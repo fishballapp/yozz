@@ -9,6 +9,11 @@ on:
     branches:
       - main
 
+# Two releases pushed close together must not race `pnpm -r publish`'s read-then-write.
+concurrency:
+  group: publish
+  cancel-in-progress: false
+
 jobs:
   publish:
     # GitHub-hosted on purpose: npm trusted publishing (the OIDC exchange below) does not work on
@@ -26,11 +31,22 @@ jobs:
           cache: pnpm
           registry-url: https://registry.npmjs.org
       - run: pnpm install --frozen-lockfile
+      # An npm version is permanent, so the publish job runs every gate itself rather than
+      # trusting ci.yml, which runs in parallel and cannot hold this one back.
+      - run: pnpm check
+      - run: pnpm typecheck
+      - run: pnpm test
       # Each package builds itself in `prepack`; this is only so a build failure reads as one.
       - run: pnpm -r --filter './packages/*' build
       - id: version
+        # The four libraries release in lockstep; the dist-tag comes from that one version, so a
+        # drift between them is a failed release, not a prerelease published as `latest`.
         run: |
-          VERSION=$(node -p "require('./packages/tls/package.json').version")
+          VERSIONS=$(node -p "['x509','tls','imap','smtp'].map(p => require('./packages/' + p + '/package.json').version).join(' ')")
+          if [ "$(echo "$VERSIONS" | tr ' ' '\n' | sort -u | wc -l)" -ne 1 ]; then
+            echo "library versions differ: $VERSIONS" >&2; exit 1
+          fi
+          VERSION=${VERSIONS%% *}
           TAG=$(echo "$VERSION" | grep -oE 'alpha|beta|rc' || true)
           echo "tag=${TAG:-latest}" >> "$GITHUB_OUTPUT"
       - run: pnpm -r publish --tag ${{ steps.version.outputs.tag }}

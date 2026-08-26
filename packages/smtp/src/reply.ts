@@ -4,7 +4,7 @@
  * reply, a code that changes mid-reply, a bare LF or a line past the cap is a `protocol` failure,
  * never a throw.
  */
-import type { ByteDuplex } from '@yozz.app/tls';
+import type { ByteDuplex } from './transport.ts';
 
 export type SmtpReply = {
   readonly code: number;

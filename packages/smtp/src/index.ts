@@ -17,3 +17,4 @@ export {
   type MessageInput,
 } from './message.ts';
 export type { SmtpFailure, SmtpReply, SmtpResult } from './reply.ts';
+export type { ByteDuplex } from './transport.ts';

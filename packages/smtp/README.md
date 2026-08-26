@@ -8,7 +8,8 @@ pnpm add @yozz.app/smtp
 
 ## The seam
 
-`@yozz.app/smtp` speaks SMTP over any `ByteDuplex` from `@yozz.app/tls`. It knows replies, EHLO
+`@yozz.app/smtp` speaks SMTP over any `ByteDuplex` (`{ read, write }`, a type it declares itself; a
+`@yozz.app/tls` connection satisfies it). No runtime dependencies. It knows replies, EHLO
 keywords, AUTH PLAIN / LOGIN, the MAIL / RCPT / DATA sequence and dot-stuffing. It **never knows**
 TLS, certificates or the vault. STARTTLS is not spoken: the transport is already TLS (465).
 

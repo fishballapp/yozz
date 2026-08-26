@@ -29,3 +29,4 @@ export type {
   ImapToken,
 } from './tokenizer.ts';
 export { DEFAULT_MAX_LITERAL_BYTES } from './tokenizer.ts';
+export type { ByteDuplex } from './transport.ts';

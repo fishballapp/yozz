@@ -1,6 +1,6 @@
 {
   "name": "@yozz.app/x509",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Strict DER, X.509 certificate decoding and RFC 5280 path validation in TypeScript, with a compiled trust store. Runs in Node and browsers, no native code.",
   "license": "MIT",
   "homepage": "https://github.com/fishballapp/yozz",
@@ -45,11 +45,9 @@
     "anchors:build": "node anchors/build.ts",
     "anchors:check": "node anchors/upstream-check.ts"
   },
-  "dependencies": {
-    "zod": "catalog:"
-  },
   "devDependencies": {
     "@types/node": "catalog:",
-    "tsdown": "catalog:"
+    "tsdown": "catalog:",
+    "zod": "catalog:"
   }
 }

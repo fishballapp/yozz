@@ -9,7 +9,6 @@
  * - Greeting is captured immediately upon creation.
  */
 
-import type { ByteDuplex } from '@yozz.app/tls';
 import { asciiToString, concatByteArrays, stringToBytes } from './bytes.ts';
 import {
   buildAppendCommand,
@@ -49,6 +48,7 @@ import {
   readLogicalLine,
   tokenizeLogicalLine,
 } from './tokenizer.ts';
+import type { ByteDuplex } from './transport.ts';
 
 export type { ImapAddress, ImapEnvelope, ImapMailbox, ImapResponseCode, ImapUntagged };
 

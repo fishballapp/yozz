@@ -332,14 +332,13 @@ importers:
         version: 4.1.8(@opentelemetry/api@1.9.1)(@types/node@24.13.2)(happy-dom@20.11.2)(jsdom@30.0.1(@noble/hashes@2.2.0))(vite@8.0.16(@types/node@24.13.2)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.48.0)(tsx@4.22.4)(yaml@2.9.0))
 
   packages/imap:
-    dependencies:
-      '@yozz.app/tls':
-        specifier: workspace:*
-        version: link:../tls
     devDependencies:
       '@types/node':
         specifier: ^24.0.0
         version: 24.13.2
+      '@yozz.app/tls':
+        specifier: workspace:*
+        version: link:../tls
       '@yozz.app/x509':
         specifier: workspace:*
         version: link:../x509
@@ -348,14 +347,13 @@ importers:
         version: 0.22.3(tsx@4.22.4)(typescript@6.0.3)
 
   packages/smtp:
-    dependencies:
-      '@yozz.app/tls':
-        specifier: workspace:*
-        version: link:../tls
     devDependencies:
       '@types/node':
         specifier: ^24.0.0
         version: 24.13.2
+      '@yozz.app/tls':
+        specifier: workspace:*
+        version: link:../tls
       '@yozz.app/x509':
         specifier: workspace:*
         version: link:../x509
@@ -386,10 +384,6 @@ importers:
         version: 4.103.0(@cloudflare/workers-types@4.20260621.1)
 
   packages/x509:
-    dependencies:
-      zod:
-        specifier: 'catalog:'
-        version: 4.4.3
     devDependencies:
       '@types/node':
         specifier: ^24.0.0
@@ -397,6 +391,9 @@ importers:
       tsdown:
         specifier: 'catalog:'
         version: 0.22.3(tsx@4.22.4)(typescript@6.0.3)
+      zod:
+        specifier: 'catalog:'
+        version: 4.4.3
 
 packages:
 

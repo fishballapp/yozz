@@ -3,8 +3,9 @@
  * business; this never sees a certificate or a password store. One command in flight at a time,
  * which is all SMTP allows without PIPELINING.
  */
-import type { ByteDuplex } from '@yozz.app/tls';
+
 import { createLineReader, readReply, type SmtpReply, type SmtpResult } from './reply.ts';
+import type { ByteDuplex } from './transport.ts';
 
 export type SmtpCapabilities = {
   /** EHLO keywords, upper-cased, e.g. `SIZE`, `8BITMIME`, `SMTPUTF8`, `PIPELINING`. */

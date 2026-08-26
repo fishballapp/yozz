@@ -8,8 +8,9 @@ pnpm add @yozz.app/imap
 
 ## The seam
 
-`@yozz.app/imap` speaks IMAP over any `ByteDuplex` (`{ read(): Promise<Uint8Array | null>; write(bytes): Promise<void> }`)
-from `@yozz.app/tls`. It knows protocol lines, `{n}` literals, command state, and RFC 2047 header
+`@yozz.app/imap` speaks IMAP over any `ByteDuplex` (`{ read(): Promise<Uint8Array | null>; write(bytes): Promise<void> }`),
+a type it declares itself; a `@yozz.app/tls` connection satisfies it, and so does anything else with
+those two methods. The package has no runtime dependencies. It knows protocol lines, `{n}` literals, command state, and RFC 2047 header
 decoding. It **never knows** TLS records, certificates, session keys, or vault storage.
 
 In the browser, the duplex wraps `@yozz.app/tls` over the production WebSocket relay. In tests, it

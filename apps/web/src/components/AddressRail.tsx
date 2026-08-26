@@ -111,7 +111,7 @@ const RailRow = ({
           accent on bar + mark + count at once is how an accent stops meaning anything. */}
       {isActive && <span className="absolute inset-y-0 left-0 w-0.5 bg-signal" />}
       {/* The mark is a visual key to the list gutter, not a word: screen readers would otherwise
-          announce this row as "P jason at jyu dot example 2". */}
+          announce this row as "J jason at jyu dot example 2". */}
       <span
         aria-hidden
         className={cn(
