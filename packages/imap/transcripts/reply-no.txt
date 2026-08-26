@@ -1,0 +1,3 @@
+S: * OK [CAPABILITY IMAP4rev1] Server ready.
+C: A0001 SELECT "NonExistentMailbox"
+S: A0001 NO [NONEXISTENT] Mailbox does not exist.

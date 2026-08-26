@@ -1,0 +1,5 @@
+S: * OK [CAPABILITY IMAP4rev1] Server ready.
+C: A0001 APPEND "Sent" (\Seen) {11}
+S: + go ahead
+C: Subject: hi
+S: A0001 OK [APPENDUID 1 42] APPEND completed.

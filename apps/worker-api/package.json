@@ -1,0 +1,33 @@
+{
+  "name": "@yozz.app/worker-api",
+  "version": "0.0.0",
+  "private": true,
+  "license": "AGPL-3.0-only",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "typegen": "wrangler types",
+    "db:migrate:local": "wrangler d1 migrations apply yozz --local",
+    "db:generate-auth": "node scripts/generate-auth-schema.ts",
+    "db:check-auth": "node scripts/generate-auth-schema.ts --check",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@better-auth/passkey": "catalog:",
+    "@fishballapps/email": "workspace:*",
+    "@yozz.app/vault-contract": "workspace:*",
+    "better-auth": "catalog:",
+    "better-auth-cloudflare": "catalog:",
+    "hono": "catalog:",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "catalog:",
+    "@cloudflare/workers-types": "catalog:",
+    "@types/node": "catalog:",
+    "kysely": "catalog:",
+    "vitest": "catalog:",
+    "wrangler": "catalog:"
+  }
+}

@@ -1,0 +1,48 @@
+{
+  "DisabledTests": {},
+  "ErrorMap": {
+    ":BAD_SIGNATURE:": ["yozz: alert-sent decrypt_error"],
+    ":DIGEST_CHECK_FAILED:": ["yozz: alert-sent decrypt_error"],
+    ":UNEXPECTED_EXTENSION:": ["yozz: alert-sent unsupported_extension"],
+    ":UNEXPECTED_MESSAGE:": ["yozz: alert-sent unexpected_message"],
+    ":UNEXPECTED_RECORD:": ["yozz: alert-sent unexpected_message"],
+    ":INVALID_OUTER_RECORD_TYPE:": ["yozz: alert-sent unexpected_message"],
+    ":DECODE_ERROR:": ["yozz: alert-sent decode_error"],
+    ":DECRYPTION_FAILED_OR_BAD_RECORD_MAC:": ["yozz: alert-sent bad_record_mac"],
+    ":BAD_DECRYPT:": ["yozz: alert-sent bad_record_mac"],
+    ":WRONG_CURVE:": ["yozz: alert-sent illegal_parameter"],
+    ":BAD_ECPOINT:": ["yozz: alert-sent illegal_parameter"],
+    ":WRONG_CIPHER_RETURNED:": ["yozz: alert-sent illegal_parameter"],
+    ":PSK_IDENTITY_NOT_FOUND:": ["yozz: alert-sent illegal_parameter"],
+    ":OLD_SESSION_PRF_HASH_MISMATCH:": ["yozz: alert-sent illegal_parameter"],
+    ":WRONG_SIGNATURE_TYPE:": [
+      "yozz: alert-sent illegal_parameter",
+      "yozz: alert-sent decrypt_error"
+    ],
+    ":DUPLICATE_EXTENSION:": ["yozz: alert-sent illegal_parameter"],
+    ":MISSING_KEY_SHARE:": [
+      "yozz: alert-sent missing_extension",
+      "yozz: alert-sent illegal_parameter"
+    ],
+    ":EMPTY_HELLO_RETRY_REQUEST:": ["yozz: alert-sent illegal_parameter"],
+    ":DATA_LENGTH_TOO_LONG:": ["yozz: alert-sent record_overflow"],
+    ":ENCRYPTED_LENGTH_TOO_LONG:": ["yozz: alert-sent record_overflow"],
+    ":CANNOT_PARSE_LEAF_CERT:": ["yozz: certificate malformed-certificate"],
+    ":TOO_MANY_EMPTY_FRAGMENTS:": ["yozz: alert-sent unexpected_message"],
+    ":TOO_MANY_WARNING_ALERTS:": ["yozz: alert-sent unexpected_message"],
+    ":TOO_MANY_KEY_UPDATES:": ["yozz: alert-sent unexpected_message"],
+    ":UNKNOWN_ALERT_TYPE:": ["yozz: alert-sent illegal_parameter"],
+    ":EXCESS_HANDSHAKE_DATA:": ["yozz: alert-sent unexpected_message"],
+    ":EXCESSIVE_MESSAGE_SIZE:": ["yozz: alert-sent decode_error"],
+    ":PEER_DID_NOT_RETURN_A_CERTIFICATE:": ["yozz: alert-sent decode_error"],
+    ":SECOND_SERVERHELLO_VERSION_MISMATCH:": ["yozz: alert-sent illegal_parameter"],
+    ":WRONG_VERSION_NUMBER:": ["yozz: alert-sent decode_error"],
+    ":ERROR_PARSING_EXTENSION:": ["yozz: alert-sent decode_error"],
+    ":HANDSHAKE_FAILURE_ON_CLIENT_HELLO:": ["yozz: alert-received handshake_failure"],
+    ":UNSUPPORTED_PROTOCOL:": ["yozz: alert-sent protocol_version"],
+    "Unexpected SSL_shutdown result: -1 != 1": ["yozz: truncated"],
+    ":UNSUPPORTED_ALGORITHM:": ["yozz: alert-sent illegal_parameter"],
+    ":SSLV3_ALERT_DECOMPRESSION_FAILURE:": ["yozz: alert-received-unknown 30"],
+    ":CERTIFICATE_VERIFY_FAILED:": ["yozz: certificate rejected-by-policy certificate_unknown"]
+  }
+}

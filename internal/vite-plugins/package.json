@@ -1,0 +1,21 @@
+{
+  "private": true,
+  "name": "@fishballapps/vite-plugins",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Vite plugins every web app in the repo applies. One implementation, imported by each vite.config.ts.",
+  "exports": {
+    "./strip-html-comments": "./src/strip-html-comments.ts"
+  },
+  "scripts": {
+    "test": "vitest run"
+  },
+  "peerDependencies": {
+    "vite": "catalog:"
+  },
+  "devDependencies": {
+    "typescript": "catalog:",
+    "vite": "catalog:",
+    "vitest": "catalog:"
+  }
+}

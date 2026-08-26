@@ -1,0 +1,19 @@
+node_modules
+*.tsbuildinfo
+dist
+.DS_Store
+.env
+
+# Cloudflare Workers local state + dev secrets (the example file is tracked)
+.wrangler/
+.dev.vars*
+!.dev.vars.example
+
+# Pinned, hash-verified downloads the exhaustive gates fetch once
+packages/x509/.limbo/
+packages/x509/.anchors/
+packages/tls/.bogo/
+
+# Vite reads these too; the monorepo root ignored them, the standalone tree must as well
+.env.local
+.env.*.local

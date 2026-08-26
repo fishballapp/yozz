@@ -1,0 +1,31 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "yozz-api",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-06-21",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": {
+    "enabled": true
+  },
+  // MODE is deliberately absent here. Top-level `vars` would apply to `wrangler dev` as well,
+  // so `"production"` would silently give local dev the production origin, CORS allowlist,
+  // Better Auth baseURL, passkey rpID and Secure cookies — against an SPA on
+  // http://localhost:5177, where credentialed fetches fail CORS and WebAuthn cannot match the
+  // rpID. Absent, `env.ts` falls back to localhost. Production deploys set MODE via
+  // `scripts/deploy-worker.ts` (`wrangler deploy --var MODE:production`). A named wrangler
+  // `env.production` block is not used: named environments do not inherit `d1_databases`.
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "yozz",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "ratelimits": [
+    {
+      "name": "RELAY_RATE_LIMIT",
+      "namespace_id": "1001",
+      "simple": { "limit": 30, "period": 60 }
+    }
+  ]
+}

@@ -1,0 +1,153 @@
+/**
+ * Compile the shipped trust store from the two pinned inputs.
+ *
+ * `cacert.pem` decides WHICH roots ship — it is NSS already filtered to the
+ * ones trusted for server authentication, and reproducing that filter ourselves
+ * is how a root nobody meant to trust gets shipped. `certdata.txt` decides what
+ * each of them may still vouch for, which is the one thing a PEM cannot say.
+ *
+ * The output is committed. A trust store that changes without a diff to read is
+ * the thing the pinned hashes exist to prevent, and the artifact is the only
+ * place a reviewer can see the result rather than the inputs.
+ */
+import { createHash } from 'node:crypto';
+import { readFileSync, writeFileSync } from 'node:fs';
+import { derFromPem } from '../harness/pem.ts';
+// From the module, NOT from `../src/index.ts`. The index re-exports the artifact
+// this script WRITES, so going through it makes the build unable to regenerate a
+// missing or malformed one — a bootstrap loop, verified by deleting the file.
+import { indexAnchors } from '../src/anchors.ts';
+import { certificateDerKeys, derKey, serverDistrustByCertificate } from './certdata.ts';
+import {
+  CACERT_CACHE,
+  CACERT_SHA256,
+  CERTDATA_CACHE,
+  CERTDATA_COMMIT,
+  CERTDATA_SHA256,
+} from './pin.ts';
+
+const ARTIFACT = new URL('../src/root-bundle-generated.ts', import.meta.url).pathname;
+
+/**
+ * Hash what we are about to COMPILE, not what `anchors:fetch` happened to verify
+ * on some earlier run.
+ *
+ * `.anchors/` is a gitignored cache. Bump `pin.ts` without re-fetching and the
+ * old bytes are still sitting there — so the artifact would be stamped with the
+ * new hashes and built from the old files, and a reviewer reading
+ * `root-bundle-generated.ts` is told it matches something it was never checked
+ * against. That is precisely the silent trust change the pins exist to prevent,
+ * so the header below carries these MEASURED hashes rather than the constants.
+ */
+const sha256 = (bytes: Uint8Array): string => createHash('sha256').update(bytes).digest('hex');
+
+const readVerified = (name: string, cache: string, expected: string): string => {
+  const bytes = readFileSync(cache);
+  const actual = sha256(bytes);
+  if (actual !== expected) {
+    throw new Error(
+      `${name} in .anchors/ is not what pin.ts names.\n  pinned ${expected}\n  cached ${actual}\n` +
+        'Run `pnpm -F @yozz.app/x509 anchors:fetch` — and if the pin was just bumped, read what\n' +
+        'moved before trusting the result. Compiling the cached bytes under the new pin would\n' +
+        'stamp the artifact with hashes it does not match.',
+    );
+  }
+  return bytes.toString('utf8');
+};
+
+const cacert = readVerified('cacert.pem', CACERT_CACHE, CACERT_SHA256);
+const certdata = readVerified('certdata.txt', CERTDATA_CACHE, CERTDATA_SHA256);
+
+const bundle = derFromPem(cacert);
+if (bundle.length === 0) throw new Error('cacert.pem yielded no certificates');
+
+const distrust = serverDistrustByCertificate(certdata);
+const known = certificateDerKeys(certdata);
+
+/**
+ * A bundle root that certdata has never heard of means the two pins are out of
+ * step with each other — curl republishes on its own schedule, so one can be
+ * newer than the other. That is a real thing to catch: the cutoffs would be
+ * read from a file that does not describe the roots being shipped, and every
+ * missing root would silently get `null`.
+ */
+const unknown = bundle.filter(der => !known.has(derKey(der)));
+if (unknown.length > 0) {
+  throw new Error(
+    `${unknown.length} of ${bundle.length} roots in cacert.pem are absent from certdata.txt.\n` +
+      `The two pins disagree about what NSS contains — cacert ${CACERT_SHA256.slice(0, 12)}, ` +
+      `nss ${CERTDATA_COMMIT.slice(0, 12)}. Re-pin them together rather than shipping cutoffs\n` +
+      'read from a file that does not describe these roots.',
+  );
+}
+
+const entries = indexAnchors(
+  bundle.map((der, index) => ({
+    id: `cacert.pem#${index}`,
+    der,
+    serverDistrustAfter: distrust.get(derKey(der))?.notAfter ?? null,
+  })),
+);
+
+/**
+ * `indexAnchors` drops a certificate it cannot decode, which is right for a
+ * runtime lookup — one corrupt row must not take down an unrelated connection.
+ * It is wrong HERE. A decoder regression or a truncated PEM block would compile
+ * a quieter, shorter trust store and exit 0, and the only thing that would
+ * notice is a committed test asserting the count.
+ */
+if (entries.length !== bundle.length) {
+  throw new Error(
+    `${bundle.length - entries.length} of ${bundle.length} roots in cacert.pem did not decode.\n` +
+      'Refusing to ship a trust store smaller than its input — find out which, and why.',
+  );
+}
+
+const withCutoff = entries.filter(entry => entry.serverDistrustAfter !== null);
+const base64 = (bytes: Uint8Array): string => Buffer.from(bytes).toString('base64');
+
+writeFileSync(
+  ARTIFACT,
+  `${[
+    '/**',
+    ' * GENERATED by `pnpm -F @yozz.app/x509 anchors:build`. Do not edit.',
+    ' *',
+    ` * curl cacert.pem  sha256 ${sha256(Buffer.from(cacert, 'utf8'))}`,
+    ` * NSS certdata.txt commit ${CERTDATA_COMMIT}`,
+    ` * NSS certdata.txt sha256 ${sha256(Buffer.from(certdata, 'utf8'))}`,
+    ' *',
+    ` * ${entries.length} roots, ${withCutoff.length} carrying a server distrust-after cutoff.`,
+    ' * A cutoff is compared against the LEAF’s notBefore, so a root past it still',
+    ' * anchors everything it signed before it. See anchors/certdata.ts.',
+    ' */',
+    "import type { AnchorIndexEntry } from './anchors.ts';",
+    '',
+    'const decode = (base64: string): Uint8Array =>',
+    '  Uint8Array.from(atob(base64), character => character.charCodeAt(0));',
+    '',
+    'export const ROOT_BUNDLE: readonly AnchorIndexEntry[] = [',
+    ...entries.map(entry =>
+      [
+        '  {',
+        `    id: ${JSON.stringify(entry.id)},`,
+        `    der: decode(${JSON.stringify(base64(entry.der))}),`,
+        `    subjectDer: decode(${JSON.stringify(base64(entry.subjectDer))}),`,
+        `    serverDistrustAfter: ${
+          entry.serverDistrustAfter === null
+            ? 'null'
+            : `new Date(${JSON.stringify(entry.serverDistrustAfter.toISOString())})`
+        },`,
+        '  },',
+      ].join('\n'),
+    ),
+    '];',
+  ].join('\n')}\n`,
+);
+
+console.log(`${entries.length} roots -> ${ARTIFACT}`);
+for (const entry of withCutoff) {
+  const label = distrust.get(derKey(entry.der))?.label ?? entry.id;
+  console.log(
+    `  distrust-after ${entry.serverDistrustAfter?.toISOString().slice(0, 10)}  ${label}`,
+  );
+}

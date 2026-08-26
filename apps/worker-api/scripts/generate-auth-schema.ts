@@ -1,0 +1,143 @@
+/**
+ * Generates the next Better Auth D1 migration into apps/worker-api/migrations/.
+ *
+ * Better Auth owns its own tables (user / session / account / verification, plus the plugin tables:
+ * passkey). Instead of the stand-alone `@better-auth/cli`, this calls Better Auth's
+ * OWN `getMigrations` against the SAME schema-affecting plugin set the worker mounts (src/auth.ts), so
+ * the output is always version-matched. Every committed migration is applied to an in-memory SQLite
+ * first, so what comes out is the DELTA: the DDL the current Better Auth still wants. Applied
+ * migrations are frozen (wrangler tracks them by filename), so a delta is written as a new
+ * `000N_better_auth_*.sql` and never into an existing file.
+ *
+ * Run: `pnpm -F @yozz.app/worker-api db:generate-auth` (writes nothing when there is no delta)
+ * Check: `pnpm -F @yozz.app/worker-api db:check-auth` (fails when there is a delta)
+ */
+import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { DatabaseSync, type SQLInputValue } from 'node:sqlite';
+import { passkey } from '@better-auth/passkey';
+import type { BetterAuthOptions } from 'better-auth';
+import { magicLink } from 'better-auth/plugins';
+import { cloudflare } from 'better-auth-cloudflare';
+import {
+  type CompiledQuery,
+  type DatabaseConnection,
+  type Dialect,
+  type Driver,
+  Kysely,
+  type QueryResult,
+  SqliteAdapter,
+  SqliteIntrospector,
+  SqliteQueryCompiler,
+} from 'kysely';
+
+class NodeSqliteConnection implements DatabaseConnection {
+  readonly #db: DatabaseSync;
+  constructor(db: DatabaseSync) {
+    this.#db = db;
+  }
+
+  async executeQuery<R>(compiled: CompiledQuery): Promise<QueryResult<R>> {
+    const statement = this.#db.prepare(compiled.sql);
+    const parameters = compiled.parameters as SQLInputValue[];
+    if (/^\s*(select|pragma|with)/i.test(compiled.sql)) {
+      return { rows: statement.all(...parameters) as unknown as R[] };
+    }
+    const { changes } = statement.run(...parameters);
+    return { rows: [], numAffectedRows: BigInt(changes) };
+  }
+
+  streamQuery<R>(): AsyncIterableIterator<QueryResult<R>> {
+    throw new Error('streaming is not supported by the schema generator');
+  }
+}
+
+class NodeSqliteDriver implements Driver {
+  readonly #db: DatabaseSync;
+  constructor(db: DatabaseSync) {
+    this.#db = db;
+  }
+  async init(): Promise<void> {}
+  async acquireConnection(): Promise<DatabaseConnection> {
+    return new NodeSqliteConnection(this.#db);
+  }
+  async beginTransaction(): Promise<void> {
+    this.#db.exec('BEGIN');
+  }
+  async commitTransaction(): Promise<void> {
+    this.#db.exec('COMMIT');
+  }
+  async rollbackTransaction(): Promise<void> {
+    this.#db.exec('ROLLBACK');
+  }
+  async releaseConnection(): Promise<void> {}
+  async destroy(): Promise<void> {
+    this.#db.close();
+  }
+}
+
+const migrationsDir = join(import.meta.dirname, '../migrations');
+const committed = readdirSync(migrationsDir)
+  .filter(name => name.endsWith('.sql'))
+  .toSorted();
+
+const sqlite = new DatabaseSync(':memory:');
+for (const name of committed) sqlite.exec(readFileSync(join(migrationsDir, name), 'utf8'));
+
+const nodeSqliteDialect: Dialect = {
+  createAdapter: () => new SqliteAdapter(),
+  createDriver: () => new NodeSqliteDriver(sqlite),
+  createQueryCompiler: () => new SqliteQueryCompiler(),
+  createIntrospector: db => new SqliteIntrospector(db),
+};
+
+const db = new Kysely({ dialect: nodeSqliteDialect });
+
+const options: BetterAuthOptions = {
+  database: { db, type: 'sqlite' },
+  plugins: [
+    cloudflare({ geolocationTracking: false }),
+    magicLink({ sendMagicLink: async () => undefined }),
+    passkey(),
+  ],
+};
+
+type GetMigrations = (
+  config: BetterAuthOptions,
+) => Promise<{ compileMigrations: () => Promise<string> }>;
+const dbEntry = import.meta.resolve('better-auth/db');
+const { getMigrations } = (await import(new URL('./get-migration.mjs', dbEntry).href)) as {
+  getMigrations: GetMigrations;
+};
+
+const { compileMigrations } = await getMigrations(options);
+const sql = await compileMigrations();
+await db.destroy();
+
+// Kysely joins zero statements into a lone `;`.
+const delta = sql.trim();
+const isCheck = process.argv.includes('--check');
+
+if (delta.replaceAll(/[;\s]/g, '') === '') {
+  console.log(`Auth schema is up to date: ${migrationsDir}`);
+  process.exit(0);
+}
+if (isCheck) {
+  console.error(
+    `Auth schema is out of date; Better Auth still wants:\n\n${delta}\n\nRun \`pnpm -F @yozz.app/worker-api db:generate-auth\` to write it as the next migration.`,
+  );
+  process.exit(1);
+}
+
+const next = String(committed.length + 1).padStart(4, '0');
+const outPath = join(migrationsDir, `${next}_better_auth.sql`);
+const header = `-- Better Auth tables the mounted plugin set (apps/worker-api/src/auth.ts) wants and the
+-- migrations before this one do not provide.
+--
+-- GENERATED by apps/worker-api/scripts/generate-auth-schema.ts via Better Auth's own getMigrations,
+-- run against every earlier migration — do NOT edit by hand, and do not edit an earlier one either:
+-- applied migrations are frozen. Re-run \`pnpm -F @yozz.app/worker-api db:generate-auth\` after
+-- changing the plugin set; it writes the next delta or nothing.
+`;
+writeFileSync(outPath, `${header}\n${delta}\n`);
+console.log(`Wrote ${outPath}`);

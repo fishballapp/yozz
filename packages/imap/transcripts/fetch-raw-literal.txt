@@ -1,0 +1,8 @@
+S: * OK [CAPABILITY IMAP4rev1] Server ready.
+C: A0001 UID FETCH 42 (BODY.PEEK[])
+S: * 3 FETCH (UID 42 BODY[] {7}
+a
+)
+*
+b)
+S: A0001 OK FETCH completed.

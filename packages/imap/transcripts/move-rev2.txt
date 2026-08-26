@@ -1,0 +1,3 @@
+S: * OK [CAPABILITY IMAP4rev2] Server ready.
+C: A0001 UID MOVE 5 "Archive"
+S: A0001 OK MOVE completed.

@@ -1,0 +1,34 @@
+# Every case @yozz.app/x509 answers differently from x509-limbo, reviewed one at a
+# time. The harness FAILS when the real set differs from this file in either
+# direction — a new disagreement is a regression, and a disappeared one means
+# this file is stale.
+#
+# All 10 are over-ACCEPTS, which is the dangerous direction for a verifier. Both
+# groups below are ATTRIBUTED: each was measured, and neither can be closed
+# without breaking something the same suite calls valid.
+#
+# --- CABF BR 7.1.4.3, the common name must repeat a SAN entry (9 cases) -------
+# An ISSUANCE rule for linters, not a path-validation rule. Implementing it wins
+# these 9 and rejects 496 of the 902 chains this suite expects to SUCCEED —
+# counted directly, see DECISIONS.md for the recount. Our code never
+# reads a common name at all, so none of these is an impersonation path: in every
+# one, an unconstrained trusted CA issued a certificate that really does name the
+# host. See DECISIONS.md before re-adding it.
+webpki::cn::case-mismatch
+webpki::cn::ipv4-hex-mismatch
+webpki::cn::ipv4-leading-zeros-mismatch
+webpki::cn::ipv6-non-rfc5952-mismatch
+webpki::cn::ipv6-uncompressed-mismatch
+webpki::cn::ipv6-uppercase-mismatch
+webpki::cn::not-in-san
+webpki::cn::punycode-not-in-san
+webpki::cn::utf8-vs-punycode-mismatch
+#
+# --- an anchor with no authority key identifier (1 case) ---------------------
+# The suite contradicts itself here, and its own description says so
+# ("ambiguous but potentially disallowed"). Measured: this case and
+# `cve::cve-2024-0567` present an anchor with the SAME two properties — not
+# self-issued, no authority key identifier — and expect OPPOSITE verdicts. No
+# rule over those inputs can satisfy both. We accept, which keeps cve-2024-0567
+# passing. AKI is a path-building hint; the signature is what authenticates.
+rfc5280::aki::cross-signed-root-missing-aki

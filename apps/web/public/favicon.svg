@@ -1,0 +1,27 @@
+<!--
+  The wordmark reduced to its one distinctive letter: a Z reversed out of a solid signal block,
+  which is the app's own selected-row inversion at 16px, carrying the wordmark's line across the
+  middle. Here the line runs the other way round: the Z is the hole, so the band is a strip of
+  signal restored across it, merging into the block it came from.
+
+  OPTICALLY SIZED, not scaled down. The bars are 32 units against the wordmark's 26 and the letter
+  fills 112 of the 128 box, because a mark that has to survive a 16px browser tab needs more weight
+  than the same mark at 56px. The line stays proportional at ~7% of the icon, matching the
+  wordmark's 7-of-100 cut. Rasterised and checked at 96 / 48 / 32 / 24 / 16.
+
+  The fill is the signal token, oklch(0.87 0.19 140), written as a literal hex because a linked
+  favicon gets no stylesheet. Keep it in step with global.css.
+
+  Note for editors: XML forbids a double hyphen inside a comment, so token names cannot be written
+  here with their CSS custom-property prefix. An invalid comment silently breaks the whole file.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" fill-rule="evenodd">
+  <mask id="z">
+    <rect width="128" height="128" fill="#fff" />
+    <g transform="translate(31.31 8) scale(1.12) skewX(-10)">
+      <path d="M0 0H76V32L28 68H76V100H0V68L48 32H0Z" fill="#000" />
+    </g>
+    <rect y="59.52" width="128" height="8.96" fill="#fff" />
+  </mask>
+  <rect width="128" height="128" fill="#8bf274" mask="url(#z)" />
+</svg>

@@ -1,0 +1,15 @@
+S: * OK [CAPABILITY IMAP4rev1 X-GM-EXT-1] Gimap ready.
+C: A0001 UID FETCH 200:201 (FLAGS ENVELOPE INTERNALDATE RFC822.SIZE UID BODY.PEEK[HEADER.FIELDS (REFERENCES)] X-GM-THRID)
+S: * 1 FETCH (UID 200 X-GM-THRID 1834682380345891234 FLAGS (\Seen) INTERNALDATE "23-Aug-2026 09:00:00 +0000" RFC822.SIZE 1520 ENVELOPE ("Sun, 23 Aug 2026 09:00:00 +0000" "Re: Lunch" ((NIL NIL "ann" "example.com")) ((NIL NIL "ann" "example.com")) NIL ((NIL NIL "me" "example.com")) NIL NIL "<mid@example.com>" "<reply@example.com>") BODY[HEADER.FIELDS (REFERENCES)] {51}
+References: <root@example.com>
+ <mid@example.com>
+
+)
+S: * 2 FETCH (UID 201 X-GM-THRID 99 FLAGS () INTERNALDATE "23-Aug-2026 09:30:00 +0000" RFC822.SIZE 900 ENVELOPE ("Sun, 23 Aug 2026 09:30:00 +0000" "Hello" ((NIL NIL "bob" "example.com")) ((NIL NIL "bob" "example.com")) NIL ((NIL NIL "me" "example.com")) NIL NIL NIL "<hello@example.com>") BODY[HEADER.FIELDS (REFERENCES)] {2}
+
+)
+S: A0001 OK Fetch completed.
+C: A0002 UID FETCH 200:201 (FLAGS UID)
+S: * 1 FETCH (UID 200 FLAGS (\Seen \Flagged))
+S: * 2 FETCH (UID 201 FLAGS ())
+S: A0002 OK Fetch completed.

@@ -1,0 +1,7 @@
+S: * OK [CAPABILITY IMAP4rev1 LITERAL+] Server ready.
+C: A0001 LOGIN "user@example.com" {9+}
+C: péssword
+S: A0001 OK LOGIN completed.
+C: A0002 CAPABILITY
+S: * CAPABILITY IMAP4rev1 LITERAL+
+S: A0002 OK CAPABILITY completed.

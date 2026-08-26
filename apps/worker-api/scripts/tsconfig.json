@@ -1,0 +1,13 @@
+// Composite TS project for the Node deploy scripts: node types (NOT the Worker's workers-types).
+// secret-keys is JSON, so no `.ts`-extension imports — no allowImportingTsExtensions — so this is
+// composite + root-referenced (repojj clean) and typechecked by `tsc -b`. TS scripts run via `node`
+// (type-stripping) or the generate-auth-schema entry.
+{
+  "extends": "../../../tsconfig.base.json",
+  "compilerOptions": {
+    "composite": true,
+    "tsBuildInfoFile": "node_modules/.tmp/tsconfig.tsbuildinfo",
+    "types": ["node"]
+  },
+  "include": ["**/*.ts"]
+}

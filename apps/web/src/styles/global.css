@@ -1,0 +1,196 @@
+@import "tailwindcss";
+
+/* Self-hosted faces (no Google CDN). Geist carries all prose; Geist Mono carries every machine
+   value — timestamps, counts, addresses, SMTP hosts, origin letters. They are a metrically
+   matched pair, which is why they are here: mono values sit in columns beside sans prose and
+   have to align. See DESIGN.md. */
+@import "@fontsource-variable/geist";
+@import "@fontsource-variable/geist-mono";
+
+/*
+  INK & RULE — token system for yozz.
+
+  DARK ONLY, BY PRODUCT DECISION. There is no light theme and no system-scheme detection: yozz
+  ships one surface. The token SHAPE is still the repo convention (bare custom properties on
+  :root, mapped into Tailwind via `@theme inline`, no `dark:` at callsites), so a light set is a
+  purely additive `:root[data-theme='light']` block if that decision is ever revisited.
+
+  Strategy: Restrained. Warm ink neutrals + exactly ONE chromatic signal.
+
+  The neutrals are warm (hue ~75-85, very low chroma), never blue-black — that is what keeps this
+  out of the near-black-plus-neon look every AI mail client ships. Reinforced by material: no
+  glow, no gradient, no glass, no shadow, no rounded panels. Separation is hairline and space.
+
+  State is carried by INVERSION, not colour: the selected row is a solid --select bar with --ink
+  text reversed out of it, the way a terminal mail client has always done it. --signal is spent
+  only on unread, focus, the one primary action and a set star, so it stays meaningful at a
+  glance down a dense column.
+*/
+
+:root {
+  /* grounds — warm ink */
+  --ink: oklch(0.155 0.006 75);
+  --ink-raised: oklch(0.198 0.007 75); /* rail, status bar, compose plate */
+  --ink-sunken: oklch(0.128 0.006 75); /* reader ground, inset wells */
+  --ink-hover: oklch(0.235 0.008 75);
+
+  /* rules — the only separator; there are no borders in this system */
+  --rule: oklch(0.3 0.008 75);
+  --rule-soft: oklch(0.243 0.007 75);
+
+  /* ink on ink — warm off-white, three steps */
+  /* Three steps of ink-on-ink. The binding surface for contrast is --ink-hover, NOT --ink: a
+     hovered row is the lightest ground any of this text ever sits on, so a value tuned against
+     --ink alone gets worse exactly when the pointer is on it. Measured against --ink-hover:
+     --paper 14.9:1, --paper-dim 6.4:1, --paper-faint 4.96:1. All clear AA at 11px. */
+  --paper: oklch(0.945 0.008 85);
+  --paper-dim: oklch(0.706 0.01 82);
+  --paper-faint: oklch(0.64 0.01 80);
+
+  /* The one INVERTED surface: the ground of the selected row, and nothing else. Deliberately a
+     step below --paper — a full-strength paper bar dropped into a 0.155 ground is a glare source
+     on a screen you sit in front of all day, and this is the one shape the eye is pulled to. It
+     stops at 0.90 rather than going lower because the row's secondary content is --ink/60 on it,
+     which holds 4.67:1 here and falls under AA by 0.87. */
+  --select: oklch(0.9 0.01 84);
+
+  /* The one signal: unread, focus, primary action, a set star.
+     PHOSPHOR GREEN, and the hue is the decision. Green and amber are the two colours a terminal
+     ever had, and this is a terminal mail client; yozz shipped amber first and it failed on one
+     specific job, so it took the sibling.
+
+     Hue 140 is not the fintech green (that is viridian, ~165, blue-green). It sits 60° off the
+     ground's ~80 — clear of the "accent reading as the ground turned up" trap — and 115° off
+     --danger, so nothing is confusable.
+
+     What decided it is that hue 140 is the ONLY family with two vivid ends. Measured across every
+     hue at maximum in-gamut chroma: it carries 13.97:1 on --ink at C 0.19, AND --signal-deep below
+     still holds C 0.177 where it has to survive the inverted row. Chrome yellow could not do the
+     second — see DECISIONS.md, and check any new value against the sRGB boundary before shipping
+     it, because three in a row here were authored outside it and silently clipped. */
+  --signal: oklch(0.87 0.19 140);
+  --signal-ink: oklch(0.18 0.035 140);
+  --signal-well: oklch(0.3 0.05 140); /* faint signal wash — the send-only chip, nothing else */
+  /* The accent as it survives --select, and the only thing on it is a set star on a selected row.
+     3.37:1 there, and still C 0.177 — a proper green, not a drab one, which is the whole reason
+     the hue changed. On any dark ground the accent is --signal; this is not an alternative to it. */
+  --signal-deep: oklch(0.55 0.177 140);
+
+  --danger: oklch(0.64 0.16 25);
+
+  color-scheme: dark;
+}
+
+@theme inline {
+  --font-sans: "Geist Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "Geist Mono Variable", ui-monospace, "SF Mono", monospace;
+
+  --color-ink: var(--ink);
+  --color-ink-raised: var(--ink-raised);
+  --color-ink-sunken: var(--ink-sunken);
+  --color-ink-hover: var(--ink-hover);
+
+  --color-rule: var(--rule);
+  --color-rule-soft: var(--rule-soft);
+
+  --color-paper: var(--paper);
+  --color-paper-dim: var(--paper-dim);
+  --color-paper-faint: var(--paper-faint);
+  --color-select: var(--select);
+
+  --color-signal: var(--signal);
+  --color-signal-ink: var(--signal-ink);
+  --color-signal-well: var(--signal-well);
+  --color-signal-deep: var(--signal-deep);
+  --color-danger: var(--danger);
+
+  /* Product-tight scale. This app's BASE size is 13px — the list record — so the `base` step is
+     redefined rather than a new step invented.
+
+     NAME THESE CAREFULLY. tailwind-merge decides whether `text-x` is a size or a colour by whether
+     `x` looks like a t-shirt size; an invented name like `text-row` is classified as a COLOUR, put
+     in the same conflict group as `text-signal-ink`, and one of the two is silently dropped. That
+     shipped a near-white label on the filled primary button at 1.2:1. `base` and `2xs` are both recognised as
+     sizes, so they coexist with colour utilities. Never add a text size whose name is not a
+     t-shirt size. */
+  --text-2xs: 0.6875rem;
+  --text-2xs--line-height: 1rem;
+  --text-base: 0.8125rem;
+  --text-base--line-height: 1.125rem;
+}
+
+@layer base {
+  html {
+    background-color: var(--ink);
+  }
+
+  body {
+    background-color: var(--ink);
+    color: var(--paper);
+    font-family: var(--font-sans);
+    font-size: var(--text-base);
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  /* Machine values align in columns, so figures must not jitter between rows. */
+  body {
+    font-variant-numeric: tabular-nums;
+  }
+
+  ::selection {
+    background: var(--signal);
+    color: var(--signal-ink);
+  }
+
+  /* One focus affordance everywhere. Square, because nothing in this system is rounded. */
+  :focus-visible {
+    outline: 2px solid var(--signal);
+    outline-offset: -2px;
+  }
+
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: var(--rule);
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--paper-faint);
+  }
+
+  * {
+    scrollbar-color: var(--rule) transparent;
+    scrollbar-width: thin;
+  }
+}
+
+@layer components {
+  /* The column label voice: tiny, tracked-out, uppercase mono. Used for list column headers,
+     rail section headers, and settings field labels — the system's one piece of "chrome" type. */
+  .label-rule {
+    font-family: var(--font-mono);
+    font-size: var(--text-2xs);
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--paper-faint);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    /* biome-ignore lint/complexity/noImportantStyles: reduced-motion reset must beat utilities */
+    animation-duration: 0.01ms !important;
+    /* biome-ignore lint/complexity/noImportantStyles: reduced-motion reset must beat utilities */
+    transition-duration: 0.01ms !important;
+  }
+}

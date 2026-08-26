@@ -1,0 +1,5 @@
+S: * OK [CAPABILITY IMAP4rev1] Server ready.
+C: A0001 NOOP
+S: A0001 OK NOOP completed.
+C: A0002 NOOP
+S: A0002 OK NOOP completed.

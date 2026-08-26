@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>YOZZ</title>
+    <!-- The wordmark reduced to its one distinctive letter. SVG only, deliberately: every browser
+         this SPA targets supports it, and a .ico would freeze the mark at two raster sizes. -->
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <meta
+      name="description"
+      content="One calm client over the mail accounts you already have. Read every address in one stream, and send from any address you own."
+    />
+    <!-- YOZZ ships one surface: dark. There is deliberately no system-scheme detection and no
+         stored preference here — see src/styles/global.css. `color-scheme` is declared up front so
+         the UA paints form controls and the scrollbar dark from the first frame. -->
+    <meta name="color-scheme" content="dark" />
+    <meta name="theme-color" content="#151311" />
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

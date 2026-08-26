@@ -1,0 +1,7 @@
+S: * OK [CAPABILITY IMAP4rev1] Server ready.
+C: A0001 LIST "" "*"
+S: * LIST (\HasNoChildren) "/" "INBOX"
+S: * LIST (\HasChildren) "/" {10}
+Archive/01
+S: * LIST (\HasNoChildren) "/" "Sent"
+S: A0001 OK LIST completed.

@@ -1,0 +1,6 @@
+S: * OK [CAPABILITY IMAP4rev1] Server ready.
+C: A0001 FETCH 1:3 (FLAGS ENVELOPE INTERNALDATE RFC822.SIZE UID BODY.PEEK[HEADER.FIELDS (REFERENCES)])
+S: * 1 FETCH (UID 100 FLAGS (\Seen) INTERNALDATE "01-Aug-2026 09:00:00 +0000" RFC822.SIZE 1200 ENVELOPE ("Sat, 01 Aug 2026 09:00:00 +0000" "Oldest" ((NIL NIL "amy" "example.com")) ((NIL NIL "amy" "example.com")) NIL ((NIL NIL "me" "example.com")) NIL NIL NIL "<old-1@example.com>"))
+S: * 2 FETCH (UID 104 FLAGS () INTERNALDATE "02-Aug-2026 09:00:00 +0000" RFC822.SIZE 1300 ENVELOPE ("Sun, 02 Aug 2026 09:00:00 +0000" "Middle" ((NIL NIL "bo" "example.com")) ((NIL NIL "bo" "example.com")) NIL ((NIL NIL "me" "example.com")) NIL NIL NIL "<old-2@example.com>"))
+S: * 3 FETCH (UID 109 FLAGS () INTERNALDATE "03-Aug-2026 09:00:00 +0000" RFC822.SIZE 1400 ENVELOPE ("Mon, 03 Aug 2026 09:00:00 +0000" "Newest" ((NIL NIL "cy" "example.com")) ((NIL NIL "cy" "example.com")) NIL ((NIL NIL "me" "example.com")) NIL NIL NIL "<old-3@example.com>"))
+S: A0001 OK Fetch completed.

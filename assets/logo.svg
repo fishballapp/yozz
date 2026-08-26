@@ -1,0 +1,23 @@
+<!--
+  The wordmark from apps/web/src/components/Wordmark.tsx, frozen as a file for places that get no
+  React and no stylesheet (the README on GitHub, social cards). Same geometry, same 10° oblique,
+  same 7-unit hairline cut; set in the signal token on the ink ground. The app renders it in paper (`text-paper`);
+  the README wordmark is green on purpose (Jason, 2026-08-26): here it is the one place the mark
+  stands alone, and the badges beside it are in the same two colours. Hexes are the oklch tokens in DESIGN.md, written literally for the same reason
+  favicon.svg does: keep them in step with global.css. Edit Wordmark.tsx first, then this.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 420 180" role="img" aria-label="YOZZ">
+  <rect width="420" height="180" fill="#0e0c09" />
+  <!-- The mask is applied in the group's own (translated, skewed) space, so the cut is in letter
+       coordinates: 46.5 of 100, as in Wordmark.tsx. White keeps, black cuts. -->
+  <mask id="cut">
+    <rect x="-200" y="-200" width="800" height="800" fill="#fff" />
+    <rect x="-200" y="46.5" width="800" height="7" fill="#000" />
+  </mask>
+  <g mask="url(#cut)" transform="translate(60.63 40) skewX(-10)" fill="#8bf274" fill-rule="evenodd">
+    <path d="M0 0H26L38 30L50 0H76L51 58V100H25V58Z" />
+    <path transform="translate(80 0)" d="M0 0H76V100H0ZM26 26H50V74H26Z" />
+    <path transform="translate(160 0)" d="M0 0H76V26L36 74H76V100H0V74L40 26H0Z" />
+    <path transform="translate(240 0)" d="M0 0H76V26L36 74H76V100H0V74L40 26H0Z" />
+  </g>
+</svg>

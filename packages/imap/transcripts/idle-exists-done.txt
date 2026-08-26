@@ -1,0 +1,9 @@
+S: * OK [CAPABILITY IMAP4rev1 IDLE] Server ready.
+C: A0001 IDLE
+S: + idling
+S: * 5 EXISTS
+S: * 3 FETCH (FLAGS (\Seen))
+C: DONE
+S: A0001 OK IDLE completed.
+C: A0002 NOOP
+S: A0002 OK NOOP completed.

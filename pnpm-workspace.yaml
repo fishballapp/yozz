@@ -1,0 +1,66 @@
+packages:
+  - apps/web
+  - apps/worker-api
+  - internal/cn
+  - internal/email
+  - internal/vault
+  - internal/vault-contract
+  - internal/vite-plugins
+  - packages/imap
+  - packages/smtp
+  - packages/tls
+  - packages/x509
+autoInstallPeers: true
+strictPeerDependencies: false
+minimumReleaseAge: 10080
+catalogMode: strict
+cleanupUnusedCatalogs: true
+overrides:
+  "@types/node": "catalog:"
+  "@better-auth/core": 1.7.1
+allowBuilds:
+  "@biomejs/biome": true
+  esbuild: true
+  sharp: false
+  workerd: true
+catalog:
+  "@base-ui/react": ^1.6.0
+  "@better-auth/passkey": 1.7.1
+  "@biomejs/biome": ^2.4.15
+  "@cloudflare/vitest-pool-workers": 0.21.3
+  "@cloudflare/workers-types": ^4.20260621.1
+  "@fontsource-variable/geist": ^5.2.9
+  "@fontsource-variable/geist-mono": ^5.2.8
+  "@phosphor-icons/react": ^2.1.10
+  "@playwright/test": 1.61.0
+  "@tailwindcss/vite": ^4.3.1
+  "@tanstack/markdown": ^0.0.13
+  "@tanstack/react-router": ^1.170.16
+  "@tanstack/router-plugin": ^1.168.18
+  "@types/node": ^24.0.0
+  "@vitejs/plugin-react": ^6.0.2
+  better-auth: 1.7.1
+  better-auth-cloudflare: ^0.3.1
+  class-variance-authority: ^0.7.1
+  clsx: ^2.1.1
+  dompurify: ^3.4.13
+  fake-indexeddb: ^6.0.0
+  hono: ^4.12.26
+  jsdom: ^30.0.1
+  kysely: ^0.29.2
+  postal-mime: ^3.0.0
+  repojj: ^2026.1.35
+  tailwind-merge: ^3.6.0
+  tailwindcss: ^4.3.1
+  tsdown: ^0.22.3
+  typescript: ~6.0.3
+  vite: ^8.0.16
+  vitest: ^4.1.5
+  wrangler: ^4.103.0
+  zod: ^4.4.3
+catalogs:
+  web:
+    "@types/react": ^19.2.17
+    "@types/react-dom": ^19.2.3
+    react: ^19.2.7
+    react-dom: ^19.2.7

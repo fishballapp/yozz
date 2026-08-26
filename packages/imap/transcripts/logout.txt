@@ -1,0 +1,4 @@
+S: * OK [CAPABILITY IMAP4rev1] Server ready.
+C: A0001 LOGOUT
+S: * BYE Logging out.
+S: A0001 OK LOGOUT completed.

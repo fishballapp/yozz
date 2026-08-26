@@ -1,0 +1,10 @@
+S: * OK [CAPABILITY IMAP4rev1] Server ready.
+C: A0001 SELECT "INBOX"
+S: * 15 EXISTS
+S: * 2 RECENT
+S: * FLAGS (\Answered \Flagged \Deleted \Seen \Draft)
+S: * OK [PERMANENTFLAGS (\Answered \Flagged \Deleted \Seen \Draft \*)] Permanent flags
+S: * OK [UIDVALIDITY 1692800000] UIDs valid
+S: * OK [UIDNEXT 1050] Predicted next UID
+S: * OK [READ-WRITE] Select completed.
+S: A0001 OK [READ-WRITE] Completed.

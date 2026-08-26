@@ -1,0 +1,1 @@
+S: * OK [CAPABILITY IMAP4rev1] Server ready.

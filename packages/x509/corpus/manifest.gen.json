@@ -1,0 +1,2882 @@
+{
+  "version": 1,
+  "unreachable": [],
+  "certificates": [
+    {
+      "file": "disroot.org-993-4e8c9f16-leaf.der",
+      "sha256": "4e8c9f169dde7b4c83380497f23de2f5cb9d5c1c689c27ca17707c90c622448d",
+      "subject": "CN=disroot.org",
+      "fingerprint": {
+        "signatureAlgorithm": "ecdsa-with-SHA384",
+        "key": "ec/prime256v1",
+        "extensions": [
+          "Authority Information Access",
+          "CT Precertificate SCTs",
+          "X509v3 Authority Key Identifier",
+          "X509v3 Basic Constraints!critical",
+          "X509v3 CRL Distribution Points",
+          "X509v3 Certificate Policies",
+          "X509v3 Extended Key Usage",
+          "X509v3 Key Usage!critical",
+          "X509v3 Subject Alternative Name",
+          "X509v3 Subject Key Identifier"
+        ],
+        "asn1Types": [
+          "PRINTABLESTRING",
+          "UTCTIME"
+        ]
+      },
+      "seenAt": [
+        {
+          "target": "disroot.org:993",
+          "indexInChain": 0,
+          "chainLength": 4,
+          "position": "leaf",
+          "sha256": "4e8c9f169dde7b4c83380497f23de2f5cb9d5c1c689c27ca17707c90c622448d"
+        },
+        {
+          "target": "mail.riseup.net:993",
+          "indexInChain": 0,
+          "chainLength": 4,
+          "position": "leaf",
+          "sha256": "9cfce473cb2ec8548b4db174e4697e1149481fd678fb14b872c143a463568e7e"
+        },
+        {
+          "target": "imap.migadu.com:993",
+          "indexInChain": 0,
+          "chainLength": 4,
+          "position": "leaf",
+          "sha256": "94c412439df01beea630d57711a237460a642e6d38d3a70fc17426872475b24c"
+        },
+        {
+          "target": "smtp.migadu.com:465",
+          "indexInChain": 0,
+          "chainLength": 4,
+          "position": "leaf",
+          "sha256": "69ab56eba23a6bd40cdb9dbb83f5488213d3d21f0d854fa8d35ff7ad2340d150"
+        }
+      ]
+    },
+    {
+      "file": "disroot.org-993-a2372d06-intermediate.der",
+      "sha256": "a2372d06431e9716365eeed47ec020351497d182fcc038e457e58168a03cac07",
+      "subject": "C=US, O=Let's Encrypt, CN=YE1",
+      "fingerprint": {
+        "signatureAlgorithm": "ecdsa-with-SHA384",
+        "key": "ec/secp384r1",
+        "extensions": [
+          "Authority Information Access",
+          "X509v3 Authority Key Identifier",
+          "X509v3 Basic Constraints!critical",
+          "X509v3 CRL Distribution Points",
+          "X509v3 Certificate Policies",
+          "X509v3 Extended Key Usage",
+          "X509v3 Key Usage!critical",
+          "X509v3 Subject Key Identifier"
+        ],
+        "asn1Types": [
+          "PRINTABLESTRING",
+          "UTCTIME"
+        ]
+      },
+      "seenAt": [
+        {
+          "target": "disroot.org:993",
+          "indexInChain": 1,
+          "chainLength": 4,
+          "position": "intermediate",
+          "sha256": "a2372d06431e9716365eeed47ec020351497d182fcc038e457e58168a03cac07"
+        },
+        {
+          "target": "disroot.org:993",
+          "indexInChain": 2,
+          "chainLength": 4,
+          "position": "intermediate",
+          "sha256": "0fc0901cca2bae9e9fdbb02d50d02f1094f7b36672086991b9e897626dc485f0"
+        },
+        {
+          "target": "mail.riseup.net:993",
+          "indexInChain": 1,
+          "chainLength": 4,
+          "position": "intermediate",
+          "sha256": "a2372d06431e9716365eeed47ec020351497d182fcc038e457e58168a03cac07"
+        },
+        {
+          "target": "mail.riseup.net:993",
+          "indexInChain": 2,
+          "chainLength": 4,
+          "position": "intermediate",
+          "sha256": "0fc0901cca2bae9e9fdbb02d50d02f1094f7b36672086991b9e897626dc485f0"
+        },
+        {
+          "target": "imap.migadu.com:993",
+          "indexInChain": 1,
+          "chainLength": 4,
+          "position": "intermediate",
+          "sha256": "97658de8c68dfa98ace1e5028a63d54a1aae911b3e21471076c6850cd08cbab4"
+        },
+        {
+          "target": "imap.migadu.com:993",
+          "indexInChain": 2,
+          "chainLength": 4,
+          "position": "intermediate",
+          "sha256": "0fc0901cca2bae9e9fdbb02d50d02f1094f7b36672086991b9e897626dc485f0"
+        },
+        {
+          "target": "smtp.migadu.com:465",
+          "indexInChain": 1,
+          "chainLength": 4,
+          "position": "intermediate",
+          "sha256": "a2372d06431e9716365eeed47ec020351497d182fcc038e457e58168a03cac07"
+        },
+        {
+          "target": "smtp.migadu.com:465",
+          "indexInChain": 2,
+          "chainLength": 4,
+          "position": "intermediate",
+          "sha256": "0fc0901cca2bae9e9fdbb02d50d02f1094f7b36672086991b9e897626dc485f0"
+        }
+      ]
+    },
+    {
+      "file": "disroot.org-993-ee5f7abd-intermediate.der",
+      "sha256": "ee5f7abd6981bb0255632cd8f49283451b4b18844d12040b44ee00f07b8fe2c6",
+      "subject": "C=US, O=Internet Security Research Group, CN=ISRG Root X2",
+      "fingerprint": {
+        "signatureAlgorithm": "sha256WithRSAEncryption",
+        "key": "ec/secp384r1",
+        "extensions": [
+          "Authority Information Access",
+          "X509v3 Authority Key Identifier",
+          "X509v3 Basic Constraints!critical",
+          "X509v3 CRL Distribution Points",
+          "X509v3 Certificate Policies",
+          "X509v3 Extended Key Usage",
+          "X509v3 Key Usage!critical",
+          "X509v3 Subject Key Identifier"
+        ],
+        "asn1Types": [
+          "PRINTABLESTRING",
+          "UTCTIME"
+        ]
+      },
+      "seenAt": [
+        {
+          "target": "disroot.org:993",
+          "indexInChain": 3,
+          "chainLength": 4,
+          "position": "intermediate",
+          "sha256": "ee5f7abd6981bb0255632cd8f49283451b4b18844d12040b44ee00f07b8fe2c6"
+        },
+        {
+          "target": "mail.riseup.net:993",
+          "indexInChain": 3,
+          "chainLength": 4,
+          "position": "intermediate",
+          "sha256": "ee5f7abd6981bb0255632cd8f49283451b4b18844d12040b44ee00f07b8fe2c6"
+        },
+        {
+          "target": "imap.migadu.com:993",
+          "indexInChain": 3,
+          "chainLength": 4,
+          "position": "intermediate",
+          "sha256": "ee5f7abd6981bb0255632cd8f49283451b4b18844d12040b44ee00f07b8fe2c6"
+        },
+        {
+          "target": "smtp.migadu.com:465",
+          "indexInChain": 3,
+          "chainLength": 4,
+          "position": "intermediate",
+          "sha256": "ee5f7abd6981bb0255632cd8f49283451b4b18844d12040b44ee00f07b8fe2c6"
+        }
+      ]
+    },
+    {
+      "file": "imap.aruba.it-993-931aaa1e-intermediate.der",
+      "sha256": "931aaa1ec9b2ba0fa59a82302f4f830628c86d9b2d2a50a4d1b2ce895c4cc648",
+      "subject": "C=IT, ST=Bergamo, L=Ponte San Pietro, O=Actalis S.p.A., CN=Actalis Organization Validated Server CA G3",
+      "fingerprint": {
+        "signatureAlgorithm": "sha256WithRSAEncryption",
+        "key": "rsa/4096",
+        "extensions": [
+          "Authority Information Access",
+          "X509v3 Authority Key Identifier",
+          "X509v3 Basic Constraints!critical",
+          "X509v3 CRL Distribution Points",
+          "X509v3 Certificate Policies",
+          "X509v3 Extended Key Usage",
+          "X509v3 Key Usage!critical",
+          "X509v3 Subject Key Identifier"
+        ],
+        "asn1Types": [
+          "PRINTABLESTRING",
+          "UTCTIME",
+          "UTF8STRING"
+        ]
+      },
+      "seenAt": [
+        {
+          "target": "imap.aruba.it:993",
+          "indexInChain": 1,
+          "chainLength": 2,
+          "position": "intermediate",
+          "sha256": "931aaa1ec9b2ba0fa59a82302f4f830628c86d9b2d2a50a4d1b2ce895c4cc648"
+        }
+      ]
+    },
+    {
+      "file": "imap.fastmail.com-993-072639d0-intermediate.der",
+      "sha256": "072639d0b140d5bffae16ad9c3f6cc6086040621f51ee61a6d46a8915c07cf76",
+      "subject": "C=US, O=ISRG, CN=Root YR",
+      "fingerprint": {
+        "signatureAlgorithm": "sha256WithRSAEncryption",
+        "key": "rsa/4096",
+        "extensions": [
+          "Authority Information Access",
+          "X509v3 Authority Key Identifier",
+          "X509v3 Basic Constraints!critical",
+          "X509v3 CRL Distribution Points",
+          "X509v3 Certificate Policies",
+          "X509v3 Extended Key Usage",
+          "X509v3 Key Usage!critical",
+          "X509v3 Subject Key Identifier"
+        ],
+        "asn1Types": [
+          "PRINTABLESTRING",
+          "UTCTIME"
+        ]
+      },
+      "seenAt": [
+        {
+          "target": "imap.fastmail.com:993",
+          "indexInChain": 2,
+          "chainLength": 3,
+          "position": "intermediate",
+          "sha256": "072639d0b140d5bffae16ad9c3f6cc6086040621f51ee61a6d46a8915c07cf76"
+        },
+        {
+          "target": "imap.qq.com:993",
+          "indexInChain": 1,
+          "chainLength": 2,
+          "position": "intermediate",
+          "sha256": "7cd6cdd25eee2512aaf1419afd44c146c43aa1093d5a60d4ed39efbdda815ad4"
+        },
+        {
+          "target": "imap.163.com:993",
+          "indexInChain": 1,
+          "chainLength": 2,
+          "position": "intermediate",
+          "sha256": "05dc9edc0fddfa975a1432ef806ec780078b5362ad45af76db15c907630db25d"
+        },
+        {
+          "target": "imap.seznam.cz:993",
+          "indexInChain": 2,
+          "chainLength": 3,
+          "position": "intermediate",
+          "sha256": "072639d0b140d5bffae16ad9c3f6cc6086040621f51ee61a6d46a8915c07cf76"
+        },
+        {
+          "target": "imap.one.com:993",
+          "indexInChain": 2,
+          "chainLength": 3,
+          "position": "intermediate",
+          "sha256": "072639d0b140d5bffae16ad9c3f6cc6086040621f51ee61a6d46a8915c07cf76"
+        },
+        {
+          "target": "imap.purelymail.com:993",
+          "indexInChain": 2,
+          "chainLength": 3,
+          "position": "intermediate",
+          "sha256": "072639d0b140d5bffae16ad9c3f6cc6086040621f51ee61a6d46a8915c07cf76"
+        },
+        {
+          "target": "smtp.fastmail.com:465",
+          "indexInChain": 2,
+          "chainLength": 3,
+          "position": "intermediate",
+          "sha256": "072639d0b140d5bffae16ad9c3f6cc6086040621f51ee61a6d46a8915c07cf76"
+        }
+      ]
+    },
+    {
+      "file": "imap.fastmail.com-993-313f6394-leaf.der",
+      "sha256": "313f6394e12d6187e7205329987b0ae819e62f172774607f2134f3a94b4e5250",
+      "subject": "CN=*.fastmail.com",
+      "fingerprint": {
+        "signatureAlgorithm": "sha256WithRSAEncryption",
+        "key": "rsa/2048",
+        "extensions": [
+          "Authority Information Access",
+          "CT Precertificate SCTs",
+          "X509v3 Authority Key Identifier",
+          "X509v3 Basic Constraints!critical",
+          "X509v3 CRL Distribution Points",
+          "X509v3 Certificate Policies",
+          "X509v3 Extended Key Usage",
+          "X509v3 Key Usage!critical",
+          "X509v3 Subject Alternative Name",
+          "X509v3 Subject Key Identifier"
+        ],
+        "asn1Types": [
+          "PRINTABLESTRING",
+          "UTCTIME",
+          "UTF8STRING"
+        ]
+      },
+      "seenAt": [
+        {
+          "target": "imap.fastmail.com:993",
+          "indexInChain": 0,
+          "chainLength": 3,
+          "position": "leaf",
+          "sha256": "313f6394e12d6187e7205329987b0ae819e62f172774607f2134f3a94b4e5250"
+        },
+        {
+          "target": "imap.mail.yahoo.com:993",
+          "indexInChain": 0,
+          "chainLength": 3,
+          "position": "leaf",
+          "sha256": "a03a7fc4b353158121a4d7b655cef78961bfa25c589ec035e3fa6c623f2de4ee"
+        },
+        {
+          "target": "imap.aol.com:993",
+          "indexInChain": 0,
+          "chainLength": 3,
+          "position": "leaf",
+          "sha256": "a86d4c6e94c921fda7300953189f1db8e9c2851ded8af84b3909084a681cfaeb"
+        },
+        {
+          "target": "imap.zoho.com:993",
+          "indexInChain": 0,
+          "chainLength": 2,
+          "position": "leaf",
+          "sha256": "fe566140ef4fd3084566651175a855ad597e54291cf8bd20cb8c8529dc8a96bf"
+        },
+        {
+          "target": "imap.zoho.eu:993",
+          "indexInChain": 0,
+          "chainLength": 3,
+          "position": "leaf",
+          "sha256": "a9d4e472d1ae65d5a32b6abf27748961d7a1234664131a7f82312d754facb967"
+        },
+        {
+          "target": "imap.qq.com:993",
+          "indexInChain": 0,
+          "chainLength": 2,
+          "position": "leaf",
+          "sha256": "820803b44dea4b638c027b1831c3f04888ba849285f3c1692422b15a0a6a68ae"
+        },
+        {
+          "target": "imap.163.com:993",
+          "indexInChain": 0,
+          "chainLength": 2,
+          "position": "leaf",
+          "sha256": "92e23846c0f886740dc0a7fb599a10e6e0586a2b408c3d2420d065d1a5066cdf"
+        },
+        {
+          "target": "imap.naver.com:993",
+          "indexInChain": 0,
+          "chainLength": 3,
+          "position": "leaf",
+          "sha256": "6e1b03be83a351d755cb4ed08c1dd11513af872cd5c86a5eeb20b82b02762329"
+        },
+        {
+          "target": "imap.aruba.it:993",
+          "indexInChain": 0,
+          "chainLength": 2,
+          "position": "leaf",
+          "sha256": "e1bdb584b082cb51ee25b472c9b078a366196963c22337b7a36e94520197c9be"
+        },
+        {
+          "target": "smtp.fastmail.com:465",
+          "indexInChain": 0,
+          "chainLength": 3,
+          "position": "leaf",
+          "sha256": "313f6394e12d6187e7205329987b0ae819e62f172774607f2134f3a94b4e5250"
+        }
+      ]
+    },
+    {
+      "file": "imap.forwardemail.net-993-8c54c334-intermediate.der",
+      "sha256": "8c54c334b66ba4e426772af4a3f9136c19a1aec729fdb28c535c07a5a4ef22e0",
+      "subject": "C=GB, O=Sectigo Limited, CN=Sectigo Public Server Authentication CA DV R36",
+      "fingerprint": {
+        "signatureAlgorithm": "sha384WithRSAEncryption",
+        "key": "rsa/3072",
+        "extensions": [
+          "Authority Information Access",
+          "X509v3 Authority Key Identifier",
+          "X509v3 Basic Constraints!critical",
+          "X509v3 CRL Distribution Points",
+          "X509v3 Certificate Policies",
+          "X509v3 Extended Key Usage",
+          "X509v3 Key Usage!critical",
+          "X509v3 Subject Key Identifier"
+        ],
+        "asn1Types": [
+          "PRINTABLESTRING",
+          "UTCTIME"
+        ]
+      },
+      "seenAt": [
+        {
+          "target": "imap.forwardemail.net:993",
+          "indexInChain": 1,
+          "chainLength": 3,
+          "position": "intermediate",
+          "sha256": "8c54c334b66ba4e426772af4a3f9136c19a1aec729fdb28c535c07a5a4ef22e0"
+        },
+        {
+          "target": "mail.gandi.net:993",
+          "indexInChain": 1,
+          "chainLength": 2,
+          "position": "intermediate",
+          "sha256": "f0104ff17274608f1a18a1e1eabf8e68a51f500a87e2efa22ecb622763fef4cf"
+        },
+        {
+          "target": "mail.infomaniak.com:993",
+          "indexInChain": 1,
+          "chainLength": 4,
+          "position": "intermediate",
+          "sha256": "8c54c334b66ba4e426772af4a3f9136c19a1aec729fdb28c535c07a5a4ef22e0"
+        },
+        {
+          "target": "imap.mail.ovh.net:993",
+          "indexInChain": 1,
+          "chainLength": 4,
+          "position": "intermediate",
+          "sha256": "8c54c334b66ba4e426772af4a3f9136c19a1aec729fdb28c535c07a5a4ef22e0"
+        }
+      ]
+    },
+    {
+      "file": "imap.forwardemail.net-993-92f351bf-intermediate.der",
+      "sha256": "92f351bf3d54164dfa8dd8f9e1139d3150349786485d2b9eecd00e2971c1e6c5",
+      "subject": "C=GB, O=Sectigo Limited, CN=Sectigo Public Server Authentication Root R46",
+      "fingerprint": {
+        "signatureAlgorithm": "sha384WithRSAEncryption",
+        "key": "rsa/4096",
+        "extensions": [
+          "Authority Information Access",
+          "X509v3 Authority Key Identifier",
+          "X509v3 Basic Constraints!critical",
+          "X509v3 CRL Distribution Points",
+          "X509v3 Certificate Policies",
+          "X509v3 Extended Key Usage",
+          "X509v3 Key Usage!critical",
+          "X509v3 Subject Key Identifier"
+        ],
+        "asn1Types": [
+          "PRINTABLESTRING",
+          "UTCTIME"
+        ]
+      },
+      "seenAt": [
+        {
+          "target": "imap.forwardemail.net:993",
+          "indexInChain": 2,
+          "chainLength": 3,
+          "position": "intermediate",
+          "sha256": "92f351bf3d54164dfa8dd8f9e1139d3150349786485d2b9eecd00e2971c1e6c5"
+        },
+        {
+          "target": "mail.infomaniak.com:993",
+          "indexInChain": 2,
+          "chainLength": 4,
+          "position": "intermediate",
+          "sha256": "92f351bf3d54164dfa8dd8f9e1139d3150349786485d2b9eecd00e2971c1e6c5"
+        },
+        {
+          "target": "imap.mail.ovh.net:993",
+          "indexInChain": 2,
+          "chainLength": 4,
+          "position": "intermediate",
+          "sha256": "92f351bf3d54164dfa8dd8f9e1139d3150349786485d2b9eecd00e2971c1e6c5"
+        }
+      ]
+    },
+    {
+      "file": "imap.forwardemail.net-993-bf437bc1-leaf.der",
+      "sha256": "bf437bc1974eedde32bb60c2f6006b0b6ee02326ed16be4ad7d1f7948b1e432a",
+      "subject": "CN=*.forwardemail.net",
+      "fingerprint": {
+        "signatureAlgorithm": "sha256WithRSAEncryption",
+        "key": "rsa/2048",
+        "extensions": [
+          "Authority Information Access",
+          "CT Precertificate SCTs",
+          "X509v3 Authority Key Identifier",
+          "X509v3 Basic Constraints!critical",
+          "X509v3 Certificate Policies",
+          "X509v3 Extended Key Usage",
+          "X509v3 Key Usage!critical",
+          "X509v3 Subject Alternative Name",
+          "X509v3 Subject Key Identifier"
+        ],
+        "asn1Types": [
+          "PRINTABLESTRING",
+          "UTCTIME",
+          "UTF8STRING"
+        ]
+      },
+      "seenAt": [
+        {
+          "target": "imap.forwardemail.net:993",
+          "indexInChain": 0,
+          "chainLength": 3,
+          "position": "leaf",
+          "sha256": "bf437bc1974eedde32bb60c2f6006b0b6ee02326ed16be4ad7d1f7948b1e432a"
+        }
+      ]
+    },
+    {
+      "file": "imap.gmail.com-993-3ee0278d-intermediate.der",
+      "sha256": "3ee0278df71fa3c125c4cd487f01d774694e6fc57e0cd94c24efd769133918e5",
+      "subject": "C=US, O=Google Trust Services LLC, CN=GTS Root R1",
+      "fingerprint": {
+        "signatureAlgorithm": "sha256WithRSAEncryption",
+        "key": "rsa/4096",
+        "extensions": [
+          "Authority Information Access",
+          "X509v3 Authority Key Identifier",
+          "X509v3 Basic Constraints!critical",
+          "X509v3 CRL Distribution Points",
+          "X509v3 Certificate Policies",
+          "X509v3 Key Usage!critical",
+          "X509v3 Subject Key Identifier"
+        ],
+        "asn1Types": [
+          "PRINTABLESTRING",
+          "UTCTIME"
+        ]
+      },
+      "seenAt": [
+        {
+          "target": "imap.gmail.com:993",
+          "indexInChain": 2,
+          "chainLength": 3,
+          "position": "intermediate",
+          "sha256": "3ee0278df71fa3c125c4cd487f01d774694e6fc57e0cd94c24efd769133918e5"
+        },
+        {
+          "target": "smtp.gmail.com:465",
+          "indexInChain": 2,
+          "chainLength": 3,
+          "position": "intermediate",
+          "sha256": "3ee0278df71fa3c125c4cd487f01d774694e6fc57e0cd94c24efd769133918e5"
+        }
+      ]
+    },
+    {
+      "file": "imap.gmail.com-993-881571fd-leaf.der",
+      "sha256": "881571fdfdaafebb1abf1df93a3569591dd8d874282206c8a40f17ec00cb3786",
+      "subject": "CN=imap.gmail.com",
+      "fingerprint": {
+        "signatureAlgorithm": "sha256WithRSAEncryption",
+        "key": "ec/prime256v1",
+        "extensions": [
+          "Authority Information Access",
+          "CT Precertificate SCTs",
+          "X509v3 Authority Key Identifier",
+          "X509v3 Basic Constraints!critical",
+          "X509v3 CRL Distribution Points",
+          "X509v3 Certificate Policies",
+          "X509v3 Extended Key Usage",
+          "X509v3 Key Usage!critical",
+          "X509v3 Subject Alternative Name",
+          "X509v3 Subject Key Identifier"
+        ],
+        "asn1Types": [
+          "PRINTABLESTRING",
+          "UTCTIME"
+        ]
+      },
+      "seenAt": [
+        {
+          "target": "imap.gmail.com:993",
+          "indexInChain": 0,
+          "chainLength": 3,
+          "position": "leaf",
+          "sha256": "881571fdfdaafebb1abf1df93a3569591dd8d874282206c8a40f17ec00cb3786"
+        },
+        {
+          "target": "smtp.gmail.com:465",
+          "indexInChain": 0,
+          "chainLength": 3,
+          "position": "leaf",
+          "sha256": "12e92f171e53a6b65d295199eaf6ba21543655023a44f42992e09d5ce95ef5e1"
+        }
+      ]
+    },
+    {
+      "file": "imap.gmail.com-993-e6fe22bf-intermediate.der",
+      "sha256": "e6fe22bf45e4f0d3b85c59e02c0f495418e1eb8d3210f788d48cd5e1cb547cd4",
+      "subject": "C=US, O=Google Trust Services, CN=WR2",
+      "fingerprint": {
+        "signatureAlgorithm": "sha256WithRSAEncryption",
+        "key": "rsa/2048",
+        "extensions": [
+          "Authority Information Access",
+          "X509v3 Authority Key Identifier",
+          "X509v3 Basic Constraints!critical",
+          "X509v3 CRL Distribution Points",
+          "X509v3 Certificate Policies",
+          "X509v3 Extended Key Usage",
+          "X509v3 Key Usage!critical",
+          "X509v3 Subject Key Identifier"
+        ],
+        "asn1Types": [
+          "PRINTABLESTRING",
+          "UTCTIME"
+        ]
+      },
+      "seenAt": [
+        {
+          "target": "imap.gmail.com:993",
+          "indexInChain": 1,
+          "chainLength": 3,
+          "position": "intermediate",
+          "sha256": "e6fe22bf45e4f0d3b85c59e02c0f495418e1eb8d3210f788d48cd5e1cb547cd4"
+        },
+        {
+          "target": "imap.fastmail.com:993",
+          "indexInChain": 1,
+          "chainLength": 3,
+          "position": "intermediate",
+          "sha256": "238b85a0099c65b970477d5724f1a1d475ce5058cffe4efa8733899bdb863c47"
+        },
+        {
+          "target": "imap.mailbox.org:993",
+          "indexInChain": 1,
+          "chainLength": 2,
+          "position": "intermediate",
+          "sha256": "4bcc5e234fe81ede4eaf883aa19c31335b0b26e85e066b9945e4cb6153eb20c2"
+        },
+        {
+          "target": "posteo.de:993",
+          "indexInChain": 1,
+          "chainLength": 2,
+          "position": "intermediate",
+          "sha256": "2d140f20b8a96e2b4d2f1cc5aca5e5a1e7dc56a7491e510906960f38d2d21aef"
+        },
+        {
+          "target": "outlook.office365.com:993",
+          "indexInChain": 1,
+          "chainLength": 2,
+          "position": "intermediate",
+          "sha256": "c8025f9fc65fdfc95b3ca8cc7867b9a587b5277973957917463fc813d0b625a9"
+        },
+        {
+          "target": "imap.mail.yahoo.com:993",
+          "indexInChain": 1,
+          "chainLength": 3,
+          "position": "intermediate",
+          "sha256": "c8025f9fc65fdfc95b3ca8cc7867b9a587b5277973957917463fc813d0b625a9"
+        },
+        {
+          "target": "imap.aol.com:993",
+          "indexInChain": 1,
+          "chainLength": 3,
+          "position": "intermediate",
+          "sha256": "c8025f9fc65fdfc95b3ca8cc7867b9a587b5277973957917463fc813d0b625a9"
+        },
+        {
+          "target": "imap.zoho.com:993",
+          "indexInChain": 1,
+          "chainLength": 2,
+          "position": "intermediate",
+          "sha256": "4bcc5e234fe81ede4eaf883aa19c31335b0b26e85e066b9945e4cb6153eb20c2"
+        },
+        {
+          "target": "imap.zoho.eu:993",
+          "indexInChain": 1,
+          "chainLength": 3,
+          "position": "intermediate",
+          "sha256": "4bcc5e234fe81ede4eaf883aa19c31335b0b26e85e066b9945e4cb6153eb20c2"
+        },
+        {
+          "target": "imap.naver.com:993",
+          "indexInChain": 1,
+          "chainLength": 3,
+          "position": "intermediate",
+          "sha256": "c06e307f7cfc1d32fa72a4c033c87b90019af216f0775d64978a2eca6c8a230e"
+        },
+        {
+          "target": "imap.seznam.cz:993",
+          "indexInChain": 1,
+          "chainLength": 3,
+          "position": "intermediate",
+          "sha256": "13949634d99cd6fd6aa80bc034fefacceb1969feef986586713ecdbb05758d3f"
+        },
+        {
+          "target": "imap.one.com:993",
+          "indexInChain": 1,
+          "chainLength": 3,
+          "position": "intermediate",
+          "sha256": "238b85a0099c65b970477d5724f1a1d475ce5058cffe4efa8733899bdb863c47"
+        },
+        {
+          "target": "imap.purelymail.com:993",
+          "indexInChain": 1,
+          "chainLength": 3,
+          "position": "intermediate",
+          "sha256": "13949634d99cd6fd6aa80bc034fefacceb1969feef986586713ecdbb05758d3f"
+        },
+        {
+          "target": "imap.telstra.com:993",
+          "indexInChain": 1,
+          "chainLength": 3,
+          "position": "intermediate",
+          "sha256": "c8025f9fc65fdfc95b3ca8cc7867b9a587b5277973957917463fc813d0b625a9"
+        },
+        {
+          "target": "smtp.gmail.com:465",
+          "indexInChain": 1,
+          "chainLength": 3,
+          "position": "intermediate",
+          "sha256": "e6fe22bf45e4f0d3b85c59e02c0f495418e1eb8d3210f788d48cd5e1cb547cd4"
+        },
+        {
+          "target": "smtp.fastmail.com:465",
+          "indexInChain": 1,
+          "chainLength": 3,
+          "position": "intermediate",
+          "sha256": "238b85a0099c65b970477d5724f1a1d475ce5058cffe4efa8733899bdb863c47"
+        },
+        {
+          "target": "smtp.mailbox.org:465",
+          "indexInChain": 1,
+          "chainLength": 2,
+          "position": "intermediate",
+          "sha256": "4bcc5e234fe81ede4eaf883aa19c31335b0b26e85e066b9945e4cb6153eb20c2"
+        }
+      ]
+    },
+    {
+      "file": "imap.gmx.net-993-3def6eca-leaf.der",
+      "sha256": "3def6ecaaf59406cd5aff3eed9030f62fdad7b026131568b8c971a73ced108a3",
+      "subject": "C=DE, ST=Rheinland-Pfalz, L=Montabaur, O=1&1 Mail & Media GmbH, CN=mail.gmx.net",
+      "fingerprint": {
+        "signatureAlgorithm": "sha256WithRSAEncryption",
+        "key": "rsa/3072",
+        "extensions": [
+          "Authority Information Access",
+          "CT Precertificate SCTs",
+          "X509v3 Authority Key Identifier",
+          "X509v3 Basic Constraints!critical",
+          "X509v3 CRL Distribution Points",
+          "X509v3 Certificate Policies",
+          "X509v3 Extended Key Usage",
+          "X509v3 Key Usage!critical",
+          "X509v3 Subject Alternative Name",
+          "X509v3 Subject Key Identifier"
+        ],
+        "asn1Types": [
+          "PRINTABLESTRING",
+          "UTCTIME",
+          "UTF8STRING"
+        ]
+      },
+      "seenAt": [
+        {
+          "target": "imap.gmx.net:993",
+          "indexInChain": 0,
+          "chainLength": 2,
+          "position": "leaf",
+          "sha256": "3def6ecaaf59406cd5aff3eed9030f62fdad7b026131568b8c971a73ced108a3"
+        },
+        {
+          "target": "imap.web.de:993",
+          "indexInChain": 0,
+          "chainLength": 2,
+          "position": "leaf",
+          "sha256": "29235b7052ee778867e1073aa09b9e9977c933965d9883faec41b4fabfcf4e62"
+        },
+        {
+          "target": "imap.ionos.de:993",
+          "indexInChain": 0,
+          "chainLength": 2,
+          "position": "leaf",
+          "sha256": "c9f22cd04ada6e42ae1f6bf36a99d1671069c4dc5d68e113838fae91a71bb684"
+        }
+      ]
+    },
+    {
+      "file": "imap.gmx.net-993-944ace96-intermediate.der",
+      "sha256": "944ace961db316beb694e01c302c46fed40dc0291729e7daf58550c3cb55e791",
+      "subject": "C=DE, O=Deutsche Telekom Security GmbH, CN=Telekom Security ServerID OV Class 2 CA",
+      "fingerprint": {
+        "signatureAlgorithm": "sha256WithRSAEncryption",
+        "key": "rsa/3072",
+        "extensions": [
+          "Authority Information Access",
+          "X509v3 Authority Key Identifier",
+          "X509v3 Basic Constraints!critical",
+          "X509v3 CRL Distribution Points",
+          "X509v3 Certificate Policies",
+          "X509v3 Extended Key Usage",
+          "X509v3 Key Usage!critical",
+          "X509v3 Subject Key Identifier"
+        ],
+        "asn1Types": [
+          "PRINTABLESTRING",
+          "UTCTIME",
+          "UTF8STRING"
+        ]
+      },
+      "seenAt": [
+        {
+          "target": "imap.gmx.net:993",
+          "indexInChain": 1,
+          "chainLength": 2,
+          "position": "intermediate",
+          "sha256": "944ace961db316beb694e01c302c46fed40dc0291729e7daf58550c3cb55e791"
+        },
+        {
+          "target": "imap.web.de:993",
+          "indexInChain": 1,
+          "chainLength": 2,
+          "position": "intermediate",
+          "sha256": "944ace961db316beb694e01c302c46fed40dc0291729e7daf58550c3cb55e791"
+        },
+        {
+          "target": "imap.ionos.de:993",
+          "indexInChain": 1,
+          "chainLength": 2,
+          "position": "intermediate",
+          "sha256": "944ace961db316beb694e01c302c46fed40dc0291729e7daf58550c3cb55e791"
+        }
+      ]
+    },
+    {
+      "file": "imap.mail.me.com-993-6c66578d-intermediate.der",
+      "sha256": "6c66578dc96ad13eb7b688bdc09db472d5fbf03b3bd21309665052a886d7e9b4",
+      "subject": "CN=Apple Public Server RSA CA 11 - G1, O=Apple Inc., ST=California, C=US",
+      "fingerprint": {
+        "signatureAlgorithm": "sha384WithRSAEncryption",
+        "key": "rsa/2048",
+        "extensions": [
+          "Authority Information Access",
+          "X509v3 Authority Key Identifier",
+          "X509v3 Basic Constraints!critical",
+          "X509v3 CRL Distribution Points",
+          "X509v3 Certificate Policies",
+          "X509v3 Extended Key Usage",
+          "X509v3 Key Usage!critical",
+          "X509v3 Subject Key Identifier"
+        ],
+        "asn1Types": [
+          "PRINTABLESTRING",
+          "UTCTIME"
+        ]
+      },
+      "seenAt": [
+        {
+          "target": "imap.mail.me.com:993",
+          "indexInChain": 1,
+          "chainLength": 2,
+          "position": "intermediate",
+          "sha256": "6c66578dc96ad13eb7b688bdc09db472d5fbf03b3bd21309665052a886d7e9b4"
+        }
+      ]
+    },
+    {
+      "file": "imap.mail.me.com-993-becc4130-leaf.der",
+      "sha256": "becc4130a01c3d26546dc3ca0b05235500ee78ea4943971ca1a2cb8ed85f5e76",
+      "subject": "C=US, ST=California, O=Apple Inc., CN=imap.mail.me.com",
+      "fingerprint": {
+        "signatureAlgorithm": "sha256WithRSAEncryption",
+        "key": "rsa/2048",
+        "extensions": [
+          "1.2.840.113635.100.6.86",
+          "Authority Information Access",
+          "CT Precertificate SCTs",
+          "X509v3 Authority Key Identifier",
+          "X509v3 Basic Constraints!critical",
+          "X509v3 CRL Distribution Points",
+          "X509v3 Certificate Policies",
+          "X509v3 Extended Key Usage",
+          "X509v3 Key Usage!critical",
+          "X509v3 Subject Alternative Name",
+          "X509v3 Subject Key Identifier"
+        ],
+        "asn1Types": [
+          "PRINTABLESTRING",
+          "UTCTIME",
+          "UTF8STRING"
+        ]
+      },
+      "seenAt": [
+        {
+          "target": "imap.mail.me.com:993",
+          "indexInChain": 0,
+          "chainLength": 2,
+          "position": "leaf",
+          "sha256": "becc4130a01c3d26546dc3ca0b05235500ee78ea4943971ca1a2cb8ed85f5e76"
+        }
+      ]
+    },
+    {
+      "file": "imap.mail.yahoo.com-993-cb3ccbb7-root.der",
+      "sha256": "cb3ccbb76031e5e0138f8dd39a23f9de47ffc35e43c1144cea27d46a5ab1cb5f",
+      "subject": "C=US, O=DigiCert Inc, OU=www.digicert.com, CN=DigiCert Global Root G2",
+      "fingerprint": {
+        "signatureAlgorithm": "sha256WithRSAEncryption",
+        "key": "rsa/2048",
+        "extensions": [
+          "X509v3 Basic Constraints!critical",
+          "X509v3 Key Usage!critical",
+          "X509v3 Subject Key Identifier"
+        ],
+        "asn1Types": [
+          "PRINTABLESTRING",
+          "UTCTIME"
+        ]
+      },
+      "seenAt": [
+        {
+          "target": "imap.mail.yahoo.com:993",
+          "indexInChain": 2,
+          "chainLength": 3,
+          "position": "root",
+          "sha256": "cb3ccbb76031e5e0138f8dd39a23f9de47ffc35e43c1144cea27d46a5ab1cb5f"
+        },
+        {
+          "target": "imap.aol.com:993",
+          "indexInChain": 2,
+          "chainLength": 3,
+          "position": "root",
+          "sha256": "cb3ccbb76031e5e0138f8dd39a23f9de47ffc35e43c1144cea27d46a5ab1cb5f"
+        },
+        {
+          "target": "imap.zoho.eu:993",
+          "indexInChain": 2,
+          "chainLength": 3,
+          "position": "root",
+          "sha256": "cb3ccbb76031e5e0138f8dd39a23f9de47ffc35e43c1144cea27d46a5ab1cb5f"
+        },
+        {
+          "target": "imap.naver.com:993",
+          "indexInChain": 2,
+          "chainLength": 3,
+          "position": "root",
+          "sha256": "cb3ccbb76031e5e0138f8dd39a23f9de47ffc35e43c1144cea27d46a5ab1cb5f"
+        },
+        {
+          "target": "imap.rambler.ru:993",
+          "indexInChain": 2,
+          "chainLength": 3,
+          "position": "root",
+          "sha256": "cbb522d7b7f127ad6a0113865bdf1cd4102e7d0759af635a7cf4720dc963c53b"
+        },
+        {
+          "target": "imap.telstra.com:993",
+          "indexInChain": 2,
+          "chainLength": 3,
+          "position": "root",
+          "sha256": "cb3ccbb76031e5e0138f8dd39a23f9de47ffc35e43c1144cea27d46a5ab1cb5f"
+        },
+        {
+          "target": "node:root-store",
+          "indexInChain": 0,
+          "chainLength": 1,
+          "position": "root",
+          "sha256": "cbb522d7b7f127ad6a0113865bdf1cd4102e7d0759af635a7cf4720dc963c53b"
+        },
+        {
+          "target": "node:root-store",
+          "indexInChain": 0,
+          "chainLength": 1,
+          "position": "root",
+          "sha256": "45140b3247eb9cc8c5b4f0d7b53091f73292089e6e5a63e2749dd3aca9198eda"
+        },
+        {
+          "target": "node:root-store",
+          "indexInChain": 0,
+          "chainLength": 1,
+          "position": "root",
+          "sha256": "2ce1cb0bf9d2f9e102993fbe215152c3b2dd0cabde1c68e5319b839154dbb7f5"
+        },
+        {
+          "target": "node:root-store",
+          "indexInChain": 0,
+          "chainLength": 1,
+          "position": "root",
+          "sha256": "568d6905a2c88708a4b3025190edcfedb1974a606a13c6e5290fcb2ae63edab5"
+        },
+        {
+          "target": "node:root-store",
+          "indexInChain": 0,
+          "chainLength": 1,
+          "position": "root",
+          "sha256": "513b2cecb810d4cde5dd85391adfc6c2dd60d87bb736d2b521484aa47a0ebef6"
+        },
+        {
+          "target": "node:root-store",
+          "indexInChain": 0,
+          "chainLength": 1,
+          "position": "root",
+          "sha256": "7d05ebb682339f8c9451ee094eebfefa7953a114edb2f44949452fab7d2fc185"
+        },
+        {
+          "target": "node:root-store",
+          "indexInChain": 0,
+          "chainLength": 1,
+          "position": "root",
+          "sha256": "cb3ccbb76031e5e0138f8dd39a23f9de47ffc35e43c1144cea27d46a5ab1cb5f"
+        },
+        {
+          "target": "node:root-store",
+          "indexInChain": 0,
+          "chainLength": 1,
+          "position": "root",
+          "sha256": "8ecde6884f3d87b1125ba31ac3fcb13d7016de7f57cc904fe1cb97c6ae98196e"
+        },
+        {
+          "target": "node:root-store",
+          "indexInChain": 0,
+          "chainLength": 1,
+          "position": "root",
+          "sha256": "46edc3689046d53a453fb3104ab80dcaec658b2660ea1629dd7e867990648716"
+        },
+        {
+          "target": "node:root-store",
+          "indexInChain": 0,
+          "chainLength": 1,
+          "position": "root",
+          "sha256": "40f6af0346a99aa1cd1d555a4e9cce62c7f9634603ee406615833dc8c8d00367"
+        },
+        {
+          "target": "node:root-store",
+          "indexInChain": 0,
+          "chainLength": 1,
+          "position": "root",
+          "sha256": "125609aa301da0a249b97a8239cb6a34216f44dcac9f3954b14292f2e8c8608f"
+        },
+        {
+          "target": "node:root-store",
+          "indexInChain": 0,
+          "chainLength": 1,
+          "position": "root",
+          "sha256": "3f034bb5704d44b2d08545a02057de93ebf3905fce721acbc730c06ddaee904e"
+        }
+      ]
+    },
+    {
+      "file": "imap.mailbox.org-993-6dcc7cca-leaf.der",
+      "sha256": "6dcc7ccad5875f926c0ecd35da5da977509555f61d189329c5c0015236baeb53",
+      "subject": "CN=*.mailbox.org",
+      "fingerprint": {
+        "signatureAlgorithm": "sha256WithRSAEncryption",
+        "key": "rsa/4096",
+        "extensions": [
+          "Authority Information Access",
+          "CT Precertificate SCTs",
+          "X509v3 Authority Key Identifier",
+          "X509v3 Basic Constraints!critical",
+          "X509v3 CRL Distribution Points",
+          "X509v3 Certificate Policies",
+          "X509v3 Extended Key Usage",
+          "X509v3 Key Usage!critical",
+          "X509v3 Subject Alternative Name",
+          "X509v3 Subject Key Identifier"
+        ],
+        "asn1Types": [
+          "PRINTABLESTRING",
+          "UTCTIME",
+          "UTF8STRING"
+        ]
+      },
+      "seenAt": [
+        {
+          "target": "imap.mailbox.org:993",
+          "indexInChain": 0,
+          "chainLength": 2,
+          "position": "leaf",
+          "sha256": "6dcc7ccad5875f926c0ecd35da5da977509555f61d189329c5c0015236baeb53"
+        },
+        {
+          "target": "smtp.mailbox.org:465",
+          "indexInChain": 0,
+          "chainLength": 2,
+          "position": "leaf",
+          "sha256": "6dcc7ccad5875f926c0ecd35da5da977509555f61d189329c5c0015236baeb53"
+        }
+      ]
+    },
+    {
+      "file": "imap.seznam.cz-993-fb6ce8cb-leaf.der",
+      "sha256": "fb6ce8cbc11b918bcc39f05ed4fb6efdde527086ca2da62996baaa4fb1a68cb9",
+      "subject": "CN=imap.seznam.cz",
+      "fingerprint": {
+        "signatureAlgorithm": "sha256WithRSAEncryption",
+        "key": "rsa/4096",
+        "extensions": [
+          "Authority Information Access",
+          "CT Precertificate SCTs",
+          "X509v3 Authority Key Identifier",
+          "X509v3 Basic Constraints!critical",
+          "X509v3 CRL Distribution Points",
+          "X509v3 Certificate Policies",
+          "X509v3 Extended Key Usage",
+          "X509v3 Key Usage!critical",
+          "X509v3 Subject Alternative Name",
+          "X509v3 Subject Key Identifier"
+        ],
+        "asn1Types": [
+          "PRINTABLESTRING",
+          "UTCTIME"
+        ]
+      },
+      "seenAt": [
+        {
+          "target": "imap.seznam.cz:993",
+          "indexInChain": 0,
+          "chainLength": 3,
+          "position": "leaf",
+          "sha256": "fb6ce8cbc11b918bcc39f05ed4fb6efdde527086ca2da62996baaa4fb1a68cb9"
+        },
+        {
+          "target": "imap.one.com:993",
+          "indexInChain": 0,
+          "chainLength": 3,
+          "position": "leaf",
+          "sha256": "36571ebb675a7b53005225f2545906dcb590f652ce137d91865078604ccea914"
+        }
+      ]
+    },
+    {
+      "file": "imap.yandex.com-993-b676ffa3-intermediate.der",
+      "sha256": "b676ffa3179e8812093a1b5eafee876ae7a6aaf231078dad1bfb21cd2893764a",
+      "subject": "C=BE, O=GlobalSign nv-sa, CN=GlobalSign RSA OV SSL CA 2018",
+      "fingerprint": {
+        "signatureAlgorithm": "sha256WithRSAEncryption",
+        "key": "rsa/2048",
+        "extensions": [
+          "Authority Information Access",
+          "X509v3 Authority Key Identifier",
+          "X509v3 Basic Constraints!critical",
+          "X509v3 CRL Distribution Points",
+          "X509v3 Certificate Policies",
+          "X509v3 Key Usage!critical",
+          "X509v3 Subject Key Identifier"
+        ],
+        "asn1Types": [
+          "PRINTABLESTRING",
+          "UTCTIME"
+        ]
+      },
+      "seenAt": [
+        {
+          "target": "imap.yandex.com:993",
+          "indexInChain": 1,
+          "chainLength": 3,
+          "position": "intermediate",
+          "sha256": "b676ffa3179e8812093a1b5eafee876ae7a6aaf231078dad1bfb21cd2893764a"
+        },
+        {
+          "target": "imap.yandex.com:993",
+          "indexInChain": 2,
+          "chainLength": 3,
+          "position": "intermediate",
+          "sha256": "445eec78bc61215044a0379656aa2d5db5e42f76cb70b8d14c2077aa943d4ebb"
+        },
+        {
+          "target": "imap.rambler.ru:993",
+          "indexInChain": 1,
+          "chainLength": 3,
+          "position": "intermediate",
+          "sha256": "b676ffa3179e8812093a1b5eafee876ae7a6aaf231078dad1bfb21cd2893764a"
+        }
+      ]
+    },
+    {
+      "file": "mail.gandi.net-993-0f4ea196-leaf.der",
+      "sha256": "0f4ea1965df92a609b338a775446e763cb62726fc9c270f9f73e2d4b885c1483",
+      "subject": "CN=mail.gandi.net",
+      "fingerprint": {
+        "signatureAlgorithm": "sha256WithRSAEncryption",
+        "key": "rsa/4096",
+        "extensions": [
+          "Authority Information Access",
+          "CT Precertificate SCTs",
+          "X509v3 Authority Key Identifier",
+          "X509v3 Basic Constraints!critical",
+          "X509v3 Certificate Policies",
+          "X509v3 Extended Key Usage",
+          "X509v3 Key Usage!critical",
+          "X509v3 Subject Alternative Name",
+          "X509v3 Subject Key Identifier"
+        ],
+        "asn1Types": [
+          "PRINTABLESTRING",
+          "UTCTIME"
+        ]
+      },
+      "seenAt": [
+        {
+          "target": "mail.gandi.net:993",
+          "indexInChain": 0,
+          "chainLength": 2,
+          "position": "leaf",
+          "sha256": "0f4ea1965df92a609b338a775446e763cb62726fc9c270f9f73e2d4b885c1483"
+        },
+        {
+          "target": "imap.mail.ovh.net:993",
+          "indexInChain": 0,
+          "chainLength": 4,
+          "position": "leaf",
+          "sha256": "8264b19d5bf227d1ac4457ccc975b0a2bbf79a4be3a3864382b62e1ad5ac3d89"
+        }
+      ]
+    },
+    {
+      "file": "mail.infomaniak.com-993-835f61b2-leaf.der",
+      "sha256": "835f61b292870c69b4cb350e4071475072a7e0aaa2867de5d9754b5d80363dde",
+      "subject": "CN=mail.infomaniak.com",
+      "fingerprint": {
+        "signatureAlgorithm": "sha256WithRSAEncryption",
+        "key": "rsa/2048",
+        "extensions": [
+          "Authority Information Access",
+          "CT Precertificate SCTs",
+          "X509v3 Authority Key Identifier",
+          "X509v3 Basic Constraints!critical",
+          "X509v3 Certificate Policies",
+          "X509v3 Extended Key Usage",
+          "X509v3 Key Usage!critical",
+          "X509v3 Subject Alternative Name",
+          "X509v3 Subject Key Identifier"
+        ],
+        "asn1Types": [
+          "PRINTABLESTRING",
+          "UTCTIME"
+        ]
+      },
+      "seenAt": [
+        {
+          "target": "mail.infomaniak.com:993",
+          "indexInChain": 0,
+          "chainLength": 4,
+          "position": "leaf",
+          "sha256": "835f61b292870c69b4cb350e4071475072a7e0aaa2867de5d9754b5d80363dde"
+        },
+        {
+          "target": "imap.rambler.ru:993",
+          "indexInChain": 0,
+          "chainLength": 3,
+          "position": "leaf",
+          "sha256": "8104322d996b05c8d5bb12a1edf7f30c9859a492f7afb2fc0f8d7b458df0d6cf"
+        }
+      ]
+    },
+    {
+      "file": "mail.infomaniak.com-993-e793c9b0-root.der",
+      "sha256": "e793c9b02fd8aa13e21c31228accb08119643b749c898964b1746d46c3d4cbd2",
+      "subject": "C=US, ST=New Jersey, L=Jersey City, O=The USERTRUST Network, CN=USERTrust RSA Certification Authority",
+      "fingerprint": {
+        "signatureAlgorithm": "sha384WithRSAEncryption",
+        "key": "rsa/4096",
+        "extensions": [
+          "X509v3 Basic Constraints!critical",
+          "X509v3 Key Usage!critical",
+          "X509v3 Subject Key Identifier"
+        ],
+        "asn1Types": [
+          "PRINTABLESTRING",
+          "UTCTIME"
+        ]
+      },
+      "seenAt": [
+        {
+          "target": "mail.infomaniak.com:993",
+          "indexInChain": 3,
+          "chainLength": 4,
+          "position": "root",
+          "sha256": "e793c9b02fd8aa13e21c31228accb08119643b749c898964b1746d46c3d4cbd2"
+        },
+        {
+          "target": "imap.mail.ovh.net:993",
+          "indexInChain": 3,
+          "chainLength": 4,
+          "position": "root",
+          "sha256": "e793c9b02fd8aa13e21c31228accb08119643b749c898964b1746d46c3d4cbd2"
+        },
+        {
+          "target": "node:root-store",
+          "indexInChain": 0,
+          "chainLength": 1,
+          "position": "root",
+          "sha256": "552f7bdcf1a7af9e6ce672017f4f12abf77240c78e761ac203d1d9d20ac89988"
+        },
+        {
+          "target": "node:root-store",
+          "indexInChain": 0,
+          "chainLength": 1,
+          "position": "root",
+          "sha256": "52f0e1c4e58ec629291b60317f074671b85d7ea80d5b07273463534b32b40234"
+        },
+        {
+          "target": "node:root-store",
+          "indexInChain": 0,
+          "chainLength": 1,
+          "position": "root",
+          "sha256": "e793c9b02fd8aa13e21c31228accb08119643b749c898964b1746d46c3d4cbd2"
+        },
+        {
+          "target": "node:root-store",
+          "indexInChain": 0,
+          "chainLength": 1,
+          "position": "root",
+          "sha256": "1ba5b2aa8c65401a82960118f80bec4f62304d83cec4713a19c39c011ea46db4"
+        },
+        {
+          "target": "node:root-store",
+          "indexInChain": 0,
+          "chainLength": 1,
+          "position": "root",
+          "sha256": "4fa3126d8d3a11d1c4855a4f807cbad6cf919d3a5a88b03bea2c6372d93c40c9"
+        },
+        {
+          "target": "node:root-store",
+          "indexInChain": 0,
+          "chainLength": 1,
+          "position": "root",
+          "sha256": "d947432abde7b7fa90fc2e6b59101b1280e0e1c7e4e40fa3c6887fff57a7f4cf"
+        },
+        {
+          "target": "node:root-store",
+          "indexInChain": 0,
+          "chainLength": 1,
+          "position": "root",
+          "sha256": "371a00dc0533b3721a7eeb40e8419e70799d2b0a0f2c1d80693165f7cec4ad75"
+        },
+        {
+          "target": "node:root-store",
+          "indexInChain": 0,
+          "chainLength": 1,
+          "position": "root",
+          "sha256": "7bb647a62aeeac88bf257aa522d01ffea395e0ab45c73f93f65654ec38f25a06"
+        },
+        {
+          "target": "node:root-store",
+          "indexInChain": 0,
+          "chainLength": 1,
+          "position": "root",
+          "sha256": "4b009c1034494f9ab56bba3ba1d62731fc4d20d8955adcec10a925607261e338"
+        },
+        {
+          "target": "node:root-store",
+          "indexInChain": 0,
+          "chainLength": 1,
+          "position": "root",
+          "sha256": "06c08d7dafd876971eb1124fe67f847ec0c7a158d3ea53cbe940e2ea9791f4c3"
+        }
+      ]
+    },
+    {
+      "file": "node-root-store-0552e6f8-root.der",
+      "sha256": "0552e6f83fdf65e8fa9670e666df28a4e21340b510cbe52566f97c4fb94b2bd1",
+      "subject": "C=DE, O=D-Trust GmbH, CN=D-TRUST BR Root CA 2 2023",
+      "fingerprint": {
+        "signatureAlgorithm": "sha512WithRSAEncryption",
+        "key": "rsa/4096",
+        "extensions": [
+          "X509v3 Basic Constraints!critical",
+          "X509v3 CRL Distribution Points",
+          "X509v3 Key Usage!critical",
+          "X509v3 Subject Key Identifier"
+        ],
+        "asn1Types": [
+          "PRINTABLESTRING",
+          "UTCTIME"
+        ]
+      },
+      "seenAt": [
+        {
+          "target": "node:root-store",
+          "indexInChain": 0,
+          "chainLength": 1,
+          "position": "root",
+          "sha256": "0552e6f83fdf65e8fa9670e666df28a4e21340b510cbe52566f97c4fb94b2bd1"
+        },
+        {
+          "target": "node:root-store",
+          "indexInChain": 0,
+          "chainLength": 1,
+          "position": "root",
+          "sha256": "8e8221b2e7d4007836a1672f0dcc299c33bc07d316f132fa1a206d587150f1ce"
+        }
+      ]
+    },
+    {
+      "file": "node-root-store-1793927a-root.der",
+      "sha256": "1793927a0614549789adce2f8f34f7f0b66d0f3ae3a3b84d21ec15dbba4fadc7",
+      "subject": "C=GB, ST=Greater Manchester, L=Salford, O=COMODO CA Limited, CN=COMODO ECC Certification Authority",
+      "fingerprint": {
+        "signatureAlgorithm": "ecdsa-with-SHA384",
+        "key": "ec/secp384r1",
+        "extensions": [
+          "X509v3 Basic Constraints!critical",
+          "X509v3 Key Usage!critical",
+          "X509v3 Subject Key Identifier"
+        ],
+        "asn1Types": [
+          "PRINTABLESTRING",
+          "UTCTIME"
+        ]
+      },
+      "seenAt": [
+        {
+          "target": "node:root-store",
+          "indexInChain": 0,
+          "chainLength": 1,
+          "position": "root",
+          "sha256": "1793927a0614549789adce2f8f34f7f0b66d0f3ae3a3b84d21ec15dbba4fadc7"
+        },
+        {
+          "target": "node:root-store",
+          "indexInChain": 0,
+          "chainLength": 1,
+          "position": "root",
+          "sha256": "7e37cb8b4c47090cab36551ba6f45db840680fba166a952db100717f43053fc2"
+        },
+        {
+          "target": "node:root-store",
+          "indexInChain": 0,
+          "chainLength": 1,
+          "position": "root",
+          "sha256": "31ad6648f8104138c738f39ea4320133393e3a18cc02296ef97c2ac9ef6731d0"
+        },
+        {
+          "target": "node:root-store",
+          "indexInChain": 0,
+          "chainLength": 1,
+          "position": "root",
+          "sha256": "4ff460d54b9c86dabfbcfc5712e0400d2bed3fbc4d4fbdaa86e06adcd2a9ad7a"
+        },
+        {
+          "target": "node:root-store",
+          "indexInChain": 0,
+          "chainLength": 1,
+          "position": "root",
+          "sha256": "179fbc148a3dd00fd24ea13458cc43bfa7f59c8182d783a513f6ebec100c8924"
+        },
+        {
+          "target": "node:root-store",
+          "indexInChain": 0,
+          "chainLength": 1,
+          "position": "root",
+          "sha256": "e35d28419ed02025cfa69038cd623962458da5c695fbdea3c22b0bfb25897092"
+        },
+        {
+          "target": "node:root-store",
+          "indexInChain": 0,
+          "chainLength": 1,
+          "position": "root",
+          "sha256": "86a1ecba089c4a8d3bbe2734c612ba341d813e043cf9e8a862cd5c57a36bbe6b"
+        },
+        {
+          "target": "node:root-store",
+          "indexInChain": 0,
+          "chainLength": 1,
+          "position": "root",
+          "sha256": "bc4d809b15189d78db3e1d8cf4f9726a795da1643ca5f1358e1ddb0edc0d7eb3"
+        },
+        {
+          "target": "node:root-store",
+          "indexInChain": 0,
+          "chainLength": 1,
+          "position": "root",
+          "sha256": "cbb9c44d84b8043e1050ea31a69f514955d7bfd2e2c6b49301019ad61d9f5058"
+        },
+        {
+          "target": "node:root-store",
+          "indexInChain": 0,
+          "chainLength": 1,
+          "position": "root",
+          "sha256": "6b328085625318aa50d173c98d8bda09d57e27413d114cf787a0f5d06c030cf6"
+        },
+        {
+          "target": "node:root-store",
+          "indexInChain": 0,
+          "chainLength": 1,
+          "position": "root",
+          "sha256": "30fbba2c32238e2a98547af97931e550428b9b3f1c8eeb6633dcfa86c5b27dd3"
+        },
+        {
+          "target": "node:root-store",
+          "indexInChain": 0,
+          "chainLength": 1,
+          "position": "root",
+          "sha256": "69729b8e15a86efc177a57afb7171dfc64add28c2fca8cf1507e34453ccb1470"
+        },
+        {
+          "target": "node:root-store",
+          "indexInChain": 0,
+          "chainLength": 1,
+          "position": "root",
+          "sha256": "34d8a73ee208d9bcdb0d956520934b4e40e69482596e8b6f73c8426b010a6f48"
+        },
+        {
+          "target": "node:root-store",
+          "indexInChain": 0,
+          "chainLength": 1,
+          "position": "root",
+          "sha256": "349dfa4058c5e263123b398ae795573c4e1313c83fe68f93556cd5e8031b3c7d"
+        },
+        {
+          "target": "node:root-store",
+          "indexInChain": 0,
+          "chainLength": 1,
+          "position": "root",
+          "sha256": "018e13f0772532cf809bd1b17281867283fc48c6e13be9c69812854a490c1b05"
+        },
+        {
+          "target": "node:root-store",
+          "indexInChain": 0,
+          "chainLength": 1,
+          "position": "root",
+          "sha256": "b4585f22e4ac756a4e8612a1361c5d9d031a93fd84febb778fa3068b0fc42dc2"
+        },
+        {
+          "target": "node:root-store",
+          "indexInChain": 0,
+          "chainLength": 1,
+          "position": "root",
+          "sha256": "e74fbda55bd564c473a36b441aa799c8a68e077440e8288b9fa1e50e4bbaca11"
+        },
+        {
+          "target": "node:root-store",
+          "indexInChain": 0,
+          "chainLength": 1,
+          "position": "root",
+          "sha256": "c90f26f0fb1b4018b22227519b5ca2b53e2ca5b3be5cf18efe1bef47380c5383"
+        },
+        {
+          "target": "node:root-store",
+          "indexInChain": 0,
+          "chainLength": 1,
+          "position": "root",
+          "sha256": "e778f0f095fe843729cd1a0082179e5314a9c291442805e1fb1d8fb6b8886c3a"
+        },
+        {
+          "target": "node:root-store",
+          "indexInChain": 0,
+          "chainLength": 1,
+          "position": "root",
+          "sha256": "c0076b9ef0531fb1a656d67c4ebe97cd5dbaa41ef44598acc2489878c92d8711"
+        }
+      ]
+    },
+    {
+      "file": "node-root-store-18ce6cfe-root.der",
+      "sha256": "18ce6cfe7bf14e60b2e347b8dfe868cb31d02ebb3ada271569f50343b46db3a4",
+      "subject": "C=US, O=Amazon, CN=Amazon Root CA 3",
+      "fingerprint": {
+        "signatureAlgorithm": "ecdsa-with-SHA256",
+        "key": "ec/prime256v1",
+        "extensions": [
+          "X509v3 Basic Constraints!critical",
+          "X509v3 Key Usage!critical",
+          "X509v3 Subject Key Identifier"
+        ],
+        "asn1Types": [
+          "PRINTABLESTRING",
+          "UTCTIME"
+        ]
+      },
+      "seenAt": [
+        {
+          "target": "node:root-store",
+          "indexInChain": 0,
+          "chainLength": 1,
+          "position": "root",
+          "sha256": "18ce6cfe7bf14e60b2e347b8dfe868cb31d02ebb3ada271569f50343b46db3a4"
+        },
+        {
+          "target": "node:root-store",
+          "indexInChain": 0,
+          "chainLength": 1,
+          "position": "root",
+          "sha256": "b085d70b964f191a73e4af0d54ae7a0e07aafdaf9b71dd0862138ab7325a24a2"
+        }
+      ]
+    },
+    {
+      "file": "node-root-store-2cabeafe-root.der",
+      "sha256": "2cabeafe37d06ca22aba7391c0033d25982952c453647349763a3ab5ad6ccf69",
+      "subject": "OU=GlobalSign Root CA - R6, O=GlobalSign, CN=GlobalSign",
+      "fingerprint": {
+        "signatureAlgorithm": "sha384WithRSAEncryption",
+        "key": "rsa/4096",
+        "extensions": [
+          "X509v3 Authority Key Identifier",
+          "X509v3 Basic Constraints!critical",
+          "X509v3 Key Usage!critical",
+          "X509v3 Subject Key Identifier"
+        ],
+        "asn1Types": [
+          "PRINTABLESTRING",
+          "UTCTIME"
+        ]
+      },
+      "seenAt": [
+        {
+          "target": "node:root-store",
+          "indexInChain": 0,
+          "chainLength": 1,
+          "position": "root",
+          "sha256": "2cabeafe37d06ca22aba7391c0033d25982952c453647349763a3ab5ad6ccf69"
+        },
+        {
+          "target": "node:root-store",
+          "indexInChain": 0,
+          "chainLength": 1,
+          "position": "root",
+          "sha256": "3f63bb2814be174ec8b6439cf08d6d56f0b7c405883a5648a334424d6b3ec558"
+        }
+      ]
+    },
+    {
+      "file": "node-root-store-3417bb06-root.der",
+      "sha256": "3417bb06cc6007da1b961c920b8ab4ce3fad820e4aa30b9acbc4a74ebdcebc65",
+      "subject": "C=US, ST=Texas, L=Houston, O=SSL Corporation, CN=SSL.com Root Certification Authority ECC",
+      "fingerprint": {
+        "signatureAlgorithm": "ecdsa-with-SHA256",
+        "key": "ec/secp384r1",
+        "extensions": [
+          "X509v3 Authority Key Identifier",
+          "X509v3 Basic Constraints!critical",
+          "X509v3 Key Usage!critical",
+          "X509v3 Subject Key Identifier"
+        ],
+        "asn1Types": [
+          "PRINTABLESTRING",
+          "UTCTIME",
+          "UTF8STRING"
+        ]
+      },
+      "seenAt": [
+        {
+          "target": "node:root-store",
+          "indexInChain": 0,
+          "chainLength": 1,
+          "position": "root",
+          "sha256": "3417bb06cc6007da1b961c920b8ab4ce3fad820e4aa30b9acbc4a74ebdcebc65"
+        },
+        {
+          "target": "node:root-store",
+          "indexInChain": 0,
+          "chainLength": 1,
+          "position": "root",
+          "sha256": "22a2c1f7bded704cc1e701b5f408c310880fe956b5de2a4a44f99c873a25a7c8"
+        }
+      ]
+    },
+    {
+      "file": "node-root-store-3c5f81fe-root.der",
+      "sha256": "3c5f81fea5fab82c64bfa2eaecafcde8e077fc8620a7cae537163df36edbf378",
+      "subject": "C=HU, L=Budapest, O=Microsec Ltd., CN=Microsec e-Szigno Root CA 2009, emailAddress=info@e-szigno.hu",
+      "fingerprint": {
+        "signatureAlgorithm": "sha256WithRSAEncryption",
+        "key": "rsa/2048",
+        "extensions": [
+          "X509v3 Authority Key Identifier",
+          "X509v3 Basic Constraints!critical",
+          "X509v3 Key Usage!critical",
+          "X509v3 Subject Alternative Name",
+          "X509v3 Subject Key Identifier"
+        ],
+        "asn1Types": [
+          "IA5STRING",
+          "PRINTABLESTRING",
+          "UTCTIME",
+          "UTF8STRING"
+        ]
+      },
+      "seenAt": [
+        {
+          "target": "node:root-store",
+          "indexInChain": 0,
+          "chainLength": 1,
+          "position": "root",
+          "sha256": "3c5f81fea5fab82c64bfa2eaecafcde8e077fc8620a7cae537163df36edbf378"
+        }
+      ]
+    },
+    {
+      "file": "node-root-store-44b545aa-root.der",
+      "sha256": "44b545aa8a25e65a73ca15dc27fc36d24c1cb9953a066539b11582dc487b4833",
+      "subject": "C=GR, L=Athens, O=Hellenic Academic and Research Institutions Cert. Authority, CN=Hellenic Academic and Research Institutions ECC RootCA 2015",
+      "fingerprint": {
+        "signatureAlgorithm": "ecdsa-with-SHA256",
+        "key": "ec/secp384r1",
+        "extensions": [
+          "X509v3 Basic Constraints!critical",
+          "X509v3 Key Usage!critical",
+          "X509v3 Subject Key Identifier"
+        ],
+        "asn1Types": [
+          "PRINTABLESTRING",
+          "UTCTIME"
+        ]
+      },
+      "seenAt": [
+        {
+          "target": "node:root-store",
+          "indexInChain": 0,
+          "chainLength": 1,
+          "position": "root",
+          "sha256": "44b545aa8a25e65a73ca15dc27fc36d24c1cb9953a066539b11582dc487b4833"
+        }
+      ]
+    },
+    {
+      "file": "node-root-store-49e7a442-root.der",
+      "sha256": "49e7a442acf0ea6287050054b52564b650e4f49e42e348d6aa38e039e957b1c1",
+      "subject": "C=DE, O=D-Trust GmbH, CN=D-TRUST Root Class 3 CA 2 2009",
+      "fingerprint": {
+        "signatureAlgorithm": "sha256WithRSAEncryption",
+        "key": "rsa/2048",
+        "extensions": [
+          "X509v3 Basic Constraints!critical",
+          "X509v3 CRL Distribution Points",
+          "X509v3 Key Usage!critical",
+          "X509v3 Subject Key Identifier"
+        ],
+        "asn1Types": [
+          "PRINTABLESTRING",
+          "UTCTIME",
+          "UTF8STRING"
+        ]
+      },
+      "seenAt": [
+        {
+          "target": "node:root-store",
+          "indexInChain": 0,
+          "chainLength": 1,
+          "position": "root",
+          "sha256": "49e7a442acf0ea6287050054b52564b650e4f49e42e348d6aa38e039e957b1c1"
+        },
+        {
+          "target": "node:root-store",
+          "indexInChain": 0,
+          "chainLength": 1,
+          "position": "root",
+          "sha256": "eec5496b988ce98625b934092eec2908bed0b0f316c2d4730c84eaf1f3d34881"
+        }
+      ]
+    },
+    {
+      "file": "node-root-store-554153b1-root.der",
+      "sha256": "554153b13d2cf9ddb753bfbe1a4e0ae08d0aa4187058fe60a2b862b2e4b87bcb",
+      "subject": "C=ES, O=FNMT-RCM, OU=Ceres, organizationIdentifier=VATES-Q2826004J, CN=AC RAIZ FNMT-RCM SERVIDORES SEGUROS",
+      "fingerprint": {
+        "signatureAlgorithm": "ecdsa-with-SHA384",
+        "key": "ec/secp384r1",
+        "extensions": [
+          "X509v3 Basic Constraints!critical",
+          "X509v3 Key Usage!critical",
+          "X509v3 Subject Key Identifier"
+        ],
+        "asn1Types": [
+          "PRINTABLESTRING",
+          "UTCTIME",
+          "UTF8STRING"
+        ]
+      },
+      "seenAt": [
+        {
+          "target": "node:root-store",
+          "indexInChain": 0,
+          "chainLength": 1,
+          "position": "root",
+          "sha256": "554153b13d2cf9ddb753bfbe1a4e0ae08d0aa4187058fe60a2b862b2e4b87bcb"
+        },
+        {
+          "target": "node:root-store",
+          "indexInChain": 0,
+          "chainLength": 1,
+          "position": "root",
+          "sha256": "3f99cc474acfce4dfed58794665e478d1547739f2e780f1bb4ca9b133097d401"
+        },
+        {
+          "target": "node:root-store",
+          "indexInChain": 0,
+          "chainLength": 1,
+          "position": "root",
+          "sha256": "574df6931e278039667b720afdc1600fc27eb66dd3092979fb73856487212882"
+        },
+        {
+          "target": "node:root-store",
+          "indexInChain": 0,
+          "chainLength": 1,
+          "position": "root",
+          "sha256": "b2fae53e14ccd7ab9212064701ae279c1d8988facb775fa8a008914e663988a8"
+        },
+        {
+          "target": "node:root-store",
+          "indexInChain": 0,
+          "chainLength": 1,
+          "position": "root",
+          "sha256": "578af4ded0853f4e5998db4aeaf9cbea8d945f60b620a38d1a3c13b2bc7ba8e1"
+        }
+      ]
+    },
+    {
+      "file": "node-root-store-55926084-root.der",
+      "sha256": "55926084ec963a64b96e2abe01ce0ba86a64fbfebcc7aab5afc155b37fd76066",
+      "subject": "C=IT, L=Milan, O=Actalis S.p.A./03358520967, CN=Actalis Authentication Root CA",
+      "fingerprint": {
+        "signatureAlgorithm": "sha256WithRSAEncryption",
+        "key": "rsa/4096",
+        "extensions": [
+          "X509v3 Authority Key Identifier",
+          "X509v3 Basic Constraints!critical",
+          "X509v3 Key Usage!critical",
+          "X509v3 Subject Key Identifier"
+        ],
+        "asn1Types": [
+          "PRINTABLESTRING",
+          "UTCTIME",
+          "UTF8STRING"
+        ]
+      },
+      "seenAt": [
+        {
+          "target": "node:root-store",
+          "indexInChain": 0,
+          "chainLength": 1,
+          "position": "root",
+          "sha256": "55926084ec963a64b96e2abe01ce0ba86a64fbfebcc7aab5afc155b37fd76066"
+        },
+        {
+          "target": "node:root-store",
+          "indexInChain": 0,
+          "chainLength": 1,
+          "position": "root",
+          "sha256": "5cc3d78e4e1d5e45547a04e6873e64f90cf9536d1ccc2ef800f355c4c5fd70fd"
+        },
+        {
+          "target": "node:root-store",
+          "indexInChain": 0,
+          "chainLength": 1,
+          "position": "root",
+          "sha256": "85666a562ee0be5ce925c1d8890a6f76a87ec16d4d7d5f29ea7419cf20123b69"
+        },
+        {
+          "target": "node:root-store",
+          "indexInChain": 0,
+          "chainLength": 1,
+          "position": "root",
+          "sha256": "2e7bf16cc22485a7bbe2aa8696750761b0ae39be3b2fe9d0cc6d4ef73491425c"
+        },
+        {
+          "target": "node:root-store",
+          "indexInChain": 0,
+          "chainLength": 1,
+          "position": "root",
+          "sha256": "2e44102ab58cb85419451c8e19d9acf3662cafbc614b6a53960a30f7d0e2eb41"
+        },
+        {
+          "target": "node:root-store",
+          "indexInChain": 0,
+          "chainLength": 1,
+          "position": "root",
+          "sha256": "242b69742fcb1e5b2abf98898b94572187544e5b4d9911786573621f6a74b82c"
+        },
+        {
+          "target": "node:root-store",
+          "indexInChain": 0,
+          "chainLength": 1,
+          "position": "root",
+          "sha256": "8faf7d2e2cb4709bb8e0b33666bf75a5dd45b5de480f8ea8d4bfe6bebc17f2ed"
+        }
+      ]
+    },
+    {
+      "file": "node-root-store-59769007-root.der",
+      "sha256": "59769007f7685d0fcd50872f9f95d5755a5b2b457d81f3692b610a98672f0e1b",
+      "subject": "C=TW, O=TAIWAN-CA, OU=Root CA, CN=TWCA Global Root CA",
+      "fingerprint": {
+        "signatureAlgorithm": "sha256WithRSAEncryption",
+        "key": "rsa/4096",
+        "extensions": [
+          "X509v3 Basic Constraints!critical",
+          "X509v3 Key Usage!critical"
+        ],
+        "asn1Types": [
+          "PRINTABLESTRING",
+          "UTCTIME"
+        ]
+      },
+      "seenAt": [
+        {
+          "target": "node:root-store",
+          "indexInChain": 0,
+          "chainLength": 1,
+          "position": "root",
+          "sha256": "59769007f7685d0fcd50872f9f95d5755a5b2b457d81f3692b610a98672f0e1b"
+        }
+      ]
+    },
+    {
+      "file": "node-root-store-5a2fc03f-root.der",
+      "sha256": "5a2fc03f0c83b090bbfa40604b0988446c7636183df9846e17101a447fb8efd6",
+      "subject": "C=HK, ST=Hong Kong, L=Hong Kong, O=Hongkong Post, CN=Hongkong Post Root CA 3",
+      "fingerprint": {
+        "signatureAlgorithm": "sha256WithRSAEncryption",
+        "key": "rsa/4096",
+        "extensions": [
+          "X509v3 Authority Key Identifier",
+          "X509v3 Basic Constraints!critical",
+          "X509v3 Key Usage!critical",
+          "X509v3 Subject Key Identifier"
+        ],
+        "asn1Types": [
+          "PRINTABLESTRING",
+          "UTCTIME"
+        ]
+      },
+      "seenAt": [
+        {
+          "target": "node:root-store",
+          "indexInChain": 0,
+          "chainLength": 1,
+          "position": "root",
+          "sha256": "5a2fc03f0c83b090bbfa40604b0988446c7636183df9846e17101a447fb8efd6"
+        },
+        {
+          "target": "node:root-store",
+          "indexInChain": 0,
+          "chainLength": 1,
+          "position": "root",
+          "sha256": "fb8fec759169b9106b1e511644c618c51304373f6c0643088d8beffd1b997599"
+        },
+        {
+          "target": "node:root-store",
+          "indexInChain": 0,
+          "chainLength": 1,
+          "position": "root",
+          "sha256": "193144f431e0fddb740717d4de926a571133884b4360d30e272913cbe660ce41"
+        }
+      ]
+    },
+    {
+      "file": "node-root-store-5c58468d-root.der",
+      "sha256": "5c58468d55f58e497e743982d2b50010b6d165374acf83a7d4a32db768c4408e",
+      "subject": "C=PL, O=Unizeto Technologies S.A., OU=Certum Certification Authority, CN=Certum Trusted Network CA",
+      "fingerprint": {
+        "signatureAlgorithm": "sha1WithRSAEncryption",
+        "key": "rsa/2048",
+        "extensions": [
+          "X509v3 Basic Constraints!critical",
+          "X509v3 Key Usage!critical",
+          "X509v3 Subject Key Identifier"
+        ],
+        "asn1Types": [
+          "PRINTABLESTRING",
+          "UTCTIME"
+        ]
+      },
+      "seenAt": [
+        {
+          "target": "node:root-store",
+          "indexInChain": 0,
+          "chainLength": 1,
+          "position": "root",
+          "sha256": "5c58468d55f58e497e743982d2b50010b6d165374acf83a7d4a32db768c4408e"
+        }
+      ]
+    },
+    {
+      "file": "node-root-store-6b9c08e8-root.der",
+      "sha256": "6b9c08e86eb0f767cfad65cd98b62149e5494a67f5845e7bd1ed019f27b86bd6",
+      "subject": "C=CH, O=WISeKey, OU=OISTE Foundation Endorsed, CN=OISTE WISeKey Global Root GB CA",
+      "fingerprint": {
+        "signatureAlgorithm": "sha256WithRSAEncryption",
+        "key": "rsa/2048",
+        "extensions": [
+          "1.3.6.1.4.1.311.21.1",
+          "X509v3 Basic Constraints!critical",
+          "X509v3 Key Usage",
+          "X509v3 Subject Key Identifier"
+        ],
+        "asn1Types": [
+          "PRINTABLESTRING",
+          "UTCTIME"
+        ]
+      },
+      "seenAt": [
+        {
+          "target": "node:root-store",
+          "indexInChain": 0,
+          "chainLength": 1,
+          "position": "root",
+          "sha256": "6b9c08e86eb0f767cfad65cd98b62149e5494a67f5845e7bd1ed019f27b86bd6"
+        }
+      ]
+    },
+    {
+      "file": "node-root-store-6c61dac3-root.der",
+      "sha256": "6c61dac3a2def031506be036d2a6fe401994fbd13df9c8d466599274c446ec98",
+      "subject": "C=HU, L=Budapest, O=NetLock Kft., OU=Tanúsítványkiadók (Certification Services), CN=NetLock Arany (Class Gold) Főtanúsítvány",
+      "fingerprint": {
+        "signatureAlgorithm": "sha256WithRSAEncryption",
+        "key": "rsa/2048",
+        "extensions": [
+          "X509v3 Basic Constraints!critical",
+          "X509v3 Key Usage!critical",
+          "X509v3 Subject Key Identifier"
+        ],
+        "asn1Types": [
+          "PRINTABLESTRING",
+          "UTCTIME",
+          "UTF8STRING"
+        ]
+      },
+      "seenAt": [
+        {
+          "target": "node:root-store",
+          "indexInChain": 0,
+          "chainLength": 1,
+          "position": "root",
+          "sha256": "6c61dac3a2def031506be036d2a6fe401994fbd13df9c8d466599274c446ec98"
+        },
+        {
+          "target": "node:root-store",
+          "indexInChain": 0,
+          "chainLength": 1,
+          "position": "root",
+          "sha256": "fd73dad31c644ff1b43bef0ccdda96710b9cd9875eca7e31707af3e96d522bbd"
+        },
+        {
+          "target": "node:root-store",
+          "indexInChain": 0,
+          "chainLength": 1,
+          "position": "root",
+          "sha256": "91e2f5788d5810eba7ba58737de1548a8ecacd014598bc0b143e041b17052552"
+        },
+        {
+          "target": "node:root-store",
+          "indexInChain": 0,
+          "chainLength": 1,
+          "position": "root",
+          "sha256": "a1339d33281a0b56e557d3d32b1ce7f9367eb094bd5fa72a7e5004c8ded7cafe"
+        }
+      ]
+    },
+    {
+      "file": "node-root-store-73c17643-root.der",
+      "sha256": "73c176434f1bc6d5adf45b0e76e727287c8de57616c1e6e6141a2b2cbc7d8e4c",
+      "subject": "C=US, O=Entrust\\, Inc., OU=www.entrust.net/CPS is incorporated by reference, OU=(c) 2006 Entrust\\, Inc., CN=Entrust Root Certification Authority",
+      "fingerprint": {
+        "signatureAlgorithm": "sha1WithRSAEncryption",
+        "key": "rsa/2048",
+        "extensions": [
+          "1.2.840.113533.7.65.0",
+          "X509v3 Authority Key Identifier",
+          "X509v3 Basic Constraints!critical",
+          "X509v3 Key Usage!critical",
+          "X509v3 Private Key Usage Period",
+          "X509v3 Subject Key Identifier"
+        ],
+        "asn1Types": [
+          "PRINTABLESTRING",
+          "UTCTIME"
+        ]
+      },
+      "seenAt": [
+        {
+          "target": "node:root-store",
+          "indexInChain": 0,
+          "chainLength": 1,
+          "position": "root",
+          "sha256": "73c176434f1bc6d5adf45b0e76e727287c8de57616c1e6e6141a2b2cbc7d8e4c"
+        }
+      ]
+    },
+    {
+      "file": "node-root-store-8560f91c-root.der",
+      "sha256": "8560f91c3624daba9570b5fea0dbe36ff11a8323be9486854fb3f34a5571198d",
+      "subject": "C=CH, O=WISeKey, OU=OISTE Foundation Endorsed, CN=OISTE WISeKey Global Root GC CA",
+      "fingerprint": {
+        "signatureAlgorithm": "ecdsa-with-SHA384",
+        "key": "ec/secp384r1",
+        "extensions": [
+          "1.3.6.1.4.1.311.21.1",
+          "X509v3 Basic Constraints!critical",
+          "X509v3 Key Usage!critical",
+          "X509v3 Subject Key Identifier"
+        ],
+        "asn1Types": [
+          "PRINTABLESTRING",
+          "UTCTIME"
+        ]
+      },
+      "seenAt": [
+        {
+          "target": "node:root-store",
+          "indexInChain": 0,
+          "chainLength": 1,
+          "position": "root",
+          "sha256": "8560f91c3624daba9570b5fea0dbe36ff11a8323be9486854fb3f34a5571198d"
+        },
+        {
+          "target": "node:root-store",
+          "indexInChain": 0,
+          "chainLength": 1,
+          "position": "root",
+          "sha256": "358df39d764af9e1b766e9c972df352ee15cfac227af6ad1d70e8e4a6edcba02"
+        }
+      ]
+    },
+    {
+      "file": "node-root-store-88f438dc-root.der",
+      "sha256": "88f438dcf8ffd1fa8f429115ffe5f82ae1e06e0c70c375faad717b34a49e7265",
+      "subject": "C=KR, O=NAVER BUSINESS PLATFORM Corp., CN=NAVER Global Root Certification Authority",
+      "fingerprint": {
+        "signatureAlgorithm": "sha384WithRSAEncryption",
+        "key": "rsa/4096",
+        "extensions": [
+          "X509v3 Basic Constraints!critical",
+          "X509v3 Key Usage!critical",
+          "X509v3 Subject Key Identifier"
+        ],
+        "asn1Types": [
+          "PRINTABLESTRING",
+          "UTCTIME",
+          "UTF8STRING"
+        ]
+      },
+      "seenAt": [
+        {
+          "target": "node:root-store",
+          "indexInChain": 0,
+          "chainLength": 1,
+          "position": "root",
+          "sha256": "88f438dcf8ffd1fa8f429115ffe5f82ae1e06e0c70c375faad717b34a49e7265"
+        },
+        {
+          "target": "node:root-store",
+          "indexInChain": 0,
+          "chainLength": 1,
+          "position": "root",
+          "sha256": "81a9088ea59fb364c548a6f85559099b6f0405efbf18e5324ec9f457ba00112f"
+        }
+      ]
+    },
+    {
+      "file": "node-root-store-9a114025-root.der",
+      "sha256": "9a114025197c5bb95d94e63d55cd43790847b646b23cdf11ada4a00eff15fb48",
+      "subject": "C=NO, O=Buypass AS-983163327, CN=Buypass Class 2 Root CA",
+      "fingerprint": {
+        "signatureAlgorithm": "sha256WithRSAEncryption",
+        "key": "rsa/4096",
+        "extensions": [
+          "X509v3 Basic Constraints!critical",
+          "X509v3 Key Usage!critical",
+          "X509v3 Subject Key Identifier"
+        ],
+        "asn1Types": [
+          "PRINTABLESTRING",
+          "UTCTIME",
+          "UTF8STRING"
+        ]
+      },
+      "seenAt": [
+        {
+          "target": "node:root-store",
+          "indexInChain": 0,
+          "chainLength": 1,
+          "position": "root",
+          "sha256": "9a114025197c5bb95d94e63d55cd43790847b646b23cdf11ada4a00eff15fb48"
+        },
+        {
+          "target": "node:root-store",
+          "indexInChain": 0,
+          "chainLength": 1,
+          "position": "root",
+          "sha256": "edf7ebbca27a2a384d387b7d4010c666e2edb4843e4c29b4ae1d5b9332e6b24d"
+        },
+        {
+          "target": "node:root-store",
+          "indexInChain": 0,
+          "chainLength": 1,
+          "position": "root",
+          "sha256": "bfff8fd04433487d6a8aa60c1a29767a9fc2bbb05e420f713a13b992891d3893"
+        },
+        {
+          "target": "node:root-store",
+          "indexInChain": 0,
+          "chainLength": 1,
+          "position": "root",
+          "sha256": "9bea11c976fe014764c1be56a6f914b5a560317abd9988393382e5161aa0493c"
+        },
+        {
+          "target": "node:root-store",
+          "indexInChain": 0,
+          "chainLength": 1,
+          "position": "root",
+          "sha256": "d43af9b35473755c9684fc06d7d8cb70ee5c28e773fb294eb41ee71722924d24"
+        },
+        {
+          "target": "node:root-store",
+          "indexInChain": 0,
+          "chainLength": 1,
+          "position": "root",
+          "sha256": "d95d0e8eda79525bf9beb11b14d2100d3294985f0c62d9fabd9cd999eccb7b1d"
+        },
+        {
+          "target": "node:root-store",
+          "indexInChain": 0,
+          "chainLength": 1,
+          "position": "root",
+          "sha256": "f015ce3cc239bfef064be9f1d2c417e1a0264a0a94be1f0c8d121864eb6949cc"
+        },
+        {
+          "target": "node:root-store",
+          "indexInChain": 0,
+          "chainLength": 1,
+          "position": "root",
+          "sha256": "f3896f88fe7c0a882766a7fa6ad2749fb57a7f3e98fb769c1fa7b09c2c44d5ae"
+        }
+      ]
+    },
+    {
+      "file": "node-root-store-9a6ec012-root.der",
+      "sha256": "9a6ec012e1a7da9dbe34194d478ad7c0db1822fb071df12981496ed104384113",
+      "subject": "CN=ACCVRAIZ1, OU=PKIACCV, O=ACCV, C=ES",
+      "fingerprint": {
+        "signatureAlgorithm": "sha1WithRSAEncryption",
+        "key": "rsa/4096",
+        "extensions": [
+          "Authority Information Access",
+          "X509v3 Authority Key Identifier",
+          "X509v3 Basic Constraints!critical",
+          "X509v3 CRL Distribution Points",
+          "X509v3 Certificate Policies",
+          "X509v3 Key Usage!critical",
+          "X509v3 Subject Alternative Name",
+          "X509v3 Subject Key Identifier"
+        ],
+        "asn1Types": [
+          "PRINTABLESTRING",
+          "UTCTIME",
+          "UTF8STRING"
+        ]
+      },
+      "seenAt": [
+        {
+          "target": "node:root-store",
+          "indexInChain": 0,
+          "chainLength": 1,
+          "position": "root",
+          "sha256": "9a6ec012e1a7da9dbe34194d478ad7c0db1822fb071df12981496ed104384113"
+        }
+      ]
+    },
+    {
+      "file": "node-root-store-b4914150-root.der",
+      "sha256": "b49141502d00663d740f2e7ec340c52800962666121a36d09cf7dd2b90384fb4",
+      "subject": "C=HU, L=Budapest, O=Microsec Ltd., organizationIdentifier=VATHU-23584497, CN=e-Szigno TLS Root CA 2023",
+      "fingerprint": {
+        "signatureAlgorithm": "ecdsa-with-SHA512",
+        "key": "ec/secp521r1",
+        "extensions": [
+          "X509v3 Authority Key Identifier",
+          "X509v3 Basic Constraints!critical",
+          "X509v3 Key Usage!critical",
+          "X509v3 Subject Key Identifier"
+        ],
+        "asn1Types": [
+          "PRINTABLESTRING",
+          "UTCTIME",
+          "UTF8STRING"
+        ]
+      },
+      "seenAt": [
+        {
+          "target": "node:root-store",
+          "indexInChain": 0,
+          "chainLength": 1,
+          "position": "root",
+          "sha256": "b49141502d00663d740f2e7ec340c52800962666121a36d09cf7dd2b90384fb4"
+        }
+      ]
+    },
+    {
+      "file": "node-root-store-b676f2ed-root.der",
+      "sha256": "b676f2eddae8775cd36cb0f63cd1d4603961f49e6265ba013a2f0307b6d0b804",
+      "subject": "C=PL, O=Unizeto Technologies S.A., OU=Certum Certification Authority, CN=Certum Trusted Network CA 2",
+      "fingerprint": {
+        "signatureAlgorithm": "sha512WithRSAEncryption",
+        "key": "rsa/4096",
+        "extensions": [
+          "X509v3 Basic Constraints!critical",
+          "X509v3 Key Usage!critical",
+          "X509v3 Subject Key Identifier"
+        ],
+        "asn1Types": [
+          "GENERALIZEDTIME",
+          "PRINTABLESTRING"
+        ]
+      },
+      "seenAt": [
+        {
+          "target": "node:root-store",
+          "indexInChain": 0,
+          "chainLength": 1,
+          "position": "root",
+          "sha256": "b676f2eddae8775cd36cb0f63cd1d4603961f49e6265ba013a2f0307b6d0b804"
+        }
+      ]
+    },
+    {
+      "file": "node-root-store-beb00b30-root.der",
+      "sha256": "beb00b30839b9bc32c32e4447905950641f26421b15ed089198b518ae2ea1b99",
+      "subject": "C=HU, L=Budapest, O=Microsec Ltd., organizationIdentifier=VATHU-23584497, CN=e-Szigno Root CA 2017",
+      "fingerprint": {
+        "signatureAlgorithm": "ecdsa-with-SHA256",
+        "key": "ec/prime256v1",
+        "extensions": [
+          "X509v3 Authority Key Identifier",
+          "X509v3 Basic Constraints!critical",
+          "X509v3 Key Usage!critical",
+          "X509v3 Subject Key Identifier"
+        ],
+        "asn1Types": [
+          "PRINTABLESTRING",
+          "UTCTIME",
+          "UTF8STRING"
+        ]
+      },
+      "seenAt": [
+        {
+          "target": "node:root-store",
+          "indexInChain": 0,
+          "chainLength": 1,
+          "position": "root",
+          "sha256": "beb00b30839b9bc32c32e4447905950641f26421b15ed089198b518ae2ea1b99"
+        }
+      ]
+    },
+    {
+      "file": "node-root-store-bfd88fe1-root.der",
+      "sha256": "bfd88fe1101c41ae3e801bf8be56350ee9bad1a6b9bd515edc5c6d5b8711ac44",
+      "subject": "C=TW, O=TAIWAN-CA, OU=Root CA, CN=TWCA Root Certification Authority",
+      "fingerprint": {
+        "signatureAlgorithm": "sha1WithRSAEncryption",
+        "key": "rsa/2048",
+        "extensions": [
+          "X509v3 Basic Constraints!critical",
+          "X509v3 Key Usage!critical",
+          "X509v3 Subject Key Identifier"
+        ],
+        "asn1Types": [
+          "PRINTABLESTRING",
+          "UTCTIME",
+          "UTF8STRING"
+        ]
+      },
+      "seenAt": [
+        {
+          "target": "node:root-store",
+          "indexInChain": 0,
+          "chainLength": 1,
+          "position": "root",
+          "sha256": "bfd88fe1101c41ae3e801bf8be56350ee9bad1a6b9bd515edc5c6d5b8711ac44"
+        }
+      ]
+    },
+    {
+      "file": "node-root-store-c0a6f4dc-root.der",
+      "sha256": "c0a6f4dc63a24bfdcf54ef2a6a082a0a72de35803e2ff5ff527ae5d87206dfd5",
+      "subject": "C=TW, O=Chunghwa Telecom Co.\\, Ltd., OU=ePKI Root Certification Authority",
+      "fingerprint": {
+        "signatureAlgorithm": "sha1WithRSAEncryption",
+        "key": "rsa/4096",
+        "extensions": [
+          "X509v3 Basic Constraints",
+          "X509v3 Subject Key Identifier",
+          "setCext-hashedRoot"
+        ],
+        "asn1Types": [
+          "PRINTABLESTRING",
+          "UTCTIME",
+          "UTF8STRING"
+        ]
+      },
+      "seenAt": [
+        {
+          "target": "node:root-store",
+          "indexInChain": 0,
+          "chainLength": 1,
+          "position": "root",
+          "sha256": "c0a6f4dc63a24bfdcf54ef2a6a082a0a72de35803e2ff5ff527ae5d87206dfd5"
+        }
+      ]
+    },
+    {
+      "file": "node-root-store-c32ffd9f-root.der",
+      "sha256": "c32ffd9f46f936d16c3673990959434b9ad60aafbb9e7cf33654f144cc1ba143",
+      "subject": "C=US, O=SSL Corporation, CN=SSL.com TLS ECC Root CA 2022",
+      "fingerprint": {
+        "signatureAlgorithm": "ecdsa-with-SHA384",
+        "key": "ec/secp384r1",
+        "extensions": [
+          "X509v3 Authority Key Identifier",
+          "X509v3 Basic Constraints!critical",
+          "X509v3 Key Usage!critical",
+          "X509v3 Subject Key Identifier"
+        ],
+        "asn1Types": [
+          "PRINTABLESTRING",
+          "UTCTIME",
+          "UTF8STRING"
+        ]
+      },
+      "seenAt": [
+        {
+          "target": "node:root-store",
+          "indexInChain": 0,
+          "chainLength": 1,
+          "position": "root",
+          "sha256": "c32ffd9f46f936d16c3673990959434b9ad60aafbb9e7cf33654f144cc1ba143"
+        },
+        {
+          "target": "node:root-store",
+          "indexInChain": 0,
+          "chainLength": 1,
+          "position": "root",
+          "sha256": "be4b56cb5056c0136a526df444508daa36a0b54f42e4ac38f72af470e479654c"
+        },
+        {
+          "target": "node:root-store",
+          "indexInChain": 0,
+          "chainLength": 1,
+          "position": "root",
+          "sha256": "eec997c0c30f216f7e3b8b307d2bae42412d753fc8219dafd1520b2572850f49"
+        }
+      ]
+    },
+    {
+      "file": "node-root-store-c741f70f-root.der",
+      "sha256": "c741f70f4b2a8d88bf2e71c14122ef53ef10eba0cfa5e64cfa20f418853073e0",
+      "subject": "C=US, O=Microsoft Corporation, CN=Microsoft RSA Root Certificate Authority 2017",
+      "fingerprint": {
+        "signatureAlgorithm": "sha384WithRSAEncryption",
+        "key": "rsa/4096",
+        "extensions": [
+          "1.3.6.1.4.1.311.21.1",
+          "X509v3 Basic Constraints!critical",
+          "X509v3 Key Usage!critical",
+          "X509v3 Subject Key Identifier"
+        ],
+        "asn1Types": [
+          "PRINTABLESTRING",
+          "UTCTIME"
+        ]
+      },
+      "seenAt": [
+        {
+          "target": "node:root-store",
+          "indexInChain": 0,
+          "chainLength": 1,
+          "position": "root",
+          "sha256": "c741f70f4b2a8d88bf2e71c14122ef53ef10eba0cfa5e64cfa20f418853073e0"
+        }
+      ]
+    },
+    {
+      "file": "node-root-store-d48d3d23-root.der",
+      "sha256": "d48d3d23eedb50a459e55197601c27774b9d7b18c94d5a059511a10250b93168",
+      "subject": "C=FR, O=Dhimyotis, OU=0002 48146308100036, CN=Certigna Root CA",
+      "fingerprint": {
+        "signatureAlgorithm": "sha256WithRSAEncryption",
+        "key": "rsa/4096",
+        "extensions": [
+          "X509v3 Authority Key Identifier",
+          "X509v3 Basic Constraints!critical",
+          "X509v3 CRL Distribution Points",
+          "X509v3 Certificate Policies",
+          "X509v3 Key Usage!critical",
+          "X509v3 Subject Key Identifier"
+        ],
+        "asn1Types": [
+          "PRINTABLESTRING",
+          "UTCTIME",
+          "UTF8STRING"
+        ]
+      },
+      "seenAt": [
+        {
+          "target": "node:root-store",
+          "indexInChain": 0,
+          "chainLength": 1,
+          "position": "root",
+          "sha256": "d48d3d23eedb50a459e55197601c27774b9d7b18c94d5a059511a10250b93168"
+        }
+      ]
+    },
+    {
+      "file": "node-root-store-e0d3226a-root.der",
+      "sha256": "e0d3226aeb1163c2e48ff9be3b50b4c6431be7bb1eacc5c36b5d5ec509039a08",
+      "subject": "C=CN, O=TrustAsia Technologies\\, Inc., CN=TrustAsia Global Root CA G3",
+      "fingerprint": {
+        "signatureAlgorithm": "sha384WithRSAEncryption",
+        "key": "rsa/4096",
+        "extensions": [
+          "X509v3 Authority Key Identifier",
+          "X509v3 Basic Constraints!critical",
+          "X509v3 Key Usage!critical",
+          "X509v3 Subject Key Identifier"
+        ],
+        "asn1Types": [
+          "PRINTABLESTRING",
+          "UTCTIME",
+          "UTF8STRING"
+        ]
+      },
+      "seenAt": [
+        {
+          "target": "node:root-store",
+          "indexInChain": 0,
+          "chainLength": 1,
+          "position": "root",
+          "sha256": "e0d3226aeb1163c2e48ff9be3b50b4c6431be7bb1eacc5c36b5d5ec509039a08"
+        },
+        {
+          "target": "node:root-store",
+          "indexInChain": 0,
+          "chainLength": 1,
+          "position": "root",
+          "sha256": "efc65cadbb59adb6efe84da22311b35624b71b3b1ea0da8b6655174ec8978646"
+        },
+        {
+          "target": "node:root-store",
+          "indexInChain": 0,
+          "chainLength": 1,
+          "position": "root",
+          "sha256": "9ae36232a5189ffddb353dfd26520c015395d22777dac59db57b98c089a651e6"
+        }
+      ]
+    },
+    {
+      "file": "node-root-store-e23d4a03-root.der",
+      "sha256": "e23d4a036d7b70e9f595b1422079d2b91edfbb1fb651a0633eaa8a9dc5f80703",
+      "subject": "C=SK, L=Bratislava, O=Disig a.s., CN=CA Disig Root R2",
+      "fingerprint": {
+        "signatureAlgorithm": "sha256WithRSAEncryption",
+        "key": "rsa/4096",
+        "extensions": [
+          "X509v3 Basic Constraints!critical",
+          "X509v3 Key Usage!critical",
+          "X509v3 Subject Key Identifier"
+        ],
+        "asn1Types": [
+          "PRINTABLESTRING",
+          "UTCTIME"
+        ]
+      },
+      "seenAt": [
+        {
+          "target": "node:root-store",
+          "indexInChain": 0,
+          "chainLength": 1,
+          "position": "root",
+          "sha256": "e23d4a036d7b70e9f595b1422079d2b91edfbb1fb651a0633eaa8a9dc5f80703"
+        },
+        {
+          "target": "node:root-store",
+          "indexInChain": 0,
+          "chainLength": 1,
+          "position": "root",
+          "sha256": "8a866fd1b276b57e578e921c65828a2bed58e9f2f288054134b7f1f4bfc9cc74"
+        },
+        {
+          "target": "node:root-store",
+          "indexInChain": 0,
+          "chainLength": 1,
+          "position": "root",
+          "sha256": "8fe4fb0af93a4d0d67db0bebb23e37c71bf325dcbcdd240ea04daf58b47e1840"
+        },
+        {
+          "target": "node:root-store",
+          "indexInChain": 0,
+          "chainLength": 1,
+          "position": "root",
+          "sha256": "88ef81de202eb018452e43f864725cea5fbd1fc2d9d205730709c5d8b8690f46"
+        },
+        {
+          "target": "node:root-store",
+          "indexInChain": 0,
+          "chainLength": 1,
+          "position": "root",
+          "sha256": "5d56499be4d2e08bcfcad08a3e38723d50503bde706948e42f55603019e528ae"
+        },
+        {
+          "target": "node:root-store",
+          "indexInChain": 0,
+          "chainLength": 1,
+          "position": "root",
+          "sha256": "30d0895a9a448a262091635522d1f52010b5867acae12c78ef958fd4f4389f2f"
+        },
+        {
+          "target": "node:root-store",
+          "indexInChain": 0,
+          "chainLength": 1,
+          "position": "root",
+          "sha256": "a040929a02ce53b4acf4f2ffc6981ce4496f755e6d45fe0b2a692bcd52523f36"
+        },
+        {
+          "target": "node:root-store",
+          "indexInChain": 0,
+          "chainLength": 1,
+          "position": "root",
+          "sha256": "96bcec06264976f37460779acf28c5a7cfe8a3c0aae11a8ffcee05c0bddf08c6"
+        },
+        {
+          "target": "node:root-store",
+          "indexInChain": 0,
+          "chainLength": 1,
+          "position": "root",
+          "sha256": "657cfe2fa73faa38462571f332a2363a46fce7020951710702cdfbb6eeda3305"
+        },
+        {
+          "target": "node:root-store",
+          "indexInChain": 0,
+          "chainLength": 1,
+          "position": "root",
+          "sha256": "8a71de6559336f426c26e53880d00d88a18da4c6a91f0dcb6194e206c5c96387"
+        },
+        {
+          "target": "node:root-store",
+          "indexInChain": 0,
+          "chainLength": 1,
+          "position": "root",
+          "sha256": "77b82cd8644c4305f7acc5cb156b45675004033d51c60c6202a8e0c33467d3a0"
+        }
+      ]
+    },
+    {
+      "file": "node-root-store-e59aaa81-root.der",
+      "sha256": "e59aaa816009c22bff5b25bad37df306f049797c1f81d85ab089e657bd8f0044",
+      "subject": "C=DE, O=D-Trust GmbH, CN=D-TRUST BR Root CA 1 2020",
+      "fingerprint": {
+        "signatureAlgorithm": "ecdsa-with-SHA384",
+        "key": "ec/secp384r1",
+        "extensions": [
+          "X509v3 Basic Constraints!critical",
+          "X509v3 CRL Distribution Points",
+          "X509v3 Key Usage!critical",
+          "X509v3 Subject Key Identifier"
+        ],
+        "asn1Types": [
+          "PRINTABLESTRING",
+          "UTCTIME"
+        ]
+      },
+      "seenAt": [
+        {
+          "target": "node:root-store",
+          "indexInChain": 0,
+          "chainLength": 1,
+          "position": "root",
+          "sha256": "e59aaa816009c22bff5b25bad37df306f049797c1f81d85ab089e657bd8f0044"
+        },
+        {
+          "target": "node:root-store",
+          "indexInChain": 0,
+          "chainLength": 1,
+          "position": "root",
+          "sha256": "08170d1aa36453901a2f959245e347db0c8d37abaabc56b81aa100dc958970db"
+        }
+      ]
+    },
+    {
+      "file": "node-root-store-ebc5570c-root.der",
+      "sha256": "ebc5570c29018c4d67b1aa127baf12f703b4611ebc17b7dab5573894179b93fa",
+      "subject": "C=ES, O=FNMT-RCM, OU=AC RAIZ FNMT-RCM",
+      "fingerprint": {
+        "signatureAlgorithm": "sha256WithRSAEncryption",
+        "key": "rsa/4096",
+        "extensions": [
+          "X509v3 Basic Constraints!critical",
+          "X509v3 Certificate Policies",
+          "X509v3 Key Usage!critical",
+          "X509v3 Subject Key Identifier"
+        ],
+        "asn1Types": [
+          "PRINTABLESTRING",
+          "UTCTIME",
+          "UTF8STRING"
+        ]
+      },
+      "seenAt": [
+        {
+          "target": "node:root-store",
+          "indexInChain": 0,
+          "chainLength": 1,
+          "position": "root",
+          "sha256": "ebc5570c29018c4d67b1aa127baf12f703b4611ebc17b7dab5573894179b93fa"
+        },
+        {
+          "target": "node:root-store",
+          "indexInChain": 0,
+          "chainLength": 1,
+          "position": "root",
+          "sha256": "57de0583efd2b26e0361da99da9df4648def7ee8441c3b728afa9bcde0f9b26a"
+        }
+      ]
+    },
+    {
+      "file": "node-root-store-f356bea2-root.der",
+      "sha256": "f356bea244b7a91eb35d53ca9ad7864ace018e2d35d5f8f96ddf68a6f41aa474",
+      "subject": "CN=Atos TrustedRoot 2011, O=Atos, C=DE",
+      "fingerprint": {
+        "signatureAlgorithm": "sha256WithRSAEncryption",
+        "key": "rsa/2048",
+        "extensions": [
+          "X509v3 Authority Key Identifier",
+          "X509v3 Basic Constraints!critical",
+          "X509v3 Certificate Policies",
+          "X509v3 Key Usage!critical",
+          "X509v3 Subject Key Identifier"
+        ],
+        "asn1Types": [
+          "PRINTABLESTRING",
+          "UTCTIME",
+          "UTF8STRING"
+        ]
+      },
+      "seenAt": [
+        {
+          "target": "node:root-store",
+          "indexInChain": 0,
+          "chainLength": 1,
+          "position": "root",
+          "sha256": "f356bea244b7a91eb35d53ca9ad7864ace018e2d35d5f8f96ddf68a6f41aa474"
+        }
+      ]
+    },
+    {
+      "file": "node-root-store-fe769657-root.der",
+      "sha256": "fe7696573855773e37a95e7ad4d9cc96c30157c15d31765ba9b15704e1ae78fd",
+      "subject": "C=PL, O=Asseco Data Systems S.A., OU=Certum Certification Authority, CN=Certum Trusted Root CA",
+      "fingerprint": {
+        "signatureAlgorithm": "sha512WithRSAEncryption",
+        "key": "rsa/4096",
+        "extensions": [
+          "X509v3 Basic Constraints!critical",
+          "X509v3 Key Usage!critical",
+          "X509v3 Subject Key Identifier"
+        ],
+        "asn1Types": [
+          "PRINTABLESTRING",
+          "UTCTIME"
+        ]
+      },
+      "seenAt": [
+        {
+          "target": "node:root-store",
+          "indexInChain": 0,
+          "chainLength": 1,
+          "position": "root",
+          "sha256": "fe7696573855773e37a95e7ad4d9cc96c30157c15d31765ba9b15704e1ae78fd"
+        }
+      ]
+    },
+    {
+      "file": "outlook.office365.com-993-7c253690-leaf.der",
+      "sha256": "7c253690b40a77b8877b07b9621047f71a179810ec536f40c69d534e86ce97ba",
+      "subject": "C=US, ST=Washington, L=Redmond, O=Microsoft Corporation, CN=outlook.com",
+      "fingerprint": {
+        "signatureAlgorithm": "sha256WithRSAEncryption",
+        "key": "rsa/2048",
+        "extensions": [
+          "Authority Information Access",
+          "CT Precertificate SCTs",
+          "X509v3 Authority Key Identifier",
+          "X509v3 Basic Constraints!critical",
+          "X509v3 CRL Distribution Points",
+          "X509v3 Certificate Policies",
+          "X509v3 Extended Key Usage",
+          "X509v3 Key Usage!critical",
+          "X509v3 Subject Alternative Name",
+          "X509v3 Subject Key Identifier"
+        ],
+        "asn1Types": [
+          "PRINTABLESTRING",
+          "UTCTIME"
+        ]
+      },
+      "seenAt": [
+        {
+          "target": "outlook.office365.com:993",
+          "indexInChain": 0,
+          "chainLength": 2,
+          "position": "leaf",
+          "sha256": "7c253690b40a77b8877b07b9621047f71a179810ec536f40c69d534e86ce97ba"
+        },
+        {
+          "target": "imap.yandex.com:993",
+          "indexInChain": 0,
+          "chainLength": 3,
+          "position": "leaf",
+          "sha256": "48e6be0384c40bd9d38c8e9fdd0aae490e1156be631490079e29934aa671af44"
+        },
+        {
+          "target": "imap.purelymail.com:993",
+          "indexInChain": 0,
+          "chainLength": 3,
+          "position": "leaf",
+          "sha256": "91efd2dec2dff4a2cbd6ebb4fadb7fa889bada7c6f6a57b53ad5a362f736889c"
+        },
+        {
+          "target": "imap.telstra.com:993",
+          "indexInChain": 0,
+          "chainLength": 3,
+          "position": "leaf",
+          "sha256": "6602f65c1fdf424e4f91aa7b49b2a86da962371e24e4f579fabeb442ab5c9f56"
+        }
+      ]
+    },
+    {
+      "file": "posteo.de-993-676fc453-leaf.der",
+      "sha256": "676fc453cb39047c371cabc11379aa242033e3c6bda5368ce27374fedfe46e2f",
+      "subject": "jurisdictionC=DE, jurisdictionST=Berlin, jurisdictionL=Charlottenburg, businessCategory=Private Organization, serialNumber=HRA 47592, C=DE, ST=Berlin, L=Berlin, O=Posteo e.K., CN=posteo.de",
+      "fingerprint": {
+        "signatureAlgorithm": "sha384WithRSAEncryption",
+        "key": "rsa/3072",
+        "extensions": [
+          "Authority Information Access",
+          "CT Precertificate SCTs",
+          "X509v3 Authority Key Identifier",
+          "X509v3 Basic Constraints!critical",
+          "X509v3 CRL Distribution Points",
+          "X509v3 Certificate Policies",
+          "X509v3 Extended Key Usage",
+          "X509v3 Key Usage!critical",
+          "X509v3 Subject Alternative Name",
+          "X509v3 Subject Key Identifier"
+        ],
+        "asn1Types": [
+          "PRINTABLESTRING",
+          "UTCTIME",
+          "UTF8STRING"
+        ]
+      },
+      "seenAt": [
+        {
+          "target": "posteo.de:993",
+          "indexInChain": 0,
+          "chainLength": 2,
+          "position": "leaf",
+          "sha256": "676fc453cb39047c371cabc11379aa242033e3c6bda5368ce27374fedfe46e2f"
+        }
+      ]
+    }
+  ]
+}

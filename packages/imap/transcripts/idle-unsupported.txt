@@ -1,0 +1,5 @@
+S: * OK [CAPABILITY IMAP4rev1] Server ready.
+C: A0001 IDLE
+S: A0001 BAD Unknown command
+C: A0002 NOOP
+S: A0002 OK NOOP completed.
