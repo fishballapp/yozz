@@ -14,6 +14,10 @@ never keeps a copy of your mail.
 
 [yozz.app](https://yozz.app) · [Issues](https://github.com/fishballapp/yozz/issues)
 
+<img src="./assets/screenshot.png" width="960" alt="The YOZZ inbox: three addresses in one stream on the left, a thread with two attachments open on the right">
+
+<sub>Fixture data from the dev-only demo mode; every name and address is fictional.</sub>
+
 </div>
 
 Google removes "Send mail as" for third-party addresses in January 2027, after killing POP fetch
