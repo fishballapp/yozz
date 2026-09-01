@@ -12,8 +12,9 @@ import {
 } from '@phosphor-icons/react';
 import { Link, useParams } from '@tanstack/react-router';
 import type { ReactNode } from 'react';
-import { markOf } from '../lib/addresses';
+import { marksOf } from '../lib/addresses';
 import { useChromePref } from '../lib/chrome';
+import { DISCARD_WARNING } from '../lib/compose';
 import { attachmentsOf, isArchived, newestInbound } from '../lib/thread';
 import { listTime, stackTime } from '../lib/time';
 import {
@@ -23,11 +24,14 @@ import {
   type MailboxId,
   olderAvailable,
   previewOf,
+  syncProgressIn,
   type ThreadState,
   useMail,
 } from '../state/mail';
 import { buttonClass } from './ui/Button';
+import { ConfirmDialog } from './ui/ConfirmDialog';
 import { IconSwitch } from './ui/IconSwitch';
+import { toast } from './ui/Toast';
 
 /**
  * TWO LAYOUTS OVER ONE RECORD. The same thread is either a COLUMN record or a STACKED record, and
@@ -151,56 +155,142 @@ const StarButton = ({
   );
 };
 
+/** Every way `removeDraft` can answer, minus the two that mean the draft is gone. */
+type DiscardOutcome = Exclude<
+  Awaited<ReturnType<ReturnType<typeof useMail>['removeDraft']>>['outcome'],
+  'deleted' | 'absent'
+>;
+
+/**
+ * Why the discard did not happen, in the words the person clicking needs.
+ *
+ * A refusal is never "it failed": every one of these names a different thing to do next, and the
+ * draft is still on screen while they read it.
+ */
+const discardRefusal = (outcome: DiscardOutcome) =>
+  outcome === 'busy'
+    ? 'It is open in the composer — close that first.'
+    : outcome === 'sending'
+      ? 'It is being sent right now.'
+      : outcome === 'conflict'
+        ? 'Another device changed it since this list was built. Reload and try again.'
+        : outcome === 'locked'
+          ? 'The vault is locked.'
+          : 'The vault could not be reached.';
+
 /**
  * Triage without leaving the list. With the shortcut layer gone this is the only way to clear a row
- * without opening it, so it is revealed by hover AND by keyboard focus. Two marks everywhere but
- * Trash — archive and delete, in that order — and in Trash the single one that undoes them.
+ * without opening it, so it is revealed by hover AND by keyboard focus. Archive and delete in that
+ * order everywhere the row is a server message; in Trash the single mark that undoes them, and in
+ * Drafts the single one that discards, because neither of the other two can touch a draft.
  */
+/** One mark in the hover cluster. `confirm` present means it asks before it acts. */
+type RowAction = {
+  readonly icon: Icon;
+  readonly label: string;
+  readonly act: () => unknown;
+  readonly confirm?: {
+    readonly title: string;
+    readonly description: string;
+    readonly confirmLabel: string;
+    readonly busyLabel: string;
+  };
+};
+
 const RowTriage = ({
   thread,
   mailbox,
   isSelected,
   className,
 }: RowProps & { className: string }) => {
-  const { toggleArchive, trashThread, restoreThread } = useMail();
-  const actions =
-    mailbox === 'trash'
+  const { toggleArchive, trashThread, restoreThread, removeDraft } = useMail();
+  // A draft is a vault record with no IMAP copy, so the archive and delete below — which move
+  // server messages — can do nothing to it. In Drafts the one meaningful action is discarding it.
+  const draftId = thread.messages.find(message => message.isDraft === true)?.draftId;
+  const actions: readonly RowAction[] =
+    mailbox === 'drafts' && draftId !== undefined
       ? [
           {
-            icon: ArrowCounterClockwiseIcon,
-            label: `Restore ${thread.subject}`,
-            act: () => restoreThread(thread.id),
+            icon: TrashIcon,
+            label: `Discard ${thread.subject}`,
+            // The same sheet the composer's Discard takes: one action, one level of protection,
+            // whichever screen it is offered from.
+            confirm: {
+              title: 'Discard this draft?',
+              description: DISCARD_WARNING,
+              confirmLabel: 'Discard',
+              busyLabel: 'Discarding…',
+            },
+            act: async () => {
+              const { outcome } = await removeDraft(draftId);
+              if (outcome === 'deleted' || outcome === 'absent') return;
+              toast.add({
+                title: 'Draft not discarded',
+                description: discardRefusal(outcome),
+                timeout: 0,
+                priority: 'high',
+              });
+            },
           },
         ]
-      : [
-          {
-            icon: ArchiveIcon,
-            label: isArchived(thread)
-              ? `Move ${thread.subject} to inbox`
-              : `Archive ${thread.subject}`,
-            act: () => toggleArchive(thread.id),
-          },
-          { icon: TrashIcon, label: `Delete ${thread.subject}`, act: () => trashThread(thread.id) },
-        ];
+      : mailbox === 'trash'
+        ? [
+            {
+              icon: ArrowCounterClockwiseIcon,
+              label: `Restore ${thread.subject}`,
+              act: () => restoreThread(thread.id),
+            },
+          ]
+        : [
+            {
+              icon: ArchiveIcon,
+              label: isArchived(thread)
+                ? `Move ${thread.subject} to inbox`
+                : `Archive ${thread.subject}`,
+              act: () => toggleArchive(thread.id),
+            },
+            {
+              icon: TrashIcon,
+              label: `Delete ${thread.subject}`,
+              act: () => trashThread(thread.id),
+            },
+          ];
 
   return (
     <span className={cn('relative z-10 hidden items-center justify-end lg:flex', className)}>
-      {actions.map(({ icon: Mark, label, act }) => (
-        <button
-          key={label}
-          type="button"
-          onClick={act}
-          className={cn(
-            'flex w-6 justify-center -outline-offset-2 opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100',
-            isSelected
-              ? 'text-ink/60 hover:text-ink focus-visible:outline-ink'
-              : 'text-paper-faint hover:text-paper',
-          )}
-          aria-label={label}
-        >
-          <Mark size={13} />
-        </button>
-      ))}
+      {actions.map(({ icon: Mark, label, act, confirm }) => {
+        const mark = (
+          <button
+            type="button"
+            {...(confirm === undefined ? { onClick: () => void act() } : {})}
+            className={cn(
+              'flex w-6 justify-center -outline-offset-2 opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100',
+              // A row action that opens a sheet stays visible while the sheet is up: the pointer
+              // has left the row by then, and a trigger that vanishes under its own dialog is
+              // what makes the sheet look like it came from nowhere. Keyed on `aria-expanded`,
+              // which is what Base UI's trigger actually sets — it emits no `data-popup-open`,
+              // checked in the browser rather than assumed.
+              confirm === undefined ? '' : 'aria-expanded:opacity-100',
+              isSelected
+                ? 'text-ink/60 hover:text-ink focus-visible:outline-ink'
+                : 'text-paper-faint hover:text-paper',
+            )}
+            aria-label={label}
+          >
+            <Mark size={13} />
+          </button>
+        );
+        return confirm === undefined ? (
+          <span key={label}>{mark}</span>
+        ) : (
+          <ConfirmDialog
+            key={label}
+            trigger={mark}
+            {...confirm}
+            onConfirm={async () => void (await act())}
+          />
+        );
+      })}
     </span>
   );
 };
@@ -255,7 +345,7 @@ const ColumnsRow = ({ thread, mailbox, isSelected }: RowProps) => {
           isSelected ? 'text-ink/60' : isUnread ? 'text-signal' : 'text-paper-faint',
         )}
       >
-        {markOf(thread.accountId)}
+        {marksOf(thread.accounts)}
       </span>
 
       <span
@@ -472,7 +562,7 @@ export const ThreadList = ({
   // Which row is open is a fact about the URL. Reading it here rather than receiving it as a prop
   // keeps the answer in one place — the row link and the row's inversion cannot disagree.
   const { _splat: threadId } = useParams({ strict: false });
-  const { accounts, recordsError, syncStates, sync, loadOlder, isLoadingOlder } = useMail();
+  const { accounts, recordsError, syncStates, sync, loadOlder, isLoadingOlder, isDemo } = useMail();
   const [layout, setLayout] = useChromePref<Layout>('yozz:list-layout', 'columns', raw =>
     raw === 'stacked' ? 'stacked' : 'columns',
   );
@@ -517,36 +607,6 @@ export const ThreadList = ({
           />
         );
       }
-      const syncState = syncStates[mailbox];
-      if (
-        syncState === undefined ||
-        syncState.status === 'syncing' ||
-        syncState.status === 'idle'
-      ) {
-        return (
-          <EmptyState
-            title="Syncing"
-            body={`Fetching the newest mail from ${currentAccount.imap.host}.`}
-          />
-        );
-      }
-      if (syncState.status === 'failed') {
-        return (
-          <EmptyState
-            title="Sync failed"
-            body={describeMailFailure(syncState.failure, currentAccount.imap.host)}
-            action={
-              <button
-                type="button"
-                onClick={() => void sync(mailbox)}
-                className={buttonClass({ variant: 'secondary' })}
-              >
-                Retry
-              </button>
-            }
-          />
-        );
-      }
     }
     if (accounts.length === 0) {
       return (
@@ -564,6 +624,42 @@ export const ThreadList = ({
           }
         />
       );
+    }
+    // Demo fixtures never sync, so an empty demo folder is empty rather than pending.
+    if (!isDemo) {
+      const { pending, failed } = syncProgressIn(syncStates, accounts, mailbox);
+      const [waitingOn] = pending;
+      if (waitingOn !== undefined) {
+        return (
+          <EmptyState
+            title="Syncing"
+            body={
+              pending.length === 1
+                ? `Fetching the newest mail from ${waitingOn.imap.host}.`
+                : `Fetching the newest mail from ${pending.length} accounts.`
+            }
+          />
+        );
+      }
+      const [firstFailure] = failed;
+      if (firstFailure !== undefined) {
+        return (
+          <EmptyState
+            title="Sync failed"
+            body={describeMailFailure(firstFailure.failure, firstFailure.account.imap.host)}
+            action={
+              <button
+                type="button"
+                // A view is retried whole; an address, on its own.
+                onClick={() => void sync(isViewId(mailbox) ? undefined : mailbox)}
+                className={buttonClass({ variant: 'secondary' })}
+              >
+                Retry
+              </button>
+            }
+          />
+        );
+      }
     }
     return <EmptyState title="Nothing here yet" body="No messages in this mailbox." />;
   })();

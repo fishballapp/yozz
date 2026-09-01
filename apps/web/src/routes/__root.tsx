@@ -1,6 +1,7 @@
 import { createRootRoute, Outlet } from '@tanstack/react-router';
 import { z } from 'zod';
 import { Compose } from '../components/Compose';
+import { Toasts } from '../components/ui/Toast';
 import { composeIntentSchema } from '../lib/compose';
 import { NotFound } from '../pages/NotFound';
 import { MailProvider } from '../state/mail';
@@ -37,6 +38,7 @@ function RootLayout() {
       <MailProvider>
         <Outlet />
         <Compose />
+        <Toasts />
       </MailProvider>
     </VaultProvider>
   );

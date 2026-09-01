@@ -18,8 +18,8 @@ export type VaultFailureCode =
   /**
    * AES-GCM refused to authenticate. WHICH call failed is the diagnosis, and
    * the caller is the only one who knows: `openVault` failing means the
-   * password or the device secret is wrong, and a read failing AFTER the vault
-   * opened means the store did not answer with the record that was asked for.
+   * password is wrong, and a read failing AFTER the vault opened means the
+   * store did not answer with the record that was asked for.
    */
   | 'unreadable'
   /**
@@ -78,9 +78,9 @@ export const concat = (...parts: readonly Uint8Array[]): Uint8Array<ArrayBuffer>
 export const toBase64 = (bytes: Uint8Array): string => bytes.toBase64();
 
 /**
- * Unpadded, because the two things carried in this alphabet — a record id and a
- * device secret — both travel in URLs, and `=` in a query string is one more
- * way to arrive re-encoded. `fromBase64` accepts either form on the way back.
+ * Unpadded, because a record id travels in URLs and `=` in a query string is
+ * one more way to arrive re-encoded. `fromBase64` accepts either form on the
+ * way back.
  */
 export const toBase64Url = (bytes: Uint8Array): string =>
   bytes.toBase64({ alphabet: 'base64url', omitPadding: true });

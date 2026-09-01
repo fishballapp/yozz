@@ -10,6 +10,7 @@ describe('Vault API client', () => {
           type: 'account',
           ciphertext: 'Y2lwaGVyLWFjYy0x',
           updatedAt: 12345,
+          revision: 1,
         }),
         { status: 200, headers: { 'Content-Type': 'application/json' } },
       ),
@@ -23,6 +24,7 @@ describe('Vault API client', () => {
       type: 'account',
       ciphertext: 'Y2lwaGVyLWFjYy0x',
       updatedAt: 12345,
+      revision: 1,
     });
     expect(mockFetch).toHaveBeenCalledWith(
       'https://api.test/api/v1/vault/records/account/acc-1',
@@ -46,13 +48,15 @@ describe('Vault API client', () => {
   it('paginates list across multiple cursor pages', async () => {
     const page1 = {
       records: [
-        { id: '1', type: 'account', ciphertext: 'Y2lwaGVyLTE=', updatedAt: 100 },
-        { id: '2', type: 'account', ciphertext: 'Y2lwaGVyLTI=', updatedAt: 101 },
+        { id: '1', type: 'account', ciphertext: 'Y2lwaGVyLTE=', updatedAt: 100, revision: 1 },
+        { id: '2', type: 'account', ciphertext: 'Y2lwaGVyLTI=', updatedAt: 101, revision: 1 },
       ],
       nextCursor: 'cursor-page-2',
     };
     const page2 = {
-      records: [{ id: '3', type: 'account', ciphertext: 'Y2lwaGVyLTM=', updatedAt: 102 }],
+      records: [
+        { id: '3', type: 'account', ciphertext: 'Y2lwaGVyLTM=', updatedAt: 102, revision: 1 },
+      ],
       nextCursor: null,
     };
 
@@ -100,17 +104,20 @@ describe('Vault API client', () => {
     );
 
     const client = createVaultApiClient('https://api.test', mockFetch);
-    await client.put({
-      id: 'acc-1',
-      type: 'account',
-      ciphertext: 'Y2lwaGVyLWFjYy0x',
-    });
+    await client.put(
+      {
+        id: 'acc-1',
+        type: 'account',
+        ciphertext: 'Y2lwaGVyLWFjYy0x',
+      },
+      1,
+    );
 
     expect(mockFetch).toHaveBeenCalledWith(
       'https://api.test/api/v1/vault/records/account/acc-1',
       expect.objectContaining({
         method: 'PUT',
-        body: JSON.stringify({ ciphertext: 'Y2lwaGVyLWFjYy0x' }),
+        body: JSON.stringify({ ciphertext: 'Y2lwaGVyLWFjYy0x', revision: 1 }),
       }),
     );
   });
@@ -130,11 +137,14 @@ describe('Vault API client', () => {
 
     const client = createVaultApiClient('https://api.test', mockFetch);
     await expect(
-      client.put({
-        id: 'acc-1',
-        type: 'account',
-        ciphertext: 'Y2lwaGVyLWFjYy0x',
-      }),
+      client.put(
+        {
+          id: 'acc-1',
+          type: 'account',
+          ciphertext: 'Y2lwaGVyLWFjYy0x',
+        },
+        1,
+      ),
     ).rejects.toMatchObject({
       name: 'VaultApiError',
       code: 'CONFLICT',

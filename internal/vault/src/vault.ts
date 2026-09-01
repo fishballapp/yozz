@@ -303,9 +303,8 @@ export const rewrapDek = async (
 
 /**
  * Unwrap the DEK and hand back the operations that need it. A `VaultError` with
- * code `unreadable` here means the password or the device secret is wrong —
- * those are the two inputs `encKey` is made of, and AES-GCM cannot tell them
- * apart.
+ * code `unreadable` here means the password is wrong, which is the only input
+ * `encKey` is made of in password mode.
  */
 export const openVault = async (keys: VaultKey, wrappedDek: string): Promise<Vault> => {
   /**

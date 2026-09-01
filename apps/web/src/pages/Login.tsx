@@ -3,8 +3,8 @@ import { useState } from 'react';
 import { AuthColumn } from '../components/AuthColumn';
 import { Button } from '../components/ui/Button';
 import { FieldRow, Input } from '../components/ui/Field';
+import { agentLabel } from '../lib/agent-label';
 import { requestRecoveryLink } from '../vault/auth-client.ts';
-import { DeviceSecretMissingError, importDeviceSecret } from '../vault/device-secret.ts';
 import { vaultErrorMessage } from '../vault/screen-policy.ts';
 import { useVault } from '../vault/session.tsx';
 import { loginWithPasskey, loginWithPassword } from '../vault/unlock.ts';
@@ -20,8 +20,6 @@ export const Login = () => {
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [deviceSecret, setDeviceSecret] = useState('');
-  const [isDeviceSecretNeeded, setIsDeviceSecretNeeded] = useState(false);
 
   const [recoveryEmail, setRecoveryEmail] = useState('');
   const [sentTo, setSentTo] = useState<string | null>(null);
@@ -100,6 +98,7 @@ export const Login = () => {
           <FieldRow label="Email address" htmlFor="recover-email">
             <Input
               id="recover-email"
+              aria-label={agentLabel('Email address', recoveryEmail)}
               type="email"
               required
               autoComplete="email"
@@ -175,6 +174,7 @@ export const Login = () => {
         <FieldRow label="Email address" htmlFor="login-email">
           <Input
             id="login-email"
+            aria-label={agentLabel('Email address', email)}
             type="email"
             autoComplete="email"
             value={email}
@@ -192,23 +192,6 @@ export const Login = () => {
             disabled={isBusy}
           />
         </FieldRow>
-        {isDeviceSecretNeeded && (
-          <FieldRow
-            label="Device secret"
-            htmlFor="login-device-secret"
-            hint="A short string, not a QR code. Open Settings on a device that is already logged in, export the device secret there, and paste it here. It never reaches a YOZZ server."
-          >
-            <Input
-              id="login-device-secret"
-              className="font-mono"
-              autoComplete="off"
-              spellCheck={false}
-              value={deviceSecret}
-              onChange={event => setDeviceSecret(event.target.value)}
-              disabled={isBusy}
-            />
-          </FieldRow>
-        )}
         <Button
           variant="secondary"
           disabled={isBusy}
@@ -217,7 +200,6 @@ export const Login = () => {
               setBusyKind('password');
               setError(null);
               try {
-                if (deviceSecret.trim() !== '') importDeviceSecret(email, deviceSecret.trim());
                 const session = await loginWithPassword({ email, password });
                 setSession(session);
                 void navigate({
@@ -226,7 +208,6 @@ export const Login = () => {
                   search: previous => previous,
                 });
               } catch (err) {
-                if (err instanceof DeviceSecretMissingError) setIsDeviceSecretNeeded(true);
                 setError(vaultErrorMessage(err));
                 setErrorPanel('password');
               } finally {

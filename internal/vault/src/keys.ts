@@ -1,11 +1,11 @@
 /**
- * The key schedule — one password and one device secret in, everything the
- * vault needs out. ARCHITECTURE.md#keys is the spec; this file is it in code.
+ * The key schedule — one password in, everything the vault needs out.
+ * ARCHITECTURE.md#keys is the spec; this file is it in code.
  *
  * ```
  * masterKey  = PBKDF2-HMAC-SHA256(password, salt = email, 650_000)
  * authValue  = PBKDF2-HMAC-SHA256(masterKey, salt = password, 1)   → to the server
- * encKey     = HKDF(masterKey ‖ deviceSecret, info "yozz-vault")   → never leaves
+ * encKey     = HKDF(masterKey, info "yozz-vault")                  → never leaves
  * ```
  *
  * Everything a password change is meant to rotate is here, and nothing else is
@@ -15,32 +15,31 @@
  * **`authValue` cannot yield `encKey`.** It is a one-way function of
  * `masterKey` under a *different* salt, so a server holding it — Better Auth
  * hashes it again on arrival — does not hold anything that recovers
- * `masterKey`, and `encKey` needs a device secret the server has never seen
- * besides.
+ * `masterKey`.
  *
- * **PBKDF2 rather than Argon2, because the entropy comes from the device
- * secret.** WebCrypto's only KDFs are PBKDF2 and HKDF, and 128 stored random
- * bits make password strength non-load-bearing — 1Password's argument, and the
- * numbers are in DECISIONS.md. Every primitive here is `SubtleCrypto`, so no
- * third-party crypto sits in the path protecting mailbox credentials.
+ * **The password is the only entropy in this schedule**, so the 650,000
+ * iterations and the password floor `apps/web` enforces are what stand between
+ * a leaked `wrappedDek` and the vault. 650,000 is above OWASP's 600,000 floor
+ * for PBKDF2-HMAC-SHA256; a memory-hard KDF would be stronger and needs a wasm
+ * dependency WebCrypto cannot supply, which DECISIONS.md names as the upgrade
+ * path rather than something taken now. Every primitive here is `SubtleCrypto`,
+ * so no third-party crypto sits in the path protecting mailbox credentials.
  *
  * `encKey` is non-extractable and stays a `CryptoKey`. It has no form this
  * package can serialise, which is the point: the only thing that leaves is
  * `authValue`, and it leaves on purpose.
  */
 
-import { concat, fromBase64, nonShared, toBase64, toBase64Url, utf8, VaultError } from './bytes.ts';
+import { nonShared, toBase64, utf8, VaultError } from './bytes.ts';
 
 /** OWASP's floor for PBKDF2-HMAC-SHA256 is 600,000; 1Password ships 650,000. */
 const PBKDF2_ITERATIONS = 650_000;
-
-const DEVICE_SECRET_BYTES = 16;
 
 /**
  * RFC 5869 §3.1: a zero-length salt is the defined default, and Extract then
  * keys its HMAC with HashLen zero bytes. It is the right shape here — a salt
  * earns its keep against low-entropy input material, and the input is a
- * 650,000-iteration derivation concatenated with 128 random bits.
+ * 650,000-iteration derivation already salted by the email.
  */
 const NO_SALT = new Uint8Array(0);
 
@@ -60,10 +59,10 @@ export const foldEmail = (email: string): string =>
 
 /**
  * The one key the vault itself needs. It wraps and unwraps the DEK, and nothing
- * else. Password mode derives it from the password and device secret
- * (`deriveAccountKeys`); passkey mode derives it from the authenticator's PRF
- * output (`derivePasskeyEncKey`). `createVault`, `openVault` and `rewrapDek`
- * take only this, so neither mode has to fake the other's fields.
+ * else. Password mode derives it from the password (`deriveAccountKeys`);
+ * passkey mode derives it from the authenticator's PRF output
+ * (`derivePasskeyEncKey`). `createVault`, `openVault` and `rewrapDek` take only
+ * this, so neither mode has to fake the other's fields.
  */
 export type VaultKey = {
   readonly encKey: CryptoKey;
@@ -72,28 +71,6 @@ export type VaultKey = {
 export type AccountKeys = VaultKey & {
   /** Sent to the server as the Better Auth password, and nothing else. */
   readonly authValue: string;
-};
-
-/**
- * 128 random bits, stored per device and never sent. It transfers to a second
- * device by QR from one already signed in, which is why it is a string rather
- * than bytes.
- *
- * base64url because the transfer may ride in a URL, and `+/=` in a query string
- * is three separate ways to arrive corrupted.
- */
-export const createDeviceSecret = (): string =>
-  toBase64Url(crypto.getRandomValues(new Uint8Array(DEVICE_SECRET_BYTES)));
-
-const decodeDeviceSecret = (deviceSecret: string): Uint8Array => {
-  const bytes = fromBase64(deviceSecret, 'the device secret', 'base64url');
-  if (bytes.length !== DEVICE_SECRET_BYTES) {
-    throw new VaultError(
-      'malformed',
-      `the device secret is ${bytes.length} bytes, want ${DEVICE_SECRET_BYTES}`,
-    );
-  }
-  return bytes;
 };
 
 /**
@@ -152,20 +129,17 @@ const pbkdf2 = async (
 export const deriveAccountKeys = async ({
   email,
   password,
-  deviceSecret,
 }: {
   readonly email: string;
   readonly password: string;
-  readonly deviceSecret: string;
 }): Promise<AccountKeys> => {
-  const secret = decodeDeviceSecret(deviceSecret);
   const passwordBytes = utf8(password);
 
   const masterKey = await pbkdf2(passwordBytes, utf8(foldEmail(email)), PBKDF2_ITERATIONS);
 
   return {
     authValue: toBase64(await pbkdf2(masterKey, passwordBytes, 1)),
-    encKey: await hkdf(concat(masterKey, secret), 'yozz-vault', { name: 'AES-GCM', length: 256 }, [
+    encKey: await hkdf(masterKey, 'yozz-vault', { name: 'AES-GCM', length: 256 }, [
       'wrapKey',
       'unwrapKey',
     ]),
@@ -176,10 +150,9 @@ const PRF_OUTPUT_BYTES = 32;
 
 /**
  * Passkey mode's `encKey`: HKDF over the 32 bytes the authenticator's PRF
- * extension returns for our label. No password and no device secret are in
- * the schedule — the PRF output is already 256 random bits the authenticator
- * will only release after user verification, which is the entropy the device
- * secret supplies in password mode.
+ * extension returns for our label. No password is in the schedule — the PRF
+ * output is already 256 random bits the authenticator will only release after
+ * user verification, so this mode does not rest on what the user can remember.
  *
  * `hkdf` copies its input (`nonShared`), so a view into a larger WebAuthn
  * buffer is keyed by exactly its 32 bytes and not by the buffer around it.

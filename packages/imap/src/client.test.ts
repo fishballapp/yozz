@@ -184,11 +184,37 @@ const runTranscriptSession = async (
 };
 
 describe('IMAP Client transcripts and state machine', () => {
-  it('APPENDs a message as a synchronising literal and accepts APPENDUID', async () => {
+  it('APPENDs as a synchronising literal and reports where the message landed', async () => {
     const steps = parseTranscript('append-literal.txt');
     await runTranscriptSession(steps, async client => {
       const res = await client.append('Sent', stringToBytes('Subject: hi'), ['\\Seen']);
-      expect(res.ok).toBe(true);
+      // The locator, so the caller can address what it just wrote without searching for it.
+      expect(res).toEqual({ ok: true, value: { uidValidity: 1, uid: 42 } });
+    });
+  });
+
+  it('reports no locator when the server issues no APPENDUID', async () => {
+    const steps = parseTranscript('append-no-uidplus.txt');
+    await runTranscriptSession(steps, async client => {
+      const res = await client.append('Drafts', stringToBytes('Subject: hi'), ['\\Draft']);
+      expect(res).toEqual({ ok: true, value: null });
+    });
+  });
+
+  it('refuses UID EXPUNGE without UIDPLUS rather than erasing more than it was asked', async () => {
+    const steps = parseTranscript('append-no-uidplus.txt');
+    await runTranscriptSession(steps, async client => {
+      await client.append('Drafts', stringToBytes('Subject: hi'), ['\\Draft']);
+      const res = await client.uidExpunge('42');
+      expect(res.ok).toBe(false);
+    });
+  });
+
+  it('finds a message by a header, which is what makes an APPEND retry safe', async () => {
+    const steps = parseTranscript('uid-search-header.txt');
+    await runTranscriptSession(steps, async client => {
+      const res = await client.uidSearchHeader('Message-ID', '<draft-7@x.co>');
+      expect(res).toEqual({ ok: true, value: [31, 33] });
     });
   });
 

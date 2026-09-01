@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Folder, Message } from '../lib/thread';
 import type { AccountSyncState } from '../mail/sync';
-import { olderAvailable, type ThreadState, threadsIn } from './mail';
+import { olderAvailable, syncProgressIn, type ThreadState, threadsIn } from './mail';
 
 const message = (id: string): Message => ({
   id,
@@ -14,7 +14,8 @@ const message = (id: string): Message => ({
 
 const thread = (id: string, folders: readonly Folder[], isStarred = false): ThreadState => ({
   id,
-  accountId: 'me@x',
+  accounts: ['me@x'],
+  foldersByAccount: { 'me@x': folders },
   subject: id,
   messages: [message(`${id}/1`)],
   isUnread: false,
@@ -50,7 +51,6 @@ describe('olderAvailable', () => {
   const synced = (complete: readonly Folder[]): AccountSyncState => ({
     status: 'synced',
     at: 0,
-    count: 0,
     complete,
   });
   const accounts = [{ address: 'me@x' }, { address: 'us@y' }];
@@ -84,5 +84,38 @@ describe('olderAvailable', () => {
     expect(olderAvailable(done, accounts, 'unified')).toBe(false);
     expect(olderAvailable(done, accounts, 'trash')).toBe(true);
     expect(olderAvailable(done, [{ address: 'me@x' }], 'trash')).toBe(false);
+  });
+});
+
+describe('syncProgressIn', () => {
+  const accounts = [{ address: 'me@x' }, { address: 'us@y' }];
+  const failed: AccountSyncState = {
+    status: 'failed',
+    failure: { kind: 'error', detail: 'nope' },
+    at: 0,
+  };
+  const synced: AccountSyncState = { status: 'synced', at: 0, complete: [] };
+
+  const addresses = (accs: readonly { readonly address: string }[]) => accs.map(a => a.address);
+
+  it('counts an account with no state at all as pending, which is the fresh-login case', () => {
+    // The bug: a view asked the single-address question, found nothing, and said "Nothing here
+    // yet" through the whole first sync.
+    expect(addresses(syncProgressIn({}, accounts, 'unified').pending)).toEqual(['me@x', 'us@y']);
+  });
+
+  it('narrows to the accounts the mailbox draws from', () => {
+    const states = { 'me@x': synced, 'us@y': { status: 'syncing' } as const };
+    expect(addresses(syncProgressIn(states, accounts, 'unified').pending)).toEqual(['us@y']);
+    expect(syncProgressIn(states, accounts, 'me@x').pending).toEqual([]);
+    expect(addresses(syncProgressIn(states, accounts, 'us@y').pending)).toEqual(['us@y']);
+  });
+
+  it('reports a failure in a view, not only under the address that failed', () => {
+    const states = { 'me@x': synced, 'us@y': failed };
+    const { pending, failed: bad } = syncProgressIn(states, accounts, 'unified');
+    expect(pending).toEqual([]);
+    expect(addresses(bad.map(entry => entry.account))).toEqual(['us@y']);
+    expect(syncProgressIn(states, accounts, 'me@x').failed).toEqual([]);
   });
 });

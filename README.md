@@ -42,9 +42,27 @@ Your mail itself is not encrypted; it is wherever it already lives. So this is n
 "zero-knowledge email client", and we don't call it one. It adds nothing to your attack surface,
 which is the smaller and true claim.
 
+Two things do get stored with us, sealed: the drafts you write, so one started on a laptop is on
+your phone, and mail sent from an address that has no mailbox to keep a copy in. Both are
+ciphertext under your key, like your stored passwords.
+
 Received HTML renders in a sandboxed frame with no network, remote images off until you ask, and
 a switch to the sender's plain-text part. Inbox and Sent are threaded together and cached on the
 device; nothing is synced through us.
+
+## Works with your agent
+
+The tab registers six [WebMCP](https://webmachinelearning.github.io/webmcp/) tools, so an agent
+that drives your browser (ChatGPT's desktop browser, Chrome with
+`chrome://flags/#enable-webmcp-testing`) can work the mailbox with you: `get_addresses`,
+`get_threads` (find and read, rows or whole conversations), `update_threads` (read, starred, and
+which mailbox), `save_draft`, `delete_draft`, and `navigate` to put something on your screen. It is
+the only place an agent *can* read this mail: our servers hold ciphertext.
+
+Reading changes nothing, on screen or in the mailbox; `navigate` is what shows you a conversation,
+and it says so. **Nothing is sent by a tool.** A draft the agent writes is stored encrypted in your
+vault, so it is waiting in Drafts on every device you use, and you press Send. The tools live in
+`apps/web/src/agent/`.
 
 ## Status
 
@@ -86,8 +104,8 @@ Needs Node 26 and pnpm (the version in `package.json`'s `packageManager`).
 pnpm install
 cp apps/worker-api/.dev.vars.example apps/worker-api/.dev.vars   # set BETTER_AUTH_SECRET to any 32+ chars
 pnpm -F @yozz.app/worker-api db:migrate:local                    # migrations into wrangler dev's local D1
-pnpm -F @yozz.app/worker-api dev                                 # http://localhost:8787; magic links print here
-VITE_API_URL=http://localhost:8787 pnpm -F @yozz.app/web dev     # http://localhost:5177
+pnpm -F @yozz.app/worker-api dev                                 # http://localhost:8177; magic links print here
+VITE_API_URL=http://localhost:8177 pnpm -F @yozz.app/web dev     # http://localhost:5177
 ```
 
 Open `/welcome`, enter an address, paste the magic link printed in the wrangler terminal into the

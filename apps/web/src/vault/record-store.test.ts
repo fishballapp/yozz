@@ -1,10 +1,5 @@
 import 'fake-indexeddb/auto';
-import {
-  createDeviceSecret,
-  createVault,
-  deriveAccountKeys,
-  type EncryptedRecord,
-} from '@yozz.app/vault';
+import { createVault, deriveAccountKeys, type EncryptedRecord } from '@yozz.app/vault';
 import type { VaultRecordEnvelope } from '@yozz.app/vault-contract';
 import { IDBFactory } from 'fake-indexeddb';
 import { beforeEach, describe, expect, it } from 'vitest';
@@ -27,13 +22,14 @@ class InMemoryVaultApi implements VaultApi {
     }
   }
 
-  async put(record: EncryptedRecord): Promise<void> {
+  async put(record: EncryptedRecord, revision: number): Promise<void> {
     const key = `${record.type}:${record.id}`;
     this.records.set(key, {
       id: record.id,
       type: record.type,
       ciphertext: record.ciphertext,
       updatedAt: Date.now(),
+      revision,
     });
   }
 
@@ -42,12 +38,13 @@ class InMemoryVaultApi implements VaultApi {
     this.records.delete(key);
   }
 
-  setRaw(type: string, id: string, ciphertext: string): void {
+  setRaw(type: string, id: string, ciphertext: string, revision: number | null = null): void {
     this.records.set(`${type}:${id}`, {
       id,
       type,
       ciphertext,
       updatedAt: Date.now(),
+      revision,
     });
   }
 }
@@ -62,8 +59,7 @@ describe('RecordStore with freshVault and IndexedDB marks', () => {
   it('puts, gets, and removes records with client-side encryption and freshness verification', async () => {
     const keys = await deriveAccountKeys({
       email: 'user@example.com',
-      password: 'password123',
-      deviceSecret: createDeviceSecret(),
+      password: 'password123456',
     });
     const { vault } = await createVault(keys);
     const api = new InMemoryVaultApi();
@@ -110,8 +106,7 @@ describe('RecordStore with freshVault and IndexedDB marks', () => {
   it('rejects stale replay attacks via persistent high-water mark', async () => {
     const keys = await deriveAccountKeys({
       email: 'user@example.com',
-      password: 'password123',
-      deviceSecret: createDeviceSecret(),
+      password: 'password123456',
     });
     const { vault } = await createVault(keys);
     const api = new InMemoryVaultApi();
@@ -168,11 +163,82 @@ describe('RecordStore with freshVault and IndexedDB marks', () => {
     store2.close();
   });
 
+  it('lets the loser of a CAS race still read the winner', async () => {
+    /**
+     * Marks are per device. Allocating from this device's mark instead of from the row would
+     * seal a number the winner never wrote, leaving the loser's mark above the authoritative
+     * record and every later read of it refused as a replay — locked out of its own draft.
+     */
+    const keys = await deriveAccountKeys({
+      email: 'user@example.com',
+      password: 'password123456',
+    });
+    const { vault } = await createVault(keys);
+    const api = new InMemoryVaultApi();
+    const store = await createRecordStore({ userId: 'user-1', rawVault: vault, api, idbFactory });
+
+    // This device gets a head start, so its mark runs well above the shared row.
+    for (let i = 0; i < 4; i += 1) {
+      await store.put({ type: 'draft', naturalKey: 'k', plaintext: `v${i}` });
+    }
+    const [row] = await Array.fromAsync(api.list('draft'));
+    if (row === undefined) throw new Error('the record was not stored');
+
+    // The other device wins from revision 1: it read the row at 1 and wrote 2.
+    await store.put({
+      type: 'draft',
+      naturalKey: 'k',
+      plaintext: 'theirs',
+      precondition: { expect: 'revision', revision: row.revision },
+    });
+
+    const opened = await store.get('draft', 'k');
+    expect(opened?.plaintext).toBe('theirs');
+  });
+
+  it('refuses a row whose clear revision disagrees with the sealed one', async () => {
+    const keys = await deriveAccountKeys({
+      email: 'user@example.com',
+      password: 'password123456',
+    });
+    const { vault } = await createVault(keys);
+    const api = new InMemoryVaultApi();
+    const store = await createRecordStore({ userId: 'user-1', rawVault: vault, api, idbFactory });
+
+    await store.put({ type: 'account', naturalKey: 'acc', plaintext: 'hello' });
+    // The ciphertext is genuine and seals revision 1; only the column is changed. Nothing
+    // legitimate produces this, because the client writes both from the same number.
+    const [stored] = await Array.fromAsync(api.list('account'));
+    if (stored === undefined) throw new Error('the record was not stored');
+    api.setRaw('account', stored.id, stored.ciphertext, 2);
+
+    await expect(store.get('account', 'acc')).rejects.toMatchObject({
+      name: 'VaultStoreDisagreementError',
+    });
+  });
+
+  it('accepts a pre-CAS row, whose column has nothing to say', async () => {
+    const keys = await deriveAccountKeys({
+      email: 'user@example.com',
+      password: 'password123456',
+    });
+    const { vault } = await createVault(keys);
+    const api = new InMemoryVaultApi();
+    const store = await createRecordStore({ userId: 'user-1', rawVault: vault, api, idbFactory });
+
+    await store.put({ type: 'account', naturalKey: 'acc', plaintext: 'hello' });
+    const [stored] = await Array.fromAsync(api.list('account'));
+    if (stored === undefined) throw new Error('the record was not stored');
+    api.setRaw('account', stored.id, stored.ciphertext, null);
+
+    const opened = await store.get('account', 'acc');
+    expect(opened?.plaintext).toBe('hello');
+  });
+
   it('lets a removed record be recreated, which a caller-picked revision could not', async () => {
     const keys = await deriveAccountKeys({
       email: 'user@example.com',
-      password: 'password123',
-      deviceSecret: createDeviceSecret(),
+      password: 'password123456',
     });
     const { vault } = await createVault(keys);
     const api = new InMemoryVaultApi();

@@ -7,6 +7,12 @@
   "observability": {
     "enabled": true
   },
+  // Pinned, and NOT wrangler's 8787 default: **8787 is reserved for the Grok bot** on this
+  // machine, and wrangler answers a busy port by walking up — 8788, 8789, 8790 — into whatever
+  // the next project pinned there (dynm.link has two of those). A dev server whose port moves
+  // when another one is already up is a CORS failure nobody reads a stack trace for, so it is
+  // stated here. 8177 pairs with the SPA's 5177. See docs/infra.md → Local ports.
+  "dev": { "port": 8177 },
   // MODE is deliberately absent here. Top-level `vars` would apply to `wrangler dev` as well,
   // so `"production"` would silently give local dev the production origin, CORS allowlist,
   // Better Auth baseURL, passkey rpID and Secure cookies — against an SPA on

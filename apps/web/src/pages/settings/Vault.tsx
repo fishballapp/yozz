@@ -1,4 +1,3 @@
-import { CopyIcon } from '@phosphor-icons/react';
 import { Link, useNavigate } from '@tanstack/react-router';
 import { useEffect, useState } from 'react';
 import { Definition, PageSection } from '../../components/PageColumn';
@@ -8,7 +7,6 @@ import { ConfirmDialog } from '../../components/ui/ConfirmDialog';
 import { FieldRow, Input } from '../../components/ui/Field';
 import { getApiBaseUrl, isApiConfigured } from '../../vault/api-base-url.ts';
 import { signOut } from '../../vault/auth-client.ts';
-import { getDeviceSecret } from '../../vault/device-secret.ts';
 import { checkPasskeyPrfCapability, type PrfCapability } from '../../vault/passkey-prf.ts';
 import { PASSKEY_OFFER, vaultErrorMessage } from '../../vault/screen-policy.ts';
 import { useVault } from '../../vault/session.tsx';
@@ -21,9 +19,9 @@ import {
 } from '../../vault/unlock.ts';
 
 /**
- * The vault, one section per thing you might come here to do: how you sign in, what a second
- * device needs, which server keys this device trusts, and the two exits. Each section says up
- * front what it changes; the controls underneath do only that.
+ * The vault, one section per thing you might come here to do: how you sign in, which
+ * authenticators can open it, which server keys this device trusts, and the two exits. Each
+ * section says up front what it changes; the controls underneath do only that.
  */
 export const Vault = () => {
   const navigate = useNavigate();
@@ -36,11 +34,7 @@ export const Vault = () => {
   const [isSwitchingToPassword, setIsSwitchingToPassword] = useState(false);
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
-  const [switchedToPasswordNote, setSwitchedToPasswordNote] = useState(false);
   const [addedPasskeyNote, setAddedPasskeyNote] = useState(false);
-
-  const [deviceSecret, setDeviceSecret] = useState<string | null | undefined>(undefined);
-  const [isCopied, setIsCopied] = useState(false);
 
   useEffect(() => {
     if (session === null) return;
@@ -184,7 +178,6 @@ export const Vault = () => {
                         setIsSwitchingToPassword(false);
                         setPassword('');
                         setConfirmPassword('');
-                        setSwitchedToPasswordNote(true);
                       })
                     }
                   >
@@ -214,12 +207,6 @@ export const Vault = () => {
 
         {session.mode === 'password' && (
           <div className="mt-4 space-y-3">
-            {switchedToPasswordNote && (
-              <p className="text-base text-paper-dim">
-                This device now has a device secret. Copy it from the section below before you sign
-                in on another one.
-              </p>
-            )}
             {canOfferPasskey ? (
               <Button
                 variant="secondary"
@@ -228,7 +215,6 @@ export const Vault = () => {
                   void run(async () => {
                     const next = await switchModeToPasskey({ currentSession: session });
                     setSession(next);
-                    setSwitchedToPasswordNote(false);
                   })
                 }
               >
@@ -268,50 +254,6 @@ export const Vault = () => {
               </p>
             )}
           </div>
-        </PageSection>
-      )}
-
-      {session.mode === 'password' && (
-        <PageSection
-          label="Device secret"
-          note="Password mode needs this as well as your password. Paste it into the login screen on a new device. It never reaches a YOZZ server, and there is no QR code for it."
-        >
-          {deviceSecret === undefined ? (
-            <Button
-              variant="secondary"
-              onClick={() => {
-                setDeviceSecret(getDeviceSecret(session.email));
-                setIsCopied(false);
-              }}
-            >
-              Show device secret
-            </Button>
-          ) : deviceSecret === null ? (
-            <p className="text-base text-paper-dim">
-              This browser has no device secret for that address.
-            </p>
-          ) : (
-            <div className="space-y-2">
-              <div className="flex items-stretch gap-2">
-                <div className="min-w-0 flex-1 border-y border-rule bg-ink px-3 py-2 font-mono text-2xs text-paper select-all">
-                  {deviceSecret}
-                </div>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="shrink-0 size-11 lg:size-7"
-                  aria-label={isCopied ? 'Copied' : 'Copy device secret'}
-                  onClick={() => {
-                    if (navigator.clipboard === undefined) return;
-                    void navigator.clipboard.writeText(deviceSecret).then(() => setIsCopied(true));
-                  }}
-                >
-                  <CopyIcon size={14} />
-                </Button>
-              </div>
-              {isCopied && <p className="text-2xs text-paper-faint">Copied</p>}
-            </div>
-          )}
         </PageSection>
       )}
 

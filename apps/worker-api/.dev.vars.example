@@ -3,8 +3,8 @@
 # being sent — FORWARD_EMAIL_ALIAS_PASSWORD is only read in production. Production
 # deploys set MODE via `scripts/deploy-worker.ts` (`--var MODE:production`).
 # Set WEB_ORIGIN / BASE_URL only to point at something other than
-# http://localhost:5177 and http://localhost:8787.
+# http://localhost:5177 and http://localhost:8177.
 BETTER_AUTH_SECRET=
 FORWARD_EMAIL_ALIAS_PASSWORD=
 # WEB_ORIGIN=http://localhost:5177
-# BASE_URL=http://localhost:8787
+# BASE_URL=http://localhost:8177

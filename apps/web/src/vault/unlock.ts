@@ -16,12 +16,6 @@ import {
   getSession,
 } from './auth-client.ts';
 import {
-  DeviceSecretMissingError,
-  getDeviceSecret,
-  getOrCreateDeviceSecret,
-  importDeviceSecret,
-} from './device-secret.ts';
-import {
   checkPasskeyPrfCapability,
   evaluatePrfForCredential,
   extractPrfOutput,
@@ -34,11 +28,13 @@ import { createRecordStore, type RecordStore } from './record-store.ts';
 import { forgetUnlockKeys, loadUnlockKeys, type UnlockKeys } from './unlock-keys.ts';
 
 /**
- * The password is one of two halves of the key in password mode; the device secret carries the
- * entropy. It still has to be a password: an empty one makes the mode device-secret-only while
- * every screen says otherwise. The server never sees it, so this is the only place to refuse.
+ * The password is the ONLY entropy in password mode — nothing device-local sits beside it — so
+ * this floor is what stands between a leaked `wrappedDek` and the vault, together with PBKDF2's
+ * 650,000 iterations. Twelve rather than eight for that reason, and the copy asks for a
+ * passphrase rather than a password. The server never sees it, so this is the only place to
+ * refuse.
  */
-export const MIN_PASSWORD_LENGTH = 8;
+export const MIN_PASSWORD_LENGTH = 12;
 
 const refuseShortPassword = (password: string) => {
   if (password.length < MIN_PASSWORD_LENGTH) {
@@ -103,26 +99,18 @@ const openSession = async ({
 export const createPasswordVault = async ({
   email,
   password,
-  deviceSecret,
   api = vaultApi,
   idbFactory,
-  storage,
 }: {
   readonly email: string;
   readonly password: string;
-  /** A secret transferred from another device. Absent, this device mints its own. */
-  readonly deviceSecret?: string;
   readonly api?: VaultApiClient;
   readonly idbFactory?: IDBFactory;
-  readonly storage?: Storage;
 }): Promise<UnlockedVaultSession> => {
   refuseShortPassword(password);
   await refuseIfAlreadyEnrolled(api);
 
-  if (deviceSecret !== undefined) importDeviceSecret(email, deviceSecret, storage);
-  const secret = getOrCreateDeviceSecret(email, storage);
-
-  const keys = await deriveAccountKeys({ email, password, deviceSecret: secret });
+  const keys = await deriveAccountKeys({ email, password });
 
   const { vault, wrappedDek } = await createVault(keys);
   // The Worker sets the Better Auth credential inside this same call: its
@@ -138,22 +126,13 @@ export const loginWithPassword = async ({
   password,
   api = vaultApi,
   idbFactory,
-  storage,
 }: {
   readonly email: string;
   readonly password: string;
   readonly api?: VaultApiClient;
   readonly idbFactory?: IDBFactory;
-  readonly storage?: Storage;
 }): Promise<UnlockedVaultSession> => {
-  const deviceSecret = getDeviceSecret(email, storage);
-  if (!deviceSecret) {
-    throw new DeviceSecretMissingError(
-      'Device secret is missing on this device. Key transfer is required.',
-    );
-  }
-
-  const keys = await deriveAccountKeys({ email, password, deviceSecret });
+  const keys = await deriveAccountKeys({ email, password });
 
   const signinRes = await authSignInPassword(email, keys.authValue);
   if (signinRes.error) {
@@ -400,18 +379,15 @@ export const switchModeToPassword = async ({
   password,
   email = currentSession.email,
   api = vaultApi,
-  storage,
 }: {
   readonly currentSession: UnlockedVaultSession;
   readonly password: string;
   readonly email?: string;
   readonly api?: VaultApiClient;
-  readonly storage?: Storage;
 }): Promise<UnlockedVaultSession> => {
   refuseShortPassword(password);
-  const deviceSecret = getOrCreateDeviceSecret(email, storage);
 
-  const newKeys = await deriveAccountKeys({ email, password, deviceSecret });
+  const newKeys = await deriveAccountKeys({ email, password });
   const newWrappedDek = await rewrapDek(currentSession, newKeys, currentSession.wrappedDek);
 
   await api.finalizePasswordUnlock({

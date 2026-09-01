@@ -3,8 +3,8 @@
  * zero-access vault server and client record store.
  *
  * This package holds ONLY public metadata and ciphertext schemas. It strictly
- * excludes all secret material (DEK, masterKey, encKey, authValue, device secrets,
- * PRF outputs, passwords, plaintexts, natural keys) and client-internal state
+ * excludes all secret material (DEK, masterKey, encKey, authValue, PRF outputs,
+ * passwords, plaintexts, natural keys) and client-internal state
  * (revision marks, sealed revision numbers).
  */
 
@@ -192,12 +192,44 @@ export const FinalizeUnlockRequestSchema = z.discriminatedUnion('mode', [
 export type FinalizeUnlockRequest = z.infer<typeof FinalizeUnlockRequestSchema>;
 
 /** PUT /api/v1/vault/records/:type/:id request body. */
+/**
+ * A record's revision, stated in the clear so the STORE can compare-and-swap on it. It is the
+ * same number the client seals inside the ciphertext, and the sealed one stays authoritative:
+ * a column beside the row is a claim, the number under AES-GCM is a fact
+ * ([DECISIONS.md](../../../DECISIONS.md)). The client checks the two agree on every read; this
+ * one exists only so two devices editing one draft cannot silently overwrite each other.
+ */
+export const RevisionSchema = z.number().int().nonnegative();
+
+/**
+ * The precondition a write states. Discriminated rather than one nullable number because JSON
+ * cannot carry "the key is present and means nothing": `{ expect: 'revision', revision: null }`
+ * (a row written before the column existed) and `{ expect: 'absent' }` (no row at all) are
+ * different claims, and both differ again from stating nothing, which is the pre-CAS
+ * last-write-wins every existing caller keeps.
+ */
+export const PutPreconditionSchema = z.discriminatedUnion('expect', [
+  z.object({ expect: z.literal('absent') }).strict(),
+  z.object({ expect: z.literal('revision'), revision: RevisionSchema.nullable() }).strict(),
+]);
+export type PutPrecondition = z.infer<typeof PutPreconditionSchema>;
+
 export const PutRecordRequestSchema = z
   .object({
     ciphertext: CiphertextSchema,
+    revision: RevisionSchema,
+    precondition: PutPreconditionSchema.optional(),
   })
   .strict();
 export type PutRecordRequest = z.infer<typeof PutRecordRequestSchema>;
+
+/** DELETE /api/v1/vault/records/:type/:id query: the version being deleted, when stating one. */
+export const DeleteRecordQuerySchema = z
+  .object({
+    ifRevision: z.coerce.number().int().nonnegative().optional(),
+  })
+  .strict();
+export type DeleteRecordQuery = z.infer<typeof DeleteRecordQuerySchema>;
 
 /** Stored/returned vault record envelope. */
 export const VaultRecordEnvelopeSchema = z
@@ -206,6 +238,8 @@ export const VaultRecordEnvelopeSchema = z
     type: RecordTypeSchema,
     ciphertext: CiphertextSchema,
     updatedAt: z.number().int().nonnegative(),
+    /** Null on a row written before the column existed; the next write fills it. */
+    revision: RevisionSchema.nullable(),
   })
   .strict();
 export type VaultRecordEnvelope = z.infer<typeof VaultRecordEnvelopeSchema>;

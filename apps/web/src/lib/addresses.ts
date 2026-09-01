@@ -40,6 +40,15 @@ export type InboundAddress = AddressRecord & { imap: NonNullable<AddressRecord['
 export const isInbound = (record: AddressRecord): record is InboundAddress =>
   record.imap !== undefined;
 
+/**
+ * The gutter letters for a conversation: one per account holding some of it, in address order.
+ * A thread spans accounts, so a single letter would have to pick one of them and would change
+ * when that account's copy was the one filed away. Two accounts sharing a first letter collapse
+ * to one mark, which is what a two-character gutter can honestly say.
+ */
+export const marksOf = (addresses: readonly string[]): string =>
+  [...new Set(addresses.map(markOf))].join('');
+
 /** The gutter letter: first character of the local part, upper-cased. `?` for an empty local part. */
 export const markOf = (address: string): string => {
   const local = address.slice(0, address.indexOf('@'));

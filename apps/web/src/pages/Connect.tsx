@@ -6,6 +6,7 @@ import { Definition, PageColumn } from '../components/PageColumn';
 import { Button } from '../components/ui/Button';
 import { FieldRow, Input } from '../components/ui/Field';
 import { type AddressRecord, addressRecordSchema, isInbound } from '../lib/addresses';
+import { agentLabel } from '../lib/agent-label';
 import {
   type AutoconfigLookup,
   describeSource,
@@ -261,6 +262,7 @@ export const Connect = () => {
         <FieldRow label="Email address" htmlFor="connect-address">
           <Input
             id="connect-address"
+            aria-label={agentLabel('Email address', address)}
             type="email"
             required
             autoComplete="email"

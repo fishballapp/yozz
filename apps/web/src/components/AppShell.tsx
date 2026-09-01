@@ -2,6 +2,8 @@ import { Dialog } from '@base-ui/react/dialog';
 import { ListIcon, PlusIcon, XIcon } from '@phosphor-icons/react';
 import { Link, Navigate, Outlet, useMatches, useParams, useSearch } from '@tanstack/react-router';
 import { useEffect, useState } from 'react';
+import { AgentTools } from '../agent/AgentTools';
+import { JudgeBanner } from '../judge/JudgeBanner';
 import { isDemo, usePaneWidth } from '../lib/chrome';
 import { withCompose } from '../lib/compose';
 import { mailboxLabel, useMail, visibleThreads } from '../state/mail';
@@ -109,6 +111,8 @@ const AppShellBody = () => {
         </Link>
       </div>
 
+      <JudgeBanner />
+
       <div className="flex min-h-0 flex-1">
         <aside className="hidden shrink-0 lg:block" style={{ width: railWidth }}>
           <AddressRail />
@@ -127,6 +131,7 @@ const AppShellBody = () => {
       </div>
 
       <StatusBar title={title} counts={counts} />
+      <AgentTools />
 
       <Dialog.Root open={isRailOpen} onOpenChange={setIsRailOpen}>
         <Dialog.Portal>

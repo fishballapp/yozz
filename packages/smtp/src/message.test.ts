@@ -216,3 +216,41 @@ describe('a message with nobody in To', () => {
     expect(text).toMatch(/^Cc: cc@example.com\r?$/m);
   });
 });
+
+describe('References', () => {
+  const base = {
+    from: { address: 'me@example.com' },
+    to: ['you@example.com'],
+    subject: 'Re: hi',
+    date: new Date(Date.UTC(2026, 7, 28, 9, 0, 0)),
+    messageId: '<new@example.com>',
+    text: 'body',
+  };
+  const headersOf = (input: Parameters<typeof buildMessage>[0]) =>
+    new TextDecoder().decode(buildMessage(input)).split('\r\n\r\n')[0] ?? '';
+
+  it('carries the whole chain, oldest first, folded so no line runs long', () => {
+    const chain = Array.from({ length: 12 }, (_, index) => `<m${index}@example.com>`);
+    const headers = headersOf({ ...base, inReplyTo: '<m11@example.com>', references: chain });
+    expect(headers).toContain('In-Reply-To: <m11@example.com>');
+    // Unfolding (CRLF + WSP → space) gives the list back in order.
+    const references = headers
+      .split('\r\n')
+      .join('\n')
+      .replace(/\n[ \t]+/g, ' ')
+      .split('\n')
+      .find(line => line.startsWith('References:'));
+    expect(references).toBe(`References: ${chain.join(' ')}`);
+    for (const line of headers.split('\r\n')) expect(line.length).toBeLessThan(998);
+  });
+
+  it('falls back to the parent alone, which is what a first reply references', () => {
+    expect(headersOf({ ...base, inReplyTo: '<parent@example.com>' })).toContain(
+      'References: <parent@example.com>',
+    );
+  });
+
+  it('writes no References on a message that answers nothing', () => {
+    expect(headersOf(base)).not.toContain('References:');
+  });
+});

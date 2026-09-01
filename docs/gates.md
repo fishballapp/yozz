@@ -15,8 +15,10 @@ pnpm -F @yozz.app/vault-contract test   # 26. The wire schemas, incl. the strict
 pnpm -F @yozz.app/worker-api test       # 26. Against an ISOLATED LOCAL D1 with every migration
                                     #   applied; migrations.test.ts pins vault_record's exact
                                     #   column list, so a new plaintext column is a red test
-pnpm -F @yozz.app/web test              # 124. Vault client + unlock (WebAuthn mocked), mail MIME
-                                    #   ceilings, sanitizer policy and per-message image consent
+pnpm -F @yozz.app/web test              # 298. Vault client + unlock (WebAuthn mocked), mail MIME,
+                                    #   the WebMCP tools over a fake port + their mount, draft
+                                    #   records under CAS, the send state machine and the draft
+                                    #   mirror, ceilings, sanitizer policy and image consent
 pnpm -F @yozz.app/x509 test             # 426, incl. end-to-end chains signed at test time and the
                                     #   two authentication bypasses as regressions
 pnpm -F @yozz.app/tls test              # 455. RFC 8448 byte-exact on all five traces; the interop
@@ -64,7 +66,18 @@ count as debt, not a score.
 pnpm -F @yozz.app/web vault:drive       # both unlock modes through headless Chromium against wrangler
                                     #   dev + local D1, incl. a real WebAuthn PRF ceremony on CDP's
                                     #   virtual authenticator. Needs both dev servers up
-                                    #   (AGENTS.md, "Running the vault locally"). 12 steps, all ✓
+                                    #   (AGENTS.md, "Running the vault locally"). 13 steps, all ✓
+```
+
+## A vault draft in the composer
+
+```bash
+pnpm -F @yozz.app/web draft:drive       # writes a draft record the way `save_draft` does, then opens it
+                                    #   both ways a user can: a fresh load of `?compose=draft:<key>`
+                                    #   and a client-side navigation from the Drafts list. Reads the
+                                    #   To/Subject/Body back as both DOM property and attribute, since
+                                    #   an agent reading a page snapshot only ever sees the attribute.
+                                    #   Same dev servers as `vault:drive`.
 ```
 
 ## Received HTML in real browsers

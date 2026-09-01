@@ -1,4 +1,4 @@
-import type { ImapClient, ImapIdle, ImapResult, ImapUntagged } from '@yozz.app/imap';
+import type { ImapClient, ImapIdle, ImapResult, ImapSelected, ImapUntagged } from '@yozz.app/imap';
 import type { InboundAddress } from '../lib/addresses';
 import type { MailConnection, MailConnectionFailure, Result } from './connection';
 
@@ -23,7 +23,7 @@ export type LiveClient = ImapClient & {
    * SELECT only if `name` is not already the selected mailbox. Sync calls `client.select`
    * directly because it wants fresh UIDVALIDITY/UIDNEXT; body fetches and flag writes use this.
    */
-  readonly ensureSelected: (name: string) => Promise<ImapResult<void>>;
+  readonly ensureSelected: (name: string) => Promise<ImapResult<ImapSelected>>;
 };
 
 export type LiveTask<T> = {
@@ -62,6 +62,8 @@ type Socket = {
   readonly resumed: boolean;
   idle: ImapIdle | null;
   selected: string | null;
+  /** What the last SELECT answered, so a write can check the mailbox has not been renumbered. */
+  selectedInfo: ImapSelected | null;
 };
 
 type Connection = {
@@ -164,15 +166,16 @@ export const createLiveManager = (deps: {
       // Always read-write: flag writes and APPEND need it, and EXAMINE would block them.
       const res = await client.select(mailbox, { readOnly: false });
       socket().selected = res.ok ? mailbox : null;
+      socket().selectedInfo = res.ok ? res.value : null;
       return res;
     };
     return {
       ...client,
       select,
       ensureSelected: async name => {
-        if (socket().selected === name) return { ok: true, value: undefined };
-        const res = await select(name);
-        return res.ok ? { ok: true, value: undefined } : res;
+        const known = socket().selectedInfo;
+        if (socket().selected === name && known !== null) return { ok: true, value: known };
+        return select(name);
       },
     };
   };
@@ -213,6 +216,7 @@ export const createLiveManager = (deps: {
       resumed: opened.value.resumed,
       idle: null,
       selected: null,
+      selectedInfo: null,
     };
     conn.socket = socket;
     conn.socketKey = conn.imapKey;

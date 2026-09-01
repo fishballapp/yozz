@@ -21,6 +21,13 @@ export const composeIntentSchema = z.union([
   z.templateLiteral(['reply:', z.string().min(1)]),
   z.templateLiteral(['reply-all:', z.string().min(1)]),
   z.templateLiteral(['forward:', z.string().min(1)]),
+  /**
+   * A draft already in the vault, named by its STABLE key rather than a versioned `draftId`: the
+   * URL must keep resolving as the draft is edited, and every save changes the version. Opening
+   * it is a read, never a create — a `draft:` intent naming nothing shows the not-found state
+   * rather than starting a blank message under somebody else's key.
+   */
+  z.templateLiteral(['draft:', z.string().min(1)]),
 ]);
 
 export type ComposeIntent = z.infer<typeof composeIntentSchema>;
@@ -59,7 +66,36 @@ export const withoutCompose = <T extends { compose?: ComposeIntent }>(previous: 
  * param and is valid on Settings, where no thread is in the path to lean on.
  */
 const messageIdOfIntent = (intent: ComposeIntent) =>
-  intent === 'new' ? undefined : intent.slice(intent.indexOf(':') + 1);
+  intent === 'new' || intent.startsWith('draft:')
+    ? undefined
+    : intent.slice(intent.indexOf(':') + 1);
+
+/** The draft key a `draft:` intent names, or nothing for the intents that describe new mail. */
+export const draftKeyOfIntent = (intent: ComposeIntent): string | null =>
+  intent.startsWith('draft:') ? intent.slice('draft:'.length) : null;
+
+/**
+ * What the discard sheet warns, wherever discarding is offered — the composer's footer and the
+ * Drafts row take the same sentence, because they are the same action.
+ *
+ * The second half is the whole reason the sheet exists. The record is tombstoned for 30 days
+ * rather than deleted, so "irreversible" is false of the data — but no screen in YOZZ brings one
+ * back, so it is true of the person, and that is the one the warning has to be honest about.
+ */
+export const DISCARD_WARNING =
+  'The message is thrown away and nothing is sent. No screen here brings a discarded draft back.';
+
+/**
+ * Whether the person wrote anything, or only opened the composer and closed it again.
+ *
+ * Closing keeps the draft, so something has to stop a mistaken Reply from leaving a record in
+ * Drafts every time it is closed. The test is against the draft AS IT OPENED, never against
+ * emptiness: a reply opens with a recipient, a subject and the quoted original already in it, so
+ * "the fields are blank" would be false of every reply ever written and true of none.
+ */
+export const isUntouched = (draft: ComposeDraft, opened: ComposeDraft): boolean =>
+  draft.attachments.length === 0 &&
+  (['to', 'cc', 'bcc', 'subject', 'body'] as const).every(field => draft[field] === opened[field]);
 
 /**
  * Who Reply all adds beyond Reply: everyone the message was addressed to, minus every address you
@@ -132,7 +168,16 @@ export const seedFor = (
       // Replies quote the original, the way mail has always done it — and `>` is both the mail
       // convention and markdown's blockquote, so it survives either reading.
       body: quoteForReply(message),
-      ...(message.messageId !== undefined ? { inReplyTo: message.messageId } : {}),
+      ...(message.messageId !== undefined
+        ? {
+            inReplyTo: message.messageId,
+            // RFC 5322 §3.6.4: the parent's own chain, then the parent. Deduplicated because a
+            // client that already repeated an id should not make us repeat it again.
+            references: [
+              ...new Set([...(message.references ?? []), message.messageId]),
+            ] as readonly string[],
+          }
+        : {}),
     };
   }
 

@@ -1,0 +1,4 @@
+S: * OK [CAPABILITY IMAP4rev1 UIDPLUS] Server ready.
+C: A0001 UID SEARCH HEADER "Message-ID" "<draft-7@x.co>"
+S: * SEARCH 31 33
+S: A0001 OK SEARCH completed.

@@ -3,6 +3,7 @@ import {
   ArchiveIcon,
   GearIcon,
   MailboxIcon,
+  NotePencilIcon,
   PaperPlaneTiltIcon,
   PlusIcon,
   StarIcon,
@@ -188,6 +189,12 @@ export const AddressRail = ({ onNavigate }: { onNavigate?: () => void }) => {
           mailbox="starred"
           mark={<StarIcon size={13} />}
           label="Starred"
+          onNavigate={onNavigate}
+        />
+        <RailRow
+          mailbox="drafts"
+          mark={<NotePencilIcon size={13} />}
+          label="Drafts"
           onNavigate={onNavigate}
         />
         <RailRow

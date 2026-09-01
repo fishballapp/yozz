@@ -4,6 +4,7 @@ import {
   ApiErrorResponseSchema,
   ListRecordsResponseSchema,
   PasskeyWrapResponseSchema,
+  type PutPrecondition,
   type UnlockStatusResponse,
   UnlockStatusResponseSchema,
   type VaultRecordEnvelope,
@@ -26,8 +27,17 @@ export class VaultApiError extends Error {
 export type VaultApi = {
   readonly get: (type: string, id: string) => Promise<VaultRecordEnvelope | null>;
   readonly list: (type: string) => AsyncIterable<VaultRecordEnvelope>;
-  readonly put: (record: EncryptedRecord) => Promise<void>;
-  readonly remove: (type: string, id: string) => Promise<void>;
+  /**
+   * `revision` is the number sealed inside `record.ciphertext`, restated in the clear so the
+   * store can compare-and-swap on it. `precondition` is what the write claims about the row it
+   * replaces; omitted, the write is the pre-CAS last-write-wins.
+   */
+  readonly put: (
+    record: EncryptedRecord,
+    revision: number,
+    precondition?: PutPrecondition,
+  ) => Promise<void>;
+  readonly remove: (type: string, id: string, ifRevision?: number) => Promise<void>;
 };
 
 export type VaultApiClient = VaultApi & {
@@ -120,12 +130,20 @@ export const createVaultApiClient = (
     }
   };
 
-  const put = async (record: EncryptedRecord): Promise<void> => {
+  const put = async (
+    record: EncryptedRecord,
+    revision: number,
+    precondition?: PutPrecondition,
+  ): Promise<void> => {
     const res = await request(
       `/api/v1/vault/records/${encodeURIComponent(record.type)}/${encodeURIComponent(record.id)}`,
       {
         method: 'PUT',
-        body: JSON.stringify({ ciphertext: record.ciphertext }),
+        body: JSON.stringify({
+          ciphertext: record.ciphertext,
+          revision,
+          ...(precondition === undefined ? {} : { precondition }),
+        }),
       },
     );
 
@@ -134,9 +152,10 @@ export const createVaultApiClient = (
     }
   };
 
-  const remove = async (type: string, id: string): Promise<void> => {
+  const remove = async (type: string, id: string, ifRevision?: number): Promise<void> => {
+    const query = ifRevision === undefined ? '' : `?ifRevision=${ifRevision}`;
     const res = await request(
-      `/api/v1/vault/records/${encodeURIComponent(type)}/${encodeURIComponent(id)}`,
+      `/api/v1/vault/records/${encodeURIComponent(type)}/${encodeURIComponent(id)}${query}`,
       { method: 'DELETE' },
     );
 

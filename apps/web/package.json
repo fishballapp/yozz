@@ -11,7 +11,9 @@
     "preview": "vite preview --port 5177",
     "test": "vitest run --passWithNoTests",
     "html:security": "node harness/html-security.ts",
-    "vault:drive": "node harness/vault-drive.ts"
+    "vault:drive": "node harness/vault-drive.ts",
+    "draft:drive": "node harness/draft-open.ts",
+    "judge:accounts": "node harness/judge-accounts.ts"
   },
   "dependencies": {
     "@base-ui/react": "catalog:",

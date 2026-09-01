@@ -4,7 +4,7 @@
  *     pnpm -F @yozz.app/tls browser                       # local bridge, all three engines
  *     pnpm -F @yozz.app/tls browser --engine webkit       # one engine
  *     pnpm -F @yozz.app/tls browser --bridge "wss://…?key=…"   # through a deployed Worker
- *     pnpm -F @yozz.app/tls browser --relay ws://localhost:8787/api/v1/relay --cookie <token>
+ *     pnpm -F @yozz.app/tls browser --relay ws://localhost:8177/api/v1/relay --cookie <token>
  *
  * **Through the production relay** (`apps/worker-api`, `/api/v1/relay`). The relay wants a
  * session and an `Origin` equal to the web origin, and this page is served from port 5178, so
@@ -40,7 +40,7 @@ const ENGINES = { chromium, firefox, webkit };
 type EngineName = keyof typeof ENGINES;
 
 const PAGE_PORT = 5178;
-const BRIDGE_PORT = 8787;
+const BRIDGE_PORT = 8178;
 const BRIDGE_KEY = 'm8-local';
 const WORKER_DIR = fileURLToPath(new URL('../../../../spikes/relay/worker', import.meta.url));
 

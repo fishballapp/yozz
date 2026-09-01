@@ -1,7 +1,6 @@
 import { VaultError, type VaultFailureCode } from '@yozz.app/vault';
 import type { ApiErrorCode } from '@yozz.app/vault-contract';
 import { VaultApiError } from './api.ts';
-import { DeviceSecretMissingError, DeviceStorageError } from './device-secret.ts';
 import { PasskeyPrfError, type PrfCapability } from './passkey-prf.ts';
 import { UnlockError } from './unlock.ts';
 
@@ -40,7 +39,7 @@ const API_ERROR_MESSAGES: Record<ApiErrorCode | 'NETWORK_ERROR', string> = {
 
 const VAULT_ERROR_MESSAGES: Record<VaultFailureCode, string> = {
   unreadable:
-    "That did not open the vault. In password mode the password and this device's secret both have to be right, and nothing can tell which one is wrong.",
+    'That did not open the vault. In password mode that means the passphrase was wrong; the stored data itself cannot say more than that it failed to authenticate.',
   malformed: 'A stored value was not the shape it should be.',
   stale:
     'The server answered with an older version of a record than this device has already seen. Nothing was read.',
@@ -66,12 +65,6 @@ export const vaultErrorMessage = (error: unknown): string => {
   }
   if (error instanceof VaultError) {
     return VAULT_ERROR_MESSAGES[error.code];
-  }
-  if (error instanceof DeviceSecretMissingError) {
-    return 'This device has no device secret for that address. Paste the one exported from a device that is already logged in.';
-  }
-  if (error instanceof DeviceStorageError) {
-    return 'This browser will not let YOZZ keep anything on this device. Password mode needs that; allow site data, or use a passkey.';
   }
   if (error instanceof PasskeyPrfError) {
     return error.message;

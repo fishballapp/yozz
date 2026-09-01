@@ -336,6 +336,9 @@ importers:
       '@types/node':
         specifier: ^24.0.0
         version: 24.13.2
+      '@yozz.app/smtp':
+        specifier: workspace:*
+        version: link:../smtp
       '@yozz.app/tls':
         specifier: workspace:*
         version: link:../tls

@@ -23,6 +23,17 @@ const storedDraftSchema = z.object({
     subject: z.string(),
     body: z.string(),
     inReplyTo: z.string().optional(),
+    references: z.array(z.string()).optional(),
+    /**
+     * Which vault record this text already IS, when it has reached one.
+     *
+     * Without them a reload restored the words and lost the identity, so the autosave read a
+     * draft with no `draftId`, took its create branch, and minted a SECOND record holding the
+     * same message — once per reload, for as long as you kept reloading. The key is the stable
+     * one; the version is a hint the restore re-checks against the live records.
+     */
+    draftKey: z.string().optional(),
+    draftId: z.string().optional(),
   }),
 });
 

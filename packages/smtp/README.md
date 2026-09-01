@@ -14,7 +14,7 @@ keywords, AUTH PLAIN / LOGIN, the MAIL / RCPT / DATA sequence and dot-stuffing. 
 TLS, certificates or the vault. STARTTLS is not spoken: the transport is already TLS (465).
 
 `buildMessage` turns composer fields into 7-bit bytes: RFC 2047 headers, 7bit or quoted-printable bodies,
-`multipart/alternative` when an HTML rendering is given, `In-Reply-To` + `References` for replies.
+`multipart/alternative` when an HTML rendering is given, `In-Reply-To` + the folded `References` chain for replies.
 
 ## Tests
 

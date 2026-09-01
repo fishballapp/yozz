@@ -1,8 +1,8 @@
 /**
  * Which messages are one conversation. Pure: message ids in, groups of ids out.
  *
- * Gmail's own answer (`X-GM-THRID`) wins where it exists, because it is what the user sees in
- * Gmail's UI. Everything else follows JMAP's recommendation (RFC 8621 §3): two messages share a
+ * Gmail's own answer (`X-GM-THRID`) is one edge among the others, scoped to the account that
+ * issued it. Everything else follows JMAP's recommendation (RFC 8621 §3): two messages share a
  * thread when an identical msg-id appears in either's `Message-ID` / `In-Reply-To` / `References`
  * AND their base subjects match. Union-find over that relation, rather than JWZ's tree, because
  * the list shows a flat conversation and never a tree
@@ -17,6 +17,12 @@ export type ThreadableMessage = {
   readonly references: readonly string[];
   readonly subject: string | null;
   readonly gmailThreadId: string | null;
+  /**
+   * Which account the Gmail thread id belongs to. A THRID is Gmail's own number for a
+   * conversation inside ONE mailbox, so two accounts can hand out the same one for unrelated
+   * mail; scoping it keeps that from merging strangers. Absent for a message with no THRID.
+   */
+  readonly gmailAccount?: string;
 };
 
 // ponytail: RFC 5256's leaders plus the localized Outlook set the knowledge doc lists; extend
@@ -62,9 +68,9 @@ const msgIdsOf = (message: ThreadableMessage): readonly string[] => [
 
 /**
  * Groups by conversation. The key of each group is the id of its EARLIEST member in input order,
- * which is what a thread id is built from. Callers pass the inbox first and each mailbox in
- * ascending uid, so a thread keeps its id through every later sync until an older message is
- * backfilled, and a route that names it keeps resolving.
+ * which is what a thread id is built from. Callers pass messages oldest first, so a thread keeps
+ * its id through every later sync and every move until an older message is backfilled, and a
+ * route that names it keeps resolving.
  */
 export const groupIntoThreads = (
   messages: readonly ThreadableMessage[],
@@ -93,9 +99,12 @@ export const groupIntoThreads = (
   };
 
   for (const message of messages) {
+    // A THRID is an EXTRA edge, never a replacement for the header edges: it links what Gmail
+    // considers one conversation inside one account, and the headers are what link that
+    // conversation to the copies other accounts hold. Taking the THRID and skipping the headers
+    // (which this did) meant two accounts in one conversation never joined.
     if (message.gmailThreadId !== null) {
-      link(`gmail:${message.gmailThreadId}`, message.id);
-      continue;
+      link(`gmail:${message.gmailAccount ?? ''}:${message.gmailThreadId}`, message.id);
     }
     const subject = baseSubject(message.subject);
     for (const id of msgIdsOf(message)) link(`${subject}\0${id}`, message.id);

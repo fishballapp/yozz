@@ -196,24 +196,84 @@ export const buildStoreFlagsCommand = (
   };
 };
 
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const two = (value: number) => String(value).padStart(2, '0');
+
+/**
+ * RFC 9051 date-time, quoted: `"28-Aug-2026 09:48:00 +0800"`. The day is space-padded rather
+ * than zero-padded, which the grammar requires and several servers enforce. Local zone, so it
+ * says when the message reached this client.
+ */
+export const formatImapDateTime = (date: Date): string => {
+  const offset = -date.getTimezoneOffset();
+  const sign = offset < 0 ? '-' : '+';
+  const zone = `${sign}${two(Math.floor(Math.abs(offset) / 60))}${two(Math.abs(offset) % 60)}`;
+  const day = String(date.getDate()).padStart(2, ' ');
+  return `"${day}-${MONTHS[date.getMonth()]}-${date.getFullYear()} ${two(date.getHours())}:${two(date.getMinutes())}:${two(date.getSeconds())} ${zone}"`;
+};
+
 /** APPEND with the message as a literal; flags are IMAP atoms such as `\\Seen`, sent unquoted. */
 export const buildAppendCommand = (
   tag: string,
   mailbox: string,
   flags: readonly string[],
   message: Uint8Array,
+  internalDate?: Date,
 ): OutgoingCommand => {
   const mboxUtf7 = encodeModifiedUtf7(mailbox);
+  const stamp = internalDate === undefined ? '' : `${formatImapDateTime(internalDate)} `;
   return {
     lines: [
       {
-        text: stringToBytes(`${tag} APPEND ${quoteString(mboxUtf7)} (${flags.join(' ')}) `),
+        text: stringToBytes(`${tag} APPEND ${quoteString(mboxUtf7)} (${flags.join(' ')}) ${stamp}`),
         literal: message,
       },
       { text: stringToBytes('\r\n') },
     ],
   };
 };
+
+/** EXPUNGE: erases every `\\Deleted` message in the selected mailbox. */
+export const buildExpungeCommand = (tag: string): OutgoingCommand => ({
+  lines: [{ text: stringToBytes(`${tag} EXPUNGE\r\n`) }],
+});
+
+/**
+ * RFC 4315 UID EXPUNGE: erases only the named `\\Deleted` messages. Plain EXPUNGE erases every
+ * `\\Deleted` message in the mailbox, including ones another client flagged and has not yet
+ * erased itself — so replacing a draft with it would quietly take somebody else's deletions with
+ * it. Needs UIDPLUS; the client refuses without it rather than falling back.
+ */
+export const buildUidExpungeCommand = (tag: string, uidSet: string): OutgoingCommand => ({
+  lines: [{ text: stringToBytes(`${tag} UID EXPUNGE ${uidSet}\r\n`) }],
+});
+
+/**
+ * UID SEARCH for one header's exact value, e.g. `HEADER "Message-ID" "<id>"`.
+ *
+ * What makes an APPEND retry safe: after a lost response the client asks whether the copy it was
+ * about to write is already there, instead of writing a second one.
+ *
+ * **Ask it about a header IMAP names.** A private `X-` header looks like the better question — a
+ * Message-ID can be rewritten by a provider, a subject match is a guess — but a server need only
+ * index the headers the protocol defines, and one that does not index yours answers the EMPTY LIST
+ * rather than an error. That is indistinguishable from "no copy is there", so the caller writes
+ * the second copy, or decides it has nothing to erase. Measured on Forward Email:
+ * docs/knowledge/forwardemail-api.md.
+ */
+export const buildUidSearchHeaderCommand = (
+  tag: string,
+  header: string,
+  value: string,
+): OutgoingCommand => ({
+  lines: [
+    {
+      text: stringToBytes(
+        `${tag} UID SEARCH HEADER ${quoteString(header)} ${quoteString(value)}\r\n`,
+      ),
+    },
+  ],
+});
 
 /** RFC 6851 UID MOVE — relocates messages into another mailbox in one round trip. */
 export const buildMoveCommand = (

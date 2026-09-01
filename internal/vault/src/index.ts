@@ -2,8 +2,8 @@
  * `@yozz.app/vault` — the browser-side key schedule and record cryptography for the
  * zero-access vault. Every primitive is WebCrypto.
  *
- * The shape it serves: one password and one 128-bit device secret derive
- * `authValue` for the server and `encKey` for the browser. `encKey` wraps a
+ * The shape it serves: one password derives `authValue` for the server and
+ * `encKey` for the browser. `encKey` wraps a
  * DEK, and the DEK is root key material with two labelled HKDF children —
  * `recordKey`, which encrypts one record per item, and `indexKey`, which blind-
  * indexes `[type, naturalKey]` into that record's id. **The children hang off
@@ -35,7 +35,6 @@ export { VaultError, type VaultFailureCode } from './bytes.ts';
 export { freshVault, inMemoryRevisionMarks, type RevisionMarks } from './fresh.ts';
 export {
   type AccountKeys,
-  createDeviceSecret,
   deriveAccountKeys,
   derivePasskeyEncKey,
   foldEmail,

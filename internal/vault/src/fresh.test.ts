@@ -6,7 +6,6 @@ import { createVault, type Vault } from './vault.ts';
 const ACCOUNT = {
   email: 'jason@example.com',
   password: 'correct horse battery staple',
-  deviceSecret: 'AAAAAAAAAAAAAAAAAAAAAA',
 };
 
 const NATURAL_KEY = 'jason@posteo.de';

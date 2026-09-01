@@ -1,8 +1,9 @@
-import { Link, useNavigate, useParams } from '@tanstack/react-router';
+import { Link, useNavigate, useParams, useSearch } from '@tanstack/react-router';
 import { useEffect } from 'react';
 import { ThreadReader } from '../components/ThreadReader';
 import { keepCompose } from '../lib/compose';
-import { useMail } from '../state/mail';
+import { threadByHandle } from '../lib/thread';
+import { useMail, visibleThreads } from '../state/mail';
 
 /**
  * The reader pane, filled.
@@ -14,14 +15,12 @@ import { useMail } from '../state/mail';
 export const Thread = () => {
   const { mailbox, _splat: threadId } = useParams({ from: '/_app/m/$mailbox/t/$' });
   const navigate = useNavigate({ from: '/m/$mailbox/t/$' });
+  const { q } = useSearch({ from: '/_app/m/$mailbox' });
   const { threads, markRead, loadBody } = useMail();
   // A thread is named by its root message, and the root can change under a URL — paging in an
   // older message, or a move that relocates it — so an id that no longer names a thread is tried
   // as a message of one before it is called missing.
-  const thread =
-    threads.find(candidate => candidate.id === threadId) ??
-    threads.find(candidate => candidate.messages.some(message => message.id === threadId)) ??
-    null;
+  const thread = threadByHandle(threads, threadId ?? '');
 
   // Opening a message marks it read and fetches its body — including on a direct link, which is
   // why both are effects rather than click handlers. A failed body is retried from the reader.
@@ -37,9 +36,29 @@ export const Thread = () => {
 
   if (thread === null) return <ThreadMissing />;
 
+  // Filing a thread opens the one after it in the list on screen (the one before it at the end,
+  // the mailbox when it was alone). Computed from the list as it is NOW, before the move has
+  // applied: once it has, the thread is no longer in this list to measure from.
+  const advance = () => {
+    const list = visibleThreads(threads, mailbox, q);
+    const index = list.findIndex(candidate => candidate.id === thread.id);
+    const next = list[index + 1] ?? list[index - 1];
+    if (next === undefined || index === -1) {
+      void navigate({ to: '/m/$mailbox', params: { mailbox }, search: previous => previous });
+      return;
+    }
+    void navigate({
+      to: '/m/$mailbox/t/$',
+      params: { mailbox, _splat: next.id },
+      search: previous => previous,
+      replace: true,
+    });
+  };
+
   return (
     <ThreadReader
       thread={thread}
+      onTriaged={advance}
       // Closing keeps the search: you narrowed the list to find this, and you are probably about to
       // open the next one from the same narrowed list.
       onClose={() =>

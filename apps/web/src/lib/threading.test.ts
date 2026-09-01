@@ -50,16 +50,41 @@ describe('groupIntoThreads', () => {
     expect(groups.size).toBe(2);
   });
 
-  it('trusts Gmail ids where they exist, whatever the headers say', () => {
+  it('takes a Gmail id as an extra edge, never instead of the headers', () => {
     const groups = groupIntoThreads([
       msg(1, { gmailThreadId: '7' }),
+      // Nothing in the headers joins this one; Gmail's own answer does.
       msg(2, { gmailThreadId: '7', subject: 'Unrelated', inReplyTo: null }),
+      // A different THRID, but the headers say it answers m1 — and the headers are what let a
+      // conversation reach copies another account holds, so they must still be read.
       msg(3, { gmailThreadId: '8', subject: 'Re: Lunch', inReplyTo: '<m1@x>' }),
     ]);
-    expect([...groups.entries()]).toEqual([
-      ['m1', ['m1', 'm2']],
-      ['m3', ['m3']],
+    expect([...groups.entries()]).toEqual([['m1', ['m1', 'm2', 'm3']]]);
+  });
+
+  it('does not merge two accounts that happen to share a thread id', () => {
+    // A THRID is Gmail's number inside ONE mailbox, so the same one means nothing across two.
+    const groups = groupIntoThreads([
+      msg(1, { gmailThreadId: '7', gmailAccount: 'a@x' }),
+      msg(2, { gmailThreadId: '7', gmailAccount: 'b@x', subject: 'Unrelated', inReplyTo: null }),
     ]);
+    expect([...groups.entries()]).toEqual([
+      ['m1', ['m1']],
+      ['m2', ['m2']],
+    ]);
+  });
+
+  it('joins one conversation across two accounts through the headers', () => {
+    const groups = groupIntoThreads([
+      msg(1, { gmailThreadId: '7', gmailAccount: 'a@x' }),
+      msg(2, {
+        gmailThreadId: '9',
+        gmailAccount: 'b@x',
+        subject: 'Re: Lunch',
+        inReplyTo: '<m1@x>',
+      }),
+    ]);
+    expect([...groups.entries()]).toEqual([['m1', ['m1', 'm2']]]);
   });
 
   it('joins through any parent when In-Reply-To carries several ids with CFWS', () => {

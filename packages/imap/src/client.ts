@@ -17,6 +17,7 @@ import {
   buildAuthenticatePlainSaslIrCommand,
   buildCapabilityCommand,
   buildCreateCommand,
+  buildExpungeCommand,
   buildFetchFlagsCommand,
   buildFetchRawCommand,
   buildFetchSummariesCommand,
@@ -29,6 +30,8 @@ import {
   buildNoopCommand,
   buildSelectCommand,
   buildStoreFlagsCommand,
+  buildUidExpungeCommand,
+  buildUidSearchHeaderCommand,
   type OutgoingCommand,
 } from './commands.ts';
 import type { ImapAddress, ImapEnvelope } from './envelope.ts';
@@ -133,12 +136,37 @@ export type ImapClient = {
     mode: 'add' | 'remove' | 'set',
     flags: readonly string[],
   ) => Promise<ImapResult<void>>;
-  /** APPEND a whole RFC 5322 message to a mailbox, e.g. a Sent copy after SMTP accepted it. */
+  /**
+   * APPEND a whole RFC 5322 message to a mailbox, e.g. a Sent copy after SMTP accepted it.
+   * Without `internalDate` the server stamps the message with its own clock.
+   *
+   * Resolves with the `APPENDUID` the server issued (RFC 4315), or `null` where it issued none —
+   * a server without UIDPLUS. That locator is how a caller addresses what it just wrote without
+   * searching for it, which matters for a draft: the alternative is finding it by Message-ID, and
+   * a retry after a lost response would then be indistinguishable from a duplicate.
+   */
   readonly append: (
     mailbox: string,
     message: Uint8Array,
     flags: readonly string[],
-  ) => Promise<ImapResult<void>>;
+    internalDate?: Date,
+  ) => Promise<ImapResult<AppendUid | null>>;
+  /** EXPUNGE: erases every `\\Deleted` message in the selected mailbox. */
+  readonly expunge: () => Promise<ImapResult<void>>;
+  /**
+   * RFC 4315 UID EXPUNGE: erases only these `\\Deleted` messages, leaving anything another
+   * client flagged alone. Refuses without UIDPLUS rather than falling back to plain EXPUNGE,
+   * which would erase more than was asked.
+   */
+  readonly uidExpunge: (uidSet: string) => Promise<ImapResult<void>>;
+  /**
+   * UID SEARCH over one header's exact value in the selected mailbox, newest-last uid order as
+   * the server gives it. An empty array means the mailbox does not hold it.
+   */
+  readonly uidSearchHeader: (
+    header: string,
+    value: string,
+  ) => Promise<ImapResult<readonly number[]>>;
   /** RFC 6851 UID MOVE. Refuses without the MOVE capability (no COPY+EXPUNGE fallback). */
   readonly move: (uidSet: string, mailbox: string) => Promise<ImapResult<void>>;
   /** CREATE a mailbox. */
@@ -152,6 +180,22 @@ export type ImapClient = {
    */
   readonly idle: () => ImapIdle;
   readonly logout: () => Promise<ImapResult<void>>;
+};
+
+/** Where an APPEND landed: RFC 4315's `[APPENDUID <uidvalidity> <uid>]`. */
+export type AppendUid = { readonly uidValidity: number; readonly uid: number };
+
+/**
+ * The `APPENDUID` of a tagged OK, when the server issued one. It arrives as an unrecognised
+ * response code, which is exactly what `other` is for — no parser change, and a server without
+ * UIDPLUS simply has nothing here.
+ */
+const appendUidOf = (tagged: ImapTagged): AppendUid | null => {
+  const code = tagged.code;
+  if (code?.kind !== 'other' || code.code !== 'APPENDUID') return null;
+  const [uidValidity, uid] = code.args.map(Number);
+  if (uidValidity === undefined || uid === undefined) return null;
+  return Number.isInteger(uidValidity) && Number.isInteger(uid) ? { uidValidity, uid } : null;
 };
 
 /**
@@ -741,11 +785,45 @@ export const createImapClient = (
         return { ok: true, value: undefined };
       }),
 
-    append: (mailbox, message, flags) =>
+    append: (mailbox, message, flags, internalDate) =>
       enqueueCommand(async () => {
-        const res = await executeCommand(tag => buildAppendCommand(tag, mailbox, flags, message));
+        const res = await executeCommand(tag =>
+          buildAppendCommand(tag, mailbox, flags, message, internalDate),
+        );
+        if (!res.ok) return res;
+        return { ok: true, value: appendUidOf(res.value.tagged) };
+      }),
+
+    expunge: () =>
+      enqueueCommand(async () => {
+        const res = await executeCommand(buildExpungeCommand);
         if (!res.ok) return res;
         return { ok: true, value: undefined };
+      }),
+
+    uidExpunge: uidSet =>
+      enqueueCommand(async () => {
+        const greetRes = await greetingPromise;
+        if (!greetRes.ok) return greetRes;
+        if (!knownCapabilities.some(c => c.toUpperCase() === 'UIDPLUS')) {
+          return {
+            ok: false,
+            reason: { kind: 'no', text: 'UID EXPUNGE needs UIDPLUS, which this server lacks' },
+          };
+        }
+        const res = await executeCommand(tag => buildUidExpungeCommand(tag, uidSet));
+        if (!res.ok) return res;
+        return { ok: true, value: undefined };
+      }),
+
+    uidSearchHeader: (header, value) =>
+      enqueueCommand(async () => {
+        const res = await executeCommand(tag => buildUidSearchHeaderCommand(tag, header, value));
+        if (!res.ok) return res;
+        const found = res.value.untagged.flatMap(item =>
+          item.kind === 'search' ? [...item.uids] : [],
+        );
+        return { ok: true, value: found };
       }),
 
     move: (uidSet, mailbox) =>

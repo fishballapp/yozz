@@ -1,7 +1,7 @@
 {
   "name": "@yozz.app/imap",
-  "version": "0.1.2",
-  "description": "Transport-agnostic IMAP4rev2/rev1 client core: literals, total parsing, RFC 2047, SASL PLAIN/LOGIN, IDLE, UID MOVE.",
+  "version": "0.1.3",
+  "description": "Transport-agnostic IMAP4rev2/rev1 client core: literals, total parsing, RFC 2047, SASL PLAIN/LOGIN, IDLE, UID MOVE, APPEND with APPENDUID, UID EXPUNGE.",
   "license": "MIT",
   "homepage": "https://github.com/fishballapp/yozz",
   "repository": {
@@ -37,10 +37,12 @@
     "build": "tsdown src/index.ts --format esm --dts",
     "prepack": "pnpm build",
     "test": "vitest run",
-    "live": "node harness/live.ts"
+    "live": "node harness/live.ts",
+    "seed": "node harness/seed-inbox.ts"
   },
   "devDependencies": {
     "@types/node": "catalog:",
+    "@yozz.app/smtp": "workspace:*",
     "@yozz.app/tls": "workspace:*",
     "@yozz.app/x509": "workspace:*",
     "tsdown": "catalog:"

@@ -36,6 +36,15 @@ describe('draft store', () => {
     expect(loadDraft('u1', 'reply:me@x/inbox/1', storage)).toEqual({ ...draft, attachments: [] });
   });
 
+  it('restores which record the draft already is, so a reload cannot mint a second one', () => {
+    const storage = memoryStorage();
+    const saved: ComposeDraft = { ...draft, draftKey: 'k-1', draftId: 'k-1@3' };
+    saveDraft('u1', 'new', saved, storage);
+    // Without these two the autosave reads a draft with no id, takes its create branch, and files
+    // the same message again — once per reload, for as long as you keep reloading.
+    expect(loadDraft('u1', 'new', storage)).toMatchObject({ draftKey: 'k-1', draftId: 'k-1@3' });
+  });
+
   it('drops a record that does not parse instead of throwing', () => {
     const storage = memoryStorage();
     storage.setItem('yozz:draft:u1', '{not json');

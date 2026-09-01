@@ -7,7 +7,13 @@ describe('D1 migrations and schema invariants', () => {
     await applyMigrations(env.DB);
   });
 
-  it('vault_record has the EXACT five columns specified (no revision, no device_id)', async () => {
+  /**
+   * `revision` joined the row deliberately in 0005, to compare-and-swap on. It is a nullable
+   * PRECONDITION, never the authority — the revision that counts stays sealed in the ciphertext,
+   * and the client refuses a row where the two disagree. `device_id` remains excluded: nothing
+   * the store keeps may identify a device.
+   */
+  it('vault_record has exactly the specified columns: revision, and no device id', async () => {
     const info = await env.DB.prepare('PRAGMA table_info(vault_record)').all<{
       cid: number;
       name: string;
@@ -18,9 +24,10 @@ describe('D1 migrations and schema invariants', () => {
     }>();
 
     const columns = info.results.map((col: { name: string }) => col.name);
-    expect(columns).toEqual(['user_id', 'id', 'type', 'ciphertext', 'updated_at']);
+    expect(columns).toEqual(['user_id', 'id', 'type', 'ciphertext', 'updated_at', 'revision']);
 
-    expect(columns).not.toContain('revision');
+    // Nullable, because every row written before 0005 has nothing to say about its revision.
+    expect(info.results.find(col => col.name === 'revision')?.notnull).toBe(0);
     expect(columns).not.toContain('device_id');
     expect(columns).not.toContain('deviceId');
   });

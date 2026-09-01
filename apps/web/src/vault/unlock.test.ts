@@ -3,7 +3,6 @@ import type { UnlockStatusResponse } from '@yozz.app/vault-contract';
 import { IDBFactory } from 'fake-indexeddb';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { VaultApiClient } from './api.ts';
-import { DeviceSecretMissingError } from './device-secret.ts';
 import {
   addPasskeyToSession,
   createPasskeyVault,
@@ -37,28 +36,6 @@ vi.mock('./passkey-prf.ts', async importOriginal => {
     checkPasskeyPrfCapability: vi.fn().mockResolvedValue('supported'),
   };
 });
-
-class MockStorage implements Storage {
-  private store = new Map<string, string>();
-  get length() {
-    return this.store.size;
-  }
-  clear() {
-    this.store.clear();
-  }
-  getItem(key: string) {
-    return this.store.get(key) ?? null;
-  }
-  key(index: number) {
-    return Array.from(this.store.keys())[index] ?? null;
-  }
-  removeItem(key: string) {
-    this.store.delete(key);
-  }
-  setItem(key: string, value: string) {
-    this.store.set(key, value);
-  }
-}
 
 const createMockVaultApi = (): VaultApiClient => {
   let mode: 'password' | 'passkey' | null = null;
@@ -139,12 +116,10 @@ const mockPrfAssertion = (expectedCredentialId: string, prfBytes: Uint8Array) =>
 
 describe('Vault unlock and session orchestration', () => {
   let idbFactory: IDBFactory;
-  let storage: MockStorage;
   let api: VaultApiClient;
 
   beforeEach(() => {
     idbFactory = new IDBFactory();
-    storage = new MockStorage();
     api = createMockVaultApi();
     vi.clearAllMocks();
 
@@ -156,13 +131,12 @@ describe('Vault unlock and session orchestration', () => {
     mocks.signInEmail.mockResolvedValue({ data: { user: { id: 'user-123' } } });
   });
 
-  it('creates and unlocks password vault, saving device secret to localStorage', async () => {
+  it('creates and unlocks a password vault from the password alone', async () => {
     const session = await createPasswordVault({
       email: 'alice@example.com',
-      password: 'password123',
+      password: 'password123456',
       api,
       idbFactory,
-      storage,
     });
 
     expect(session.userId).toBe('user-123');
@@ -183,15 +157,14 @@ describe('Vault unlock and session orchestration', () => {
     expect(sent?.wrappedDek).toBe(session.wrappedDek);
     expect(sent?.authValue).toMatch(/^[A-Za-z0-9+/]{43}=$/);
     // The password itself never leaves the browser — only its derived authValue.
-    expect(sent?.authValue).not.toBe('password123');
+    expect(sent?.authValue).not.toBe('password123456');
 
     // Logging in on the same device with existing storage succeeds
     const loginSession = await loginWithPassword({
       email: 'alice@example.com',
-      password: 'password123',
+      password: 'password123456',
       api,
       idbFactory,
-      storage,
     });
 
     expect(loginSession.userId).toBe('user-123');
@@ -199,20 +172,6 @@ describe('Vault unlock and session orchestration', () => {
 
     session.store.close();
     loginSession.store.close();
-  });
-
-  it('throws DeviceSecretMissingError when password login is attempted without local secret', async () => {
-    const emptyStorage = new MockStorage();
-
-    await expect(
-      loginWithPassword({
-        email: 'alice@example.com',
-        password: 'password123',
-        api,
-        idbFactory,
-        storage: emptyStorage,
-      }),
-    ).rejects.toThrow(DeviceSecretMissingError);
   });
 
   it('creates and unlocks passkey vault with PRF extension', async () => {
@@ -300,10 +259,9 @@ describe('Vault unlock and session orchestration', () => {
     // DEK from a rewrap — both are opaque wrapped bytes — so the guard is here.
     const pw = await createPasswordVault({
       email: 'alice@example.com',
-      password: 'password123',
+      password: 'password123456',
       api,
       idbFactory,
-      storage,
     });
     pw.store.close();
 
@@ -329,10 +287,9 @@ describe('Vault unlock and session orchestration', () => {
     // could not unlock.
     const pw = await createPasswordVault({
       email: 'alice@example.com',
-      password: 'password123',
+      password: 'password123456',
       api,
       idbFactory,
-      storage,
     });
 
     await expect(addPasskeyToSession({ currentSession: pw, api })).rejects.toThrow(
@@ -356,10 +313,9 @@ describe('Vault unlock and session orchestration', () => {
     // Start in password mode
     const pwSession = await createPasswordVault({
       email: 'alice@example.com',
-      password: 'password123',
+      password: 'password123456',
       api,
       idbFactory,
-      storage,
     });
 
     // Write a secret record
@@ -381,9 +337,8 @@ describe('Vault unlock and session orchestration', () => {
     // Switch back to password mode
     const pwSession2 = await switchModeToPassword({
       currentSession: pkSession,
-      password: 'newpassword456',
+      password: 'newpassword456789',
       api,
-      storage,
     });
 
     expect(pwSession2.mode).toBe('password');
@@ -394,7 +349,7 @@ describe('Vault unlock and session orchestration', () => {
 });
 
 describe('createPasswordVault with a short password', () => {
-  it('refuses before touching the device secret, the server or the key schedule', async () => {
+  it('refuses before touching the server or the key schedule', async () => {
     const api = createMockVaultApi();
     await expect(
       createPasswordVault({
@@ -402,9 +357,8 @@ describe('createPasswordVault with a short password', () => {
         password: 'short',
         api,
         idbFactory: new IDBFactory(),
-        storage: new MockStorage(),
       }),
-    ).rejects.toThrow(/at least 8 characters/);
+    ).rejects.toThrow(/at least 12 characters/);
     expect(api.getUnlockStatus).not.toHaveBeenCalled();
     expect(api.finalizePasswordUnlock).not.toHaveBeenCalled();
   });
@@ -413,7 +367,6 @@ describe('createPasswordVault with a short password', () => {
 describe('createPasswordVault over an enrolled account', () => {
   it('refuses before deriving anything, for the same reason the passkey path does', async () => {
     const api = createMockVaultApi();
-    const storage = new MockStorage();
     const idbFactory = new IDBFactory();
     mocks.getSession.mockResolvedValue({
       data: { user: { id: 'user-123', email: 'alice@example.com' } },
@@ -421,10 +374,9 @@ describe('createPasswordVault over an enrolled account', () => {
 
     const first = await createPasswordVault({
       email: 'alice@example.com',
-      password: 'password123',
+      password: 'password123456',
       api,
       idbFactory,
-      storage,
     });
     first.store.close();
 
@@ -434,7 +386,6 @@ describe('createPasswordVault over an enrolled account', () => {
         password: 'another-password',
         api,
         idbFactory,
-        storage,
       }),
     ).rejects.toThrow(/already has a password vault/);
     expect(api.finalizePasswordUnlock).toHaveBeenCalledTimes(1);

@@ -9,6 +9,7 @@
  *
  *   pnpm -F @yozz.app/web vault:drive
  *   YOZZ_API=http://localhost:8792 pnpm -F @yozz.app/web vault:drive   # wrangler landed on another port
+ *   YOZZ_WEB=http://localhost:5178 pnpm -F @yozz.app/web vault:drive   # vite landed on another port
  */
 import { execFileSync } from 'node:child_process';
 import { chromium, type Page } from '@playwright/test';
@@ -25,8 +26,8 @@ const UNLOCK = '/src/vault/unlock.ts' as string;
 const AUTH = '/src/vault/auth-client.ts' as string;
 const KEYS = '/src/vault/unlock-keys.ts' as string;
 
-const WEB = 'http://localhost:5177';
-const API = process.env.YOZZ_API ?? 'http://localhost:8787';
+const WEB = process.env.YOZZ_WEB ?? 'http://localhost:5177';
+const API = process.env.YOZZ_API ?? 'http://localhost:8177';
 
 const fail = (message: string): never => {
   console.error(`✗ ${message}`);
@@ -194,6 +195,27 @@ const passwordMode = async (page: Page) => {
   );
   assertEqual('password: wrong password refused', wrong, 'refused');
 
+  /**
+   * The point of the mode: a browser that has never seen this account, with its own storage,
+   * signs in and reads the record from the address and passphrase alone. Nothing is carried
+   * over from the enrolled page, which is what the device secret used to require.
+   */
+  const stranger = await openPage();
+  await stranger.goto(`${WEB}/`);
+  const fromStranger = await stranger.evaluate(
+    async ({ e, record, UNLOCK }) => {
+      const u = (await import(UNLOCK)) as UnlockModule;
+      const s = await u.loginWithPassword({ email: e, password: 'correct horse' });
+      return await s.store.get(record.type, record.naturalKey);
+    },
+    { e: email, record: RECORD, UNLOCK },
+  );
+  await stranger.close();
+  assertEqual('password: a browser with no local state logs in and reads', fromStranger, {
+    revision: 1,
+    plaintext: RECORD.plaintext,
+  });
+
   const userId = await page.evaluate(
     async ({ e, UNLOCK, KEYS }) => {
       const u = (await import(UNLOCK)) as UnlockModule;
@@ -271,13 +293,20 @@ const passkeyMode = async (page: Page) => {
 };
 
 const browser = await chromium.launch();
+
+/** `newPage` gives each call its own context, so a page opened here shares no storage with any other. */
+const openPage = async (): Promise<Page> => {
+  const page = await browser.newPage();
+  page.on('pageerror', err => fail(`page error: ${err.message}`));
+  await page.addInitScript(api => {
+    (window as { __YOZZ_API_URL__?: string }).__YOZZ_API_URL__ = api;
+  }, API);
+  return page;
+};
+
 try {
   for (const mode of [passwordMode, passkeyMode]) {
-    const page = await browser.newPage();
-    page.on('pageerror', err => fail(`page error: ${err.message}`));
-    await page.addInitScript(api => {
-      (window as { __YOZZ_API_URL__?: string }).__YOZZ_API_URL__ = api;
-    }, API);
+    const page = await openPage();
     await mode(page);
     await page.close();
   }

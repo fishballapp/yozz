@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { AuthColumn } from '../components/AuthColumn';
 import { Button } from '../components/ui/Button';
 import { FieldRow, Input } from '../components/ui/Field';
+import { agentLabel } from '../lib/agent-label';
 import { requestSignupLink } from '../vault/auth-client.ts';
 import { vaultErrorMessage } from '../vault/screen-policy.ts';
 
@@ -86,6 +87,7 @@ export const Welcome = () => {
         >
           <Input
             id="welcome-email"
+            aria-label={agentLabel('Email address', email)}
             type="email"
             required
             autoFocus

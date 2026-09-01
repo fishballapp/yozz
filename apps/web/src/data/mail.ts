@@ -97,7 +97,7 @@ export const DEMO_ADDRESSES: readonly AddressRecord[] = [
 export const THREADS: readonly Thread[] = [
   {
     id: 't-deploy',
-    accountId: 'jason@northlane.example',
+    accounts: ['jason@northlane.example'],
     subject: 'Deploy failed on main',
     isUnread: true,
     isReplied: false,
@@ -123,7 +123,7 @@ export const THREADS: readonly Thread[] = [
   },
   {
     id: 't-stripe',
-    accountId: 'jason@northlane.example',
+    accounts: ['jason@northlane.example'],
     subject: 'Your receipt from Acme',
     isUnread: false,
     isReplied: false,
@@ -146,7 +146,7 @@ export const THREADS: readonly Thread[] = [
   },
   {
     id: 't-dune',
-    accountId: 'jason@jyu.example',
+    accounts: ['jason@jyu.example'],
     subject: 'Last 24 hours — up to 30% off sleep essentials',
     isUnread: true,
     isReplied: false,
@@ -189,7 +189,7 @@ export const THREADS: readonly Thread[] = [
   },
   {
     id: 't-mum',
-    accountId: 'jason@jyu.example',
+    accounts: ['jason@jyu.example'],
     subject: 'Sunday lunch?',
     isUnread: true,
     isReplied: false,
@@ -210,7 +210,7 @@ export const THREADS: readonly Thread[] = [
   },
   {
     id: 't-linear',
-    accountId: 'jason@northlane.example',
+    accounts: ['jason@northlane.example'],
     subject: '3 issues assigned to you',
     isUnread: false,
     isReplied: false,
@@ -232,7 +232,7 @@ export const THREADS: readonly Thread[] = [
   },
   {
     id: 't-github',
-    accountId: 'jason@northlane.example',
+    accounts: ['jason@northlane.example'],
     subject: 'PR #204 ready for review',
     isUnread: false,
     isReplied: true,
@@ -263,7 +263,7 @@ export const THREADS: readonly Thread[] = [
   },
   {
     id: 't-notion',
-    accountId: 'jason@jyu.example',
+    accounts: ['jason@jyu.example'],
     subject: 'Weekly digest',
     isUnread: false,
     isReplied: false,
@@ -284,7 +284,7 @@ export const THREADS: readonly Thread[] = [
   },
   {
     id: 't-vercel',
-    accountId: 'jason@northlane.example',
+    accounts: ['jason@northlane.example'],
     subject: 'Build succeeded for yozz-web',
     isUnread: false,
     isReplied: false,
@@ -306,7 +306,7 @@ export const THREADS: readonly Thread[] = [
   },
   {
     id: 't-kate',
-    accountId: 'jason@northlane.example',
+    accounts: ['jason@northlane.example'],
     subject: 'Contract for review',
     isUnread: true,
     isReplied: false,
@@ -332,7 +332,7 @@ export const THREADS: readonly Thread[] = [
   },
   {
     id: 't-fastmail',
-    accountId: 'jason@jyu.example',
+    accounts: ['jason@jyu.example'],
     subject: 'Password changed',
     isUnread: false,
     isReplied: false,
@@ -353,7 +353,7 @@ export const THREADS: readonly Thread[] = [
   },
   {
     id: 't-hn',
-    accountId: 'jason@jyu.example',
+    accounts: ['jason@jyu.example'],
     subject: 'Top stories today',
     isUnread: true,
     isReplied: false,
@@ -374,7 +374,7 @@ export const THREADS: readonly Thread[] = [
   },
   {
     id: 't-dad',
-    accountId: 'jason@jyu.example',
+    accounts: ['jason@jyu.example'],
     subject: 'Photos from the weekend',
     isUnread: false,
     isReplied: true,
@@ -408,7 +408,7 @@ export const THREADS: readonly Thread[] = [
   },
   {
     id: 't-cloudflare',
-    accountId: 'jason@northlane.example',
+    accounts: ['jason@northlane.example'],
     subject: 'Zone yozz.app is active',
     isUnread: false,
     isReplied: false,
@@ -430,7 +430,7 @@ export const THREADS: readonly Thread[] = [
   },
   {
     id: 't-support-refund',
-    accountId: 'hello@stillwater.example',
+    accounts: ['hello@stillwater.example'],
     subject: 'Refund request — bought twice by mistake',
     isUnread: true,
     isReplied: false,
@@ -451,7 +451,7 @@ export const THREADS: readonly Thread[] = [
   },
   {
     id: 't-appstore',
-    accountId: 'hello@stillwater.example',
+    accounts: ['hello@stillwater.example'],
     subject: 'Your app status changed to Ready for Sale',
     isUnread: false,
     isReplied: false,
@@ -472,7 +472,7 @@ export const THREADS: readonly Thread[] = [
   },
   {
     id: 't-feedback',
-    accountId: 'hello@stillwater.example',
+    accounts: ['hello@stillwater.example'],
     subject: 'Feature request: recurring shuffles',
     isUnread: false,
     isReplied: true,
@@ -504,7 +504,7 @@ export const THREADS: readonly Thread[] = [
   },
   {
     id: 't-domain',
-    accountId: 'jason@jyu.example',
+    accounts: ['jason@jyu.example'],
     subject: 'Renewal reminder for jyu.example',
     isUnread: false,
     isReplied: false,

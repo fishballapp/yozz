@@ -48,6 +48,159 @@ describe('Worker records CRUD and isolation routes', () => {
     await applyMigrations(env.DB);
   });
 
+  /**
+   * The precondition is what stops two devices editing one draft from silently overwriting each
+   * other: a refused write must change nothing at all, which is why every case asserts the stored
+   * ciphertext afterwards rather than only the status code.
+   */
+  describe('compare-and-swap', () => {
+    const put = async (
+      app: ReturnType<typeof createApp>,
+      headers: Record<string, string>,
+      body: Record<string, unknown>,
+    ) =>
+      app.request(
+        'http://localhost/api/v1/vault/records/draft/blind-draft-1',
+        { method: 'PUT', headers, body: JSON.stringify(body) },
+        env,
+      );
+
+    const storedCiphertext = async (
+      app: ReturnType<typeof createApp>,
+      headers: Record<string, string>,
+    ) => {
+      const res = await app.request(
+        'http://localhost/api/v1/vault/records/draft/blind-draft-1',
+        { method: 'GET', headers },
+        env,
+      );
+      if (res.status !== 200) return null;
+      return await res.json<{ ciphertext: string; revision: number | null }>();
+    };
+
+    it('creates only when there is no row, and refuses the second create', async () => {
+      const user = await loginWithMagicLink('cas1@example.com', 'CAS');
+      const app = createApp();
+
+      const first = await put(app, user.headers, {
+        ciphertext: 'Zmlyc3Q=',
+        revision: 1,
+        precondition: { expect: 'absent' },
+      });
+      expect(first.status).toBe(200);
+      expect(await storedCiphertext(app, user.headers)).toMatchObject({
+        ciphertext: 'Zmlyc3Q=',
+        revision: 1,
+      });
+
+      const second = await put(app, user.headers, {
+        ciphertext: 'c2Vjb25k',
+        revision: 1,
+        precondition: { expect: 'absent' },
+      });
+      expect(second.status).toBe(409);
+      // The loser wrote nothing: the first writer's content is intact.
+      expect(await storedCiphertext(app, user.headers)).toMatchObject({ ciphertext: 'Zmlyc3Q=' });
+    });
+
+    it('updates from the exact revision and refuses a stale one', async () => {
+      const user = await loginWithMagicLink('cas2@example.com', 'CAS');
+      const app = createApp();
+      await put(app, user.headers, {
+        ciphertext: 'Zmlyc3Q=',
+        revision: 1,
+        precondition: { expect: 'absent' },
+      });
+
+      const stale = await put(app, user.headers, {
+        ciphertext: 'c3RhbGU=',
+        revision: 2,
+        precondition: { expect: 'revision', revision: 7 },
+      });
+      expect(stale.status).toBe(409);
+      expect(await storedCiphertext(app, user.headers)).toMatchObject({ ciphertext: 'Zmlyc3Q=' });
+
+      const fresh = await put(app, user.headers, {
+        ciphertext: 'ZnJlc2g=',
+        revision: 2,
+        precondition: { expect: 'revision', revision: 1 },
+      });
+      expect(fresh.status).toBe(200);
+      expect(await storedCiphertext(app, user.headers)).toMatchObject({
+        ciphertext: 'ZnJlc2g=',
+        revision: 2,
+      });
+    });
+
+    it('fills a pre-CAS row on `revision: null`, and refuses that claim once it is set', async () => {
+      const user = await loginWithMagicLink('cas3@example.com', 'CAS');
+      const app = createApp();
+      // A row from before the column existed: written without a precondition, revision NULL.
+      await env.DB.prepare(
+        'INSERT INTO vault_record (user_id, id, type, ciphertext, updated_at) VALUES (?, ?, ?, ?, ?)',
+      )
+        .bind(user.userId, 'blind-draft-1', 'draft', 'b2xk', Date.now())
+        .run();
+      expect(await storedCiphertext(app, user.headers)).toMatchObject({ revision: null });
+
+      const filled = await put(app, user.headers, {
+        ciphertext: 'ZmlsbGVk',
+        revision: 5,
+        precondition: { expect: 'revision', revision: null },
+      });
+      expect(filled.status).toBe(200);
+      expect(await storedCiphertext(app, user.headers)).toMatchObject({ revision: 5 });
+
+      // The same claim a second time is stale: the row is no longer pre-CAS.
+      const again = await put(app, user.headers, {
+        ciphertext: 'YWdhaW4=',
+        revision: 6,
+        precondition: { expect: 'revision', revision: null },
+      });
+      expect(again.status).toBe(409);
+      expect(await storedCiphertext(app, user.headers)).toMatchObject({ ciphertext: 'ZmlsbGVk' });
+    });
+
+    it('deletes only the stated revision, and leaves a moved-on row alone', async () => {
+      const user = await loginWithMagicLink('cas4@example.com', 'CAS');
+      const app = createApp();
+      await put(app, user.headers, {
+        ciphertext: 'Zmlyc3Q=',
+        revision: 3,
+        precondition: { expect: 'absent' },
+      });
+
+      const wrong = await app.request(
+        'http://localhost/api/v1/vault/records/draft/blind-draft-1?ifRevision=2',
+        { method: 'DELETE', headers: user.headers },
+        env,
+      );
+      expect(wrong.status).toBe(409);
+      expect(await storedCiphertext(app, user.headers)).toMatchObject({ ciphertext: 'Zmlyc3Q=' });
+
+      const right = await app.request(
+        'http://localhost/api/v1/vault/records/draft/blind-draft-1?ifRevision=3',
+        { method: 'DELETE', headers: user.headers },
+        env,
+      );
+      expect(right.status).toBe(200);
+      expect(await storedCiphertext(app, user.headers)).toBeNull();
+    });
+
+    it('leaves a stated write with no opinion behaving exactly as before', async () => {
+      const user = await loginWithMagicLink('cas5@example.com', 'CAS');
+      const app = createApp();
+      await put(app, user.headers, { ciphertext: 'Zmlyc3Q=', revision: 1 });
+      // No precondition: last write wins, as every pre-CAS caller relies on.
+      const second = await put(app, user.headers, { ciphertext: 'c2Vjb25k', revision: 2 });
+      expect(second.status).toBe(200);
+      expect(await storedCiphertext(app, user.headers)).toMatchObject({
+        ciphertext: 'c2Vjb25k',
+        revision: 2,
+      });
+    });
+  });
+
   it('puts, gets, and deletes records with strict user isolation', async () => {
     const user1 = await loginWithMagicLink('user1@example.com', 'User One');
     const user2 = await loginWithMagicLink('user2@example.com', 'User Two');
@@ -59,7 +212,7 @@ describe('Worker records CRUD and isolation routes', () => {
       {
         method: 'PUT',
         headers: user1.headers,
-        body: JSON.stringify({ ciphertext: 'Y2lwaGVyLWFjYy0x' }),
+        body: JSON.stringify({ ciphertext: 'Y2lwaGVyLWFjYy0x', revision: 1 }),
       },
       env,
     );
@@ -132,7 +285,7 @@ describe('Worker records CRUD and isolation routes', () => {
       {
         method: 'PUT',
         headers: user1.headers,
-        body: JSON.stringify({ ciphertext: 'Y2lwaGVyLTE=' }),
+        body: JSON.stringify({ ciphertext: 'Y2lwaGVyLTE=', revision: 1 }),
       },
       env,
     );
@@ -143,7 +296,7 @@ describe('Worker records CRUD and isolation routes', () => {
       {
         method: 'PUT',
         headers: user1.headers,
-        body: JSON.stringify({ ciphertext: 'Y2lwaGVyLTI=' }),
+        body: JSON.stringify({ ciphertext: 'Y2lwaGVyLTI=', revision: 1 }),
       },
       env,
     );
@@ -164,7 +317,7 @@ describe('Worker records CRUD and isolation routes', () => {
       {
         method: 'PUT',
         headers: user1.headers,
-        body: JSON.stringify({ ciphertext: 'Y2lwaGVyLWE=' }),
+        body: JSON.stringify({ ciphertext: 'Y2lwaGVyLWE=', revision: 1 }),
       },
       env,
     );
@@ -173,7 +326,7 @@ describe('Worker records CRUD and isolation routes', () => {
       {
         method: 'PUT',
         headers: user1.headers,
-        body: JSON.stringify({ ciphertext: 'Y2lwaGVyLWI=' }),
+        body: JSON.stringify({ ciphertext: 'Y2lwaGVyLWI=', revision: 1 }),
       },
       env,
     );
@@ -182,7 +335,7 @@ describe('Worker records CRUD and isolation routes', () => {
       {
         method: 'PUT',
         headers: user1.headers,
-        body: JSON.stringify({ ciphertext: 'Y2lwaGVyLWM=' }),
+        body: JSON.stringify({ ciphertext: 'Y2lwaGVyLWM=', revision: 1 }),
       },
       env,
     );
@@ -193,7 +346,7 @@ describe('Worker records CRUD and isolation routes', () => {
       {
         method: 'PUT',
         headers: user1.headers,
-        body: JSON.stringify({ ciphertext: 'Y2lwaGVyLWQ=' }),
+        body: JSON.stringify({ ciphertext: 'Y2lwaGVyLWQ=', revision: 1 }),
       },
       env,
     );
@@ -204,7 +357,7 @@ describe('Worker records CRUD and isolation routes', () => {
       {
         method: 'PUT',
         headers: user2.headers,
-        body: JSON.stringify({ ciphertext: 'Y2lwaGVyLWU=' }),
+        body: JSON.stringify({ ciphertext: 'Y2lwaGVyLWU=', revision: 1 }),
       },
       env,
     );
@@ -265,7 +418,7 @@ describe('Worker records CRUD and isolation routes', () => {
       {
         method: 'PUT',
         headers: user1.headers,
-        body: JSON.stringify({ ciphertext: oversized }),
+        body: JSON.stringify({ ciphertext: oversized, revision: 1 }),
       },
       env,
     );

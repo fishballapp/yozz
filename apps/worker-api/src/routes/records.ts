@@ -1,5 +1,6 @@
 import {
   BlindRecordIdSchema,
+  DeleteRecordQuerySchema,
   ListRecordsQuerySchema,
   PutRecordRequestSchema,
   RecordTypeSchema,
@@ -10,8 +11,10 @@ import {
   deleteRecord,
   getRecord,
   listRecords,
+  type PutPrecondition,
   putRecord,
   RecordConflictError,
+  RecordStaleError,
 } from '../db/records.ts';
 import { type AppEnv, apiError, readJsonBody, requireSession } from '../http.ts';
 
@@ -67,6 +70,13 @@ export const recordsRoute = new Hono<AppEnv>()
     if (!body.ok) return body.response;
 
     const user = c.get('user');
+    const stated = body.data.precondition;
+    const precondition: PutPrecondition | undefined =
+      stated === undefined
+        ? undefined
+        : stated.expect === 'absent'
+          ? 'create'
+          : { ifRevision: stated.revision };
     try {
       await putRecord(
         c.env.DB,
@@ -74,10 +84,15 @@ export const recordsRoute = new Hono<AppEnv>()
         key.data.type,
         key.data.id,
         body.data.ciphertext,
+        body.data.revision,
         Date.now(),
+        precondition,
       );
       return c.json({ ok: true as const }, 200);
     } catch (err) {
+      if (err instanceof RecordStaleError) {
+        return apiError(c, 409, 'CONFLICT', 'Record revision is stale');
+      }
       if (err instanceof RecordConflictError) {
         return apiError(c, 409, 'CONFLICT', err.message);
       }
@@ -88,7 +103,19 @@ export const recordsRoute = new Hono<AppEnv>()
     const key = readRecordKey(c);
     if (!key.success) return key.response;
 
+    const query = DeleteRecordQuerySchema.safeParse(c.req.query());
+    if (!query.success) {
+      return apiError(c, 400, 'BAD_REQUEST', 'Invalid query parameters');
+    }
+
     const user = c.get('user');
-    await deleteRecord(c.env.DB, user.id, key.data.type, key.data.id);
-    return c.json({ ok: true as const }, 200);
+    try {
+      await deleteRecord(c.env.DB, user.id, key.data.type, key.data.id, query.data.ifRevision);
+      return c.json({ ok: true as const }, 200);
+    } catch (err) {
+      if (err instanceof RecordStaleError) {
+        return apiError(c, 409, 'CONFLICT', 'Record revision is stale');
+      }
+      throw err;
+    }
   });

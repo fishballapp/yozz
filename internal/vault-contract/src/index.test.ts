@@ -19,14 +19,40 @@ describe('vault-contract invariants', () => {
   });
 
   describe('PutRecordRequestSchema', () => {
-    it('accepts valid ciphertext', () => {
-      const valid = { ciphertext: 'aXYzMTIzNDU2' };
+    it('accepts a ciphertext with the revision it seals', () => {
+      const valid = { ciphertext: 'aXYzMTIzNDU2', revision: 1 };
       expect(PutRecordRequestSchema.parse(valid)).toEqual(valid);
     });
 
-    it('strictly rejects revision field', () => {
-      const withRevision = { ciphertext: 'aXYzMTIzNDU2', revision: 1 };
-      expect(() => PutRecordRequestSchema.parse(withRevision)).toThrow();
+    it('requires the revision, because the store compares on it', () => {
+      expect(() => PutRecordRequestSchema.parse({ ciphertext: 'aXYzMTIzNDU2' })).toThrow();
+    });
+
+    it('takes each of the three preconditions, and nothing else', () => {
+      const body = { ciphertext: 'aXYzMTIzNDU2', revision: 2 };
+      expect(
+        PutRecordRequestSchema.parse({ ...body, precondition: { expect: 'absent' } }),
+      ).toMatchObject({ precondition: { expect: 'absent' } });
+      expect(
+        PutRecordRequestSchema.parse({
+          ...body,
+          precondition: { expect: 'revision', revision: null },
+        }),
+      ).toMatchObject({ precondition: { expect: 'revision', revision: null } });
+      expect(
+        PutRecordRequestSchema.parse({
+          ...body,
+          precondition: { expect: 'revision', revision: 1 },
+        }),
+      ).toMatchObject({ precondition: { expect: 'revision', revision: 1 } });
+      // `absent` carries no revision, and `revision` may not omit one: the discriminator is the
+      // whole point, so a shape that means two things at once is refused.
+      expect(() =>
+        PutRecordRequestSchema.parse({ ...body, precondition: { expect: 'absent', revision: 1 } }),
+      ).toThrow();
+      expect(() =>
+        PutRecordRequestSchema.parse({ ...body, precondition: { expect: 'revision' } }),
+      ).toThrow();
     });
 
     it('strictly rejects plaintext or secret fields', () => {
@@ -51,7 +77,7 @@ describe('vault-contract invariants', () => {
       expect(() =>
         PutRecordRequestSchema.parse({
           ciphertext: 'aXYzMTIzNDU2',
-          deviceSecret: 'abc',
+          masterKey: 'abc',
         }),
       ).toThrow();
     });
@@ -69,19 +95,20 @@ describe('vault-contract invariants', () => {
         type: 'account',
         ciphertext: 'Y2lwaGVydGV4dA==',
         updatedAt: 1700000000,
+        revision: 4,
       };
       expect(VaultRecordEnvelopeSchema.parse(envelope)).toEqual(envelope);
     });
 
-    it('strictly rejects revision field', () => {
-      const envelopeWithRevision = {
+    it('carries a null revision for a row written before the column existed', () => {
+      const envelope = {
         id: 'blind-id-123',
         type: 'account',
         ciphertext: 'Y2lwaGVydGV4dA==',
         updatedAt: 1700000000,
-        revision: 4,
+        revision: null,
       };
-      expect(() => VaultRecordEnvelopeSchema.parse(envelopeWithRevision)).toThrow();
+      expect(VaultRecordEnvelopeSchema.parse(envelope)).toEqual(envelope);
     });
 
     it('strictly rejects naturalKey, deviceId, or plaintexts', () => {
@@ -271,6 +298,7 @@ describe('vault-contract invariants', () => {
             type: 'account',
             ciphertext: 'Y2lwaGVy',
             updatedAt: 1700000000,
+            revision: 1,
           },
         ],
         nextCursor: 'id-1',

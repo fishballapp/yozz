@@ -30,7 +30,10 @@ export const buttonClass = cva(
         primary: 'bg-signal text-signal-ink hover:bg-signal/85 disabled:bg-ink-sunken',
         secondary: 'bg-ink-hover text-paper hover:bg-rule',
         ghost: 'text-paper-dim hover:bg-ink-hover hover:text-paper',
-        danger: 'text-danger hover:bg-danger hover:text-paper',
+        // Dark on the chromatic fill, exactly as primary puts `signal-ink` on `signal`. Paper on
+        // `danger` measures 3.08:1 and misses AA at this size; `ink` measures 5.38:1. The variant
+        // had been declared and never rendered, so the hover had never been read off a screen.
+        danger: 'text-danger hover:bg-danger hover:text-ink',
       },
       size: {
         sm: 'h-7 px-2.5 text-2xs',

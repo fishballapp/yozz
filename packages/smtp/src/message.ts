@@ -17,8 +17,25 @@ export type MessageInput = {
   /** When present the message is `multipart/alternative`, text first. */
   readonly html?: string;
   readonly inReplyTo?: string;
+  /**
+   * The parent's `References` followed by its Message-ID, oldest first — the chain RFC 5322 §3.6.4
+   * asks a reply to carry. Without it a client that threads on References alone (and the base
+   * subject is a guess, not a rule) sees a reply to a reply as a new conversation. Defaults to
+   * `[inReplyTo]`, which is what a first reply's chain is anyway.
+   */
+  readonly references?: readonly string[];
   /** When present the whole message becomes `multipart/mixed`: the body first, then each file. */
   readonly attachments?: readonly MessageAttachment[];
+  /**
+   * Headers this client owns, appended after the standard block.
+   *
+   * YOZZ no longer uses this. It stamped `X-Yozz-Draft` here to find its own copies again without
+   * trusting a Message-ID a provider may rewrite, and that failed on a more basic point: a server
+   * need only index the headers IMAP names, so `SEARCH HEADER` on a private one can answer the
+   * empty list for a message that carries it (docs/knowledge/forwardemail-api.md). The field stays
+   * because a message builder should be able to set a header; do not build a LOOKUP on one.
+   */
+  readonly extraHeaders?: readonly (readonly [string, string])[];
 };
 
 export type MessageAttachment = {
@@ -228,7 +245,19 @@ export const buildMessage = (input: MessageInput): Uint8Array => {
     ['MIME-Version', '1.0'],
   );
   if (input.inReplyTo !== undefined) {
-    headers.push(['In-Reply-To', input.inReplyTo], ['References', input.inReplyTo]);
+    headers.push(['In-Reply-To', input.inReplyTo]);
+  }
+  // A long chain folds: RFC 5322 caps a line at 998 octets, and a dozen ids pass that. Folding is
+  // the header's own rule (§2.2.3) — CRLF then one space, which unfolds back to the same list.
+  const references = input.references ?? (input.inReplyTo === undefined ? [] : [input.inReplyTo]);
+  if (references.length > 0) {
+    for (const id of references) assertNoLineBreak('References', id);
+    headers.push(['References', references.join('\r\n ')]);
+  }
+
+  for (const [name, value] of input.extraHeaders ?? []) {
+    assertNoLineBreak(name, value);
+    headers.push([name, value]);
   }
 
   for (const { filename, mimeType } of input.attachments ?? []) {

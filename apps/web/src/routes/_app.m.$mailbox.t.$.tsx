@@ -3,8 +3,9 @@ import { Thread } from '../pages/Thread';
 
 /**
  * One open message. The id is a SPLAT (`$`), not a single param: a real thread id is
- * `address/folder/uid`, and a slash inside one `$param` gets escaped on the way out and decoded back
- * into a second segment on reload. The splat takes the rest of the path verbatim.
+ * `mid/<Message-ID>` or `address/folder/uidValidity/uid`, and a slash inside one `$param` gets
+ * escaped on the way out and decoded back into a second segment on reload. The splat takes the
+ * rest of the path verbatim.
  *
  * A thread id cannot be checked the way a mailbox id can — it is data, not a closed set, so an
  * unknown one is a route that matches and finds nothing rather than a route that fails to match.

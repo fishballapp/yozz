@@ -6,20 +6,30 @@ import {
   PaperclipIcon,
   PaperPlaneRightIcon,
   PencilSimpleIcon,
+  TrashIcon,
   XIcon,
 } from '@phosphor-icons/react';
 import { useNavigate, useSearch } from '@tanstack/react-router';
 import { useEffect, useRef, useState } from 'react';
+import { agentLabel } from '../lib/agent-label';
 import { isDemo } from '../lib/chrome';
-import { seedFor, withoutCompose } from '../lib/compose';
+import {
+  DISCARD_WARNING,
+  draftKeyOfIntent,
+  seedFor,
+  withCompose,
+  withoutCompose,
+} from '../lib/compose';
 import { ATTACHMENT_LABEL, attachmentKindOf, formatBytes } from '../lib/mail-format';
 import { MAX_ATTACHMENT_BYTES } from '../mail/send';
-import { describeMailFailure, useMail } from '../state/mail';
+import { describeMailFailure, type SendReport, useMail } from '../state/mail';
 import { useVault } from '../vault/session';
 import { FromSwitch } from './FromSwitch';
 import { MarkdownView } from './MarkdownView';
 import { Button } from './ui/Button';
+import { ConfirmDialog } from './ui/ConfirmDialog';
 import { Input } from './ui/Field';
+import { toast } from './ui/Toast';
 
 /**
  * Composing is a DOCUMENT, not a chat window.
@@ -53,6 +63,50 @@ const TABS = [
   { value: 'preview', label: 'Preview', Icon: EyeIcon },
 ] as const;
 
+/**
+ * A send outlives the composer that started it, so its result arrives as a toast rather than as a
+ * line under a form that has closed. The "Sending…" toast carries no timeout because it is
+ * replaced, never expired; the two that report a problem carry none either, because a message
+ * that did not go is not news to show for four seconds and take away.
+ */
+const reportSend = (settled: Promise<SendReport>, reopen: (draftKey: string) => void) => {
+  const id = toast.add({ title: 'Sending…', timeout: 0 });
+  void settled.then(report => {
+    if (report.state === 'sent') {
+      toast.update(id, { title: 'Sent', timeout: 4000 });
+      return;
+    }
+    if (report.state === 'sent-with-caveat') {
+      toast.update(id, {
+        title: 'Sent',
+        description: report.detail,
+        timeout: 0,
+        priority: 'high',
+      });
+      return;
+    }
+    if (report.state === 'unsettled') {
+      // Deliberately not "Sent" and not "Not sent": nobody knows which, and saying either would
+      // be the app guessing on the user's behalf about whether a message reached somebody.
+      toast.update(id, {
+        title: 'Send unfinished',
+        description: report.detail,
+        timeout: 0,
+        priority: 'high',
+      });
+      return;
+    }
+    toast.update(id, {
+      title: 'Not sent',
+      description: report.detail,
+      timeout: 0,
+      priority: 'high',
+      // Nothing else on screen knows WHICH draft this was, and Drafts may hold several.
+      actionProps: { children: 'Reopen', onClick: () => reopen(report.draftKey) },
+    });
+  });
+};
+
 export const Compose = () => {
   const { compose } = useSearch({ from: '__root__' });
   const navigate = useNavigate();
@@ -66,12 +120,25 @@ export const Compose = () => {
     threads,
     identities,
     ownedAddresses,
+    drafts,
+    draftConflict,
+    draftError,
+    resolveDraftConflict,
+    openSendState,
+    sendAgain,
+    backToEditing,
+    discardDraft,
   } = useMail();
   // `to: '.'` — closing a draft leaves you exactly where you were reading, and only drops the
   // param. `replace` because opening and closing a composer is one round trip, not two history
   // entries: without it, Back after closing re-opened a blank draft instead of going back.
   const close = () => {
     void navigate({ to: '.', search: withoutCompose, replace: true });
+  };
+
+  /** Puts a refused send back in front of the person: the draft is still in the vault, by key. */
+  const reopenDraft = (draftKey: string) => {
+    void navigate({ to: '.', search: withCompose(`draft:${draftKey}`), replace: true });
   };
 
   // The URL → store sync, and the only one in the app. It is guarded by the intent it last acted
@@ -95,15 +162,25 @@ export const Compose = () => {
   useEffect(() => {
     if (seeded.current === seedKey || !canSeed) return;
     const seed = compose === undefined ? {} : seedFor(compose, threads, identities, ownedAddresses);
-    // A reply or forward names a message. Until the mail it names has loaded `seedFor` has
+    // A reply or forward names a MESSAGE. Until the mail it names has loaded `seedFor` has
     // nothing, and seeding then would fix an empty draft for good — so a referenced intent is not
     // marked seeded until it resolves; the effect simply runs again as mail arrives.
-    if (compose !== undefined && compose !== 'new' && Object.keys(seed).length === 0) return;
+    //
+    // A `draft:` intent is not one of those: its content comes from the vault record rather than
+    // from a message, so `seedFor` returns nothing for it BY DESIGN and waiting for a seed here
+    // would leave every draft URL stuck open-but-empty for ever.
+    const draftKey = compose === undefined ? null : draftKeyOfIntent(compose);
+    const namesMessage = compose !== undefined && compose !== 'new' && draftKey === null;
+    if (namesMessage && Object.keys(seed).length === 0) return;
+    // The same wait, for the same reason, one step later: a `draft:` intent resolves against the
+    // vault records, which load after unlock. Seeding before they arrive would mark the intent
+    // done and leave the composer empty even once the record is here.
+    if (draftKey !== null && !drafts.some(candidate => candidate.draftKey === draftKey)) return;
     seeded.current = seedKey;
     setSendError(null);
     const opened = seedDraft(compose, seed);
     setShowCopies(opened !== null && (opened.cc !== '' || opened.bcc !== ''));
-  }, [compose, seedKey, canSeed, seedDraft, threads, identities, ownedAddresses]);
+  }, [compose, seedKey, canSeed, seedDraft, threads, identities, ownedAddresses, drafts]);
 
   const fileInput = useRef<HTMLInputElement>(null);
   const bodyInput = useRef<HTMLTextAreaElement>(null);
@@ -134,12 +211,15 @@ export const Compose = () => {
     <Dialog.Root
       // Open once there is a draft to show, not merely an intent in the URL: the intent is there
       // during the resume too, and a dialog with no fields in it is what that looked like.
+      //
+      // Clicking past it closes it, like the X and like Escape. It carried `disablePointerDismissal`
+      // for as long as closing meant DISCARDING — a draft must not vanish because you clicked
+      // beside it — and that reason went when Discard became its own button. Closing keeps the
+      // draft now, so the stray click is free.
       open={compose !== undefined && draft !== null}
       onOpenChange={open => {
         if (!open) close();
       }}
-      // A draft must not vanish because you clicked past it — closing is deliberate.
-      disablePointerDismissal
     >
       <Dialog.Portal>
         <Dialog.Backdrop className="fixed inset-0 z-40 bg-ink/75 transition-opacity duration-150 data-ending-style:opacity-0 data-starting-style:opacity-0" />
@@ -148,24 +228,82 @@ export const Compose = () => {
             className={cn(
               'flex min-h-dvh w-full flex-col bg-ink-raised outline-none',
               'sm:h-[min(46rem,calc(100dvh-3rem))] sm:min-h-0 sm:max-w-3xl sm:border sm:border-rule',
-              'transition-[opacity,transform] duration-150 data-ending-style:translate-y-1 data-ending-style:opacity-0 data-starting-style:translate-y-1 data-starting-style:opacity-0',
+              'transition-[opacity,translate] duration-150 data-ending-style:translate-y-1 data-ending-style:opacity-0 data-starting-style:translate-y-1 data-starting-style:opacity-0',
             )}
           >
             <div className="flex h-11 shrink-0 items-center justify-between border-b border-rule-soft pr-1 pl-4">
               <Dialog.Title className="label-rule text-paper-dim">New message</Dialog.Title>
+              {/* Close keeps the draft. Discard, in the footer, is the only thing that does not. */}
               <Dialog.Close
                 render={
                   <Button
                     variant="ghost"
                     size="icon"
                     className="size-11 lg:size-7"
-                    aria-label="Discard draft"
+                    aria-label="Close draft"
                   >
                     <XIcon size={15} />
                   </Button>
                 }
               />
             </div>
+
+            {draftError !== null && draftConflict === null && (
+              <p
+                role="status"
+                className="shrink-0 border-b border-rule bg-ink-sunken px-4 py-3 text-base text-paper-dim"
+              >
+                {draftError}
+              </p>
+            )}
+
+            {draftConflict !== null && (
+              /**
+               * Both versions still exist and nothing has been written: the person picks. No
+               * merge, and no "newest wins" — either would silently throw away prose somebody
+               * typed, which is the one outcome a draft store must never produce.
+               */
+              <div className="flex shrink-0 flex-wrap items-center gap-3 border-b border-rule bg-ink-sunken px-4 py-3">
+                <p role="alert" className="text-base text-paper-dim">
+                  Edited on another device.
+                </p>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => resolveDraftConflict('theirs')}
+                >
+                  Load theirs
+                </Button>
+                <Button variant="ghost" size="sm" onClick={() => resolveDraftConflict('mine')}>
+                  Keep mine
+                </Button>
+              </div>
+            )}
+
+            {openSendState !== null && (
+              /**
+               * A send that never reported back. Nothing here resends on its own: the message may
+               * be at its recipient already, and only the person can decide that a second copy is
+               * better than a lost one.
+               */
+              <div className="flex shrink-0 flex-wrap items-center gap-3 border-b border-rule bg-ink-sunken px-4 py-3">
+                <p role="alert" className="text-base text-paper-dim">
+                  {openSendState === 'sending'
+                    ? 'Sending — this draft is frozen until it finishes.'
+                    : 'This may already have been sent.'}
+                </p>
+                {openSendState === 'unconfirmed' && (
+                  <>
+                    <Button variant="secondary" size="sm" onClick={() => void sendAgain()}>
+                      Send again
+                    </Button>
+                    <Button variant="ghost" size="sm" onClick={() => void backToEditing()}>
+                      Back to editing
+                    </Button>
+                  </>
+                )}
+              </div>
+            )}
 
             {draft !== null && (
               <>
@@ -179,6 +317,7 @@ export const Compose = () => {
                     <Input
                       ref={toInput}
                       id="compose-to"
+                      aria-label={agentLabel('To', draft.to)}
                       type="email"
                       multiple
                       value={draft.to}
@@ -204,6 +343,7 @@ export const Compose = () => {
                         <FieldLabel htmlFor="compose-cc">Cc</FieldLabel>
                         <Input
                           id="compose-cc"
+                          aria-label={agentLabel('Cc', draft.cc)}
                           type="email"
                           multiple
                           value={draft.cc}
@@ -216,6 +356,7 @@ export const Compose = () => {
                         <FieldLabel htmlFor="compose-bcc">Bcc</FieldLabel>
                         <Input
                           id="compose-bcc"
+                          aria-label={agentLabel('Bcc', draft.bcc)}
                           type="email"
                           multiple
                           value={draft.bcc}
@@ -352,27 +493,70 @@ export const Compose = () => {
                           })();
                         }}
                       />
-                      <Button variant="ghost" size="sm" onClick={() => fileInput.current?.click()}>
+                      {/*
+                        The footer's controls are the one row a thumb uses, so they carry the 44px
+                        target on a phone and the compact one from `lg` up — the same shape the
+                        header's Close already had, and the reason it was the only control here
+                        that met the rule.
+                      */}
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-11 lg:h-7"
+                        onClick={() => fileInput.current?.click()}
+                      >
                         <PaperclipIcon size={13} />
                         Attach
                       </Button>
+                      {/*
+                        The one control that destroys writing, so it sits at the opposite end of
+                        the bar from Send and asks before it acts. The record is tombstoned rather
+                        than deleted, but no screen in the app brings one back — so from here it
+                        is irreversible, and it takes the same sheet Remove address and Reset
+                        vault take (DECISIONS.md).
+                      */}
+                      <ConfirmDialog
+                        trigger={
+                          <Button
+                            variant="danger"
+                            size="sm"
+                            className="h-11 lg:h-7"
+                            // Frozen as Send is: the bytes may already be on the wire.
+                            disabled={isSending || openSendState === 'sending'}
+                          >
+                            <TrashIcon size={13} />
+                            Discard
+                          </Button>
+                        }
+                        title="Discard this draft?"
+                        description={DISCARD_WARNING}
+                        confirmLabel="Discard"
+                        busyLabel="Discarding…"
+                        onConfirm={async () => {
+                          await discardDraft();
+                          close();
+                        }}
+                      />
                     </div>
                     <Button
                       variant="primary"
+                      className="h-11 lg:h-8"
                       onClick={() => {
                         void (async () => {
                           setIsSending(true);
                           setSendError(null);
                           try {
-                            const result = await send();
-                            if (!result.ok) {
+                            const claimed = await send();
+                            if (!claimed.ok) {
                               const host =
                                 identities.find(identity => identity.address === draft.identityId)
                                   ?.smtp.host ?? draft.identityId;
-                              setSendError(describeMailFailure(result.error, host));
+                              setSendError(describeMailFailure(claimed.error, host));
                               return;
                             }
+                            // The bytes are frozen; the rest of the send outlives this dialog.
                             close();
+                            reportSend(claimed.value.settled, reopenDraft);
                           } catch (err) {
                             setSendError(err instanceof Error ? err.message : String(err));
                           } finally {
@@ -383,6 +567,8 @@ export const Compose = () => {
                       // A Bcc-only send is a real message — any one of the three fields is enough.
                       disabled={
                         isSending ||
+                        // Frozen by a send in flight, here or on another device.
+                        openSendState === 'sending' ||
                         pendingReads > 0 ||
                         [draft.to, draft.cc, draft.bcc].every(field => field.trim() === '')
                       }

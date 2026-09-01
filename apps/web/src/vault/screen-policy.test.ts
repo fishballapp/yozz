@@ -2,7 +2,6 @@ import { VaultError, type VaultFailureCode } from '@yozz.app/vault';
 import { ApiErrorCodeSchema } from '@yozz.app/vault-contract';
 import { describe, expect, it } from 'vitest';
 import { VaultApiError } from './api.ts';
-import { DeviceSecretMissingError, DeviceStorageError } from './device-secret.ts';
 import { PasskeyPrfError, type PrfCapability } from './passkey-prf.ts';
 import { PASSKEY_OFFER, vaultErrorMessage } from './screen-policy.ts';
 import { UnlockError } from './unlock.ts';
@@ -78,20 +77,13 @@ describe('vaultErrorMessage', () => {
     );
 
     expect(vaultErrorMessage(new VaultError('unreadable', 'x'))).toBe(
-      "That did not open the vault. In password mode the password and this device's secret both have to be right, and nothing can tell which one is wrong.",
+      'That did not open the vault. In password mode that means the passphrase was wrong; the stored data itself cannot say more than that it failed to authenticate.',
     );
     expect(vaultErrorMessage(new VaultError('malformed', 'x'))).toBe(
       'A stored value was not the shape it should be.',
     );
     expect(vaultErrorMessage(new VaultError('stale', 'x'))).toBe(
       'The server answered with an older version of a record than this device has already seen. Nothing was read.',
-    );
-
-    expect(vaultErrorMessage(new DeviceSecretMissingError('x'))).toBe(
-      'This device has no device secret for that address. Paste the one exported from a device that is already logged in.',
-    );
-    expect(vaultErrorMessage(new DeviceStorageError('x'))).toBe(
-      'This browser will not let YOZZ keep anything on this device. Password mode needs that; allow site data, or use a passkey.',
     );
 
     const prfMessage = 'PRF refused on this authenticator.';

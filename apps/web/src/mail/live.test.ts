@@ -59,7 +59,9 @@ const createFakeClient = (capabilities: readonly string[] = ['IDLE']): FakeClien
     fetchFlags: async () => ({ ok: true, value: [] }),
     fetchRaw: async () => ({ ok: true, value: new Uint8Array() }),
     storeFlags: async () => ({ ok: true, value: undefined }),
-    append: async () => ({ ok: true, value: undefined }),
+    append: async () => ({ ok: true, value: null }),
+    expunge: async () => ({ ok: true, value: undefined }),
+    uidExpunge: async () => ({ ok: true, value: undefined }),
     move: async () => ({ ok: true, value: undefined }),
     create: async () => ({ ok: true, value: undefined }),
     noop: async () => {
@@ -85,6 +87,7 @@ const createFakeClient = (capabilities: readonly string[] = ['IDLE']): FakeClien
         ended,
       };
     },
+    uidSearchHeader: async () => ({ ok: true, value: [] }),
     logout: async () => {
       client.logouts += 1;
       return { ok: true, value: undefined };

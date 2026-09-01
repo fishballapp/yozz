@@ -1,11 +1,11 @@
 import type { ImapMessageSummary } from '@yozz.app/imap';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { InboundAddress } from '../lib/addresses';
-import type { Folder } from '../lib/thread';
+import { FOLDERS, type Folder } from '../lib/thread';
 import type { FetchedBody } from './bodies';
 import type { FolderSync } from './cache';
 import type { MailConnectionFailure, Result } from './connection';
 import type { LiveClient, LiveTask } from './live';
+import { threadsFromAccounts } from './summaries';
 
 const list = vi.fn();
 const select = vi.fn();
@@ -33,11 +33,6 @@ const run = <T>(task: LiveTask<T>): Promise<Result<T, MailConnectionFailure>> =>
   task.run(fakeClient);
 
 const { syncAccount, loadOlder, prefetchBodies, moveThread } = await import('./sync');
-
-const RECORD = {
-  address: 'me@x',
-  imap: { host: 'imap.x', port: 993, username: 'me', password: 'p' },
-} as unknown as InboundAddress;
 
 const SENT = { name: 'Sent', delimiter: '/', attributes: ['\\Sent'] };
 const ARCHIVE = { name: 'Archive', delimiter: '/', attributes: ['\\Archive'] };
@@ -73,28 +68,16 @@ const emptyFolder = () => ({
 });
 
 const fakeCache = (seed: Partial<Record<Folder, Seed>> = {}) => {
-  const state: Record<Folder, ReturnType<typeof emptyFolder>> = {
-    inbox: {
-      sync: seed.inbox?.sync ?? null,
-      summaries: seed.inbox?.summaries ?? [],
-      bodies: seed.inbox?.bodies ?? new Map(),
-    },
-    sent: {
-      sync: seed.sent?.sync ?? null,
-      summaries: seed.sent?.summaries ?? [],
-      bodies: seed.sent?.bodies ?? new Map(),
-    },
-    archive: {
-      sync: seed.archive?.sync ?? null,
-      summaries: seed.archive?.summaries ?? [],
-      bodies: seed.archive?.bodies ?? new Map(),
-    },
-    trash: {
-      sync: seed.trash?.sync ?? null,
-      summaries: seed.trash?.summaries ?? [],
-      bodies: seed.trash?.bodies ?? new Map(),
-    },
-  };
+  const state = Object.fromEntries(
+    FOLDERS.map(folder => [
+      folder,
+      {
+        sync: seed[folder]?.sync ?? null,
+        summaries: seed[folder]?.summaries ?? [],
+        bodies: seed[folder]?.bodies ?? new Map(),
+      },
+    ]),
+  ) as Record<Folder, ReturnType<typeof emptyFolder>>;
   return {
     folder: (folder: Folder) => ({
       getSync: async () => state[folder].sync,
@@ -147,10 +130,7 @@ beforeEach(() => {
   move.mockReset();
   create.mockReset();
   list.mockResolvedValue({ ok: true, value: INBOX_ONLY });
-  ensureSelected.mockImplementation(async (name: string) => {
-    const res = await select(name);
-    return res.ok ? { ok: true, value: undefined } : res;
-  });
+  ensureSelected.mockImplementation(async (name: string) => select(name));
 });
 
 describe('syncAccount', () => {
@@ -158,11 +138,14 @@ describe('syncAccount', () => {
     selectAnswers({ INBOX: { uidValidity: 5, uidNext: 300, exists: 250 } });
     fetchSummariesBySeq.mockResolvedValue({ ok: true, value: [summary(150), summary(151)] });
     const cache = fakeCache();
-    const { state } = await syncAccount(run, cache, RECORD);
+    const { state } = await syncAccount(run, cache);
     // 250 messages exist, so the window is the newest 200 of them by sequence number.
     expect(fetchSummariesBySeq).toHaveBeenCalledWith('51:*');
     // A folder the server lacks has nothing older; only the inbox, larger than a window, is open.
-    expect(state).toMatchObject({ status: 'synced', complete: ['sent', 'archive', 'trash'] });
+    expect(state).toMatchObject({
+      status: 'synced',
+      complete: ['sent', 'archive', 'trash', 'drafts'],
+    });
     expect(cache.read('inbox').sync).toEqual({
       name: 'INBOX',
       uidValidity: 5,
@@ -178,22 +161,22 @@ describe('syncAccount', () => {
     selectAnswers({ INBOX: { uidValidity: 5, uidNext: 4, exists: 3 } });
     fetchSummariesBySeq.mockResolvedValue({ ok: true, value: [summary(1)] });
     const small = fakeCache();
-    const { state } = await syncAccount(run, small, RECORD);
+    const { state } = await syncAccount(run, small);
     expect(fetchSummariesBySeq).toHaveBeenCalledWith('1:*');
     expect(state).toMatchObject({
       status: 'synced',
-      complete: ['inbox', 'sent', 'archive', 'trash'],
+      complete: ['inbox', 'sent', 'archive', 'trash', 'drafts'],
     });
     expect(small.read('inbox').sync?.complete).toBe(true);
 
     fetchSummariesBySeq.mockClear();
     selectAnswers({ INBOX: { uidValidity: 5, uidNext: 1, exists: 0 } });
     const empty = fakeCache();
-    const { state: emptyState } = await syncAccount(run, empty, RECORD);
+    const { state: emptyState } = await syncAccount(run, empty);
     expect(fetchSummariesBySeq).not.toHaveBeenCalled();
     expect(emptyState).toMatchObject({
       status: 'synced',
-      complete: ['inbox', 'sent', 'archive', 'trash'],
+      complete: ['inbox', 'sent', 'archive', 'trash', 'drafts'],
     });
   });
 
@@ -207,7 +190,7 @@ describe('syncAccount', () => {
         summaries: [summary(9), summary(10)],
       },
     });
-    await syncAccount(run, cache, RECORD);
+    await syncAccount(run, cache);
     expect(fetchFlags).toHaveBeenCalledWith('9:10');
     expect(fetchSummaries).toHaveBeenCalledWith('11:*');
     const { summaries, sync } = cache.read('inbox');
@@ -241,7 +224,10 @@ describe('syncAccount', () => {
         ],
       });
     const cache = fakeCache();
-    const { threads, state } = await syncAccount(run, cache, RECORD);
+    const { byFolder, state } = await syncAccount(run, cache);
+    // Grouping is the store's one global pass, so the sync hands back summaries and this test
+    // runs the same pass over the one account it synced.
+    const threads = threadsFromAccounts({ 'me@x': byFolder });
     expect(select.mock.calls.map(([name]) => name)).toEqual(['INBOX', 'Sent']);
     expect(cache.read('sent').sync).toEqual({
       name: 'Sent',
@@ -252,10 +238,15 @@ describe('syncAccount', () => {
     // One message in each: both folders were read whole, so neither has older mail behind it.
     expect(state).toMatchObject({
       status: 'synced',
-      complete: ['inbox', 'sent', 'archive', 'trash'],
+      complete: ['inbox', 'sent', 'archive', 'trash', 'drafts'],
     });
     // One conversation: the inbox message and the reply that went out, not two threads.
-    expect(threads.map(t => t.messages.map(m => m.id))).toEqual([['me@x/inbox/2', 'me@x/sent/2']]);
+    expect(threads.map(t => t.messages.map(m => m.id))).toEqual([['mid/<m2@x>', 'mid/<reply@x>']]);
+    // Two folders, two uid spaces, and each copy carries the UIDVALIDITY of its own folder.
+    expect(threads[0]?.messages.map(m => m.locations?.[0])).toEqual([
+      { account: 'me@x', folder: 'inbox', uidValidity: 5, uid: 2 },
+      { account: 'me@x', folder: 'sent', uidValidity: 8, uid: 2 },
+    ]);
   });
 
   it('a UIDVALIDITY change clears the cache and reports invalidated on the failed refetch', async () => {
@@ -267,7 +258,7 @@ describe('syncAccount', () => {
         summaries: [summary(40)],
       },
     });
-    const { state } = await syncAccount(run, cache, RECORD);
+    const { state } = await syncAccount(run, cache);
     expect(cache.read('inbox').summaries).toEqual([]);
     expect(state).toMatchObject({ status: 'failed', invalidated: true });
   });
@@ -276,7 +267,7 @@ describe('syncAccount', () => {
     selectAnswers({ INBOX: { uidValidity: 5, uidNext: 300, exists: 250 } });
     fetchSummariesBySeq.mockResolvedValue({ ok: true, value: [summary(150)] });
     const cache = fakeCache();
-    const { state } = await syncAccount(run, cache, RECORD, () => true);
+    const { state } = await syncAccount(run, cache, () => true);
     expect(state.status).toBe('failed');
     expect(cache.read('inbox')).toEqual({ sync: null, summaries: [], bodies: new Map() });
   });
@@ -285,7 +276,7 @@ describe('syncAccount', () => {
 describe('loadOlder', () => {
   /** A folder with one page cached, whose oldest message sits at the given sequence number. */
   const paged = (seq: number) => {
-    ensureSelected.mockResolvedValue({ ok: true, value: undefined });
+    ensureSelected.mockResolvedValue({ ok: true, value: { uidValidity: 1 } });
     fetchSummaries.mockResolvedValue({ ok: true, value: [{ ...summary(40), seq }] });
     return fakeCache({
       inbox: {
@@ -361,7 +352,7 @@ describe('loadOlder', () => {
 describe('prefetchBodies', () => {
   it('fetches only newest under-ceiling uncached bodies', async () => {
     selectAnswers({ INBOX: { uidValidity: 1, uidNext: 10, exists: 3 } });
-    ensureSelected.mockResolvedValue({ ok: true, value: undefined });
+    ensureSelected.mockResolvedValue({ ok: true, value: { uidValidity: 1 } });
     const raw = new TextEncoder().encode('Subject: hi\r\n\r\nhello\r\n');
     fetchRaw.mockResolvedValue({ ok: true, value: raw });
     const cache = fakeCache({
@@ -372,14 +363,20 @@ describe('prefetchBodies', () => {
       },
     });
     // uid 3 oversized, uid 2 already cached → only uid 1 is fetched.
-    prefetchBodies(run, cache, { inbox: cache.read('inbox').summaries }, 1024 * 1024, 30);
+    prefetchBodies(
+      run,
+      cache,
+      { inbox: { uidValidity: 1, summaries: cache.read('inbox').summaries } },
+      1024 * 1024,
+      30,
+    );
     await vi.waitFor(() => expect(fetchRaw).toHaveBeenCalledTimes(1));
     expect(fetchRaw).toHaveBeenCalledWith(1);
     expect(ensureSelected).toHaveBeenCalledWith('INBOX');
   });
 
   it('counts the per-folder budget over eligible bodies, not over the newest uids', async () => {
-    ensureSelected.mockResolvedValue({ ok: true, value: undefined });
+    ensureSelected.mockResolvedValue({ ok: true, value: { uidValidity: 1 } });
     fetchRaw.mockResolvedValue({
       ok: true,
       value: new TextEncoder().encode('Subject: hi\r\n\r\nhello\r\n'),
@@ -395,7 +392,13 @@ describe('prefetchBodies', () => {
         ]),
       },
     });
-    prefetchBodies(run, cache, { inbox: cache.read('inbox').summaries }, 1024 * 1024, 2);
+    prefetchBodies(
+      run,
+      cache,
+      { inbox: { uidValidity: 1, summaries: cache.read('inbox').summaries } },
+      1024 * 1024,
+      2,
+    );
     await vi.waitFor(() => expect(fetchRaw).toHaveBeenCalledTimes(2));
     expect(fetchRaw.mock.calls.map(([uid]) => uid)).toEqual([2, 1]);
   });
@@ -404,9 +407,13 @@ describe('prefetchBodies', () => {
 describe('moveThread', () => {
   it('archives into the LIST \\Archive mailbox without CREATE', async () => {
     list.mockResolvedValue({ ok: true, value: [...INBOX_ONLY, ARCHIVE] });
-    ensureSelected.mockResolvedValue({ ok: true, value: undefined });
+    ensureSelected.mockResolvedValue({ ok: true, value: { uidValidity: 1 } });
     move.mockResolvedValue({ ok: true, value: undefined });
-    const res = await moveThread(run, [{ mailbox: 'INBOX', uids: [10, 11] }], 'archive');
+    const res = await moveThread(
+      run,
+      [{ mailbox: 'INBOX', uidValidity: 1, uids: [10, 11] }],
+      'archive',
+    );
     expect(res).toEqual({ ok: true, value: undefined });
     expect(ensureSelected).toHaveBeenCalledWith('INBOX');
     expect(move).toHaveBeenCalledWith('10,11', 'Archive');
@@ -415,22 +422,34 @@ describe('moveThread', () => {
 
   it('CREATEs Archive when LIST has none, unarchives to INBOX, and maps a refused MOVE', async () => {
     list.mockResolvedValue({ ok: true, value: INBOX_ONLY });
-    ensureSelected.mockResolvedValue({ ok: true, value: undefined });
+    ensureSelected.mockResolvedValue({ ok: true, value: { uidValidity: 1 } });
     create.mockResolvedValue({ ok: true, value: undefined });
     move.mockResolvedValueOnce({ ok: true, value: undefined });
-    const archived = await moveThread(run, [{ mailbox: 'INBOX', uids: [3] }], 'archive');
+    const archived = await moveThread(
+      run,
+      [{ mailbox: 'INBOX', uidValidity: 1, uids: [3] }],
+      'archive',
+    );
     expect(archived).toEqual({ ok: true, value: undefined });
     expect(create).toHaveBeenCalledWith('Archive');
     expect(move).toHaveBeenCalledWith('3', 'Archive');
 
     move.mockResolvedValueOnce({ ok: true, value: undefined });
-    const unarchived = await moveThread(run, [{ mailbox: 'Archive', uids: [3] }], 'inbox');
+    const unarchived = await moveThread(
+      run,
+      [{ mailbox: 'Archive', uidValidity: 1, uids: [3] }],
+      'inbox',
+    );
     expect(unarchived).toEqual({ ok: true, value: undefined });
     expect(move).toHaveBeenLastCalledWith('3', 'INBOX');
     expect(create).toHaveBeenCalledTimes(1);
 
     move.mockResolvedValueOnce({ ok: false, reason: { kind: 'no', text: 'denied' } });
-    const refused = await moveThread(run, [{ mailbox: 'INBOX', uids: [4] }], 'archive');
+    const refused = await moveThread(
+      run,
+      [{ mailbox: 'INBOX', uidValidity: 1, uids: [4] }],
+      'archive',
+    );
     expect(refused).toEqual({
       ok: false,
       error: { kind: 'imap', reason: { kind: 'no', text: 'denied' } },
@@ -439,13 +458,13 @@ describe('moveThread', () => {
 
   it('bins every source mailbox in one task, into the trash folder LIST already names', async () => {
     list.mockResolvedValue({ ok: true, value: [...INBOX_ONLY, TRASH] });
-    ensureSelected.mockResolvedValue({ ok: true, value: undefined });
+    ensureSelected.mockResolvedValue({ ok: true, value: { uidValidity: 1 } });
     move.mockResolvedValue({ ok: true, value: undefined });
     const res = await moveThread(
       run,
       [
-        { mailbox: 'INBOX', uids: [1, 2] },
-        { mailbox: 'Sent', uids: [7] },
+        { mailbox: 'INBOX', uidValidity: 1, uids: [1, 2] },
+        { mailbox: 'Sent', uidValidity: 1, uids: [7] },
       ],
       'trash',
     );
@@ -457,12 +476,22 @@ describe('moveThread', () => {
     expect(create).not.toHaveBeenCalled();
   });
 
+  it('refuses to move uids the server has renumbered since they were read', async () => {
+    // The same uid names different mail after a UIDVALIDITY change, so a move aimed at one
+    // message would bin a stranger's.
+    list.mockResolvedValue({ ok: true, value: [...INBOX_ONLY, TRASH] });
+    ensureSelected.mockResolvedValue({ ok: true, value: { uidValidity: 9 } });
+    const res = await moveThread(run, [{ mailbox: 'INBOX', uidValidity: 1, uids: [1] }], 'trash');
+    expect(res.ok).toBe(false);
+    expect(move).not.toHaveBeenCalled();
+  });
+
   it('CREATEs Trash when LIST has no bin of any name', async () => {
     list.mockResolvedValue({ ok: true, value: INBOX_ONLY });
-    ensureSelected.mockResolvedValue({ ok: true, value: undefined });
+    ensureSelected.mockResolvedValue({ ok: true, value: { uidValidity: 1 } });
     create.mockResolvedValue({ ok: true, value: undefined });
     move.mockResolvedValue({ ok: true, value: undefined });
-    const res = await moveThread(run, [{ mailbox: 'INBOX', uids: [8] }], 'trash');
+    const res = await moveThread(run, [{ mailbox: 'INBOX', uidValidity: 1, uids: [8] }], 'trash');
     expect(res).toEqual({ ok: true, value: undefined });
     expect(create).toHaveBeenCalledWith('Trash');
     expect(move).toHaveBeenCalledWith('8', 'Trash');

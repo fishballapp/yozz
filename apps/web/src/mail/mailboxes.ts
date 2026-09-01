@@ -5,6 +5,8 @@ import type { MailConnectionFailure, Result } from './connection';
 /** RFC 6154 names the folder; servers without SPECIAL-USE mostly agree on how they spell it. */
 const SENT_MAILBOX_NAMES = new Set(['sent', 'sent items', 'sent messages', 'sent mail']);
 const ARCHIVE_MAILBOX_NAMES = new Set(['archive', 'archives']);
+/** Gmail's is under its own namespace; `Draft` singular is Exchange's. */
+const DRAFTS_MAILBOX_NAMES = new Set(['drafts', '[gmail]/drafts', 'draft']);
 const TRASH_MAILBOX_NAMES = new Set([
   'trash',
   'deleted',
@@ -40,6 +42,7 @@ export const resolveFolders = async (
   const sent = specialUseOf(listed.value, '\\sent', SENT_MAILBOX_NAMES);
   const archive = specialUseOf(listed.value, '\\archive', ARCHIVE_MAILBOX_NAMES);
   const trash = specialUseOf(listed.value, '\\trash', TRASH_MAILBOX_NAMES);
+  const drafts = specialUseOf(listed.value, '\\drafts', DRAFTS_MAILBOX_NAMES);
   return {
     ok: true,
     value: {
@@ -47,6 +50,7 @@ export const resolveFolders = async (
       ...(sent === undefined ? {} : { sent: sent.name }),
       ...(archive === undefined ? {} : { archive: archive.name }),
       ...(trash === undefined ? {} : { trash: trash.name }),
+      ...(drafts === undefined ? {} : { drafts: drafts.name }),
     },
   };
 };

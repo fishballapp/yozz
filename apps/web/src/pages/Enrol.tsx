@@ -253,8 +253,13 @@ export const Enrol = () => {
           <p className="text-2xs text-paper-faint">{PASSKEY_OFFER.unsupported.note}</p>
         )}
         <p className="text-base leading-relaxed text-paper-dim">
-          A password plus a secret this browser keeps and never sends. Adding a second device means
-          copying that secret across by hand.
+          Your password is the only key. It never leaves this browser, and nothing else has to be
+          carried to a new one, so any browser you can type it into opens the vault.
+        </p>
+        <p className="text-base leading-relaxed text-paper-dim">
+          Make it a passphrase rather than a password. It is the only thing standing between the
+          vault and whoever holds a copy of the encrypted data, and twelve characters is the floor
+          rather than the target.
         </p>
         <p className="text-base leading-relaxed text-paper-dim">
           There is no recovery. Lose the password and the vault resets, which is safe here because

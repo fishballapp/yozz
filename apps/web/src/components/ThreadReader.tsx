@@ -8,13 +8,14 @@ import {
   DownloadSimpleIcon,
   EnvelopeSimpleIcon,
   type Icon,
+  NotePencilIcon,
   StarIcon,
   TextAlignLeftIcon,
   TrashIcon,
   XIcon,
 } from '@phosphor-icons/react';
 import { Link, useParams } from '@tanstack/react-router';
-import { markOf } from '../lib/addresses';
+import { marksOf } from '../lib/addresses';
 import { useChromePref } from '../lib/chrome';
 import { replyAllCc, withCompose } from '../lib/compose';
 import { linkify } from '../lib/linkify';
@@ -56,41 +57,55 @@ import { IconSwitch } from './ui/IconSwitch';
  * that produces the identical message is a choice with no answer, and on the two-party threads that
  * are most of anyone's mail it would be there every time.
  */
-const MessageActions = ({ message, canReplyAll }: { message: Message; canReplyAll: boolean }) => (
-  // Both quote the body, so neither is offered until it has arrived: a reply seeded from a
-  // message still loading would quote nothing and never notice.
-  <div className={cn('mt-4 flex gap-2', message.bodyStatus !== undefined && 'invisible')}>
-    <Link
-      to="."
-      search={withCompose(`reply:${message.id}`)}
-      className={cn(buttonClass({ variant: 'secondary', size: 'sm' }), 'h-11 lg:h-7')}
-      aria-label={`Reply, quoting ${message.fromName}`}
-    >
-      <ArrowUUpLeftIcon size={13} />
-      Reply
-    </Link>
-    {canReplyAll && (
+const MessageActions = ({ message, canReplyAll }: { message: Message; canReplyAll: boolean }) =>
+  // An unsent draft is not something to reply to or forward — it is something to finish, and the
+  // composer is where that happens.
+  message.isDraft === true ? (
+    <div className="mt-4 flex gap-2">
       <Link
         to="."
-        search={withCompose(`reply-all:${message.id}`)}
-        className={cn(buttonClass({ variant: 'ghost', size: 'sm' }), 'h-11 lg:h-7')}
-        aria-label={`Reply to all, quoting ${message.fromName}`}
+        search={withCompose(`draft:${message.draftKey ?? ''}`)}
+        className={cn(buttonClass({ variant: 'secondary', size: 'sm' }), 'h-11 lg:h-7')}
       >
-        <ArrowUUpLeftIcon size={13} weight="bold" />
-        Reply all
+        <NotePencilIcon size={13} />
+        Edit draft
       </Link>
-    )}
-    <Link
-      to="."
-      search={withCompose(`forward:${message.id}`)}
-      className={cn(buttonClass({ variant: 'ghost', size: 'sm' }), 'h-11 lg:h-7')}
-      aria-label={`Forward the message from ${message.fromName}`}
-    >
-      <ArrowUUpRightIcon size={13} />
-      Forward
-    </Link>
-  </div>
-);
+    </div>
+  ) : (
+    // Both quote the body, so neither is offered until it has arrived: a reply seeded from a
+    // message still loading would quote nothing and never notice.
+    <div className={cn('mt-4 flex gap-2', message.bodyStatus !== undefined && 'invisible')}>
+      <Link
+        to="."
+        search={withCompose(`reply:${message.id}`)}
+        className={cn(buttonClass({ variant: 'secondary', size: 'sm' }), 'h-11 lg:h-7')}
+        aria-label={`Reply, quoting ${message.fromName}`}
+      >
+        <ArrowUUpLeftIcon size={13} />
+        Reply
+      </Link>
+      {canReplyAll && (
+        <Link
+          to="."
+          search={withCompose(`reply-all:${message.id}`)}
+          className={cn(buttonClass({ variant: 'ghost', size: 'sm' }), 'h-11 lg:h-7')}
+          aria-label={`Reply to all, quoting ${message.fromName}`}
+        >
+          <ArrowUUpLeftIcon size={13} weight="bold" />
+          Reply all
+        </Link>
+      )}
+      <Link
+        to="."
+        search={withCompose(`forward:${message.id}`)}
+        className={cn(buttonClass({ variant: 'ghost', size: 'sm' }), 'h-11 lg:h-7')}
+        aria-label={`Forward the message from ${message.fromName}`}
+      >
+        <ArrowUUpRightIcon size={13} />
+        Forward
+      </Link>
+    </div>
+  );
 
 /** Saves the bytes as the sender's filename. The URL is revoked once the click has been handed off. */
 const download = (file: Attachment) => {
@@ -210,7 +225,16 @@ const READING_MODES = [
   { id: 'text', Icon: TextAlignLeftIcon, label: 'Plain text' },
 ] as const satisfies readonly { id: ReadingMode; Icon: Icon; label: string }[];
 
-export const ThreadReader = ({ thread, onClose }: { thread: ThreadState; onClose: () => void }) => {
+export const ThreadReader = ({
+  thread,
+  onClose,
+  onTriaged,
+}: {
+  thread: ThreadState;
+  onClose: () => void;
+  /** After a move: the reader is done with this thread, and the next one in the list is up. */
+  onTriaged: () => void;
+}) => {
   const {
     ownedAddresses,
     toggleStar,
@@ -268,10 +292,11 @@ export const ThreadReader = ({ thread, onClose }: { thread: ThreadState; onClose
               onChange={setMode}
               cellClassName="size-11 lg:size-7"
             />
-            {/* Triage closes the reader: the thread you just filed is not the one you are reading,
-                and one you marked unread would be read again the moment it stayed open. Opened
-                from Trash, a thread offers the one move that gets it out — the row it came from
-                offered the same, and a conversation only half in the bin must not lose it. */}
+            {/* Filing a thread moves the reader on to the next in the list — the one you just
+                filed is not the one you are reading — while marking unread closes it, since it
+                would be read again the moment it stayed open. Opened from Trash, a thread offers
+                the one move that gets it out — the row it came from offered the same, and a
+                conversation only half in the bin must not lose it. */}
             <Button
               variant="ghost"
               size="icon"
@@ -291,7 +316,7 @@ export const ThreadReader = ({ thread, onClose }: { thread: ThreadState; onClose
                 className="size-11 lg:size-7"
                 onClick={() => {
                   restoreThread(thread.id);
-                  onClose();
+                  onTriaged();
                 }}
                 aria-label="Restore thread"
               >
@@ -305,7 +330,7 @@ export const ThreadReader = ({ thread, onClose }: { thread: ThreadState; onClose
                   className="size-11 lg:size-7"
                   onClick={() => {
                     toggleArchive(thread.id);
-                    onClose();
+                    onTriaged();
                   }}
                   aria-label={isArchived(thread) ? 'Move to inbox' : 'Archive thread'}
                 >
@@ -317,7 +342,7 @@ export const ThreadReader = ({ thread, onClose }: { thread: ThreadState; onClose
                   className="size-11 lg:size-7"
                   onClick={() => {
                     trashThread(thread.id);
-                    onClose();
+                    onTriaged();
                   }}
                   aria-label="Delete thread"
                 >
@@ -339,7 +364,7 @@ export const ThreadReader = ({ thread, onClose }: { thread: ThreadState; onClose
 
         <p className="mt-1.5 flex items-center gap-1.5 pl-8 font-mono text-2xs text-paper-faint lg:pl-7">
           <span aria-hidden className="text-paper-dim">
-            {markOf(thread.accountId)}
+            {marksOf(thread.accounts)}
           </span>
           <span>delivered to {inbound.toAddress}</span>
           {/* The same count the list row carries, on the same rule: only above one, because "1

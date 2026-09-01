@@ -1,10 +1,10 @@
-import { AlertDialog } from '@base-ui/react/alert-dialog';
 import { ImageIcon } from '@phosphor-icons/react';
 import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import { z } from 'zod';
 import { useChromePref } from '../lib/chrome';
 import { buildMailFrame } from '../mail/html';
 import { Button } from './ui/Button';
+import { ConfirmDialog } from './ui/ConfirmDialog';
 
 /** What the script inside the frame posts. Anything else on the channel is ignored. */
 const FrameMessageSchema = z.discriminatedUnion('type', [
@@ -106,44 +106,30 @@ export const HtmlBody = ({
       {inlineImagesTruncated && (
         <p className="font-mono text-2xs text-paper-faint">Some inline images were blocked.</p>
       )}
-      <AlertDialog.Root open={isAsking} onOpenChange={open => setAskingFor(open ? html : null)}>
-        <AlertDialog.Portal>
-          <AlertDialog.Backdrop className="fixed inset-0 z-40 bg-ink/70 transition-opacity duration-150 data-[ending-style]:opacity-0 data-[starting-style]:opacity-0" />
-          <AlertDialog.Viewport className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            <AlertDialog.Popup className="w-[min(100%,24rem)] border border-rule bg-ink-raised p-5 outline-none">
-              <AlertDialog.Title className="text-[19px] leading-tight font-medium tracking-[-0.015em] text-paper">
-                Show remote images?
-              </AlertDialog.Title>
-              <AlertDialog.Description className="mt-3 text-base leading-relaxed text-paper-dim">
-                The pictures in this message load from the sender's servers, so the sender may learn
-                you opened it. This applies to this message only.
-              </AlertDialog.Description>
-              <label className="mt-4 flex items-center gap-2 text-base text-paper">
-                <input
-                  type="checkbox"
-                  checked={skipNextTime}
-                  onChange={event => setSkipNextTime(event.target.checked)}
-                  className="size-4 accent-signal"
-                />
-                Don't ask again when I click an image
-              </label>
-              <div className="mt-5 flex flex-wrap items-center gap-2">
-                <AlertDialog.Close render={<Button variant="ghost" />}>Cancel</AlertDialog.Close>
-                <Button
-                  variant="primary"
-                  onClick={() => {
-                    if (skipNextTime) setAsksBeforeImageClick(false);
-                    setRemoteAllowedFor(html);
-                    setAskingFor(null);
-                  }}
-                >
-                  Show images
-                </Button>
-              </div>
-            </AlertDialog.Popup>
-          </AlertDialog.Viewport>
-        </AlertDialog.Portal>
-      </AlertDialog.Root>
+      <ConfirmDialog
+        open={isAsking}
+        onOpenChange={open => setAskingFor(open ? html : null)}
+        title="Show remote images?"
+        description="The pictures in this message load from the sender's servers, so the sender may learn you opened it. This applies to this message only."
+        confirmLabel="Show images"
+        // Not a deletion: this one wants a decision, so it takes the primary action's colour.
+        confirmVariant="primary"
+        busyLabel="Showing…"
+        onConfirm={async () => {
+          if (skipNextTime) setAsksBeforeImageClick(false);
+          setRemoteAllowedFor(html);
+        }}
+      >
+        <label className="mt-4 flex items-center gap-2 text-base text-paper">
+          <input
+            type="checkbox"
+            checked={skipNextTime}
+            onChange={event => setSkipNextTime(event.target.checked)}
+            className="size-4 accent-signal"
+          />
+          Don't ask again when I click an image
+        </label>
+      </ConfirmDialog>
       <iframe
         key={isRemoteAllowed ? 'remote' : 'blocked'}
         ref={frameRef}

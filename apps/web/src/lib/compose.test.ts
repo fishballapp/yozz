@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { DEMO_ADDRESSES, THREADS } from '../data/mail';
-import { composeIntentSchema, replyAllCc, seedFor } from './compose';
+import type { ComposeDraft } from '../state/mail';
+import { composeIntentSchema, isUntouched, replyAllCc, seedFor } from './compose';
 import type { Thread } from './thread';
 
 /**
@@ -69,7 +70,7 @@ describe('seedFor — forward', () => {
  */
 const GROUP: Thread = {
   id: 't-group',
-  accountId: 'jason@jyu.example',
+  accounts: ['jason@jyu.example'],
   subject: 'Friday',
   isUnread: false,
   isReplied: false,
@@ -88,6 +89,77 @@ const GROUP: Thread = {
 };
 
 const GROUP_OWNED = ['jason@jyu.example', 'me@jyu.example'];
+
+/**
+ * A chain, built here because the demo fixtures carry no Message-IDs: what a reply announces is
+ * the parent's own References plus the parent, and getting it wrong is invisible until someone
+ * else's client shows the reply as a new conversation.
+ */
+const CHAIN: Thread = {
+  id: 't-chain',
+  accounts: ['jason@jyu.example'],
+  subject: 'Deploy',
+  isUnread: false,
+  isReplied: false,
+  isStarred: false,
+  messages: [
+    {
+      id: 'm-chain-1',
+      fromName: 'Ana',
+      fromAddress: 'ana@example.com',
+      toAddress: 'jason@jyu.example',
+      at: 1,
+      body: ['First.'],
+      messageId: '<one@example.com>',
+    },
+    {
+      id: 'm-chain-2',
+      fromName: 'Ana',
+      fromAddress: 'ana@example.com',
+      toAddress: 'jason@jyu.example',
+      at: 2,
+      body: ['Third.'],
+      messageId: '<three@example.com>',
+      references: ['<one@example.com>', '<two@example.com>'],
+    },
+  ],
+};
+
+describe('seedFor — the References chain', () => {
+  const chainSeed = (messageId: string) =>
+    seedFor(composeIntentSchema.parse(`reply:${messageId}`), [CHAIN], DEMO_ADDRESSES, GROUP_OWNED);
+
+  it("announces the parent's chain and then the parent", () => {
+    expect(chainSeed('m-chain-2')).toMatchObject({
+      inReplyTo: '<three@example.com>',
+      references: ['<one@example.com>', '<two@example.com>', '<three@example.com>'],
+    });
+  });
+
+  it('is the parent alone when the parent referenced nothing', () => {
+    expect(chainSeed('m-chain-1')).toMatchObject({
+      inReplyTo: '<one@example.com>',
+      references: ['<one@example.com>'],
+    });
+  });
+
+  it('never repeats an id a sloppy sender already repeated', () => {
+    const repeated: Thread = {
+      ...CHAIN,
+      messages: [
+        { ...CHAIN.messages[0], references: ['<one@example.com>'] } as Thread['messages'][number],
+      ],
+    };
+    expect(
+      seedFor(
+        composeIntentSchema.parse('reply:m-chain-1'),
+        [repeated],
+        DEMO_ADDRESSES,
+        GROUP_OWNED,
+      ),
+    ).toMatchObject({ references: ['<one@example.com>'] });
+  });
+});
 
 describe('replyAllCc', () => {
   it('keeps the others and drops every address you own, plus the sender', () => {
@@ -139,8 +211,8 @@ describe('seedFor — degenerate intents', () => {
 });
 
 describe('composeIntentSchema', () => {
-  it('accepts the four shapes and rejects everything else', () => {
-    for (const ok of ['new', 'reply:m-1', 'reply-all:m-1', 'forward:m-1']) {
+  it('accepts the five shapes and rejects everything else', () => {
+    for (const ok of ['new', 'reply:m-1', 'reply-all:m-1', 'forward:m-1', 'draft:k-1']) {
       expect(composeIntentSchema.safeParse(ok).success).toBe(true);
     }
     // A junk `?compose=` must read as "closed", never throw or open something empty.
@@ -149,7 +221,7 @@ describe('composeIntentSchema', () => {
       'reply-all:',
       'forward:',
       'reply',
-      'draft:m-1',
+      'draft:',
       '',
       'NEW',
       42,
@@ -157,5 +229,40 @@ describe('composeIntentSchema', () => {
     ]) {
       expect(composeIntentSchema.safeParse(bad).success).toBe(false);
     }
+  });
+});
+
+/**
+ * Closing the composer keeps the draft, so this is the one thing standing between a mistaken
+ * Reply and a record in Drafts every time one is closed again.
+ */
+describe('isUntouched', () => {
+  const opened: ComposeDraft = {
+    startedAsReply: true,
+    identityId: 'me@x',
+    to: 'dana@x',
+    cc: '',
+    bcc: '',
+    subject: 'Re: sync',
+    body: '> Thursday 10:00 is fine by me.',
+    attachments: [],
+  };
+
+  it('is true for a reply nobody typed into, whose fields are full from the moment it opens', () => {
+    expect(isUntouched({ ...opened }, opened)).toBe(true);
+  });
+
+  it('is false once a single character reaches any field', () => {
+    expect(isUntouched({ ...opened, body: `Yes.\n\n${opened.body}` }, opened)).toBe(false);
+    expect(isUntouched({ ...opened, cc: 'sam@x' }, opened)).toBe(false);
+    expect(isUntouched({ ...opened, subject: 'Re: sync?' }, opened)).toBe(false);
+  });
+
+  it('is false for an attachment alone, which is writing with no text in it', () => {
+    const attached = {
+      ...opened,
+      attachments: [{ name: 'f.pdf', size: 3, kind: 'pdf' as const, content: new Uint8Array(3) }],
+    };
+    expect(isUntouched(attached, opened)).toBe(false);
   });
 });

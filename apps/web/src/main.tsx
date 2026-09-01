@@ -6,8 +6,10 @@ import './styles/global.css';
 
 // File-based routing: routeTree.gen.ts is generated from src/routes/* by the tanstackRouter()
 // Vite plugin (see vite.config.ts).
-// `@` stays literal in the path: a thread id is `address/folder/uid`, and `/t/jason@x.com/inbox/12` should read
-// in the address bar the way it is typed. The router decodes the splat on match either way.
+// `@` stays literal in the path: a thread id is `mid/<Message-ID>` (`lib/thread.ts`), and
+// `/t/mid/<abc@x.com>` should read in the address bar the way it is typed. The router
+// percent-encodes the brackets and decodes the splat on match either way. The fallback id
+// (`address/folder/uidValidity/uid`) carries an `@` too, for the same reason.
 const router = createRouter({
   routeTree,
   defaultPreload: 'intent',

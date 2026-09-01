@@ -10,14 +10,13 @@
 
 import { beforeAll, describe, expect, it } from 'vitest';
 import { VaultError } from './bytes.ts';
-import { type AccountKeys, createDeviceSecret, deriveAccountKeys } from './keys.ts';
+import { type AccountKeys, deriveAccountKeys } from './keys.ts';
 import { createVault, openVault, rewrapDek, type Vault } from './vault.ts';
 
 const EMAIL = 'jason@example.com';
 const PASSWORD = 'correct horse battery staple';
-const DEVICE_SECRET = 'AAECAwQFBgcICQoLDA0ODw';
 
-const ACCOUNT = { email: EMAIL, password: PASSWORD, deviceSecret: DEVICE_SECRET };
+const ACCOUNT = { email: EMAIL, password: PASSWORD };
 
 /** PBKDF2 at 650,000 iterations is ~0.2s, so derive each distinct account once. */
 let keys: AccountKeys;
@@ -53,7 +52,7 @@ const readPlaintext = async (v: Vault, ciphertext: string): Promise<string> =>
   (await read(v, ciphertext)).plaintext;
 
 describe('opening a vault', () => {
-  it('reopens with the same password and device secret', async () => {
+  it('reopens with the same password', async () => {
     const reopened = await openVault(await deriveAccountKeys(ACCOUNT), wrappedDek);
     const stored = await record('{"host":"posteo.de","password":"hunter2"}');
 
@@ -62,15 +61,15 @@ describe('opening a vault', () => {
     );
   });
 
-  it('refuses the wrong password and the wrong device secret alike', async () => {
-    for (const wrong of [
-      { ...ACCOUNT, password: 'correct horse battery stapler' },
-      { ...ACCOUNT, deviceSecret: createDeviceSecret() },
-    ]) {
-      await expect(openVault(await deriveAccountKeys(wrong), wrappedDek)).rejects.toThrow(
-        new VaultError('unreadable', 'the wrapped DEK did not authenticate'),
-      );
-    }
+  it('refuses the wrong password', async () => {
+    const wrong = await deriveAccountKeys({
+      ...ACCOUNT,
+      password: 'correct horse battery stapler',
+    });
+
+    await expect(openVault(wrong, wrappedDek)).rejects.toThrow(
+      new VaultError('unreadable', 'the wrapped DEK did not authenticate'),
+    );
   });
 
   it('refuses a wrapped DEK that is truncated or not base64', async () => {
