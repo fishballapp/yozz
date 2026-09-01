@@ -1,10 +1,7 @@
 /**
- * The one IndexedDB database this device keeps. `revision-marks` (the rollback
- * defence) and `unlock-keys` (the persisted unlock) are per-user rows;
- * `tls-pins` and `tls-sessions` (`mail/peer-store.ts`) are per mail host,
- * because a host's key is a fact about the host; `mail-sync`, `mail-summaries`
- * and `mail-bodies` (`mail/cache.ts`) are the derived mail cache, per user,
- * account and folder. One database so one version number covers the schema.
+ * The one IndexedDB database on this device: per-user rows (`revision-marks`, `unlock-keys`),
+ * per-host rows (`tls-pins`, `tls-sessions`), and the derived mail cache per user, account and
+ * folder. One database so one version number covers the schema.
  */
 export class DeviceDbError extends Error {
   constructor(message: string) {
@@ -28,10 +25,7 @@ export const STORES = {
   mailBodies: { name: 'mail-bodies', keyPath: ['userId', 'account', 'folder', 'uid'] },
 } as const satisfies Record<string, StoreSpec>;
 
-/**
- * Stores whose key path changed in a version: an upgrade from before it drops and recreates them.
- * Only the derived mail cache has ever changed shape, and it is rebuilt from the server.
- */
+/** Stores whose key path changed in a version: dropped and recreated on upgrade. Only the derived cache has ever changed shape. */
 const REKEYED: readonly { readonly since: number; readonly names: readonly string[] }[] = [
   { since: 5, names: [STORES.mailSync.name, STORES.mailSummaries.name, STORES.mailBodies.name] },
 ];
@@ -70,9 +64,7 @@ export const openDeviceDb = (factory: IDBFactory): Promise<IDBDatabase> =>
       }
     };
     req.onsuccess = () => {
-      // A newer tab bumping DB_VERSION needs this connection to close, or its upgrade blocks and
-      // that tab falls back to locked. Revision marks hold a connection open for the whole
-      // session, so without this the first schema bump after they open would deadlock the fleet.
+      // A newer tab's upgrade blocks until this connection closes; revision marks hold one open all session.
       req.result.onversionchange = () => req.result.close();
       resolve(req.result);
     };
@@ -81,18 +73,8 @@ export const openDeviceDb = (factory: IDBFactory): Promise<IDBDatabase> =>
       reject(new DeviceDbError('IndexedDB open blocked by existing connection'));
   });
 
-/**
- * Run `body` against one store and settle on the TRANSACTION, never on a
- * request inside it. A request that succeeded inside a transaction that then
- * aborts has not touched committed state: a read resolved early is a value
- * this device cannot stand behind, and a write resolved early is a write it
- * never kept. `body` returns the value the transaction's completion will deliver.
- */
-/**
- * One read-write transaction spanning several stores, settled on completion. For an invalidation
- * that must be all-or-nothing — clearing a user's whole mail cache is three stores, and a partial
- * clear can leave a body whose summary is gone.
- */
+/** Settled on the transaction, never on a request inside it: a request that succeeded in an aborted transaction touched nothing. */
+/** One read-write transaction over several stores, for a clear that must be all-or-nothing. */
 export const runStoresTransaction = (
   db: IDBDatabase,
   storeNames: readonly StoreName[],
@@ -126,8 +108,7 @@ export const runTransaction = <T>(
         throw new DeviceDbError(`Transaction start failed: ${String(err)}`);
       }
     })();
-    // Flipped by the body's `done`, read by `oncomplete`: the value exists before
-    // the transaction commits and may only be handed out after.
+    // The value exists before the transaction commits and may only be handed out after.
     let result: T | undefined;
     body(tx.objectStore(storeName), value => {
       result = value;

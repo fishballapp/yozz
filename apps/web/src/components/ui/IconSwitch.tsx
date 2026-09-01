@@ -4,12 +4,9 @@ import { cn } from '@fishballapps/cn';
 import type { Icon } from '@phosphor-icons/react';
 
 /**
- * A row of icon cells, exactly one pressed: Base UI's Toggle Group, so the row is one labelled
- * control with arrow-key movement rather than N unrelated buttons. The pressed cell takes the
- * RAIL's active ground rather than a list row's inversion: a solid --paper block in the chrome
- * out-shouts every record under it, and this control sets how content is drawn — it must not be
- * the brightest thing in it. `cellClassName` sizes the hit area per call site (the reader header
- * needs 44px on touch); the default is the compact desktop cell.
+ * Base UI's Toggle Group, so the row is one labelled control with arrow-key movement. The
+ * pressed cell takes the rail's active ground, not a list row's inversion. `cellClassName` sizes
+ * the hit area per call site.
  */
 export const IconSwitch = <T extends string>({
   label,
@@ -28,7 +25,7 @@ export const IconSwitch = <T extends string>({
     aria-label={label}
     value={[value]}
     onValueChange={([next]) => {
-      // Pressing the active cell again would empty the group; one option is always chosen.
+      // Pressing the active cell again would empty the group.
       const chosen = options.find(option => option.id === next);
       if (chosen !== undefined) onChange(chosen.id);
     }}

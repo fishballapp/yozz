@@ -1,20 +1,6 @@
 /**
- * RFC 5280 certificate structure, decoded from the TLV tree `der.ts` produces.
- *
- * The split: this layer turns TLVs into typed fields and enforces the ENCODING
- * rules — inner and outer `AlgorithmIdentifier` agree, no extension OID appears
- * twice, extensions only where the version admits them. It decides nothing about
- * trust. Whether a `cA` bit is required, whether SHA-1 is acceptable, whether a
- * name matches: all M4.
- *
- * Every field an attacker controls is kept FAITHFULLY, not normalised. A dNSName
- * carrying an embedded NUL comes back with the NUL still in it, because
- * `evil.com\0.good.com` truncated at decode is how a name check gets fooled by a
- * string the CA never issued. Rejecting it is the matcher's job, and it can only
- * do that job if the bytes reach it intact.
- *
- * Failures throw `DerError`, the same type `der.ts` throws, so M4 still has
- * exactly one catch and `tls` still has one failure path.
+ * Encoding rules only; trust is `validate.ts`. Every field an attacker controls is kept verbatim,
+ * never normalised: a dNSName with an embedded NUL comes back with the NUL, for the matcher to refuse.
  */
 import {
   DerError,
@@ -42,11 +28,7 @@ const expectUniversal = (node: DerNode, tagNumber: number, what: string): DerNod
   return node;
 };
 
-/**
- * An EXPLICIT tag wraps exactly ONE value. Taking the first child and ignoring
- * the rest lets a second, different value ride along invisibly, which is how two
- * implementations come to disagree about the same bytes.
- */
+/** An EXPLICIT tag wraps exactly one value; a second would ride along invisibly. */
 const onlyChildOf = (node: DerNode, what: string): DerNode => {
   const children = childrenOf(node, what);
   const [only] = children;
@@ -61,11 +43,6 @@ const childrenOf = (node: DerNode, what: string): readonly DerNode[] => {
   return node.children;
 };
 
-/**
- * Walks a SEQUENCE's fields in declaration order. OPTIONAL fields are why this
- * is a cursor and not destructuring: whether `issuerUniqueID` is present changes
- * which index `extensions` sits at.
- */
 const fieldsOf = (node: DerNode, what: string) => {
   const children = childrenOf(node, what);
   let index = 0;
@@ -88,10 +65,9 @@ const fieldsOf = (node: DerNode, what: string) => {
   };
 };
 
-/** An OID plus its opaque parameters. RSASSA-PSS carries its entire configuration there. */
 export type AlgorithmIdentifier = {
   readonly oid: string;
-  /** The parameters TLV verbatim, or null when the field is absent (which differs from NULL). */
+  /** Verbatim, or null when absent (which differs from an ASN.1 NULL). */
   readonly parametersDer: Uint8Array | null;
 };
 
@@ -118,15 +94,11 @@ const isSameAlgorithm = (a: AlgorithmIdentifier, b: AlgorithmIdentifier): boolea
 
 export type AttributeTypeAndValue = {
   readonly oid: string;
-  /**
-   * The value TLV verbatim, string type included. `openssl x509 -text` shows the
-   * text and hides whether it was a PrintableString or a UTF8String — and RFC
-   * 5280 name comparison turns on exactly that, so the bytes are what we keep.
-   */
+  /** Verbatim, string type included: RFC 5280 name comparison turns on the type. */
   readonly valueDer: Uint8Array;
 };
 
-/** RDNSequence. The inner array is one RDN, which is a SET and may hold several attributes. */
+/** The inner array is one RDN: a SET, which may hold several attributes. */
 export type Name = {
   readonly der: Uint8Array;
   readonly relativeDistinguishedNames: readonly (readonly AttributeTypeAndValue[])[];
@@ -141,8 +113,7 @@ const decodeName = (node: DerNode): Name => {
         expectUniversal(rdn, UNIVERSAL.SET, 'a RelativeDistinguishedName'),
         'an RDN',
       );
-      // RFC 5280 s4.1.2.4: SET SIZE (1..MAX). An empty RDN is a shape no CA can
-      // issue, and one that makes two different names compare equal.
+      // RFC 5280 §4.1.2.4: SET SIZE (1..MAX).
       if (attributes.length === 0) throw structure(rdn, 'an RDN holds at least one attribute');
       return attributes.map(attribute => {
         const fields = fieldsOf(
@@ -158,23 +129,15 @@ const decodeName = (node: DerNode): Name => {
   };
 };
 
-/** IA5String is 7-bit by definition, so anything above is malformed rather than reinterpreted. */
 const decodeIa5String = (node: DerNode): string => {
   if (node.content.some(byte => byte > 0x7f)) {
     throw new DerError('malformed-value', node.offset, 'IA5String is 7-bit');
   }
-  // Not `String.fromCharCode(...content)`: spreading attacker-sized content into
-  // a call is a stack overflow, which is not our failure type.
+  // Not `String.fromCharCode(...content)`: spreading attacker-sized content is a stack overflow.
   return [...node.content].map(byte => String.fromCharCode(byte)).join('');
 };
 
-/**
- * GeneralName, tagged by CHOICE position. `directoryName` is [4] EXPLICIT
- * because `Name` is itself a CHOICE; the rest are IMPLICIT.
- *
- * Unrecognised forms keep their tag number rather than being dropped. A name
- * constraint over a form we discarded would be a constraint silently satisfied.
- */
+/** Unrecognised forms keep their tag number: a constraint over a dropped form would be silently satisfied. */
 export type GeneralName =
   | { readonly kind: 'rfc822'; readonly value: string }
   | { readonly kind: 'dns'; readonly value: string }
@@ -191,7 +154,7 @@ const decodeGeneralName = (node: DerNode): GeneralName => {
     case 2:
       return { kind: 'dns', value: decodeIa5String(node) };
     case 4:
-      // EXPLICIT, so the RDNSequence is this node's single child.
+      // [4] is EXPLICIT because `Name` is itself a CHOICE.
       return { kind: 'directory', name: decodeName(onlyChildOf(node, 'a directoryName')) };
     case 6:
       return { kind: 'uri', value: decodeIa5String(node) };
@@ -207,7 +170,7 @@ const decodeGeneralNames = (node: DerNode, what: string): readonly GeneralName[]
 
 export type BasicConstraints = {
   readonly isCa: boolean;
-  /** How many intermediates may follow. Absent means unlimited, which is not zero. */
+  /** Absent means unlimited. */
   readonly maximumPathLength: number | null;
 };
 
@@ -217,9 +180,7 @@ const decodeBasicConstraints = (node: DerNode): BasicConstraints => {
     'BasicConstraints',
   );
   const first = fields.peek();
-  // Both fields are OPTIONAL and DEFAULT FALSE. DER omits a default, so a
-  // present BOOLEAN false is itself non-conforming — but that is a profile call,
-  // and this layer only reads what is there.
+  // Both fields are OPTIONAL and DEFAULT FALSE.
   const isCaFieldPresent =
     first !== undefined && first.tagClass === 'universal' && first.tagNumber === 1;
   if (isCaFieldPresent) fields.skip();
@@ -236,7 +197,7 @@ const decodeBasicConstraints = (node: DerNode): BasicConstraints => {
   return { isCa: isCaFieldPresent && decodeBoolean(first), maximumPathLength };
 };
 
-/** Named exactly as RFC 5280 does, so a required usage from x509-limbo is a direct lookup. */
+/** Named as RFC 5280 does. */
 const KEY_USAGE_BITS = [
   'digitalSignature',
   'nonRepudiation',
@@ -259,7 +220,7 @@ const decodeKeyUsage = (node: DerNode): ReadonlySet<KeyUsageName> => {
     KEY_USAGE_BITS.filter((_, bit) => {
       if (bit >= declaredBits) return false;
       const octet = bytes[bit >> 3] ?? 0;
-      // Bit 0 is the MOST significant bit of the first octet (X.690 s8.6.2).
+      // X.690 §8.6.2: bit 0 is the most significant bit of the first octet.
       return (octet & (0x80 >> (bit % 8))) !== 0;
     }),
   );
@@ -279,9 +240,7 @@ const decodeGeneralSubtrees = (node: DerNode): readonly GeneralSubtree[] =>
       'a GeneralSubtree',
     );
     const base = decodeGeneralName(fields.next('base'));
-    // RFC 5280 s4.2.1.10 forbids `minimum` and `maximum` in this profile. They
-    // are REJECTED rather than ignored: a constraint carrying a range we skipped
-    // is a constraint that silently constrains less than it says.
+    // RFC 5280 §4.2.1.10 forbids `minimum` and `maximum`; skipping them would constrain less than stated.
     if (fields.peek() !== undefined) {
       throw structure(
         subtree,
@@ -295,11 +254,7 @@ const decodeNameConstraints = (node: DerNode): NameConstraints => {
   const sequence = expectUniversal(node, UNIVERSAL.SEQUENCE, 'NameConstraints');
   const fields = childrenOf(sequence, 'NameConstraints');
 
-  /**
-   * Exhaustive, and at most once each. `.find()` would take the first
-   * `excludedSubtrees` and ignore a second — an attacker-controlled restrictive
-   * field that never reaches validation, in a critical extension.
-   */
+  // Not `.find()`: a second `excludedSubtrees` would be a restriction that never reaches validation.
   const subtrees = (tagNumber: number): readonly GeneralSubtree[] | null => {
     const matches = fields.filter(
       field => field.tagClass === 'context' && field.tagNumber === tagNumber,
@@ -308,7 +263,7 @@ const decodeNameConstraints = (node: DerNode): NameConstraints => {
     const [field] = matches;
     if (field === undefined) return null;
     const decoded = decodeGeneralSubtrees(field);
-    // GeneralSubtrees ::= SEQUENCE SIZE (1..MAX). An empty one states nothing.
+    // GeneralSubtrees ::= SEQUENCE SIZE (1..MAX).
     if (decoded.length === 0) throw structure(field, `[${tagNumber}] holds no GeneralSubtree`);
     return decoded;
   };
@@ -324,7 +279,6 @@ const decodeNameConstraints = (node: DerNode): NameConstraints => {
   return { permitted: permitted ?? [], excluded: excluded ?? [] };
 };
 
-/** What an extension carried, alongside whether ignoring it is permitted. */
 export type Extension<T> = { readonly isCritical: boolean; readonly value: T };
 
 export type AuthorityKeyIdentifier = {
@@ -335,19 +289,15 @@ export type AuthorityKeyIdentifier = {
 export type Extensions = {
   readonly basicConstraints: Extension<BasicConstraints> | null;
   readonly keyUsage: Extension<ReadonlySet<KeyUsageName>> | null;
-  /** OIDs, unmapped. Which OID means `serverAuth` is a policy question, so M4 owns it. */
+  /** OIDs, unmapped. */
   readonly extendedKeyUsage: Extension<readonly string[]> | null;
   readonly subjectAltName: Extension<readonly GeneralName[]> | null;
   readonly nameConstraints: Extension<NameConstraints> | null;
   readonly subjectKeyIdentifier: Extension<Uint8Array> | null;
   readonly authorityKeyIdentifier: Extension<AuthorityKeyIdentifier> | null;
-  /**
-   * How many AccessDescriptions the extension holds. Nothing in RFC 5280 s6.1
-   * consults AIA, and we never chase it — this exists only because CABF requires
-   * `SEQUENCE SIZE (1..MAX)`, and an empty one is a malformed certificate.
-   */
+  /** Only the count: nothing consults AIA, but CABF requires `SEQUENCE SIZE (1..MAX)`. */
   readonly authorityInfoAccess: Extension<number> | null;
-  /** OIDs of every critical extension we do not interpret. M4 fails closed on a non-empty list. */
+  /** Critical extensions this decoder does not interpret; validation fails closed on any. */
   readonly unrecognisedCritical: readonly string[];
 };
 
@@ -371,9 +321,7 @@ const decodeAuthorityKeyIdentifier = (node: DerNode): AuthorityKeyIdentifier => 
     fields.find(child => child.tagClass === 'context' && child.tagNumber === tagNumber);
   return {
     keyIdentifier: at(0)?.content ?? null,
-    // authorityCertIssuer [1] and authorityCertSerialNumber [2]. Their CONTENTS
-    // are never consulted, but their presence is: CABF 7.1.2.11.1 forbids them,
-    // so what matters is that they were there at all.
+    // authorityCertIssuer [1] and authorityCertSerialNumber [2], which CABF 7.1.2.11.1 forbids.
     hasIssuerAndSerial: at(1) !== undefined || at(2) !== undefined,
   };
 };
@@ -392,18 +340,12 @@ const decodeExtensions = (node: DerNode): Extensions => {
     return {
       oid,
       isCritical: isCriticalPresent && decodeBoolean(second),
-      // Kept as BYTES, undecoded. An extension we do not interpret is not parsed
-      // at all — Entrust's private 1.2.840.113533.7.65.0 holds a GeneralString,
-      // which RFC 5280 admits nowhere, and eagerly decoding every extension
-      // rejects a root that Node and every browser trust. Decoding what you never
-      // consume buys nothing and hands an attacker a parser.
+      // Undecoded: Entrust's 1.2.840.113533.7.65.0 holds a GeneralString, which RFC 5280 admits nowhere.
       extnValueDer: expectUniversal(extnValue, UNIVERSAL.OCTET_STRING, 'extnValue').content,
     };
   });
 
-  // RFC 5280 s4.2: "A certificate MUST NOT include more than one instance of a
-  // particular extension." Two BasicConstraints let an implementation reading the
-  // first and one reading the last disagree about the same certificate.
+  // RFC 5280 §4.2: at most one instance of each extension.
   const seen = new Set<string>();
   for (const { oid } of raw) {
     if (seen.has(oid)) {
@@ -412,7 +354,6 @@ const decodeExtensions = (node: DerNode): Extensions => {
     seen.add(oid);
   }
 
-  /** Only a recognised extension is decoded, and only then does its content become DER. */
   const find = <T>(oid: string, decode: (node: DerNode) => T): Extension<T> | null => {
     const extension = raw.find(candidate => candidate.oid === oid);
     return extension === undefined
@@ -446,7 +387,6 @@ const decodeExtensions = (node: DerNode): Extensions => {
         expectUniversal(access, UNIVERSAL.SEQUENCE, 'AuthorityInfoAccessSyntax'),
         'AuthorityInfoAccessSyntax',
       );
-      // The contents are never read; only that there is at least one.
       if (descriptions.length === 0) {
         throw structure(access, 'AuthorityInfoAccessSyntax holds at least one AccessDescription');
       }
@@ -461,7 +401,7 @@ const decodeExtensions = (node: DerNode): Extensions => {
 };
 
 export type SubjectPublicKeyInfo = {
-  /** The whole SPKI TLV. This is what `tls` hands to `importKey` at M6. */
+  /** The whole SPKI TLV, as `importKey` wants it. */
   readonly der: Uint8Array;
   readonly algorithm: AlgorithmIdentifier;
   readonly subjectPublicKey: Uint8Array;
@@ -470,15 +410,11 @@ export type SubjectPublicKeyInfo = {
 
 export type Certificate = {
   readonly der: Uint8Array;
-  /**
-   * Verbatim, and a VIEW of the input — never rebuilt. A signature is over the
-   * bytes the CA signed, and re-encoding to get them back is how a parser that
-   * normalises silently verifies a different certificate than it validates.
-   */
+  /** A view of the input, never rebuilt: the signature is over these exact bytes. */
   readonly tbsCertificateDer: Uint8Array;
   readonly version: 1 | 2 | 3;
   readonly serialNumber: bigint;
-  /** Encoded width. RFC 5280 s4.1.2.2 caps a serial at 20 octets, and bigint forgets. */
+  /** Encoded width, which `bigint` forgets. RFC 5280 §4.1.2.2 caps it at 20. */
   readonly serialNumberOctets: number;
   readonly signatureAlgorithm: AlgorithmIdentifier;
   readonly issuer: Name;
@@ -523,16 +459,13 @@ export const decodeCertificate = (der: Uint8Array): Certificate => {
         `unknown certificate version ${value}`,
       );
     }
-    // DER omits a DEFAULT, so an explicit v1 is a re-encoding of the same
-    // certificate with different bytes — and a signature covers bytes.
+    // DER omits a DEFAULT.
     if (known === 1) throw structure(versionField, 'version v1 is the DEFAULT and DER omits it');
     return known;
   })();
 
   const serialNumberField = fields.next('serialNumber');
-  // Bounded BEFORE decoding, not after. `decodeInteger` grows a BigInt one octet
-  // at a time, so a peer that sends a megabyte-wide INTEGER buys superlinear work
-  // from an otherwise well-formed certificate. RFC 5280 s4.1.2.2 caps it at 20.
+  // Before decoding: `decodeInteger` grows a BigInt one octet at a time.
   if (serialNumberField.content.length > MAXIMUM_SERIAL_OCTETS) {
     throw new DerError(
       'malformed-value',
@@ -564,9 +497,7 @@ export const decodeCertificate = (der: Uint8Array): Certificate => {
   );
   spkiFields.assertExhausted();
 
-  // issuerUniqueID [1] and subjectUniqueID [2] are v2-and-later, and read but
-  // unused: nothing in RFC 5280 s6.1 consults them. Skipping them WITHOUT
-  // consuming them would push `extensions` off by one.
+  // issuerUniqueID [1] and subjectUniqueID [2]: consumed so `extensions` is not off by one, never read.
   for (const tagNumber of [1, 2]) {
     const unique = fields.peek();
     if (unique?.tagClass === 'context' && unique.tagNumber === tagNumber) {
@@ -603,16 +534,14 @@ export const decodeCertificate = (der: Uint8Array): Certificate => {
     if (sequence === undefined)
       throw structure(extensionsField, '[3] EXPLICIT Extensions wraps one SEQUENCE');
     const extensionList = expectUniversal(sequence, UNIVERSAL.SEQUENCE, 'Extensions');
-    // RFC 5280 s4.1.2.9: Extensions ::= SEQUENCE SIZE (1..MAX).
+    // RFC 5280 §4.1.2.9: Extensions ::= SEQUENCE SIZE (1..MAX).
     if (childrenOf(extensionList, 'Extensions').length === 0) {
       throw structure(extensionList, 'an empty extensions SEQUENCE is not encodable');
     }
     return decodeExtensions(extensionList);
   })();
 
-  // RFC 5280 s4.1.1.2: the two MUST match. They are signed and unsigned copies of
-  // the same statement, so a mismatch means the outer one — the one a naive
-  // implementation reads to pick a verification algorithm — is unauthenticated.
+  // RFC 5280 §4.1.1.2: the unsigned outer algorithm must match the signed inner one.
   if (!isSameAlgorithm(signatureAlgorithm, innerSignature)) {
     throw structure(
       certificate,

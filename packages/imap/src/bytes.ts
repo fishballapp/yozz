@@ -1,8 +1,3 @@
-/**
- * Byte-level primitives and ASCII utilities for IMAP stream handling.
- * Zero external dependencies.
- */
-
 export const CR = 0x0d;
 export const LF = 0x0a;
 export const SPACE = 0x20;

@@ -22,10 +22,7 @@ describe('Web passkey PRF extension and derivation', () => {
     delete globalThis.window;
     expect(await checkPasskeyPrfCapability()).toBe('unsupported');
 
-    // `getClientCapabilities` is Chrome 133+ and uneven elsewhere, so its
-    // ABSENCE says nothing about PRF. Reporting `unsupported` here would refuse
-    // passkey mode on browsers where PRF works; `prf.enabled` at registration is
-    // the authoritative answer and it is per-authenticator.
+    // `getClientCapabilities` is Chrome 133+; its absence says nothing about PRF.
     globalThis.window = { PublicKeyCredential: {} } as unknown as Window & typeof globalThis;
     expect(await checkPasskeyPrfCapability()).toBe('unknown');
 
@@ -33,9 +30,7 @@ describe('Web passkey PRF extension and derivation', () => {
   });
 
   it('accepts an authentication result, which carries no `enabled` flag', () => {
-    // MDN's `get()` output is `{ prf: { results: { first } } }` — `enabled` is a
-    // `create()` field. Requiring it rejected every real assertion while tests
-    // that supplied both fields stayed green on a shape that does not occur.
+    // MDN's `get()` output has no `enabled`; requiring it rejected every real assertion.
     const bytes = new Uint8Array(32).fill(3);
     expect(extractPrfOutput({ prf: { results: { first: bytes.buffer } } })).toEqual(bytes);
   });
@@ -53,8 +48,7 @@ describe('Web passkey PRF extension and derivation', () => {
   });
 
   it('asks registration to ENABLE the PRF, never to evaluate it', () => {
-    // `create()` does not reliably return PRF output, and `evalByCredential`
-    // makes it reject outright. Enable-only is the documented shape.
+    // `create()` does not reliably return PRF output, and `evalByCredential` makes it reject.
     expect(getPrfEnableInput()).toEqual({ prf: {} });
     expect(getPrfEvalInput().prf.eval.first).toBeInstanceOf(Uint8Array);
   });
@@ -83,7 +77,6 @@ describe('Web passkey PRF extension and derivation', () => {
       }),
     ).toThrow(PasskeyPrfError);
 
-    // Invalid length (not 32 bytes)
     expect(() =>
       extractPrfOutput({
         prf: {

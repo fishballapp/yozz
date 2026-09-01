@@ -1,14 +1,9 @@
 /**
- * HACKATHON-ONLY, and it dies with the judge machinery on 2026-09-03 because it runs off the judge
- * ledger. Until then it is the ONLY check on a mail behaviour no unit test can reach: whether the
- * SERVER can find what we ask it to find.
+ * HACKATHON ONLY: dies with the judge machinery on 2026-09-03 because it runs off the ledger.
+ * The only check on whether the server can find what we ask it to find (it caught `SEARCH
+ * HEADER X-Yozz-Draft` answering empty on Forward Email). Reseed the account afterwards.
  *
  *   node harness/draft-mirror-probe.ts judge-49
- *
- * Types a draft, waits for the mirror, edits it, discards it, and looks in the real Drafts folder
- * after each step. It caught `SEARCH HEADER X-Yozz-Draft` answering empty on Forward Email, which
- * made every discard report success and leak its copy. Reseed the account afterwards
- * (`judge-reseed.ts`): this leaves mail behind.
  */
 import { readFileSync } from 'node:fs';
 import { connect, type Socket } from 'node:net';
@@ -116,7 +111,7 @@ try {
   await page.waitForTimeout(20_000);
   const appeared = await drafts('after typing');
 
-  // A second edit burst: each version used to APPEND beside the last instead of replacing it.
+  // A second edit burst: each version used to APPEND beside the last.
   phase = 'edit again';
   await page.getByLabel('Message body, markdown').fill('a second version of the body');
   await page.waitForTimeout(20_000);
@@ -124,8 +119,7 @@ try {
 
   phase = 'DISCARD';
 
-  // The composer's footer, not the header X — that one closes and KEEPS the draft now. The
-  // footer button opens the confirm sheet; the second click is the one that discards.
+  // The composer's footer, not the header X, which closes and keeps the draft.
   await page.getByRole('button', { name: 'Discard', exact: true }).click();
   await page.getByRole('alertdialog').getByRole('button', { name: 'Discard' }).click();
   await page.waitForTimeout(20_000);

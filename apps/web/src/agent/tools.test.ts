@@ -81,8 +81,7 @@ const fakePort = (threads: ThreadState[], overrides: Partial<AgentPort> = {}) =>
         .find(t => t.id === threadId)
         ?.messages.find(m => m.id === messageId);
       if (found === undefined) return { status: 'failed' } as const;
-      // The store answers from the message when it is loaded, from the fetch when it was not; the
-      // fake never publishes a render, which is the point: the tool must not need one.
+      // The fake never publishes a render: the tool must not need one.
       return loadedBody(found.bodyStatus === undefined ? found.body : ['Loaded body.']);
     }),
     markRead: vi.fn(() => true),
@@ -181,8 +180,7 @@ describe('get_threads', () => {
       uidValidity: 1,
       uid: 7,
     });
-    // A thread holding a draft always lists 'drafts' too (withDrafts appends it), so the
-    // fixture matches what real threading produces.
+    // A thread holding a draft always lists 'drafts' too.
     const mixed = thread('m', ['inbox', 'sent', 'drafts'], {
       messages: [
         message('m/1', { locations: [location('inbox')] }),
@@ -204,7 +202,7 @@ describe('get_threads', () => {
         },
       ],
     });
-    // Fixture messages have no locations and claim no mailbox rather than guessing one.
+    // Fixture messages have no locations.
     const fixture = await call(tools, 'get_threads', { ids: ['a'], body: 'latest' });
     const [only] = (fixture as { threads: { messages: Record<string, unknown>[] }[] }).threads;
     expect(only?.messages[0]).not.toHaveProperty('mailboxes');
@@ -226,11 +224,11 @@ describe('get_threads', () => {
     const long = (id: string) =>
       thread(id, ['inbox'], { messages: [message(`${id}/1`, { body: ['x'.repeat(4_000)] })] });
     const { tools } = fakePort([long('a'), long('b'), long('c')]);
-    // Three whole bodies at 4K each blow the 6K output budget, so only the first survives.
+    // Three whole bodies at 4K each blow the 6K budget, so only the first survives.
     const page = await call(tools, 'get_threads', { body: 'full', bodyChars: 4_000 });
     expect(page).toMatchObject({ total: 3, omittedThreads: 2, nextOffset: 1 });
     expect((page as { threads: unknown[] }).threads).toHaveLength(1);
-    // The dropped two are still reachable, which is the whole point of the offset.
+    // The dropped two are still reachable by offset.
     await expect(
       call(tools, 'get_threads', { body: 'full', bodyChars: 4_000, offset: 1 }),
     ).resolves.toMatchObject({ threads: [{ id: 'b' }], nextOffset: 2 });
@@ -261,8 +259,7 @@ describe('get_threads', () => {
 
   it('answers a conversation once when several ids name it', async () => {
     const { tools } = fakePort([inbox]);
-    // A thread id and a message id in the same thread are both valid handles, and an agent that
-    // collected them from different calls must not be told there are two conversations.
+    // A thread id and a message id in the same thread are both valid handles.
     await expect(call(tools, 'get_threads', { ids: ['a', 'a/1'] })).resolves.toMatchObject({
       threads: [{ id: 'a' }],
       total: 1,
@@ -284,7 +281,7 @@ describe('get_threads', () => {
     const byDefault = await read({ ids: ['c'], body: 'latest' });
     expect(byDefault.length).toBeLessThan(BODY_CHARS + 60);
     expect(byDefault).toContain('truncated');
-    // The caller's number is honoured, or a tool that advertises it is lying about its own budget.
+    // The caller's number is honoured.
     expect((await read({ ids: ['c'], body: 'latest', bodyChars: 200 })).length).toBeLessThan(260);
   });
 
@@ -352,8 +349,7 @@ describe('update_threads', () => {
 
   it('changes a conversation once when several ids name it', async () => {
     const { tools, port } = fakePort([thread('a', ['inbox'], { isStarred: false })]);
-    // Twice would be worse than noise: the second pass sees the first one's pending move and
-    // reports a refusal for a change that did happen.
+    // The second pass would see the first one's pending move and report a refusal.
     const result = await call(tools, 'update_threads', { ids: ['a', 'a/1'], starred: true });
     expect(result).toEqual({ results: [{ id: 'a', status: 'ok', isStarred: true }] });
     expect(port.setStar).toHaveBeenCalledTimes(1);
@@ -432,13 +428,12 @@ describe('save_draft and delete_draft', () => {
       references: ['<a/1@example.com>'],
     });
     expect(written.content.body.startsWith('On it.')).toBe(true);
-    // The original is quoted below, as mail has always done it.
+    // The original is quoted below.
     expect(written.content.body).toContain('> Hello there.');
   });
 
   it('refuses a replyToMessageId the conversation does not have', async () => {
-    // Falling back to the newest message would answer something the caller did not choose, and
-    // say nothing about it.
+    // Falling back to the newest message would answer something the caller did not choose.
     const { tools, state } = fakePort([thread('a', ['inbox'])]);
     await expect(
       call(tools, 'save_draft', { threadId: 'a', replyToMessageId: 'a/9', body: 'On it.' }),
@@ -447,8 +442,7 @@ describe('save_draft and delete_draft', () => {
   });
 
   it('files a reply under the account that holds the conversation', async () => {
-    // The sending address may have no mailbox of its own, and then this is the only thing that
-    // says which account's Drafts and Sent the message belongs to.
+    // The sending address may have no mailbox of its own.
     const { tools, state } = fakePort([thread('a', ['inbox'])]);
     await call(tools, 'save_draft', { from: 'alias@yozz.app', threadId: 'a', body: 'On it.' });
     expect(state.written).toMatchObject([

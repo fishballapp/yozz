@@ -188,7 +188,6 @@ describe('IMAP Client transcripts and state machine', () => {
     const steps = parseTranscript('append-literal.txt');
     await runTranscriptSession(steps, async client => {
       const res = await client.append('Sent', stringToBytes('Subject: hi'), ['\\Seen']);
-      // The locator, so the caller can address what it just wrote without searching for it.
       expect(res).toEqual({ ok: true, value: { uidValidity: 1, uid: 42 } });
     });
   });

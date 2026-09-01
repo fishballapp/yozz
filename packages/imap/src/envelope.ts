@@ -1,7 +1,3 @@
-/**
- * Parsers for IMAP FETCH items: ENVELOPE, FLAGS, INTERNALDATE, RFC822.SIZE, BODYSTRUCTURE.
- */
-
 import { asciiToString, stringToBytes } from './bytes.ts';
 import { decodeRfc2047 } from './rfc2047.ts';
 import type { ImapToken } from './tokenizer.ts';
@@ -34,7 +30,7 @@ export type ImapFetchItem =
   | { readonly kind: 'uid'; readonly uid: number }
   | { readonly kind: 'body'; readonly section: string; readonly bytes: Uint8Array | null }
   | { readonly kind: 'bodyStructure'; readonly parts: readonly string[] }
-  /** Gmail's `X-GM-THRID`: 64-bit, so kept as its decimal digits. */
+  /** Gmail's `X-GM-THRID` is 64-bit, so it stays decimal digits. */
   | { readonly kind: 'gmailThreadId'; readonly id: string }
   | { readonly kind: 'other'; readonly name: string };
 
@@ -46,9 +42,7 @@ const tokenToString = (token: ImapToken | undefined): string | null => {
   return null;
 };
 
-/**
- * Parses a single address tuple `(name adl mailbox host)` and advances index past `)`.
- */
+/** RFC 9051 address: `(name adl mailbox host)`. */
 const parseAddressTuple = (
   tokens: readonly ImapToken[],
   start: number,
@@ -59,14 +53,12 @@ const parseAddressTuple = (
 
   const rawName = tokenToString(tokens[idx]);
   idx++;
-  // Source route (adl) is ignored
   idx++;
   const rawMailbox = tokenToString(tokens[idx]);
   idx++;
   const rawHost = tokenToString(tokens[idx]);
   idx++;
 
-  // Consume up to matching ')'
   while (idx < tokens.length && tokens[idx]?.kind !== 'rparen') {
     idx++;
   }
@@ -87,10 +79,6 @@ const parseAddressTuple = (
   };
 };
 
-/**
- * Parses an address list `( (addr1) (addr2) ... )` or `NIL`.
- * Flattening groups to their member addresses.
- */
 export const parseAddressList = (
   tokens: readonly ImapToken[],
   start: number,
@@ -132,10 +120,7 @@ export const parseAddressList = (
   return { addresses, nextIndex: idx };
 };
 
-/**
- * Parses an ENVELOPE structure:
- * `(date subject from sender reply-to to cc bcc in-reply-to message-id)`
- */
+/** RFC 9051 envelope: `(date subject from sender reply-to to cc bcc in-reply-to message-id)`. */
 export const parseEnvelope = (
   tokens: readonly ImapToken[],
   start: number,
@@ -143,54 +128,43 @@ export const parseEnvelope = (
   if (tokens[start]?.kind !== 'lparen') return null;
   let idx = start + 1;
 
-  // 1. date
   const date = tokenToString(tokens[idx]);
   idx++;
 
-  // 2. subject
   const subjectRaw = tokenToString(tokens[idx]);
   const subject = subjectRaw !== null ? decodeRfc2047(subjectRaw) : null;
   idx++;
 
-  // 3. from
   const fromResult = parseAddressList(tokens, idx);
   const from = fromResult.addresses;
   idx = fromResult.nextIndex;
 
-  // 4. sender
   const senderResult = parseAddressList(tokens, idx);
   const sender = senderResult.addresses;
   idx = senderResult.nextIndex;
 
-  // 5. reply-to
   const replyToResult = parseAddressList(tokens, idx);
   const replyTo = replyToResult.addresses;
   idx = replyToResult.nextIndex;
 
-  // 6. to
   const toResult = parseAddressList(tokens, idx);
   const to = toResult.addresses;
   idx = toResult.nextIndex;
 
-  // 7. cc
   const ccResult = parseAddressList(tokens, idx);
   const cc = ccResult.addresses;
   idx = ccResult.nextIndex;
 
-  // 8. bcc
   const bccResult = parseAddressList(tokens, idx);
   const bcc = bccResult.addresses;
   idx = bccResult.nextIndex;
 
-  // 9. in-reply-to
   const inReplyTo = tokenToString(tokens[idx]);
   idx++;
 
-  // 10. message-id
   const messageId = tokenToString(tokens[idx]);
   idx++;
 
-  // Skip any trailing fields up to matching ')'
   while (idx < tokens.length && tokens[idx]?.kind !== 'rparen') {
     idx++;
   }
@@ -214,9 +188,7 @@ export const parseEnvelope = (
   };
 };
 
-/**
- * Parses BODYSTRUCTURE, extracting only the list of MIME parts (e.g. ['TEXT/PLAIN', 'TEXT/HTML']).
- */
+/** Only the MIME types, e.g. `['TEXT/PLAIN', 'TEXT/HTML']`. */
 export const parseBodyStructureParts = (
   tokens: readonly ImapToken[],
   start: number,
@@ -228,18 +200,15 @@ export const parseBodyStructureParts = (
   let idx = start + 1;
   const parts: string[] = [];
 
-  // Check if first element is '(' (multipart) or string (singlepart)
   const first = tokens[idx];
 
   if (first?.kind === 'lparen') {
-    // Multipart: list of subparts followed by subtype
     while (idx < tokens.length && tokens[idx]?.kind === 'lparen') {
       const child = parseBodyStructureParts(tokens, idx);
       parts.push(...child.parts);
       idx = child.nextIndex;
     }
 
-    // Skip multipart subtype and remaining params up to matching ')'
     let depth = 1;
     while (idx < tokens.length && depth > 0) {
       if (tokens[idx]?.kind === 'lparen') depth++;
@@ -250,7 +219,6 @@ export const parseBodyStructureParts = (
     return { parts, nextIndex: idx };
   }
 
-  // Singlepart: media-type subtype params ...
   const mediaType = tokenToString(tokens[idx]) ?? 'APPLICATION';
   idx++;
   const subType = tokenToString(tokens[idx]) ?? 'OCTET-STREAM';
@@ -258,7 +226,6 @@ export const parseBodyStructureParts = (
 
   parts.push(`${mediaType.toUpperCase()}/${subType.toUpperCase()}`);
 
-  // Skip remaining params up to matching ')'
   let depth = 1;
   while (idx < tokens.length && depth > 0) {
     if (tokens[idx]?.kind === 'lparen') depth++;
@@ -269,9 +236,6 @@ export const parseBodyStructureParts = (
   return { parts, nextIndex: idx };
 };
 
-/**
- * Parses items inside a FETCH response `(...)`.
- */
 export const parseFetchItems = (
   tokens: readonly ImapToken[],
   start: number,
@@ -336,7 +300,7 @@ export const parseFetchItems = (
           items.push({ kind: 'bodyStructure', parts: bsResult.parts });
           idx = bsResult.nextIndex;
         } else if (tokens[idx]?.kind === 'lbracket') {
-          idx++; // consume '['
+          idx++;
           const sectionParts: string[] = [];
           while (idx < tokens.length && tokens[idx]?.kind !== 'rbracket') {
             const secTok = tokens[idx];
@@ -357,11 +321,11 @@ export const parseFetchItems = (
             }
             idx++;
           }
-          if (tokens[idx]?.kind === 'rbracket') idx++; // consume ']'
+          if (tokens[idx]?.kind === 'rbracket') idx++;
 
           const section = sectionParts.join(' ');
 
-          // Optional <origin> partial, e.g. <0.1024> or <0>
+          // An optional `<origin.size>` partial, e.g. `<0.1024>`.
           const originTok = tokens[idx];
           if (originTok?.kind === 'atom' && /^<\d+(\.\d+)?>$/.test(originTok.value)) {
             idx++;

@@ -1,7 +1,3 @@
-/**
- * Byte-level encoding and decoding primitives for TLS records and messages.
- */
-
 export const concat = (...parts: readonly Uint8Array[]): Uint8Array<ArrayBuffer> => {
   const joined = new Uint8Array(parts.reduce((total, part) => total + part.length, 0));
   let offset = 0;

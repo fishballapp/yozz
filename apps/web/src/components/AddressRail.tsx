@@ -18,30 +18,8 @@ import { buttonClass } from './ui/Button';
 import { Wordmark } from './Wordmark';
 
 /**
- * The rail is address-first: the accounts you own come before any view, because the address is
- * this product's organizing unit (PRODUCT.md principle 2).
- *
- * It holds only what you touch every day. Connecting an account is a once-a-year administrative
- * act, so it lives in Settings beside the accounts it administers, and does not take a permanent
- * slot in the surface you navigate from.
- *
- * A named account leads with its name and keeps the address on a second line underneath; an
- * unnamed one is just its address. Naming an account renames it, it never HIDES which address it
- * is — the address is always on screen, because that is the thing you actually own.
- *
- * The Inbox row is not just the first row in the list, it is the home of the product, so it is
- * built differently: taller, headed by its own icon — a mailbox, the one object in the rail that
- * is a THING rather than a diagram of the UI — and carrying the total unread as a filled chip
- * rather than a numeral. Everything below it is a subset of it.
- *
- * It is labelled "Inbox", not "Unified": to the person reading it this IS the inbox, and every
- * address below is a filter of it. "Unified" describes the mechanism, and the mechanism is not
- * what you click. The mailbox id stays `unified` — the URL names the concept, the rail names the
- * place.
- *
- * Every link here uses `keepCompose` — it carries `?compose=` forward and drops `?q=`. Leaving a
- * search attached across a rail click is how the per-address view used to arrive silently
- * pre-filtered by a word typed somewhere else.
+ * Address-first (PRODUCT.md principle 2); connecting an account lives in Settings. The Inbox row
+ * is labelled "Inbox" while its id stays `unified` (DECISIONS.md). Every link uses `keepCompose`.
  */
 
 const UnifiedRow = ({ onNavigate }: { onNavigate?: () => void }) => {
@@ -99,9 +77,7 @@ const RailRow = ({
       params={{ mailbox }}
       search={keepCompose}
       onClick={onNavigate}
-      // Explicit rather than relying on TanStack Router, which also sets `aria-current` when a
-      // link matches the URL: the active state is a deliberate part of this component, so it is
-      // stated here rather than inherited from routing behaviour that could change.
+      // Explicit rather than inherited from TanStack Router's own `aria-current`.
       aria-current={isActive ? 'page' : undefined}
       className={cn(
         'relative flex items-center gap-2.5 py-1.5 pr-2.5 pl-3 text-base transition-colors',
@@ -160,8 +136,7 @@ export const AddressRail = ({ onNavigate }: { onNavigate?: () => void }) => {
         <Link
           to="."
           search={withCompose('new')}
-          // Like every other link here: the mobile sheet is a modal, and leaving it open behind the
-          // composer traps focus on "Close mailboxes" once the draft is dismissed.
+          // The mobile sheet is a modal; left open behind the composer it traps focus.
           onClick={onNavigate}
           className={cn(buttonClass({ variant: 'primary' }), 'w-full justify-start gap-2')}
         >

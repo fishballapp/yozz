@@ -1,9 +1,3 @@
-/**
- * SMTP client over a `ByteDuplex` (RFC 5321 + AUTH, RFC 4954). Implicit TLS is the transport's
- * business; this never sees a certificate or a password store. One command in flight at a time,
- * which is all SMTP allows without PIPELINING.
- */
-
 import { createLineReader, readReply, type SmtpReply, type SmtpResult } from './reply.ts';
 import type { ByteDuplex } from './transport.ts';
 
@@ -46,13 +40,9 @@ const refused = (reply: SmtpReply): SmtpResult<never> => ({
   reason: { kind: 'reply', code: reply.code, text: reply.lines.join(' ') },
 });
 
-/** A bare address may not contain the characters that would end or alter the command. */
 const isCommandSafe = (address: string) => /^[^\s<>\r\n]+$/.test(address);
 
-/**
- * RFC 5321 §4.5.2: a line beginning with `.` gets a second `.`; the message ends at `CRLF.CRLF`.
- * Done on bytes so a body is never decoded and re-encoded on the way out.
- */
+/** RFC 5321 §4.5.2: a line beginning with `.` gets a second `.`; the message ends at `CRLF.CRLF`. */
 export const dotStuff = (data: Uint8Array): Uint8Array => {
   const out: number[] = [];
   let atLineStart = true;
@@ -61,7 +51,6 @@ export const dotStuff = (data: Uint8Array): Uint8Array => {
     out.push(byte);
     atLineStart = byte === 0x0a;
   }
-  // Terminate the last line if the message did not, then the lone dot.
   if (!atLineStart) out.push(0x0d, 0x0a);
   out.push(0x2e, 0x0d, 0x0a);
   return Uint8Array.from(out);
@@ -104,7 +93,7 @@ export const createSmtpClient = (transport: ByteDuplex): SmtpClient => {
   const ehlo = async (clientName: string): Promise<SmtpResult<SmtpCapabilities>> => {
     const reply = await expect(`EHLO ${clientName}`, 250);
     if (!reply.ok) return reply;
-    // The first line is the server's name; the rest are keywords with optional parameters.
+    // RFC 5321 §4.1.1.1: the first line is the server's name, not a keyword.
     const keywordLines = reply.value.lines.slice(1).map(line => line.trim().toUpperCase());
     const authLine = keywordLines.find(line => line === 'AUTH' || line.startsWith('AUTH '));
     capabilities = {
@@ -150,13 +139,11 @@ export const createSmtpClient = (transport: ByteDuplex): SmtpClient => {
     if (envelope.to.length === 0) {
       return { ok: false, reason: { kind: 'protocol', detail: 'no recipients' } };
     }
-    // BODY=8BITMIME is offered only when the server announced it; the message builder keeps the
-    // body 7-bit anyway, so this is belt and braces rather than a requirement.
     const bodyParam = capabilities.keywords.includes('8BITMIME') ? ' BODY=8BITMIME' : '';
     const mailFrom = await expect(`MAIL FROM:<${envelope.from}>${bodyParam}`, 250);
     if (!mailFrom.ok) return mailFrom;
     for (const recipient of envelope.to) {
-      // 252: the server will not VRFY but takes the message anyway (RFC 5321 §3.5.3).
+      // 252: the server cannot verify the address but accepts the message (RFC 5321 §3.5.3).
       const rcpt = await expect(`RCPT TO:<${recipient}>`, 250, 251, 252);
       if (!rcpt.ok) return rcpt;
     }
@@ -165,8 +152,7 @@ export const createSmtpClient = (transport: ByteDuplex): SmtpClient => {
     try {
       await transport.write(dotStuff(envelope.data));
     } catch (error) {
-      // The server is still inside DATA: anything sent now, QUIT included, is read as body text
-      // and never answered. Only dropping the connection ends it.
+      // The server is still inside DATA: anything sent now, QUIT included, is read as body text.
       inData = true;
       return { ok: false, reason: { kind: 'protocol', detail: `write failed: ${String(error)}` } };
     }

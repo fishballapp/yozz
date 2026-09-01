@@ -1,11 +1,3 @@
-/**
- * Name matching and name constraints.
- *
- * This file decides most of the score: 9491 of x509-limbo's 9786 cases are
- * `bettertls::nameconstraints`. It is also where a certificate stops being a
- * data structure and starts being an authorisation, so every comparison here is
- * written to fail closed on anything it does not understand.
- */
 import type {
   AttributeTypeAndValue,
   GeneralName,
@@ -16,20 +8,11 @@ import type {
 import { decodeDer } from './der.ts';
 import type { PeerName } from './validator.ts';
 
-/**
- * ASCII-only lowercase, for hostnames. A hostname is LDH by definition, so
- * folding only A-Z is exact here and says so. Directory-string values are a
- * different problem and use `prepareForComparison` instead.
- */
+/** For hostnames, which are LDH by definition. Directory strings use `prepareForComparison`. */
 export const asciiLower = (text: string): string =>
   text.replace(/[A-Z]/g, letter => String.fromCharCode(letter.charCodeAt(0) + 0x20));
 
-/**
- * A hostname we are willing to compare at all. Anything else — an embedded NUL,
- * a trailing dot, an empty label, a non-LDH byte — is refused rather than
- * normalised, because every normalisation is a chance to agree with an attacker
- * about what a name means.
- */
+/** Refused rather than normalised: an embedded NUL, a trailing dot, an empty label, a non-LDH byte. */
 const isComparableHostname = (host: string): boolean => {
   if (host.length === 0 || host.length > 253) return false;
   const labels = host.split('.');
@@ -43,11 +26,7 @@ const isComparableHostname = (host: string): boolean => {
   );
 };
 
-/**
- * RFC 6125 as WebPKI narrows it: a wildcard is the WHOLE leftmost label, never a
- * prefix like `www*`, it matches exactly one label, and it never applies to an
- * A-label. Two labels minimum on the right, so `*.com` matches nothing.
- */
+/** RFC 6125 as WebPKI narrows it: a wildcard is the whole leftmost label, matches one label, never an A-label, and needs two labels to its right. */
 export const matchesDnsName = (presented: string, host: string): boolean => {
   const name = asciiLower(presented);
   const target = asciiLower(host);
@@ -64,30 +43,21 @@ export const matchesDnsName = (presented: string, host: string): boolean => {
 const IPV4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/;
 const HEX_WORD = /^[0-9a-fA-F]{1,4}$/;
 
-/**
- * Dotted-quad, or IPv6 including the IPv4-tail form.
- *
- * Laxity is the dangerous direction here: this parses the name a caller ASKED
- * for, so a parser that reads `1::2::3` as `1::2` lets an invalid string match a
- * real SAN. Every form below is either exactly right or refused.
- */
+/** Dotted-quad, or IPv6 including the IPv4-tail form. Every form is exact or refused. */
 export const parseIpAddress = (text: string): Uint8Array | null => {
   const quad = IPV4.exec(text);
   if (quad !== null) {
-    // `010` is not `10` in an address literal, and reading it as one is how a
-    // non-canonical spelling matches a canonical SAN.
+    // `010` is not `10` in an address literal.
     if (/(^|\.)0\d/.test(text)) return null;
     const parts = quad.slice(1).map(Number);
     return parts.every(part => part <= 255) ? Uint8Array.from(parts) : null;
   }
   if (!text.includes(':')) return null;
 
-  // Exactly zero or one compression marker; `1::2::3` is not an address.
   const sections = text.split('::');
   if (sections.length > 2) return null;
   const [head = '', tail] = sections;
 
-  /** Hex words, with an optional dotted-quad tail contributing the last two. */
   const toWords = (section: string): number[] | null => {
     if (section === '') return [];
     const parts = section.split(':');
@@ -112,7 +82,7 @@ export const parseIpAddress = (text: string): Uint8Array | null => {
   const right = tail === undefined ? [] : toWords(tail);
   if (left === null || right === null) return null;
   const total = left.length + right.length;
-  // Uncompressed must be exactly 8 words; compressed must stand for at least one.
+  // `::` stands for at least one word.
   if (tail === undefined ? total !== 8 : total >= 8) return null;
   const words = [...left, ...Array.from({ length: 8 - total }, () => 0), ...right];
   return Uint8Array.from(words.flatMap(word => [word >> 8, word & 0xff]));
@@ -121,11 +91,7 @@ export const parseIpAddress = (text: string): Uint8Array | null => {
 const isSameBytes = (a: Uint8Array, b: Uint8Array): boolean =>
   a.length === b.length && a.every((byte, index) => byte === b[index]);
 
-/**
- * Does the leaf present the name the caller asked for? CN is deliberately never
- * consulted: `webpki::cn` expects a certificate whose only match is its CN to
- * FAIL, which is what every browser has done for a decade.
- */
+/** CN is never consulted, as in every browser. */
 export const matchesPeerName = (
   subjectAltNames: readonly GeneralName[],
   expected: PeerName,
@@ -140,41 +106,23 @@ export const matchesPeerName = (
   );
 };
 
-/**
- * `null` is "this pair is not something we can evaluate". It is NOT "no match":
- * `violatesConstraints` turns it into a refusal in BOTH directions, because a
- * constraint we cannot apply must never read as one that was satisfied.
- */
+/** `null`: the pair cannot be evaluated, which `violatesConstraints` treats as a refusal in both directions. */
 type SubtreeVerdict = boolean | null;
 
-/**
- * A DNS name constraint covers a name and everything to its left: `example.com`
- * covers `example.com` and `a.example.com`, never `notexample.com`. An empty
- * constraint covers every DNS name, which is how an excluded-everything subtree
- * is written.
- */
+/** `example.com` covers `example.com` and `a.example.com`, never `notexample.com`; an empty constraint covers everything. */
 const dnsWithinSubtree = (name: string, constraint: string): SubtreeVerdict => {
   const target = asciiLower(name);
   const base = asciiLower(constraint);
   if (base === '') return true;
-  // RFC 5280 s4.2.1.10 gives dNSName no leading-dot form. A constraint written
-  // that way is one we cannot honour, so it is unprocessable rather than unmet.
+  // RFC 5280 §4.2.1.10 gives dNSName no leading-dot form.
   if (base.startsWith('.')) return null;
   if (!isComparableHostname(target)) return false;
   return target === base || target.endsWith(`.${base}`);
 };
 
 /**
- * A wildcard SAN against a subtree, and the two directions are NOT the same
- * question — which is a certificate-validation bypass if one helper answers both.
- *
- * PERMITTED asks "is everything this can authenticate inside the subtree?", so
- * `*.example.com` is permitted by `example.com`: strip the wildcard and test the
- * base. EXCLUDED asks "can this authenticate ANYTHING inside the subtree?", so
- * `*.example.com` must be refused by an exclusion of `bar.example.com` — the
- * wildcard authenticates exactly that host. Stripping the wildcard for both
- * makes the exclusion miss, and a name-constrained CA can then issue a wildcard
- * covering the host it was specifically forbidden. That is `cve::cve-2025-61727`.
+ * Permitted asks whether everything a wildcard can authenticate is inside the subtree; excluded asks
+ * whether it can authenticate anything inside it. Stripping the wildcard for both is CVE-2025-61727.
  */
 const dnsMatchesSubtree = (
   name: string,
@@ -195,24 +143,14 @@ const hostOfUri = (uri: string): string | null => {
   const authority = match?.[1];
   if (authority === undefined) return null;
   const afterUserInfo = authority.split('@').at(-1) ?? '';
-  // A bracketed IPv6 literal keeps its own colons, so strip the brackets here
-  // and let the caller decide that an address is not a domain.
+  // A bracketed IPv6 literal keeps its own colons.
   const bracketed = /^\[(.+)\]/.exec(afterUserInfo);
   if (bracketed?.[1] !== undefined) return bracketed[1];
   const host = afterUserInfo.split(':')[0];
   return host === undefined || host === '' ? null : host;
 };
 
-/**
- * RFC 5280 s4.2.1.10 gives URIs their OWN rule, and it is not the dNSName rule.
- * A constraint without a leading period names one EXACT host; with a leading
- * period it names proper subdomains and not the bare domain. Sending URIs
- * through the DNS matcher makes `example.com` cover `sub.example.com`, which the
- * constraint never said.
- *
- * A URI with no authority host, or with an IP-literal host, cannot be compared
- * against a domain constraint at all — unprocessable, not unmatched.
- */
+/** RFC 5280 §4.2.1.10: without a leading period the constraint names one exact host; with one, proper subdomains only. */
 const uriWithinSubtree = (uri: string, constraint: string): SubtreeVerdict => {
   const host = hostOfUri(uri);
   if (host === null) return null;
@@ -220,8 +158,6 @@ const uriWithinSubtree = (uri: string, constraint: string): SubtreeVerdict => {
   const target = asciiLower(host);
   if (!isComparableHostname(target)) return null;
   const base = asciiLower(constraint);
-  // The constraint "MUST be specified as a fully qualified domain name", so an
-  // empty one states nothing we can apply.
   if (base === '') return null;
   return base.startsWith('.') ? target.endsWith(base) : target === base;
 };
@@ -240,11 +176,10 @@ const emailWithinSubtree = (mailbox: string, constraint: string): SubtreeVerdict
     : asciiLower(host) === asciiLower(constraint);
 };
 
-/** An IP constraint is address followed by mask: 8 octets for v4, 32 for v6. */
+/** Address followed by mask: 8 octets for v4, 32 for v6. */
 const ipWithinSubtree = (address: Uint8Array, constraint: Uint8Array): SubtreeVerdict => {
   if (constraint.length !== address.length * 2) {
-    // A constraint of the other family is a plain non-match. A constraint of
-    // neither family is a shape we cannot apply.
+    // The other family is a non-match; neither family cannot be applied.
     return constraint.length === 8 || constraint.length === 32 ? false : null;
   }
   return address.every((byte, index) => {
@@ -254,11 +189,7 @@ const ipWithinSubtree = (address: Uint8Array, constraint: Uint8Array): SubtreeVe
   });
 };
 
-/**
- * The string types a DirectoryString can use, and how to read each one. A type
- * absent here yields an unprocessable comparison rather than a locally invented
- * key — two different values must never collapse onto one identity.
- */
+/** A type absent here yields an unprocessable comparison rather than an invented key. */
 const STRING_ENCODINGS: Readonly<Record<number, string>> = {
   12: 'utf-8',
   19: 'ascii',
@@ -267,25 +198,11 @@ const STRING_ENCODINGS: Readonly<Record<number, string>> = {
   30: 'utf-16be',
 };
 
-/**
- * RFC 4518 string preparation, to the extent a certificate needs it: compatibility
- * normalisation, insignificant spaces folded, then case folding.
- *
- * `toLowerCase` is the right tool and is locale-INDEPENDENT — it is
- * `toLocaleLowerCase` that maps the Turkish dotted I. ASCII-only folding, which
- * this used to do, leaves `O=ÉVIL` and `O=évil` as different organisations, and
- * an excluded directory subtree is then evaded by changing case.
- */
+/** RFC 4518. `toLowerCase` is locale-independent (`toLocaleLowerCase` is the one that maps Turkish dotted I). */
 const prepareForComparison = (text: string): string =>
   text.normalize('NFKC').replace(/\s+/g, ' ').trim().toLowerCase();
 
-/**
- * One attribute as a comparable key, or `null` when it cannot be prepared.
- *
- * Decoding is FATAL on purpose. A lenient decoder maps every invalid sequence to
- * U+FFFD, which collapses distinct values onto one identity — the same hazard as
- * an unpadded hex fallback, where `04 00` and `40` both read as "400".
- */
+/** Fatal decoding: a lenient decoder maps every invalid sequence to U+FFFD, collapsing distinct values. */
 const canonicalAttribute = ({ oid, valueDer }: AttributeTypeAndValue): string | null => {
   try {
     const value = decodeDer(valueDer);
@@ -297,7 +214,7 @@ const canonicalAttribute = ({ oid, valueDer }: AttributeTypeAndValue): string | 
   }
 };
 
-/** One RDN is a SET, so its attributes carry no order to compare positionally. */
+/** An RDN is a SET, so its attributes have no order. */
 const isSameRelativeDistinguishedName = (
   a: readonly AttributeTypeAndValue[],
   b: readonly AttributeTypeAndValue[],
@@ -312,7 +229,7 @@ const isSameRelativeDistinguishedName = (
   return sortedLeft.every((value, index) => value === sortedRight[index]);
 };
 
-/** A DN constraint is satisfied when its RDNs are a prefix of the subject's. */
+/** Satisfied when the constraint's RDNs are a prefix of the subject's. */
 const directoryWithinSubtree = (subject: Name, constraint: Name): SubtreeVerdict => {
   const base = constraint.relativeDistinguishedNames;
   const target = subject.relativeDistinguishedNames;
@@ -326,10 +243,6 @@ const directoryWithinSubtree = (subject: Name, constraint: Name): SubtreeVerdict
   return true;
 };
 
-/**
- * Whether one name falls inside one subtree, or `null` when the pair is a form
- * this implementation cannot evaluate.
- */
 const withinSubtree = (
   name: GeneralName,
   base: GeneralName,
@@ -350,25 +263,15 @@ const withinSubtree = (
   return null;
 };
 
-/** Every constraint in force, accumulated down the chain. */
 export type ConstraintState = {
-  /**
-   * One entry per certificate that stated permittedSubtrees, kept SEPARATE.
-   * Flattening them into one list turns intersection into union, which would let
-   * an intermediate widen the names its own issuer permitted it — the exact
-   * thing name constraints exist to prevent.
-   */
+  /** One entry per certificate that stated permittedSubtrees; flattening them would turn intersection into union. */
   readonly permittedLevels: readonly (readonly GeneralSubtree[])[];
   readonly excluded: readonly GeneralSubtree[];
 };
 
 export const EMPTY_CONSTRAINTS: ConstraintState = { permittedLevels: [], excluded: [] };
 
-/**
- * RFC 5280 s6.1.4(g). Permitted subtrees INTERSECT down the chain and excluded
- * subtrees UNION. The two directions are what make a CA unable to widen its own
- * authority by issuing itself a laxer intermediate.
- */
+/** RFC 5280 §6.1.4(g): permitted subtrees intersect down the chain, excluded subtrees union. */
 export const addConstraints = (
   state: ConstraintState,
   constraints: NameConstraints | null,
@@ -383,46 +286,19 @@ export const addConstraints = (
         excluded: [...state.excluded, ...constraints.excluded],
       };
 
-/**
- * RFC 5280 s6.1.3(b)(c), applied to one certificate's names.
- *
- * A name is refused if it falls inside any excluded subtree, or if any LEVEL
- * that constrains its name form fails to cover it. A level that states no
- * subtree of that form does not constrain it — that is the rule keeping a
- * DNS-only constraint from silently forbidding every email address.
- */
-/**
- * A ceiling on name-constraint comparisons, and it is a SECURITY control rather
- * than a performance tweak. `pathological::nc-dos-1` presents 2048 SANs against
- * 4097 subtrees — 8.4 million comparisons for a chain that is otherwise
- * perfectly valid — and x509-limbo expects it REFUSED. rustls-webpki carries the
- * same kind of bound for the same reason.
- *
- * Real certificates are nowhere near: the whole harvested corpus tops out at a
- * handful of SANs against no constraints at all.
- */
+/** A security control, not a performance one: `pathological::nc-dos-1` is 8.4 million comparisons and limbo expects it refused. */
 const MAXIMUM_NAME_COMPARISONS = 250_000;
 
 /**
- * RFC 5280 s6.1.3(b)(c), applied to one certificate's names.
- *
- * A name is refused if it falls inside any excluded subtree, or if any LEVEL
- * that constrains its name form fails to cover it. A level that states no
- * subtree of that form does not constrain it — the rule keeping a DNS-only
- * constraint from silently forbidding every email address.
- *
- * Loops rather than `some`/`every` because the comparison budget has to be
- * decremented and checked between every single comparison, and exhausting it
- * must read as a REFUSAL: a certificate we could not finish clearing is not a
- * certificate we cleared.
+ * RFC 5280 §6.1.3(b)(c). A level that states no subtree of a name's form does not constrain it.
+ * Exhausting the comparison budget is a refusal.
  */
 export const violatesConstraints = (
   names: readonly GeneralName[],
   state: ConstraintState,
 ): boolean => {
   let budget = MAXIMUM_NAME_COMPARISONS;
-  // Grouped once rather than filtered per name: with 2048 names and 2049
-  // subtrees, re-filtering is itself the denial of service.
+  // Grouped once: re-filtering per name is itself the denial of service.
   const permittedByKind = state.permittedLevels.map(level =>
     Map.groupBy(level, ({ base }) => base.kind),
   );
@@ -431,8 +307,6 @@ export const violatesConstraints = (
     for (const { base } of state.excluded) {
       if (budget <= 0) return true;
       budget -= 1;
-      // `null` is a form we cannot evaluate, and an exclusion we cannot evaluate
-      // must never read as one that was satisfied.
       if (withinSubtree(name, base, true) !== false) return true;
     }
 

@@ -60,12 +60,10 @@ describe('Relay pure target and IP validation', () => {
     });
 
     it('rejects private, loopback, link-local, multicast, and reserved IP ranges', () => {
-      // Loopback
       expect(isPublicIp('127.0.0.1')).toBe(false);
       expect(isPublicIp('127.255.255.255')).toBe(false);
       expect(isPublicIp('::1')).toBe(false);
 
-      // RFC 1918
       expect(isPublicIp('10.0.0.1')).toBe(false);
       expect(isPublicIp('10.255.255.255')).toBe(false);
       expect(isPublicIp('172.16.0.1')).toBe(false);
@@ -73,19 +71,15 @@ describe('Relay pure target and IP validation', () => {
       expect(isPublicIp('192.168.0.1')).toBe(false);
       expect(isPublicIp('192.168.255.255')).toBe(false);
 
-      // Link-local
       expect(isPublicIp('169.254.169.254')).toBe(false);
       expect(isPublicIp('fe80::1')).toBe(false);
       expect(isPublicIp('febf::1')).toBe(false);
 
-      // CGNAT
       expect(isPublicIp('100.64.0.1')).toBe(false);
       expect(isPublicIp('100.127.255.255')).toBe(false);
 
-      // 0/8
       expect(isPublicIp('0.0.0.0')).toBe(false);
 
-      // Multicast / Broadcast / Reserved
       expect(isPublicIp('224.0.0.1')).toBe(false);
       expect(isPublicIp('239.255.255.255')).toBe(false);
       expect(isPublicIp('240.0.0.1')).toBe(false);
@@ -93,14 +87,11 @@ describe('Relay pure target and IP validation', () => {
       expect(isPublicIp('ff00::1')).toBe(false);
       expect(isPublicIp('ff02::1')).toBe(false);
 
-      // IPv6 ULA fc00::/7
       expect(isPublicIp('fc00::1')).toBe(false);
       expect(isPublicIp('fd12:3456:789a::1')).toBe(false);
 
-      // Unspecified ::
       expect(isPublicIp('::')).toBe(false);
 
-      // IPv4-mapped IPv6 with private v4
       expect(isPublicIp('::ffff:10.0.0.1')).toBe(false);
       expect(isPublicIp('::ffff:127.0.0.1')).toBe(false);
       expect(isPublicIp('::ffff:192.168.1.1')).toBe(false);

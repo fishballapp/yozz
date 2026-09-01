@@ -25,10 +25,6 @@ export const createProductionEmailSender = (env: RuntimeEnv): EmailSender => {
   };
 };
 
-/**
- * Dev only: there is no mailbox to deliver to on localhost, so the link goes to
- * the Worker's terminal. `wrangler dev` prints console output inline.
- */
 export const consoleEmailSender: EmailSender = async ({ to, url }) => {
   // biome-ignore lint/suspicious/noConsole: the terminal IS the delivery channel in dev
   console.log(`\n[yozz] magic link for ${to}:\n${url}\n`);

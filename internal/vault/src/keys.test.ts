@@ -1,19 +1,6 @@
 /**
- * The key schedule against OpenSSL.
- *
- * `node:crypto` is not a mirror of the code under test the way a second call to
- * `crypto.subtle` would be — it is OpenSSL, a separate implementation of the
- * same three RFCs, reached through a separate API. So re-deriving the whole
- * schedule with it and comparing checks every parameter that has no other way
- * of being wrong loudly: the iteration count, which value is the salt in each
- * PBKDF2 pass, the ASCII email fold, the empty HKDF salt, and all three `info`
- * strings. Getting any of them wrong still produces 32 plausible bytes.
- *
- * Every derived key is non-extractable, so none is compared directly. They are
- * compared through what they DO: OpenSSL unwraps the DEK that `encKey` sealed,
- * derives the DEK's two children itself, reproduces the record id `indexKey`
- * signed, and opens a real record under `recordKey`. Three `info` labels, and
- * the exact bytes of the AEAD's additional data, all pinned that way.
+ * The schedule re-derived over `node:crypto` (OpenSSL, a separate implementation), which pins every
+ * parameter that would otherwise fail silently: iteration count, salts, the fold, the `info` labels.
  */
 
 import { createDecipheriv, createHmac, hkdfSync, pbkdf2Sync } from 'node:crypto';
@@ -24,11 +11,7 @@ import { createVault, openVault } from './vault.ts';
 const EMAIL = 'Jason@Example.com ';
 const PASSWORD = 'correct horse battery staple';
 
-/**
- * The ASCII fold, spelled out rather than reached for as `toLowerCase()` — the
- * control has to pin WHICH fold, or the day production switched to full Unicode
- * casing every test in this file would still pass.
- */
+/** Spelled out rather than `toLowerCase()`, so the control pins WHICH fold. */
 const asciiFold = (email: string): string =>
   [...email.trim()]
     .map(character =>
@@ -38,7 +21,6 @@ const asciiFold = (email: string): string =>
     )
     .join('');
 
-/** The same derivations as `keys.ts`, written independently over OpenSSL. */
 const openssl = (
   email: string,
   password: string,
@@ -79,8 +61,6 @@ describe('deriveAccountKeys', () => {
     const { authValue } = await deriveAccountKeys({ email: EMAIL, password: PASSWORD });
     const { masterKey } = openssl(EMAIL, PASSWORD);
 
-    // Skipping the second PBKDF2 pass would send the server the very value
-    // every other key is derived from, and it would look like a working login.
     expect(authValue).not.toBe(masterKey.toString('base64'));
   });
 
@@ -88,10 +68,6 @@ describe('deriveAccountKeys', () => {
     const keys = await deriveAccountKeys({ email: EMAIL, password: PASSWORD });
     const { vault, wrappedDek } = await createVault(keys);
 
-    // One chain, end to end, and every link is OpenSSL's: password → masterKey
-    // → encKey → the DEK out of the wrapped bytes → indexKey → the record id
-    // `vault.recordId` just produced. Nothing here is compared against a second
-    // call to the code under test.
     const { encKey } = openssl(EMAIL, PASSWORD);
     const dek = opensslOpen(Buffer.from(wrappedDek, 'base64'), encKey);
     expect(dek).toHaveLength(32);
@@ -104,8 +80,6 @@ describe('deriveAccountKeys', () => {
       .digest('base64url');
     expect(await vault.recordId('account', 'jason@posteo.de')).toBe(id);
 
-    // …and the last link: OpenSSL opens an actual record, which pins the record
-    // key's own label and the exact bytes of the AEAD's additional data.
     const { ciphertext } = await vault.encryptRecord({
       type: 'account',
       naturalKey: 'jason@posteo.de',
@@ -127,10 +101,7 @@ describe('deriveAccountKeys', () => {
   });
 
   it('folds ASCII and nothing wider', async () => {
-    // U+212A KELVIN SIGN lowercases to `k` under full Unicode casing and stays
-    // itself under an ASCII fold. Two addresses differing only there must
-    // therefore derive two different vaults — and if `foldEmail` ever became
-    // `toLowerCase()`, this is the test that would notice.
+    // U+212A KELVIN SIGN lowercases to `k` under Unicode casing and stays itself under an ASCII fold.
     const kelvin = await deriveAccountKeys({ email: 'jason@e\u212Aample.com', password: PASSWORD });
     const latin = await deriveAccountKeys({ email: 'jason@ekample.com', password: PASSWORD });
 
@@ -154,10 +125,6 @@ describe('deriveAccountKeys', () => {
       deriveAccountKeys({ email: EMAIL, password: PASSWORD }),
     ]);
 
-    // The whole point of the schedule holding nothing device-local: a browser
-    // that has never seen this account derives both halves from what the user
-    // typed. Same authValue, so the login succeeds, and an interchangeable
-    // encKey, so the vault the first device wrapped opens on the second.
     expect(elsewhere.authValue).toBe(here.authValue);
 
     const { wrappedDek } = await createVault(here);
@@ -174,7 +141,6 @@ describe('derivePasskeyEncKey', () => {
     expect(a.usages).toEqual(['wrapKey', 'unwrapKey']);
     expect(a.extractable).toBe(false);
 
-    // Same key material, so a vault wrapped under one opens under the other.
     const { wrappedDek } = await createVault({ encKey: a });
     await expect(openVault({ encKey: b }, wrappedDek)).resolves.toBeDefined();
   });

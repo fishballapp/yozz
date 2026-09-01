@@ -1,15 +1,6 @@
 import type { MailServer } from '@yozz.app/vault-contract';
 
-/**
- * Reads the Mozilla `clientConfig` v1.1 XML that autoconfig servers and the Thunderbird ISPDB
- * publish. Workers have no DOMParser, and the document is a fixed, flat shape — a handful of
- * `<incomingServer>` / `<outgoingServer>` blocks holding text-only children — so this pulls the
- * few fields the form needs out of it directly rather than adding an XML library for one file.
- *
- * Ceiling, stated: it reads element text, not attributes beyond `type`, and it does not decode
- * entities — a hostname never contains any. A document that nests an element inside another of
- * the same name would confuse it, and the format has none.
- */
+/** Mozilla `clientConfig` v1.1 XML. Workers have no DOMParser and the document is flat, so regexes suffice. */
 
 export type ClientConfigServer = {
   readonly host: string;
@@ -57,17 +48,12 @@ export const parseClientConfig = (xml: string): ClientConfig => {
   };
 };
 
-/** The first server the relay can reach: implicit TLS on the protocol's one port. */
 export const usableServer = (
   servers: readonly ClientConfigServer[],
   port: MailServer['port'],
 ): ClientConfigServer | null =>
   servers.find(server => server.socketType === 'SSL' && server.port === port) ?? null;
 
-/**
- * `%EMAILLOCALPART%` is the one placeholder that changes what the person types; every other value
- * (`%EMAILADDRESS%`, a literal, nothing at all) means the whole address, which is also the
- * common case.
- */
+/** Every value but `%EMAILLOCALPART%` (`%EMAILADDRESS%`, a literal, nothing) means the whole address. */
 export const usernameForm = (server: ClientConfigServer): 'address' | 'localpart' =>
   server.username === '%EMAILLOCALPART%' ? 'localpart' : 'address';

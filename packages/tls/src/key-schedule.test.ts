@@ -1,12 +1,7 @@
 /**
- * The M6 gate, first half: every intermediate secret in RFC 8448, byte for byte.
- *
- * The traces are replayed structurally rather than case by case — a step's field
- * set says which derivation it is, and the label comes out of its own title — so
- * a step the RFC publishes and this file does not exercise is a failure rather
- * than an absence. That guard is the point: a key-schedule suite that quietly
- * covers three derivations out of eighty looks exactly like one that covers all
- * of them.
+ * Every intermediate secret in RFC 8448, byte for byte. The traces are replayed structurally:
+ * a step's field set says which derivation it is, so a published step this file does not
+ * exercise is a failure rather than an absence.
  */
 
 import { hkdfSync } from 'node:crypto';
@@ -30,12 +25,7 @@ import {
   verifyData,
 } from './key-schedule.ts';
 
-/**
- * Every trace in the document negotiates 0x1301, and the document contains no
- * SHA-384 handshake at all — so `TLS_AES_256_GCM_SHA384` is unproven here, and
- * is closed later in M6 by the local server run across every group × suite.
- * `is a SHA-256 document throughout` keeps that gap from being assumed away.
- */
+/** Every trace negotiates 0x1301; `TLS_AES_256_GCM_SHA384` is proven by `interop.test.ts`. */
 const SUITE: CipherSuite = 'TLS_AES_128_GCM_SHA256';
 
 /** The steps that owe this file a check. Anything else in a trace is protocol. */
@@ -45,10 +35,7 @@ const KEY_SCHEDULE_STEP =
 /** `derive secret for handshake "tls13 derived"` -> `derived`. */
 const QUOTED_LABEL = /"tls13 ([^"]+)"/;
 
-/**
- * Every step names its label in its own title but one: a PSK binder's key is a
- * `finished` key (RFC 9846 §4.3.11.2), and the trace leaves that implicit.
- */
+/** A PSK binder's key is a `finished` key (RFC 9846 §4.3.11.2), which the trace leaves implicit. */
 const labelOf = (title: string): string | undefined =>
   QUOTED_LABEL.exec(title)?.[1] ??
   (title.startsWith('calculate PSK binder') ? 'finished' : undefined);
@@ -86,9 +73,7 @@ const checksFor = (step: Rfc8448Step): readonly Check[] => {
     ];
   }
 
-  // `hash` is the Expand-Label context. It really is a transcript hash in every
-  // step but `generate resumption secret`, where the same field carries the
-  // ticket nonce of RFC 9846 §4.7.1 — same position, same role.
+  // `hash` is the Expand-Label context; in `generate resumption secret` the same field carries the ticket nonce (§4.7.1).
   const context = bytesOf(step, 'hash');
   const expanded = bytesOf(step, 'expanded');
   const label = labelOf(step.title);
@@ -104,9 +89,8 @@ const checksFor = (step: Rfc8448Step): readonly Check[] => {
         expect(
           await hkdfExpandLabel(SUITE, prk, label, context, CIPHER_SUITES[SUITE].hashLength),
         ).toEqual(expanded);
-        // `Derive-Secret` hashes its own messages, so it is driven from the steps
-        // whose context is the EMPTY transcript's hash. The steps carrying a real
-        // transcript hash are covered from the messages themselves, below.
+        // `Derive-Secret` hashes its own messages, so it is driven from the steps whose context is the
+        // empty transcript's hash; the others are covered from the messages themselves, below.
         if (label === 'derived') {
           expect(await deriveSecret(SUITE, prk, label)).toEqual(expanded);
         }
@@ -120,10 +104,7 @@ const checksFor = (step: Rfc8448Step): readonly Check[] => {
           },
         ]
       : []),
-    // Only the PSK binder publishes a finished key beside the transcript it is
-    // taken over, so it is the one vector that proves the `Finished` MAC itself.
-    // The handshake's own verify_data needs a transcript, which arrives with the
-    // state machine.
+    // Only the PSK binder publishes a finished key beside its transcript.
     ...(binderHash !== undefined && finished !== undefined
       ? [
           {
@@ -176,8 +157,7 @@ describe('the key schedule against RFC 8448', () => {
     ).toEqual([]);
   });
 
-  // The guard above catches a step going untested; this one catches the parser
-  // silently dropping steps, which would make that guard vacuous.
+  // Catches the parser silently dropping steps, which would make the guard above vacuous.
   it('runs every derivation the document publishes', () => {
     expect(RFC_8448_TRACES.map(trace => trace.section)).toEqual(['3', '4', '5', '6', '7']);
     expect(
@@ -204,7 +184,7 @@ describe('the key schedule against RFC 8448', () => {
   });
 });
 
-/** The one step of its name that actually publishes fields; the rest say `(same as …)`. */
+/** The one step of its name that publishes fields; the rest say `(same as …)`. */
 const extractStep = (trace: Rfc8448Trace, secret: string): Rfc8448Step => {
   const step = trace.steps.find(
     candidate =>
@@ -221,12 +201,8 @@ const requiredBytes = (step: Rfc8448Step, label: string): Uint8Array => {
 };
 
 /**
- * The vector checks above drive the primitives one derivation at a time, which
- * leaves the ladder itself — the `derived` label between stages, the EMPTY
- * transcript it hashes over, salt against IKM, the zero IKM entering the master
- * stage — asserted by nothing. Swapping `handshakeSecret`'s two arguments used to
- * keep all 109 green. So the wrappers are run end to end, from each trace's own
- * published inputs, against each trace's own published secrets.
+ * The ladder itself: the `derived` label between stages, the empty transcript, salt against IKM,
+ * the zero IKM. Swapping `handshakeSecret`'s two arguments once kept every vector check green.
  */
 describe('the secret ladder, end to end', () => {
   for (const trace of RFC_8448_TRACES) {
@@ -235,8 +211,7 @@ describe('the secret ladder, end to end', () => {
       const handshake = extractStep(trace, 'handshake');
       const master = extractStep(trace, 'master');
 
-      // §4 resumes, so its Early Secret takes a real PSK; the other four take
-      // none, which is the `undefined` path and its all-zero IKM.
+      // §4 resumes, so its Early Secret takes a real PSK; the others take the all-zero IKM.
       const ikm = requiredBytes(early, 'IKM');
       const psk = ikm.some(byte => byte !== 0) ? ikm : undefined;
 
@@ -250,8 +225,7 @@ describe('the secret ladder, end to end', () => {
       );
       expect(handshakeDerived).toEqual(requiredBytes(handshake, 'secret'));
 
-      // Each stage's salt is the PREVIOUS secret run through `derived`, so a
-      // wrapper that skipped that step would fail here and nowhere else.
+      // Each stage's salt is the previous secret through `derived`.
       expect(await masterSecret(SUITE, handshakeDerived)).toEqual(requiredBytes(master, 'secret'));
     });
   }
@@ -264,15 +238,8 @@ describe('the secret ladder, end to end', () => {
     expect(await transcriptHash(SUITE)).toEqual(requiredBytes(derived, 'hash'));
   });
 
-  /**
-   * The suite drives these by name. An export nobody exercises fails here rather
-   * than shipping unproven — which is exactly how the four ladder wrappers sat
-   * untested behind 109 passing vector checks until a cross-model review read
-   * the imports rather than the results.
-   */
-  // A crypto primitive asked for nonsense must say so. Coercion here would hand
-  // back plausible key material of the wrong size, which is the failure that
-  // looks like success.
+  /** An export nobody exercises fails here rather than shipping unproven. */
+  // Coercion would hand back plausible key material of the wrong size.
   it('fails closed on a length or label that is not one', async () => {
     const secret = new Uint8Array(32);
     await expect(hkdfExpandLabel(SUITE, secret, 'key', new Uint8Array(0), 16.5)).rejects.toThrow();
@@ -282,16 +249,7 @@ describe('the secret ladder, end to end', () => {
     await expect(hkdfExpandLabel(SUITE, secret, '', new Uint8Array(0), 16)).rejects.toThrow();
   });
 
-  /**
-   * RFC 9846 §7.5, and the only caller anywhere that reaches `hkdfExpand`'s
-   * multi-block loop — every expansion in a handshake is at most one hash
-   * length, so T(1) is all the traces above ever run.
-   *
-   * BoGo proves the OUTPUT: `ExportKeyingMaterial-TLS-TLS13` asks for 1024
-   * octets, the runner derives the same 1024 from its own schedule and compares
-   * byte for byte. That gate needs Go and a 337MB checkout, so what runs here is
-   * the structural net that catches the same breakage without either.
-   */
+  /** RFC 9846 §7.5, and the only caller that reaches `hkdfExpand`'s multi-block loop. BoGo proves the output (`ExportKeyingMaterial-TLS-TLS13`, 1024 octets). */
   describe('the exporter', () => {
     const SECRET = new Uint8Array(32).fill(7);
     const CONTEXT = new TextEncoder().encode('context');
@@ -304,22 +262,10 @@ describe('the secret ladder, end to end', () => {
     });
 
     /**
-     * The multi-block loop against an implementation that is not ours:
-     * `node:crypto`'s HKDF, which is OpenSSL's. It does Extract then Expand, so
-     * feeding it the same `ikm`/`salt` our own `hkdfExtract` consumed leaves
-     * both sides expanding the SAME PRK, and handing it the `HkdfLabel` octets
-     * as `info` leaves both expanding the same info to the same length. Only
-     * the RFC 5869 §2.3 block loop differs, which is the part with no other
-     * proof in this file.
-     *
-     * The struct is rebuilt here rather than imported because importing the
-     * thing under test as its own oracle proves nothing. It is three fields
-     * straight out of §7.1.
-     *
-     * A short export is NOT a prefix of a long one, which is worth stating
-     * because it is the obvious assumption and it is false: `HkdfLabel` carries
-     * `uint16 length = Length`, so asking for 32 octets and asking for 1024
-     * expand DIFFERENT info.
+     * `node:crypto`'s HKDF does Extract then Expand, so both sides expand the same PRK and the
+     * same `HkdfLabel` info; only the RFC 5869 §2.3 block loop differs. The struct is rebuilt here
+     * rather than imported. A short export is not a prefix of a long one: `HkdfLabel` carries
+     * `uint16 length`.
      */
     it('expands past one block the way node:crypto does', async () => {
       const label = new TextEncoder().encode('tls13 exporter');
@@ -359,12 +305,7 @@ describe('the secret ladder, end to end', () => {
       expect(otherContext).not.toEqual(base);
     });
 
-    /**
-     * `opaque label<7..255> = "tls13 " + Label` (§7.1), and the prefix alone is
-     * six — so the empty label BoGo's `ExportKeyingMaterial-NoContext` passes
-     * cannot be encoded. This is the client half of that divergence, and it is
-     * why those two tests are in `RFC_DIVERGENCES` rather than in the backlog.
-     */
+    /** `opaque label<7..255> = "tls13 " + Label` (§7.1); the prefix alone is six, so the empty label cannot be encoded (`RFC_DIVERGENCES`). */
     it('refuses an empty label rather than deriving from an unencodable struct', async () => {
       await expect(exportKeyingMaterial(SUITE, SECRET, '', CONTEXT, 32)).rejects.toThrow(
         /7\.\.255/,
@@ -399,11 +340,4 @@ describe('the secret ladder, end to end', () => {
   });
 });
 
-/**
- * §4 was the one trace whose running transcript did not reproduce, and a
- * tripwire here asserted that it did not: the document publishes the TRUNCATED
- * ClientHello under the name `ClientHello`, so hashing what it prints is 35
- * octets short of what went on the wire. Resumption closed that — the binder is
- * computable now, and with it the whole message — so the check moved to
- * [session.test.ts](session.test.ts), where it reproduces all eight of them.
- */
+/** §4 publishes the truncated ClientHello under the name `ClientHello`; the running transcript is reproduced in `session.test.ts`. */

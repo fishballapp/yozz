@@ -1,8 +1,3 @@
-/**
- * TLS 1.3 Key Share and Diffie-Hellman Key Exchange (RFC 9846 §4.3.8) over WebCrypto.
- * Supports X25519, secp256r1 (P-256), and secp384r1 (P-384).
- */
-
 import { concat } from './bytes.ts';
 import type { NamedGroup } from './wire.ts';
 
@@ -165,7 +160,6 @@ export type KeySharePair = {
   readonly publicKey: Uint8Array;
 };
 
-/** The generation parameters per group, so the switch below has one arm to read. */
 const GENERATION_ALGORITHMS: Readonly<Record<NamedGroup, EcKeyGenParams | Algorithm>> = {
   x25519: { name: 'X25519' },
   secp256r1: { name: 'ECDH', namedCurve: 'P-256' },
@@ -173,10 +167,7 @@ const GENERATION_ALGORITHMS: Readonly<Record<NamedGroup, EcKeyGenParams | Algori
 };
 
 export const generateKeyShare = async (group: NamedGroup): Promise<KeySharePair> => {
-  // `generateKey` is typed `CryptoKey | CryptoKeyPair` because one signature
-  // covers symmetric algorithms too. Asserting the union away with `as` would be
-  // a compile-time claim about a runtime value, which is what the repo's rule
-  // against `!` and `as` exists to stop. Narrow it, and say so if it is wrong.
+  // `generateKey` is typed `CryptoKey | CryptoKeyPair`; narrow rather than assert.
   const generated = await crypto.subtle.generateKey(GENERATION_ALGORITHMS[group], true, [
     'deriveBits',
   ]);

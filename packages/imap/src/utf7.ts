@@ -1,12 +1,4 @@
-/**
- * RFC 3501 §5.1.3 Modified UTF-7 encoding and decoding for IMAP mailbox names.
- *
- * Printable ASCII (0x20..0x7E) except '&' are direct.
- * '&' is encoded as '&-'.
- * Non-ASCII characters are encoded as UTF-16BE in modified Base64 (',' instead of '/', no '=' padding),
- * enclosed between '&' and '-'.
- */
-
+/** RFC 3501 §5.1.3 modified UTF-7: UTF-16BE in base64 with `,` for `/` and no padding, between `&` and `-`. */
 const b64Chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+,';
 
 const encodeModifiedBase64 = (codeUnits: number[]): string => {
@@ -64,7 +56,6 @@ const decodeModifiedBase64 = (str: string): string => {
     }
     return decoded;
   } catch {
-    // If invalid base64, return original string with markers
     return `&${str}-`;
   }
 };
@@ -109,7 +100,6 @@ export const decodeModifiedUtf7 = (str: string): string => {
       }
       const dashIndex = str.indexOf('-', i + 1);
       if (dashIndex === -1) {
-        // No closing dash, output rest as-is
         result += str.slice(i);
         break;
       }

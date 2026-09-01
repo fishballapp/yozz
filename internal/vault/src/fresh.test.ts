@@ -31,8 +31,6 @@ describe('freshVault', () => {
     const before = await write('{"host":"old-host.example"}', 3);
     const after = await write('{"host":"new-host.example"}', 4);
 
-    // The whole point. `inner` opens this happily — it is a genuine record at a
-    // genuine id — and the mark is what makes it a refusal.
     await expect(read(before.ciphertext)).rejects.toMatchObject({ code: 'stale' });
     expect(await read(after.ciphertext)).toEqual({
       revision: 4,
@@ -49,9 +47,7 @@ describe('freshVault', () => {
 
   it('advances the mark on a WRITE, or a rotation is undone by a store that ignores it', async () => {
     const before = await write('{"host":"old-host.example"}', 3);
-    // Nothing has READ revision 4 — the write alone must move the mark, or a
-    // store that silently drops the rotation keeps serving 3 forever and the
-    // credential the user rotated away from stays live.
+    // The write alone must move the mark, or a store that drops the rotation is believed forever.
     await write('{"host":"new-host.example"}', 4);
 
     await expect(read(before.ciphertext)).rejects.toMatchObject({ code: 'stale' });
@@ -60,8 +56,6 @@ describe('freshVault', () => {
   it('lets a failed write be retried at the same revision', async () => {
     await write('{"host":"new-host.example"}', 4);
 
-    // The store never took it. Re-sealing the same revision must pass: the
-    // check refuses only what is BELOW the mark, so equality is the retry path.
     const retried = await write('{"host":"new-host.example"}', 4);
     expect(await read(retried.ciphertext)).toEqual({
       revision: 4,
@@ -79,8 +73,6 @@ describe('freshVault', () => {
     const stored = await write('{"host":"posteo.de"}', 9);
     const freshDevice = freshVault(inner, inMemoryRevisionMarks());
 
-    // TOFU, and the accepted limit: a device with no mark has nothing to
-    // compare against, so revision 9 is taken on sight and becomes the floor.
     expect(
       await freshDevice.decryptRecord({
         type: 'account',
@@ -108,9 +100,6 @@ describe('freshVault', () => {
     });
     const quiet = await write('{"host":"posteo.de"}', 1);
 
-    // A per-VAULT mark would refuse this: revision 1 is far behind the 12 the
-    // other record reached. The mark is per record id, and this is the test
-    // that says so.
     expect(await read(quiet.ciphertext)).toEqual({
       revision: 1,
       plaintext: '{"host":"posteo.de"}',
@@ -125,10 +114,6 @@ describe('freshVault', () => {
       plaintext: 'not yours',
     });
 
-    // Ordering: the inner read runs first, so a record that does not
-    // authenticate is `unreadable` and never reaches the mark. A wrapper that
-    // checked freshness first could advance a mark from a row the vault was
-    // about to reject.
     await expect(read(substituted.ciphertext)).rejects.toMatchObject({ code: 'unreadable' });
     expect(
       await marks.highWaterMark(await vault.recordId('account', 'someone-else@gmail.com')),
@@ -162,23 +147,13 @@ describe('freshVault', () => {
       ciphertext: current.ciphertext,
     });
 
-    // 5 then 6, and neither the equal re-seal nor the read back at 6 calls it
-    // again. This is IO avoidance rather than the safety property — `raiseTo`
-    // is a max, so an interleaved call at 5 after 6 would be harmless anyway.
     expect(advanced).toEqual([5, 6]);
   });
 
   it('never lowers a mark, which is the whole of what raiseTo promises', async () => {
     const marks = inMemoryRevisionMarks();
 
-    // Deterministic on purpose. The motivating scenario is two same-id writes
-    // overlapping — both snapshot the mark before either write lands, both pass
-    // the staleness test, and the lower one can land last; measured at 9 then 8
-    // with a blind `set`. Reproducing that interleaving in a test means racing
-    // microtasks, and the ordering flips with any await added upstream, so the
-    // test would pass for the wrong reason as often as the right one. The
-    // invariant that actually has to hold is this one, and it holds regardless
-    // of who lands last.
+    // Deterministic rather than a microtask race: this invariant holds regardless of who lands last.
     await marks.raiseTo('a-record-id', 9);
     await marks.raiseTo('a-record-id', 8);
 

@@ -1,32 +1,22 @@
-/**
- * Hand-written tokenizer over byte offsets for IMAP4rev2/rev1 stream.
- *
- * Implements total parsing over attacker-controlled bytes:
- * - Line ends at CRLF; bare LF is a protocol failure.
- * - Logical line frames `{n}` literals (and `{n+}` LITERAL+).
- * - Enforces maxLiteralBytes (default 32 MiB).
- * - A number above 2^32 - 1 is an atom of digits, not a failure: RFC 9051's `number` is
- *   32-bit, but Gmail's X-GM-THRID is 64-bit and arrives as a bare number.
- * - Never throws on malformed input; returns typed ImapResult.
- */
-
 import {
   asciiToString,
   BACKSLASH,
   CR,
   DQUOTE,
   isDigit,
+  LBRACE,
   LBRACKET,
   LF,
   LPAREN,
   PLUS,
+  RBRACE,
   RBRACKET,
   RPAREN,
   SPACE,
   TAB,
 } from './bytes.ts';
 
-export const DEFAULT_MAX_LITERAL_BYTES = 32 * 1024 * 1024; // 32 MiB
+export const DEFAULT_MAX_LITERAL_BYTES = 32 * 1024 * 1024;
 const MAX_UINT32 = 4294967295;
 
 export type ImapToken =
@@ -82,9 +72,6 @@ type ReadLineResult =
     }
   | { readonly status: 'failure'; readonly failure: ImapFailure };
 
-/**
- * Checks for bare LF in a slice of bytes.
- */
 const checkBareLf = (bytes: Uint8Array, start: number, end: number): ImapFailure | null => {
   for (let i = start; i < end; i++) {
     if (bytes[i] === LF && (i === 0 || bytes[i - 1] !== CR)) {
@@ -99,10 +86,6 @@ type LiteralHeaderResult =
   | { readonly kind: 'invalid'; readonly detail: string }
   | { readonly kind: 'valid'; readonly length: number; readonly braceIndex: number };
 
-/**
- * Parses literal length from `{<digits>}` or `{<digits>+}` before CRLF.
- * Returns valid length, invalid failure, or none if not a literal header.
- */
 const parseLiteralHeader = (
   bytes: Uint8Array,
   textStart: number,
@@ -111,19 +94,19 @@ const parseLiteralHeader = (
 ): LiteralHeaderResult => {
   if (crlfIndex === 0) return { kind: 'none' };
   let i = crlfIndex - 1;
-  if (bytes[i] !== 0x7d) return { kind: 'none' }; // '}'
+  if (bytes[i] !== RBRACE) return { kind: 'none' };
   i--;
   if (i >= textStart && bytes[i] === PLUS) {
-    i--; // skip optional '+' in LITERAL+
+    i--;
   }
   const digitsEnd = i + 1;
   while (i >= textStart && isDigit(bytes[i] ?? 0)) {
     i--;
   }
-  if (i < textStart || bytes[i] !== 0x7b) {
-    // Check if there is any '{' before '}' in this line
+  if (i < textStart || bytes[i] !== LBRACE) {
+    // A `{` anywhere before the closing `}` means a malformed literal header, not a plain line.
     for (let j = crlfIndex - 2; j >= textStart; j--) {
-      if (bytes[j] === 0x7b) {
+      if (bytes[j] === LBRACE) {
         return { kind: 'invalid', detail: 'Invalid literal header syntax' };
       }
     }
@@ -154,9 +137,6 @@ const parseLiteralHeader = (
   return { kind: 'valid', length: num, braceIndex };
 };
 
-/**
- * Scans `buffer` for a complete logical line (including any literals).
- */
 export const readLogicalLine = (
   buffer: Uint8Array,
   maxLiteralBytes: number = DEFAULT_MAX_LITERAL_BYTES,
@@ -187,7 +167,6 @@ export const readLogicalLine = (
   }
 
   while (scanOffset < buffer.length) {
-    // Look for CRLF
     let crlfIndex = -1;
     for (let i = scanOffset; i < buffer.length - 1; i++) {
       if (buffer[i] === CR && buffer[i + 1] === LF) {
@@ -197,7 +176,6 @@ export const readLogicalLine = (
     }
 
     if (crlfIndex === -1) {
-      // Check for bare LF in remaining bytes
       const lfFailure = checkBareLf(buffer, scanOffset, buffer.length);
       if (lfFailure !== null) return { status: 'failure', failure: lfFailure };
       const nextResumeAt = Math.max(textStart, buffer.length - 1);
@@ -210,11 +188,9 @@ export const readLogicalLine = (
       };
     }
 
-    // Check for bare LF before this CRLF
     const lfFailure = checkBareLf(buffer, scanOffset, crlfIndex);
     if (lfFailure !== null) return { status: 'failure', failure: lfFailure };
 
-    // Check if this CRLF is preceded by a literal header `{n}` or `{n+}`
     const headerResult = parseLiteralHeader(buffer, textStart, crlfIndex, maxLiteralBytes);
 
     if (headerResult.kind === 'invalid') {
@@ -231,7 +207,6 @@ export const readLogicalLine = (
       const braceIndex = headerResult.braceIndex;
       const literalLength = headerResult.length;
 
-      // Push text before '{'
       if (braceIndex > textStart) {
         segments.push({ kind: 'text', bytes: buffer.slice(textStart, braceIndex) });
       }
@@ -258,13 +233,11 @@ export const readLogicalLine = (
       scanOffset = literalDataEnd;
       textStart = literalDataEnd;
     } else {
-      // Normal end of logical line
       if (crlfIndex >= textStart) {
         segments.push({ kind: 'text', bytes: buffer.slice(textStart, crlfIndex) });
       }
       const consumedBytes = crlfIndex + 2;
 
-      // Construct a string summary of the line for diagnostics/status text
       let rawText = '';
       for (const seg of segments) {
         if (seg.kind === 'text') {
@@ -291,9 +264,6 @@ export const readLogicalLine = (
   };
 };
 
-/**
- * Tokenizes a text segment into IMAP tokens.
- */
 const tokenizeTextSegment = (bytes: Uint8Array, tokens: ImapToken[]): ImapResult<void> => {
   let i = 0;
   const len = bytes.length;
@@ -301,7 +271,6 @@ const tokenizeTextSegment = (bytes: Uint8Array, tokens: ImapToken[]): ImapResult
   while (i < len) {
     const byte = bytes[i] ?? 0;
 
-    // Skip whitespace
     if (byte === SPACE || byte === TAB || byte === CR || byte === LF) {
       i++;
       continue;
@@ -331,7 +300,6 @@ const tokenizeTextSegment = (bytes: Uint8Array, tokens: ImapToken[]): ImapResult
       continue;
     }
 
-    // Quoted string
     if (byte === DQUOTE) {
       i++;
       let quotedStr = '';
@@ -373,9 +341,7 @@ const tokenizeTextSegment = (bytes: Uint8Array, tokens: ImapToken[]): ImapResult
       continue;
     }
 
-    // Plus continuation token
     if (byte === PLUS) {
-      // Check if next char is an atom char
       const next = i + 1 < len ? (bytes[i + 1] ?? 0) : 0;
       const isNextAtomChar =
         next !== 0 &&
@@ -395,7 +361,6 @@ const tokenizeTextSegment = (bytes: Uint8Array, tokens: ImapToken[]): ImapResult
       }
     }
 
-    // Atom or Number or NIL
     const atomStart = i;
     while (i < len) {
       const b = bytes[i] ?? 0;
@@ -421,6 +386,7 @@ const tokenizeTextSegment = (bytes: Uint8Array, tokens: ImapToken[]): ImapResult
       tokens.push({ kind: 'nil' });
     } else if (/^\d+$/.test(atomStr)) {
       const num = Number.parseInt(atomStr, 10);
+      // RFC 9051's `number` is 32-bit, but Gmail's X-GM-THRID is 64-bit and arrives bare.
       if (num > MAX_UINT32) {
         tokens.push({ kind: 'atom', value: atomStr });
       } else {
@@ -434,9 +400,6 @@ const tokenizeTextSegment = (bytes: Uint8Array, tokens: ImapToken[]): ImapResult
   return { ok: true, value: undefined };
 };
 
-/**
- * Tokenizes a complete LogicalLine into ImapTokens.
- */
 export const tokenizeLogicalLine = (line: LogicalLine): ImapResult<readonly ImapToken[]> => {
   const tokens: ImapToken[] = [];
 

@@ -3,25 +3,16 @@ import { SAFE_INLINE_IMAGE_MIME_TYPES } from './image-types';
 import { isPermittedExternalHostname, normalizedUrlInputOf, outboundHrefOf } from './url-policy';
 
 /**
- * A received HTML body, made renderable. This module is one half of the containment; the other
- * half is the iframe in `HtmlBody.tsx` (`sandbox` without `allow-same-origin`, so the document
- * runs in an opaque origin and can reach neither the app's DOM nor its storage).
- *
- * Layers, each assuming the one before it failed:
- *
- * 1. DOMPurify's HTML-only profile strips scripts, active controls, SVG and MathML. Hooks then
- *    narrow links and fetch carriers to the exact URL shapes mail needs.
- * 2. A CSP `<meta>` inside the srcdoc denies every network fetch (`default-src 'none'`); remote
- *    images are opted in per message, by the reader, never by default. Our one measuring script
- *    runs under a fresh random nonce, so markup that somehow survived (1) still cannot execute.
- * 3. The iframe sandbox blocks navigation, forms and same-origin access; links escape only as
- *    user-clicked popups, each already carrying `rel="noopener noreferrer"`.
+ * A received HTML body, made renderable. Three layers, each assuming the one before failed:
+ * DOMPurify's HTML-only profile with hooks narrowing URL shapes; a CSP `<meta>` in the srcdoc
+ * denying every fetch (remote images opt in per message); and the iframe sandbox in `HtmlBody.tsx`
+ * (no `allow-same-origin`).
  */
 export type MailFrame = {
   readonly srcdoc: string;
-  /** True when the message references opt-in remote images. */
+  /** The message references opt-in remote images. */
   readonly hasRemoteImages: boolean;
-  /** True when the distinct-origin ceiling removed images that consent cannot restore. */
+  /** The distinct-origin ceiling removed images that consent cannot restore. */
   readonly remoteImagesTruncated: boolean;
 };
 
@@ -31,14 +22,12 @@ const SAFE_DATA_IMAGE = new RegExp(
   `^data:(?:${SAFE_INLINE_IMAGE_MIME_TYPES.join('|')});base64,[a-z0-9+/=\\s]+$`,
   'i',
 );
-// A declaration with an escape or comment is cheap to lose and expensive to prove fetch-free:
-// both can disguise `url`, while image-set also accepts URL-like image candidates.
+// An escape or comment can disguise `url`; image-set also accepts URL-like candidates.
 const CSS_RESOURCE_SYNTAX = /url\s*\(|(?:-webkit-)?image-set\s*\(|https?:|\/\/|\\|\/\*/i;
 const MAX_REMOTE_IMAGE_ORIGINS = 64;
 
-// This deliberately accepts less CSS than a browser. A top-level split may break a quoted
-// semicolon, but every retained fragment must still be a declaration and independently contain no
-// fetch/obfuscation syntax. The browser CSSOM then performs the authoritative parse below.
+// Accepts less CSS than a browser: every retained fragment must be a declaration free of
+// fetch/obfuscation syntax. The browser CSSOM does the authoritative parse below.
 const fetchFreeInlineStyleOf = (raw: string): string =>
   raw
     .split(';')
@@ -46,17 +35,15 @@ const fetchFreeInlineStyleOf = (raw: string): string =>
     .filter(declaration => declaration.includes(':') && !CSS_RESOURCE_SYNTAX.test(declaration))
     .join(';');
 
-// A blocked image keeps a transparent pixel instead of losing `src`: an `<img>` with no source is a
-// broken-image icon in WebKit, and a picture that is merely withheld should not look broken.
+// A blocked image keeps a transparent pixel: an `<img>` with no source is a broken-image icon in WebKit.
 const BLOCKED_IMAGE_PLACEHOLDER =
   'data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==';
-/** Marks an image consent can restore; the frame styles it as withheld and makes it a click target. */
+/** Marks an image consent can restore. */
 const WITHHELD_IMAGE_ATTR = 'data-yozz-withheld';
-// The glyph is a warm mid grey so one rule reads on both the dark and the white ground.
+// A warm mid grey reads on both the dark and the white ground.
 const WITHHELD_IMAGE_ICON =
   "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%238f8a80' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='3' y='4' width='18' height='16' rx='2'/%3E%3Ccircle cx='9' cy='9.5' r='1.5'/%3E%3Cpath d='M21 15l-4.5-4.5L8 19M3 17l3.5-3.5L9 16'/%3E%3C/svg%3E";
-// HTML's dimension parser: leading digits, an optional `px`; a `%` width still reserves a box
-// but says nothing about the ratio.
+// HTML's dimension parser: leading digits, optional `px`; a `%` width says nothing about the ratio.
 const PIXEL_DIMENSION = /^\s*(\d+(?:\.\d+)?)\s*(?:px)?\s*$/i;
 const pixelsOf = (raw: string | null): number | null => {
   const match = raw?.match(PIXEL_DIMENSION);
@@ -64,9 +51,8 @@ const pixelsOf = (raw: string | null): number | null => {
 };
 
 /**
- * Only a picture the sender gave a box to is drawn as withheld; a tracking pixel (1x1, or no
- * dimensions at all) stays as invisible as it was. The transparent pixel is square, so the reserved
- * ratio is restated or `height:auto` would draw every withheld picture as a square.
+ * Only a picture the sender gave a box to is drawn as withheld; a tracking pixel stays invisible.
+ * The transparent pixel is square, so the ratio is restated or `height:auto` draws a square.
  */
 // ponytail: an image sized only by CSS (`style="width:600px"`) still draws square; read the inline width if it matters.
 const markWithheld = (node: Element): void => {
@@ -94,10 +80,8 @@ const fetchFreeDeclarationsOf = (style: CSSStyleDeclaration): string => {
 
 const DARK_SCHEME_QUERY = /\(\s*prefers-color-scheme\s*:\s*dark\s*\)/i;
 
-// Inside the frame `prefers-color-scheme` would follow the OS, but YOZZ is dark whatever the OS
-// says, so a mail's own dark-scheme rules are resolved at serialisation: the dark query becomes a
-// feature that always matches, the light one a feature that never does. Both stay valid inside
-// compound queries (`screen and (...)`), which a bare `all` / `not all` would not.
+// YOZZ is dark whatever the OS says, so the dark query becomes an always-true feature and the
+// light one never-true; both stay valid inside compound queries, unlike a bare `all` / `not all`.
 const darkSchemeMediaOf = (mediaText: string): string =>
   mediaText
     .replace(/\(\s*prefers-color-scheme\s*:\s*dark\s*\)/gi, '(min-width:0)')
@@ -107,18 +91,15 @@ const COLOUR_DECLARATION = /(?:^|[;{\s])(?:background(?:-color)?|color)\s*:/i;
 const COLOUR_ATTRIBUTE_SELECTOR = '[bgcolor], [color], [style*="color"]';
 
 /**
- * Whether the sender set ANY colour: a foreground, a background, or a `<font color>`. Mail is
- * authored against webmail's white ground, and a message that sets only one side of the pair
- * (`color:#1f2430` and no background is the common case) is legible only on that ground. The dark
- * frame is therefore reserved for mail that declares nothing, which then inherits the reader's
- * paper on ink, and for mail that carries its own dark-scheme rules and so was built for both.
+ * Mail is authored against webmail's white ground, and one side of the pair set alone
+ * (`color:#1f2430`, no background) is legible only there. The dark frame is for mail that
+ * declares nothing or ships its own dark-scheme rules.
  */
 const declaresColours = (parsed: Document, stylesheets: readonly string[]): boolean =>
   parsed.body.querySelector(COLOUR_ATTRIBUTE_SELECTOR) !== null ||
   stylesheets.some(sheet => COLOUR_DECLARATION.test(sheet));
 
-// Only plain rules and `@media` groups survive: `@import`, `@font-face` and every other at-rule
-// exists to fetch or to do something mail has no use for.
+// `@import`, `@font-face` and every other at-rule exists to fetch or to do something mail has no use for.
 const fetchFreeRulesOf = (rules: CSSRuleList, dark: boolean): string =>
   Array.from(rules)
     .map(rule => {
@@ -133,15 +114,10 @@ const fetchFreeRulesOf = (rules: CSSRuleList, dark: boolean): string =>
     .join('');
 
 /**
- * Templated mail keeps its layout (`max-width`, centring, media queries) in `<style>` blocks, so
- * they are kept, re-serialised from the browser's own parse with every URL-bearing declaration
- * removed. The parse is a constructed stylesheet: it belongs to no document, applies nowhere, and
- * the spec has it drop `@import` unfetched (a `<style>` in any document, even under
- * `media="not all"`, fetches its imports before the CSSOM can be read).
- *
- * The serialisation decodes CSS escapes, so a selector string can come back holding `</style>`
- * and end the frame's raw-text element from inside; every `<` is re-escaped as CSS so the sheet
- * cannot spell a tag.
+ * `<style>` blocks are re-serialised from a constructed stylesheet, which belongs to no document
+ * and drops `@import` unfetched (a `<style>` in any document fetches its imports first). The
+ * serialisation decodes CSS escapes, so every `<` is re-escaped or a selector could spell
+ * `</style>`.
  */
 const fetchFreeStylesheetOf = (css: string, dark: boolean): string => {
   const sheet = new CSSStyleSheet();
@@ -171,26 +147,22 @@ const remoteImageUrlOf = (
   }
 };
 
-/** `sandbox` (no `same-origin`) + this CSP is the pair the whole design rests on. */
+/** `sandbox` (no `same-origin`) + this CSP is the pair the design rests on. */
 const cspOf = (allowRemoteImages: boolean, remoteImageOrigins: Set<string>, nonce: string) =>
   [
     "default-src 'none'",
-    // `data:` carries the message's own inline (`cid:`) images, rewritten at parse time; they are
-    // part of the message, so they show without any network and without asking.
+    // `data:` carries the message's own inline (`cid:`) images, rewritten at parse time.
     `img-src data:${allowRemoteImages ? ` ${Array.from(remoteImageOrigins).join(' ')}` : ''}`,
     "style-src 'unsafe-inline'",
     `script-src 'nonce-${nonce}'`,
-    // These two do NOT fall back to default-src. Both are also covered by the sanitizer
-    // (FORBID_TAGS) and the sandbox (no allow-forms) — but each layer must hold alone.
+    // These two do not fall back to default-src; each layer must hold alone.
     "base-uri 'none'",
     "form-action 'none'",
   ].join('; ');
 
-// A withheld image is often wrapped in a link; the first click loads the picture and does not
-// follow it (once loaded, the attribute is gone and the link works as sent).
-// This exact source is also admitted by the host CSP's SHA-256. A srcdoc document inherits the
-// host policy, then applies its own nonce policy as a second constraint; the browser gate executes
-// this under both and fails if either the script or the hash drifts.
+// The first click on a withheld image loads it without following its link. This exact source
+// is also admitted by the host CSP's SHA-256: a srcdoc inherits the host policy, then applies
+// its own nonce policy, so a drift in either fails.
 const MAIL_FRAME_MEASURE_SCRIPT = `let pending=0,last=-1;
 const post=()=>{pending=0;const height=document.documentElement.scrollHeight;if(height===last)return;last=height;parent.postMessage({type:'yozz:mail-height',height},'*')};
 const schedule=()=>{if(pending===0)pending=setTimeout(post,100)};
@@ -208,20 +180,17 @@ export const buildMailFrame = (
   { allowRemoteImages }: { allowRemoteImages: boolean },
 ): MailFrame => {
   const purifier = createDOMPurify(window);
-  // In an environment DOMPurify cannot support, sanitize() returns the INPUT — a silent no-op is
-  // the one failure mode this must never have. (happy-dom passes this check and still garbles the
-  // output, which is why the tests run under jsdom.)
+  // Where DOMPurify cannot run, sanitize() returns the input. (happy-dom passes this check and
+  // still garbles output, so the tests run under jsdom.)
   if (!purifier.isSupported) throw new Error('DOMPurify is not supported in this environment');
   let hasRemoteImages = false;
   let remoteImagesTruncated = false;
   const remoteImageOrigins = new Set<string>();
   purifier.addHook('afterSanitizeAttributes', node => {
-    // The marker is ours alone: a sender who ships it would turn their own inline picture into a
-    // consent trigger. Only `markWithheld` below may set it.
+    // A sender who ships the marker would turn their own picture into a consent trigger.
     node.removeAttribute(WITHHELD_IMAGE_ATTR);
-    // CSS can fetch through more properties and escape spellings than a small URL regex can
-    // safely enumerate. Preserve inline layout, but remove every declaration the browser parsed
-    // as a URL-bearing value. `<style>` blocks get the same treatment in `fetchFreeStylesheetOf`.
+    // CSS can fetch through more properties and escape spellings than a regex can enumerate, so
+    // every declaration the browser parsed as URL-bearing goes.
     if (node instanceof HTMLElement) {
       const rawStyle = node.getAttribute('style');
       if (rawStyle !== null) {
@@ -234,10 +203,8 @@ export const buildMailFrame = (
           node.style.removeProperty(property);
       }
     }
-    // A relative href would inherit the app's base URL. Slashless `https:settings/delete` and
-    // credential-bearing URLs are equally misleading, so links survive only after URL parsing and
-    // canonicalisation. Mail cannot link into YOZZ's authenticated origins; that boundary remains
-    // non-navigable even when a server endpoint later regresses on CSRF protection.
+    // A relative href would inherit the app's base URL; `https:settings/delete` and credential-bearing
+    // URLs are equally misleading. Mail cannot link into YOZZ's authenticated origins.
     if (node.tagName === 'A' || node.tagName === 'AREA') {
       const href = node.getAttribute('href');
       const outbound = href === null ? null : outboundHrefOf(href);
@@ -258,11 +225,9 @@ export const buildMailFrame = (
       return;
     }
 
-    // `srcset` is a composite value whose candidates would each need parsing to police; mail
-    // rarely uses it and `src` is present alongside, so it is dropped outright.
+    // `srcset` candidates would each need policing; mail rarely uses it and `src` is alongside.
     node.removeAttribute('srcset');
-    // HTML mail needs only `<img>` as a fetch carrier. DOMPurify's HTML profile removes SVG and
-    // MathML entirely; URLs on every other element are stripped instead of widening the CSP.
+    // Only `<img>` carries a fetch; URLs on every other element are stripped rather than widening the CSP.
     for (const attr of ['src', 'poster', 'background', 'href']) {
       const value = node.getAttribute(attr);
       if (value === null) continue;
@@ -291,8 +256,7 @@ export const buildMailFrame = (
       node.removeAttribute(attr);
     }
   });
-  // DOMPurify returns only the body, so `<style>` blocks (usually in the head) are collected from
-  // the parsed document first; the sanitizer then forbids the tag, and the sheets re-enter below.
+  // DOMPurify returns only the body, so `<style>` blocks (usually in the head) are collected first.
   const parsed = new DOMParser().parseFromString(html, 'text/html');
   const rawSheets = Array.from(parsed.querySelectorAll('style'), style => style.textContent);
   const dark =
@@ -300,9 +264,7 @@ export const buildMailFrame = (
   const stylesheet = rawSheets.map(sheet => fetchFreeStylesheetOf(sheet, dark)).join('');
   const clean = purifier.sanitize(parsed.body.innerHTML, {
     USE_PROFILES: { html: true },
-    // Forms and metadata tags have no business in mail; most are refused by default, these are
-    // the ones DOMPurify would otherwise let through. Template is explicit because its inertness
-    // can be reversed later by otherwise-innocent application code.
+    // The ones DOMPurify would otherwise let through. Template's inertness can be reversed by innocent application code.
     FORBID_TAGS: [
       'form',
       'input',
@@ -323,9 +285,7 @@ export const buildMailFrame = (
   });
 
   const nonce = randomNonce();
-  // Dark frame (transparent body, `--paper` text repeated here because the frame cannot see the
-  // app's vars) only when `declaresColours` says the mail set none, or it ships dark-scheme rules;
-  // otherwise the white ground the sender authored against. Never recoloured either way.
+  // Dark frame only when the mail set no colours or ships dark-scheme rules; never recoloured either way.
   const ground = dark
     ? ':root{color-scheme:dark}body{background:transparent;color:oklch(0.945 0.008 85)}'
     : ':root{color-scheme:light}body{background:#fff;color:#111}';

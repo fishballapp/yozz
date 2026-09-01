@@ -1,12 +1,6 @@
 import type { ImapClient, ImapSelected } from '@yozz.app/imap';
 
-/**
- * An IMAP server that answers OK to everything, for tests about what the client DOES rather than
- * about the protocol. Override the handful of methods a test is actually asserting on.
- *
- * `live.test.ts` keeps its own richer fake: it drives IDLE and records connection lifecycle, which
- * is a different subject from "which commands did this task send".
- */
+/** Answers OK to everything; override what a test asserts on. `live.test.ts` keeps its own fake for IDLE. */
 export const stubImapClient = (over: Partial<ImapClient> = {}): ImapClient => {
   const selected = (name: string): ImapSelected => ({
     name,

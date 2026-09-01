@@ -3,17 +3,9 @@ import { type ReactElement, type ReactNode, useState } from 'react';
 import { Button } from './Button';
 
 /**
- * The one shape for a question the app must have answered before it acts: a floating
- * `--ink-raised` sheet with a hairline, the headline step for the question, dim prose for what
- * happens, then Cancel and the action.
- *
- * It lives on the question layer — above the dialog it may have been opened from, and above the
- * toast ([the stack](../../../../DESIGN.md#the-stack)) — and forces its own backdrop, which Base
- * UI would otherwise drop for a nested dialog.
- *
- * Controlled while the action runs, so the sheet stays up until it settles and closes only once
- * it has: a page that navigates away on success never sees it again, and one that fails shows its
- * own error where the trigger was.
+ * The one shape for a question the app must have answered before it acts. On the question layer
+ * (DESIGN.md, "the stack"), forcing its own backdrop, which Base UI drops for a nested dialog.
+ * Controlled while the action runs, so it closes only once the action settles.
  */
 export const ConfirmDialog = ({
   title,
@@ -27,30 +19,23 @@ export const ConfirmDialog = ({
 }: {
   title: string;
   description: string;
-  /** Anything the question needs between its prose and its buttons, such as a "don't ask" tick. */
+  /** Between the prose and the buttons, such as a "don't ask" tick. */
   children?: ReactNode;
   confirmLabel: string;
-  /**
-   * `danger` for the destructive questions this began as, `primary` for one that merely wants a
-   * decision — showing remote images is a choice with a consequence, not a deletion.
-   */
+  /** `danger` for a destructive question, `primary` for one that merely wants a decision. */
   confirmVariant?: 'danger' | 'primary';
   busyLabel: string;
   onConfirm: () => Promise<void>;
 } & (
   | {
-      /** The control that opens it, owning its own open state. */
+      /** The control that opens it. */
       trigger: ReactElement;
-      /**
-       * Its text, when the trigger is a bare button. Omit it and the trigger keeps whatever it
-       * already renders — which is how a control carrying an icon beside its label, or an icon
-       * alone, opens this sheet without having its own content replaced.
-       */
+      /** Omit it and the trigger keeps whatever it already renders. */
       triggerLabel?: string;
       open?: never;
       onOpenChange?: never;
     }
-  /** Or no trigger at all, for a question something other than a click asks. */
+  /** No trigger, for a question something other than a click asks. */
   | {
       open: boolean;
       onOpenChange: (open: boolean) => void;

@@ -10,26 +10,17 @@ import {
 import type { FetchedBody } from './bodies';
 
 /**
- * The per-device mail cache: derived from IMAP, never synced, rebuilt from the server
- * whenever it is lost (ARCHITECTURE.md, "State placement"). Rows are per vault user, account
- * and folder, and the whole of a user's cache is dropped on lock — it is their plaintext.
- *
- * `mail-sync` remembers a folder's IMAP name, its `UIDVALIDITY`, the highest uid seen — which is
- * what makes the next sync incremental — and whether its oldest message is already cached;
- * `mail-summaries` holds every synced envelope;
- * `mail-bodies` holds parsed bodies under a size ceiling.
+ * Per device, derived from IMAP, rebuilt whenever lost (ARCHITECTURE.md, "State placement").
+ * Per vault user, account and folder; dropped whole on lock. `mail-sync` holds the folder's IMAP
+ * name, `UIDVALIDITY`, highest uid and whether its start is cached.
  */
 
 export type FolderSync = {
-  /** The mailbox `SELECT` names — `INBOX`, or whatever `LIST` said Sent is called here. */
+  /** The mailbox `SELECT` names. */
   readonly name: string;
   readonly uidValidity: number;
   readonly lastUid: number;
-  /**
-   * The folder's OLDEST message is cached, so there is nothing left to page back to. Set by a
-   * first sync that reached the whole folder, and by `loadOlder` when its window starts at
-   * sequence 1. A row written before this field existed simply has no start cached yet.
-   */
+  /** The folder's oldest message is cached. A row written before this field existed has no start cached yet. */
   readonly complete: boolean;
 };
 
@@ -60,7 +51,7 @@ const folderRange = ({ userId, account, folder }: Scope) =>
     [userId, account, folder, Number.MAX_SAFE_INTEGER],
   );
 
-/** Every row of one account across its folders: arrays sort after strings, so `[]` is the ceiling. */
+/** Arrays sort after strings, so `[]` is the ceiling. */
 const accountRange = (userId: string, account: string) =>
   IDBKeyRange.bound([userId, account], [userId, account, []]);
 
@@ -167,11 +158,7 @@ export const createMailCache = (userId: string, account: string, idbFactory?: ID
   folder: (folder: Folder): FolderCache =>
     createFolderCache({ userId, account, folder }, idbFactory),
 
-  /**
-   * Every row of this account, all folders, in one transaction: a `UIDVALIDITY` change, or the
-   * address being removed. All three stores together, so a partial clear cannot leave a body whose
-   * summary is gone — a later sync could otherwise resolve a reused uid to a stale body.
-   */
+  /** All three stores in one transaction, or a reused uid could resolve to a stale body. */
   clear: async () => {
     const db = await openDeviceDb(getIdbFactory(idbFactory));
     try {
@@ -196,7 +183,7 @@ export const createMailCache = (userId: string, account: string, idbFactory?: ID
 
 export type MailCache = ReturnType<typeof createMailCache>;
 
-/** Everything this user has cached, on lock or sign-out — one transaction, so it is all or nothing. */
+/** Everything this user has cached; one transaction. */
 export const clearMailCache = async (userId: string, idbFactory?: IDBFactory): Promise<void> => {
   const range = IDBKeyRange.bound([userId], [userId, []]);
   const db = await openDeviceDb(getIdbFactory(idbFactory));

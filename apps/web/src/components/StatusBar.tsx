@@ -21,15 +21,7 @@ const shortFailureReason = (failure: MailConnectionFailure): string => {
   }
 };
 
-/**
- * One dense line across the foot of the app, carrying where you are and how much is there. It is
- * the terminal lineage's status line, and it is also where this build stays honest: the right-hand
- * side states either demo mode, sync status, or that addresses are stored with nothing to sync.
- *
- * Counts are optional because not every surface has any. Settings is not a mailbox, and reporting
- * the inbox's unread total while you are administering addresses states a number about somewhere
- * you are not.
- */
+/** One line across the foot: where you are and how much is there. Counts are optional; Settings is not a mailbox. */
 export const StatusBar = ({
   title,
   counts,
@@ -54,9 +46,7 @@ export const StatusBar = ({
     (account): account is InboundAddress => syncStates[account.address]?.status === 'synced',
   );
 
-  // One word for the connections: `live` while any account has one (`live↺` when every live one
-  // resumed its TLS session), else a reconnect in progress, else `offline` only when a server
-  // or the network actually ended one. A connection not yet opened says nothing.
+  // `live` while any account has one (`live↺` when every live one resumed), else reconnecting, else `offline` only when a server or the network ended one.
   const connectionWord = (() => {
     if (demo || accounts.length === 0) return null;
     const states = accounts.flatMap(account => liveStates[account.address] ?? []);

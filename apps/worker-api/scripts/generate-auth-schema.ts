@@ -1,16 +1,6 @@
 /**
- * Generates the next Better Auth D1 migration into apps/worker-api/migrations/.
- *
- * Better Auth owns its own tables (user / session / account / verification, plus the plugin tables:
- * passkey). Instead of the stand-alone `@better-auth/cli`, this calls Better Auth's
- * OWN `getMigrations` against the SAME schema-affecting plugin set the worker mounts (src/auth.ts), so
- * the output is always version-matched. Every committed migration is applied to an in-memory SQLite
- * first, so what comes out is the DELTA: the DDL the current Better Auth still wants. Applied
- * migrations are frozen (wrangler tracks them by filename), so a delta is written as a new
- * `000N_better_auth_*.sql` and never into an existing file.
- *
- * Run: `pnpm -F @yozz.app/worker-api db:generate-auth` (writes nothing when there is no delta)
- * Check: `pnpm -F @yozz.app/worker-api db:check-auth` (fails when there is a delta)
+ * Writes the DDL Better Auth still wants, after every committed migration, as a new
+ * `000N_better_auth_*.sql`. `db:generate-auth` writes it; `db:check-auth` fails when there is a delta.
  */
 import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';

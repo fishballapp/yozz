@@ -6,25 +6,9 @@ import { useMediaQuery, usePaneWidth } from '../lib/chrome';
 import { useMail, visibleThreads } from '../state/mail';
 
 /**
- * THE FIRST VIEWPORT: rail, list, reader, status line — three ruled columns over one warm ink
- * ground, with no card, panel, shadow or rounded corner anywhere. What the eye should catch first
- * is the density of the list and the single inverted bar marking the open message.
- *
- * The rail and the status line belong to `AppShell` above this. What is here is the list column,
- * its resizer, and the reader pane — which is an `<Outlet/>`, because what fills it is a route: the
- * mailbox's index route when nothing is open, the thread route when something is.
- *
- * The list column still never TRACKS the viewport — that is the rule this layout exists to protect,
- * because columns that move as you resize the window are exactly what a fixed-column list is for. A
- * width you set by hand is the opposite of that: it is chosen once and then holds.
- *
- * The reader keeps a `24rem` floor and the list is allowed to shrink, so a narrowing window eats
- * the list before it ever squeezes the message you are reading. That is CSS doing the arbitration,
- * not a resize listener — the stored width is your intent, and the viewport is free to disagree
- * with it temporarily without overwriting it.
- *
- * Below `lg` the two panes become one at a time: opening a message replaces the list rather than
- * squeezing beside it, and there is no edge to drag.
+ * The list column, its resizer, and the reader `<Outlet/>`; the rail and status line are
+ * `AppShell`'s. The list never tracks the viewport; the reader keeps a `24rem` floor and CSS
+ * arbitrates. Below `lg` the panes show one at a time.
  */
 
 /** The designed list widths, and what double-clicking the hairline returns to. */
@@ -33,23 +17,16 @@ const LIST_WIDTH = { min: 320, max: 720, wide: 528, base: 432 };
 export const Mailbox = () => {
   const { mailbox } = useParams({ from: '/_app/m/$mailbox' });
   const { q } = useSearch({ from: '/_app/m/$mailbox' });
-  // `to: '.'` and NO `from`, and both halves matter. The destination path resolves from
-  // `from ?? currentDeepestMatch`, so `from: '/m/$mailbox'` silently dropped `/t/$` and
-  // typing in the search box CLOSED the message you were reading — `replace: true` erasing it from
-  // history as well. Without `from`, `'.'` is wherever you actually are, thread included; this is
-  // the same resolution every `<Link to=".">` in the app relies on.
+  // `to: '.'` with no `from`: `from: '/m/$mailbox'` resolved without `/t/$` and typing in the
+  // search box closed the open message.
   const navigate = useNavigate();
   const { threads } = useMail();
 
-  // Whether a message is open is a question about the URL, not about state this component holds:
-  // the thread route is what puts a `threadId` in scope. Below `lg` that is also what decides
-  // whether the list is on screen at all.
+  // Whether a message is open is a question about the URL: the thread route puts a `threadId` in scope.
   const { _splat: threadId } = useParams({ strict: false });
   const isReading = threadId !== undefined;
 
-  // The default still STEPS at `xl`, the way the fixed layout did, and it stays live: a list you
-  // never dragged still widens when the window crosses the breakpoint. Dragging replaces the step
-  // with your number; double-clicking the hairline hands the step back.
+  // The default still steps at `xl` and stays live; dragging replaces the step, double-click hands it back.
   const [listWidth, setListWidth, resetListWidth] = usePaneWidth(
     'yozz:list-width',
     useMediaQuery('(min-width: 80rem)') ? LIST_WIDTH.wide : LIST_WIDTH.base,
@@ -74,8 +51,7 @@ export const Mailbox = () => {
           threads={visibleThreads(threads, mailbox, q)}
           mailbox={mailbox}
           query={q ?? ''}
-          // `replace` because a search box is one thought, not one history entry per keystroke —
-          // without it, Back walks you backwards through the word you just typed.
+          // `replace`: a search box is one thought, not one history entry per keystroke.
           onQueryChange={query =>
             navigate({
               to: '.',

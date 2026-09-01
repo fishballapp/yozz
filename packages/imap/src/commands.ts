@@ -1,8 +1,3 @@
-/**
- * Pure builders for IMAP commands. Each builder returns exact bytes to send.
- * No I/O is performed here.
- */
-
 import { bytesToBase64, stringToBytes } from './bytes.ts';
 import { encodeModifiedUtf7 } from './utf7.ts';
 
@@ -154,14 +149,7 @@ export const buildSelectCommand = (
   };
 };
 
-/**
- * Everything a list row and client-side threading need, in one round trip. `References` is the
- * one header ENVELOPE does not carry; `X-GM-THRID` is Gmail's own threading answer and is only
- * asked for when the server advertised `X-GM-EXT-1`, since an unknown item is a BAD.
- *
- * `bySeq` drops the `UID` prefix, so `set` is read as message sequence numbers instead. `UID`
- * stays in the items either way: a summary is worthless without the id its folder is keyed by.
- */
+/** `X-GM-THRID` is asked for only when the server advertised `X-GM-EXT-1`: an unknown item is a BAD. */
 export const buildFetchSummariesCommand = (
   tag: string,
   set: string,
@@ -199,11 +187,7 @@ export const buildStoreFlagsCommand = (
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const two = (value: number) => String(value).padStart(2, '0');
 
-/**
- * RFC 9051 date-time, quoted: `"28-Aug-2026 09:48:00 +0800"`. The day is space-padded rather
- * than zero-padded, which the grammar requires and several servers enforce. Local zone, so it
- * says when the message reached this client.
- */
+/** RFC 9051 date-time. The day is space-padded, which the grammar requires and several servers enforce. */
 export const formatImapDateTime = (date: Date): string => {
   const offset = -date.getTimezoneOffset();
   const sign = offset < 0 ? '-' : '+';
@@ -212,7 +196,6 @@ export const formatImapDateTime = (date: Date): string => {
   return `"${day}-${MONTHS[date.getMonth()]}-${date.getFullYear()} ${two(date.getHours())}:${two(date.getMinutes())}:${two(date.getSeconds())} ${zone}"`;
 };
 
-/** APPEND with the message as a literal; flags are IMAP atoms such as `\\Seen`, sent unquoted. */
 export const buildAppendCommand = (
   tag: string,
   mailbox: string,
@@ -233,34 +216,16 @@ export const buildAppendCommand = (
   };
 };
 
-/** EXPUNGE: erases every `\\Deleted` message in the selected mailbox. */
 export const buildExpungeCommand = (tag: string): OutgoingCommand => ({
   lines: [{ text: stringToBytes(`${tag} EXPUNGE\r\n`) }],
 });
 
-/**
- * RFC 4315 UID EXPUNGE: erases only the named `\\Deleted` messages. Plain EXPUNGE erases every
- * `\\Deleted` message in the mailbox, including ones another client flagged and has not yet
- * erased itself — so replacing a draft with it would quietly take somebody else's deletions with
- * it. Needs UIDPLUS; the client refuses without it rather than falling back.
- */
+/** RFC 4315. */
 export const buildUidExpungeCommand = (tag: string, uidSet: string): OutgoingCommand => ({
   lines: [{ text: stringToBytes(`${tag} UID EXPUNGE ${uidSet}\r\n`) }],
 });
 
-/**
- * UID SEARCH for one header's exact value, e.g. `HEADER "Message-ID" "<id>"`.
- *
- * What makes an APPEND retry safe: after a lost response the client asks whether the copy it was
- * about to write is already there, instead of writing a second one.
- *
- * **Ask it about a header IMAP names.** A private `X-` header looks like the better question — a
- * Message-ID can be rewritten by a provider, a subject match is a guess — but a server need only
- * index the headers the protocol defines, and one that does not index yours answers the EMPTY LIST
- * rather than an error. That is indistinguishable from "no copy is there", so the caller writes
- * the second copy, or decides it has nothing to erase. Measured on Forward Email:
- * docs/knowledge/forwardemail-api.md.
- */
+/** A server need only index the headers IMAP names; on a private `X-` header it may answer the empty list. */
 export const buildUidSearchHeaderCommand = (
   tag: string,
   header: string,
@@ -275,7 +240,7 @@ export const buildUidSearchHeaderCommand = (
   ],
 });
 
-/** RFC 6851 UID MOVE — relocates messages into another mailbox in one round trip. */
+/** RFC 6851. */
 export const buildMoveCommand = (
   tag: string,
   uidSet: string,
@@ -290,7 +255,6 @@ export const buildMoveCommand = (
   ],
 });
 
-/** CREATE a mailbox (e.g. Archive the first time the client needs one). */
 export const buildCreateCommand = (tag: string, mailbox: string): OutgoingCommand => ({
   lines: [
     {

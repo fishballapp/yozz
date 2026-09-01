@@ -29,9 +29,8 @@ describe('Stage 1 — Wire tables', () => {
   });
 
   it('SUPPORTED_GROUPS covers every group in NAMED_GROUPS', () => {
-    // `namedGroupFromCode` searches SUPPORTED_GROUPS, so a group we implement
-    // but leave out of that list decodes as one we do not — which would make a
-    // legitimate HelloRetryRequest look like a request for an unknown curve.
+    // `namedGroupFromCode` searches SUPPORTED_GROUPS, so an implemented group left out of it
+    // would make a legitimate HelloRetryRequest look like a request for an unknown curve.
     expect([...SUPPORTED_GROUPS].toSorted()).toEqual(Object.keys(NAMED_GROUPS).toSorted());
   });
 
@@ -39,16 +38,13 @@ describe('Stage 1 — Wire tables', () => {
     for (const name of SUPPORTED_GROUPS) {
       expect(namedGroupFromCode(NAMED_GROUPS[name])).toBe(name);
     }
-    // 0x0019 is secp521r1, which this client does not implement.
+    // 0x0019 is secp521r1, not implemented.
     expect(namedGroupFromCode(0x0019)).toBeUndefined();
   });
 
   it('SUPPORTED_SIGNATURE_SCHEMES covers every scheme in SIGNATURE_SCHEMES', () => {
-    // The list is what `signature_algorithms` offers AND what the handshake
-    // will accept a CertificateVerify under, so a scheme in the table but not
-    // in the list is dead code — `signatureSchemeFromCode` searches the list.
-    // That a listed scheme is actually IMPLEMENTED is a different claim, and
-    // `verify.test.ts` is where it is checked.
+    // The list is what `signature_algorithms` offers and what a CertificateVerify may use;
+    // `verify.test.ts` checks that a listed scheme is implemented.
     expect([...SUPPORTED_SIGNATURE_SCHEMES].toSorted()).toEqual(
       Object.keys(SIGNATURE_SCHEMES).toSorted(),
     );
@@ -58,8 +54,8 @@ describe('Stage 1 — Wire tables', () => {
     for (const name of SUPPORTED_SIGNATURE_SCHEMES) {
       expect(signatureSchemeFromCode(SIGNATURE_SCHEMES[name])).toBe(name);
     }
-    // 0x0401 is rsa_pkcs1_sha256, which TLS 1.3 forbids in CertificateVerify;
-    // 0x0603 is ecdsa_secp521r1_sha512, which this client does not accept in a CertificateVerify — it IS in CERTIFICATE_SIGNATURE_SCHEMES, which is a different question.
+    // 0x0401 is rsa_pkcs1_sha256, forbidden in CertificateVerify; 0x0603 is ecdsa_secp521r1_sha512,
+    // in CERTIFICATE_SIGNATURE_SCHEMES only.
     expect(signatureSchemeFromCode(0x0401)).toBeUndefined();
     expect(signatureSchemeFromCode(0x0603)).toBeUndefined();
   });
@@ -87,16 +83,10 @@ describe('Stage 1 — Wire tables', () => {
 });
 
 /**
- * The gate that would have caught the `signature_algorithms_cert` defect.
- *
- * `@yozz.app/x509` decides which certificate signatures this client can verify, and
- * that answer has to reach the ClientHello. It cannot reach it as a shared
- * table — the package may never learn what TLS is — so it travels as OIDs and is
- * mapped here, and a mapping is exactly the thing that drifts. These four checks
- * are what makes the drift loud instead of silent, in the direction that
- * matters: **advertising something the validator would refuse is a handshake we
- * broke ourselves**, because RFC 9846 §4.5.1.2 tells a server that CAN match our
- * list to prefer it.
+ * `@yozz.app/x509` decides which certificate signatures are verifiable and hands that over as
+ * OIDs; the mapping here is what drifts. RFC 9846 §4.5.1.2 tells a server that can match our
+ * list to prefer it, so advertising what the validator refuses breaks the handshake ourselves.
+ * See DECISIONS.md, "`signature_algorithms_cert` is derived from `@yozz.app/x509`".
  */
 describe('signature_algorithms_cert agrees with what @yozz.app/x509 verifies', () => {
   const offered = OFFERED_CERTIFICATE_SIGNATURE_SCHEMES.map(
@@ -115,45 +105,24 @@ describe('signature_algorithms_cert agrees with what @yozz.app/x509 verifies', (
     }
   });
 
-  /**
-   * The other direction, and the one that makes this a decision rather than a
-   * leak: if `@yozz.app/x509` learns RSA-PSS or Ed25519 in a certificate, nothing
-   * would tell a server we can now verify it. This fails until someone gives
-   * that OID a code point here or writes down why it has none.
-   */
+  /** The other direction: an OID x509 learns must get a code point here, or a written reason for none. */
   it('leaves no algorithm the validator accepts unadvertised', () => {
     const advertised = new Set(offered.map(scheme => scheme.algorithmOid));
     expect([...CERTIFICATE_SIGNATURE_ALGORITHM_OIDS].sort()).toEqual([...advertised].sort());
   });
 
-  /**
-   * Two names appear in both tables, because the same ECDSA scheme can sign a
-   * CertificateVerify and a certificate. They must carry the same code point:
-   * one table saying 0x0403 and the other 0x0503 would put a scheme on the wire
-   * under a name this client uses for something else.
-   */
+  /** The same ECDSA scheme signs both messages, so it must carry one code point in both tables. */
   it('gives the shared ECDSA names one code point, not two', () => {
     for (const name of ['ecdsa_secp256r1_sha256', 'ecdsa_secp384r1_sha384'] as const) {
       expect(CERTIFICATE_SIGNATURE_SCHEMES[name].code).toBe(SIGNATURE_SCHEMES[name]);
     }
   });
 
+  /** The defect as a regression: RSA-PKCS1 was never advertised, RSA-PSS and Ed25519 were and are not verifiable in a chain. */
   /**
-   * The defect itself, as a regression. RSA-PKCS1 signs most of the real WebPKI
-   * and was never advertised; RSA-PSS and Ed25519 were advertised and are not
-   * verifiable in a chain. Both halves are asserted by name, so a future edit
-   * that merges the two lists again fails here rather than at a mail host.
-   */
-  /**
-   * **The code points, written out.** A review found every other check here
-   * passing with `rsa_pkcs1_sha256` given RSA-PSS's `0x0804`: the OID checks
-   * never read `.code`, and the name checks read `Object.keys`. So the
-   * ClientHello would have advertised PSS under a PKCS1 name — the exact defect
-   * this whole gate exists for, inverted and invisible.
-   *
-   * Literals rather than a derivation, because a derivation from the table is
-   * the table agreeing with itself. These are IANA's TLS SignatureScheme
-   * registry values, and RFC 9846 §4.3.3 lists the same.
+   * Literals, not a derivation: the OID checks never read `.code` and the name checks read
+   * `Object.keys`, so `rsa_pkcs1_sha256` given `0x0804` passed everything else. IANA's TLS
+   * SignatureScheme registry values, also listed in RFC 9846 §4.3.3.
    */
   it('carries the IANA code point for every scheme it advertises', () => {
     expect(
@@ -170,16 +139,7 @@ describe('signature_algorithms_cert agrees with what @yozz.app/x509 verifies', (
     });
   });
 
-  /**
-   * **And that it is actually SENT.** The same review deleted the extension from
-   * the ClientHello builder outright and every test here stayed green — the
-   * whole fix was removable without a gate noticing, which is worse than the
-   * defect it fixed, because the defect at least had a review that found it.
-   *
-   * Reading it back off a real production ClientHello rather than off the table
-   * is the point: this is the only assertion in the package that connects the
-   * table to the bytes.
-   */
+  /** Read back off a real ClientHello: the only assertion connecting the table to the bytes. */
   it('puts them on a production ClientHello, in order', async () => {
     const share = await generateKeyShare('x25519');
     const decoded = decodeHandshakeMessage(
@@ -202,8 +162,7 @@ describe('signature_algorithms_cert agrees with what @yozz.app/x509 verifies', (
       ),
     });
 
-    // And it is a SECOND list, not a replacement: `signature_algorithms` still
-    // carries the CertificateVerify schemes, which is what §4.3.3 separates.
+    // A second list, not a replacement (§4.3.3).
     expect(
       decoded.value.extensions.some(extension => extension.kind === 'signature_algorithms'),
     ).toBe(true);

@@ -1,18 +1,3 @@
-/**
- * The M2 reject-list, and the positives that keep it honest.
- *
- * This list is AUTHORED, not harvested, and that is the whole reason it exists:
- * every certificate in the corpus is well-formed, because a real mail server or
- * a root store accepted it. The corpus can only prove the decode half of the M2
- * gate. These vectors are the reject half.
- *
- * Every rejection asserts the CODE, never merely that something threw. A vector
- * for "non-minimal length" that passes because of an unrelated bounds failure
- * proves nothing, and would keep passing after the rule it names was deleted.
- *
- * Not here: the corpus decode gate (needs the fixtures on disk) and the fuzz
- * loop (needs a time budget). Both land as their own passes.
- */
 import { describe, expect, it } from 'vitest';
 import {
   DerError,
@@ -32,21 +17,13 @@ const der = (hex: string): Uint8Array => {
   return Uint8Array.from(digits.match(/../g) ?? [], byte => Number.parseInt(byte, 16));
 };
 
-/**
- * Short-form TLV, for vectors whose length octet is incidental. Every
- * length-rule vector below writes its bytes by hand instead — a helper that
- * encodes the length cannot express a malformed one.
- */
+/** Length vectors write their bytes by hand: a helper that encodes the length cannot express a malformed one. */
 const tlv = (tag: number, content: Uint8Array): Uint8Array =>
   Uint8Array.from([tag, content.length, ...content]);
 
 const ascii = (text: string): Uint8Array => new TextEncoder().encode(text);
 
-/**
- * Returns the DerError, and RE-THROWS anything else. That re-throw is half the
- * point: "only our own failure type" is the M2 gate, so a TypeError surfacing
- * here has to fail the test rather than be swallowed as a rejection.
- */
+/** Returns the DerError and re-throws anything else: only our own failure type may escape. */
 const rejectionOf = (run: () => unknown): DerError => {
   try {
     run();
@@ -121,11 +98,7 @@ describe('the TLV skeleton', () => {
     expect(node).toMatchObject({ tagClass: 'context', tagNumber: 31, isConstructed: true });
   });
 
-  /**
-   * The load-bearing test of the whole design. Views, not copies, is what makes
-   * M3's verbatim `tbsCertificate` free and what makes "refuse a declared length
-   * before allocating" structurally impossible to get wrong.
-   */
+  /** Views, not copies. */
   it('returns views into the input, never copies', () => {
     const input = der('30 03 02 01 05');
     const node = decodeDer(input);
@@ -217,11 +190,7 @@ describe('structure', () => {
       bytes: '05 00 00',
       code: 'trailing-data',
     },
-    /**
-     * The classic parser differential: a child that declares more than its
-     * parent's content holds. It needs no error code of its own — every read is
-     * bounded by the enclosing content, so overshoot IS truncation.
-     */
+    /** A child declaring more than its parent holds: overshoot is truncation. */
     {
       why: 'a child declaring more content than its parent holds',
       bytes: '30 03 02 02 05',
@@ -234,10 +203,7 @@ describe('structure', () => {
     },
   ]);
 
-  /**
-   * Brackets the bound without pinning it: what matters is that SOME limit
-   * fires as our own error rather than as V8's RangeError.
-   */
+  /** Brackets the bound without pinning it. */
   const nest = (depth: number): Uint8Array =>
     Array.from({ length: depth }).reduce<Uint8Array>(inner => tlv(0x30, inner), der('05 00'));
 
@@ -318,12 +284,7 @@ describe('decodeOid', () => {
     );
   });
 
-  /**
-   * The first octet packs two arcs as `40 * arc1 + arc2`, but arc1 is only ever
-   * 0, 1 or 2 — so above 119 the second arc simply keeps growing. A naive
-   * `Math.floor(byte / 40)` yields a nonexistent arc 3 here. subtls has exactly
-   * this bug (m0 notes, `asn1bytes.ts:32`).
-   */
+  /** Arc 1 is only ever 0, 1 or 2, so above 119 the second arc keeps growing. */
   it('reads a first octet above 119 without inventing an arc 3', () => {
     expect(decodeOid(decodeDer(der('06 01 7F')))).toBe('2.47');
   });
@@ -402,12 +363,7 @@ describe('decodeTime', () => {
     );
   });
 
-  /**
-   * The headline vector. `new Date('2024-02-30T00:00:00Z')` returns MARCH 1st —
-   * measured, not assumed. Left to the Date constructor, a malformed `notAfter`
-   * silently buys a day of validity and disagrees with OpenSSL, which is a
-   * verdict flip under x509-limbo.
-   */
+  /** `new Date('2024-02-30T00:00:00Z')` returns March 1st. */
   it('rejects a day-of-month that does not exist, rather than rolling it forward', () => {
     expect(rejectionOf(() => decodeTime(decodeDer(utc('240230235959Z')))).code).toBe(
       'malformed-value',

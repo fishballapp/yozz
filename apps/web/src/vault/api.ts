@@ -27,11 +27,7 @@ export class VaultApiError extends Error {
 export type VaultApi = {
   readonly get: (type: string, id: string) => Promise<VaultRecordEnvelope | null>;
   readonly list: (type: string) => AsyncIterable<VaultRecordEnvelope>;
-  /**
-   * `revision` is the number sealed inside `record.ciphertext`, restated in the clear so the
-   * store can compare-and-swap on it. `precondition` is what the write claims about the row it
-   * replaces; omitted, the write is the pre-CAS last-write-wins.
-   */
+  /** `revision` is the number sealed in the ciphertext, restated in the clear for CAS; `precondition` omitted is last-write-wins. */
   readonly put: (
     record: EncryptedRecord,
     revision: number,
@@ -63,9 +59,7 @@ const parseErrorResponse = async (res: Response): Promise<VaultApiError> => {
     if (parsed.success) {
       return new VaultApiError(parsed.data.error.code, parsed.data.error.message, res.status);
     }
-  } catch {
-    // Ignore JSON parse failure
-  }
+  } catch {}
   return new VaultApiError(
     'INTERNAL_ERROR',
     `HTTP request failed with status ${res.status}`,
@@ -113,7 +107,7 @@ export const createVaultApiClient = (
     return VaultRecordEnvelopeSchema.parse(json);
   };
 
-  /** One page, then the rest: the cursor is the recursion, not a loop variable. */
+  /** The cursor is the recursion. */
   const list = async function* (type: string, after?: string): AsyncGenerator<VaultRecordEnvelope> {
     const query = after === undefined ? '' : `?after=${encodeURIComponent(after)}`;
     const res = await request(`/api/v1/vault/records/${encodeURIComponent(type)}${query}`, {

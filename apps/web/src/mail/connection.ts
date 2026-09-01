@@ -25,10 +25,10 @@ export type Result<T, E> =
 
 export type MailConnectionFailure =
   | { readonly kind: 'relay'; readonly detail: string }
-  /** Something threw outside the protocol layers: a chunk that failed to load, a bug. */
+  /** Something threw outside the protocol layers. */
   | { readonly kind: 'error'; readonly detail: string }
   | { readonly kind: 'tls'; readonly detail: string }
-  /** The host proved a key other than the one pinned for it; Settings → Server keys accepts it. */
+  /** The host proved a key other than the one pinned; Settings → Server keys accepts it. */
   | { readonly kind: 'pin-mismatch'; readonly peer: string }
   | { readonly kind: 'imap'; readonly reason: ImapFailure }
   | { readonly kind: 'smtp'; readonly reason: SmtpFailure }
@@ -37,7 +37,7 @@ export type MailConnectionFailure =
 export type MailConnection = {
   readonly client: ImapClient;
   readonly close: () => Promise<void>;
-  /** Whether the TLS handshake resumed a prior session (`HandshakeResult.isResumed`). */
+  /** `HandshakeResult.isResumed`. */
   readonly resumed: boolean;
 };
 
@@ -72,7 +72,7 @@ type Host = { readonly host: string; readonly port: number };
 
 type TlsDuplex = {
   readonly duplex: ByteDuplex;
-  /** Closes TLS (close_notify) then the relay socket; tolerant of either already being down. */
+  /** close_notify, then the relay socket; tolerant of either already being down. */
   readonly close: () => Promise<void>;
   readonly resumed: boolean;
 };
@@ -80,20 +80,15 @@ type TlsDuplex = {
 type Handshake = {
   readonly tlsConn: TlsConnection;
   readonly transport: RelayTransport;
-  /** `HandshakeResult.peerPublicKeyPin`: the key this completed handshake proved the peer holds. */
+  /** `HandshakeResult.peerPublicKeyPin`. */
   readonly provenPin: string | null;
   readonly resumed: boolean;
 };
 
 /**
- * Relay socket → TLS 1.3 in the browser → a ByteDuplex the protocol clients speak over. The port
- * is checked against the one implicit-TLS port the protocol has, because 143/587 are STARTTLS
- * (unsupported) and the other protocol's port would connect and then fail at the greeting.
- *
- * Trust on first use lives here, on top of chain validation. A host with a stored pin is
- * checked against it before the connection exists; a host without one is pinned from the
- * handshake that completed. A stored session is offered once and whatever tickets come back
- * replace it.
+ * Relay socket → TLS 1.3 in the browser → a ByteDuplex. The port is checked against the one
+ * implicit-TLS port, since 143/587 are STARTTLS. Trust on first use lives here on top of chain
+ * validation; a stored session is offered once.
  */
 export const openTlsDuplex = async (
   { host, port }: Host,
@@ -125,9 +120,8 @@ export const openTlsDuplex = async (
   let session: TlsSession | null;
   try {
     pin = await loadPin(peer);
-    // Unpinned means first use, or a pin just forgotten: the key has to be proven by a full
-    // handshake, and a resumption would report the STORED leaf's key instead. A ticket saved by
-    // an in-flight connection after the forget is skipped here and taken by the next pinned one.
+    // Unpinned means the key has to be proven by a full handshake; a resumption would report the
+    // stored leaf's key.
     session = pin === null ? null : await takeSession(peer);
   } catch (error) {
     return { ok: false, error: { kind: 'error', detail: `Peer store: ${errorText(error)}` } };
@@ -175,9 +169,8 @@ export const openTlsDuplex = async (
     transport.close();
     const { reason } = tlsResult;
     if (reason.kind === 'certificate' && reason.chain === 'session-stored' && offered !== null) {
-      // The stored chain no longer validates, which almost always means the host rotated. The
-      // session is already evicted (taken above); one handshake without it is the response
-      // `TlsFailure.chain` exists to prescribe, not a fallback.
+      // The stored chain no longer validates (the host rotated); one handshake without the session
+      // is what `TlsFailure.chain` prescribes, not a fallback.
       return handshake(null);
     }
     if (
@@ -282,7 +275,7 @@ export const connectSmtp = async (
 
   const banner = await client.greeting();
   if (!banner.ok) return fail(banner.reason);
-  // The name after EHLO is ours to choose; the app's host is an honest one and a stable one.
+  // The name after EHLO is ours to choose; the app's host is honest and stable.
   const caps = await client.ehlo('yozz.app');
   if (!caps.ok) return fail(caps.reason);
 

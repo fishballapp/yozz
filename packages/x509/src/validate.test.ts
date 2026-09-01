@@ -1,13 +1,4 @@
-/**
- * The validator, end to end, on REAL signed chains — and in `pnpm test`.
- *
- * x509-limbo is the exhaustive gate and it cannot run here: the corpus is 39MB
- * and gitignored, so `limbo:ours` is a separate manual command. That gap is not
- * hypothetical. Two authentication bypasses shipped through every green gate
- * because nothing in the standard test path exercised `validate.ts` at all.
- *
- * These are the few vectors that must never regress silently.
- */
+/** Real signed chains, in `pnpm test`; x509-limbo cannot run here. */
 import { describe, expect, it } from 'vitest';
 import { compileAnchors, indexAnchors } from './anchors.ts';
 import { type IssuedCertificate, issueCertificate, SERVER_AUTH } from './certificate-builder.ts';
@@ -87,8 +78,7 @@ describe('the checks that make it a validator', () => {
 
   it('rejects a chain to a root it was never given', async () => {
     const root = await newRoot();
-    // A DIFFERENT name, so no candidate path exists at all. Same name with a
-    // different key is the test above, and dies on the signature instead.
+    // A different name, so no candidate path exists at all.
     const stranger = await newRoot('Unrelated Root');
     const leaf = await newLeaf(stranger);
     expect(failureOf(await validate({ leaf, root }))).toBe('no-path-to-trust-anchor');
@@ -118,10 +108,7 @@ describe('the checks that make it a validator', () => {
   });
 });
 
-/**
- * The two bypasses a cross-model review found, as chains rather than as matcher
- * probes. Both passed `pnpm check` and `pnpm test` at the time.
- */
+/** Two bypasses found by review, as chains. */
 describe('the constrained-issuer bypasses', () => {
   it('rejects a wildcard leaf reaching into a subtree its issuer excludes', async () => {
     const root = await newRoot();
@@ -170,14 +157,7 @@ describe('the constrained-issuer bypasses', () => {
   });
 });
 
-/**
- * Mozilla retires a CA by refusing what it issues from a date onward, not by
- * removing it — so this needs BOTH halves or it means nothing. A rule that
- * simply drops the root passes the refusal half perfectly and fails the other,
- * and it would take down every chain the CA signed before the cutoff: mail that
- * works in every browser, failing only in YOZZ, for up to the 60-90 days a
- * public leaf lives.
- */
+/** Both halves: refuse leaves issued after the cutoff, keep anchoring those issued before it. */
 describe('a root past its server distrust-after', () => {
   const CUTOFF = new Date('2026-04-15T23:59:59Z');
   const BEFORE = new Date('2026-03-01T00:00:00Z');
@@ -198,21 +178,8 @@ describe('a root past its server distrust-after', () => {
   });
 
   /**
-   * The rule keys on the LEAF, not on the clock — and the accept above is what
-   * proves it, which is worth saying because the obvious test for it cannot
-   * exist.
-   *
-   * "Validate before the cutoff with a leaf issued after it" is unreachable: a
-   * certificate is not valid before its own `notBefore`, so `validationTime` is
-   * never earlier than it, and such a chain dies on `certificate-not-yet-valid`
-   * long before the distrust check. The reachable discriminator is the other
-   * way round — validating well AFTER the cutoff with a leaf issued before it,
-   * which is exactly the first test here. Key the rule on `validationTime` and
-   * that test goes red.
-   *
-   * A first draft of this file asserted the unreachable direction, passed, and
-   * measured nothing: it set `at` to a moment after the cutoff and was a
-   * duplicate of the refusal below.
+   * Keyed on the leaf, not the clock. The obvious test (validate before the cutoff with a leaf issued
+   * after it) is unreachable: a leaf is never valid before its own `notBefore`.
    */
   it('refuses on the leaf even when the chain is otherwise current', async () => {
     const root = await newRoot();
@@ -224,8 +191,6 @@ describe('a root past its server distrust-after', () => {
       serverDistrustAfter: CUTOFF,
     });
     expect(failureOf(result)).toBe('certificate-authority-distrusted');
-    // The chain is valid on every other axis at that instant, so the refusal is
-    // the distrust rule and not an expiry sneaking in.
     expect(failureOf(await validate({ leaf, root, at: new Date('2026-05-02T00:00:00Z') }))).toBe(
       'ACCEPTED',
     );

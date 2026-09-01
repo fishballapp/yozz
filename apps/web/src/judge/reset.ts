@@ -4,49 +4,38 @@ import type { LiveClient, LiveTask } from '../mail/live';
 import { MINUTES_APART, seedFixtures, seedMessageId } from './fixtures';
 
 /**
- * HACKATHON ONLY — delete this folder after the WebMCP Challenge (deadline 2026-09-03).
- * Tracked as item 0 of HANDOFF.md's Next.
+ * HACKATHON ONLY: delete this folder after the WebMCP Challenge (deadline 2026-09-03).
  *
- * Puts a judge's demo mailbox back the way it started, from the browser, over the connection the
- * app already holds. Reset means reset: every folder is wiped and the fifteen fixtures are
- * appended fresh, so two runs of the judge prompt start from byte-identical mailboxes and the
- * strays a run leaves behind (sent replies, delayed DSNs, archived copies) go with the wipe. The
- * banner says so and a confirm sheet asks first — the judge's own mail does NOT survive.
- *
- * The server-side twin is `harness/judge-reseed.ts`, which proved this wipe-then-append shape
- * against Forward Email across all 51 accounts.
+ * Wipes every folder and appends the fifteen fixtures fresh, over the connection the app holds.
+ * The judge's own mail does not survive; the banner says so and a confirm sheet asks first.
+ * Server-side twin: `harness/judge-reseed.ts`.
  */
 
 export type ResetOutcome = {
   readonly wiped: number;
   readonly appended: number;
-  /** Fixtures that are not where they belong. A reset with any of these did not restore the demo. */
+  /** Fixtures that are not where they belong. */
   readonly missing: readonly string[];
 };
 
 export const resetJudgeInbox = (owner: string): LiveTask<ResetOutcome> => ({
   priority: 'user',
-  // An APPEND that is re-run duplicates the message; a reset is cheap to ask for again by hand.
+  // A re-run APPEND duplicates the message; a reset is cheap to ask for again by hand.
   retry: false,
   run: async (client: LiveClient): Promise<Result<ResetOutcome, MailConnectionFailure>> => {
     const listed = await client.list('', '*');
     if (!listed.ok) return { ok: false, error: { kind: 'imap', reason: listed.reason } };
-    // A \Noselect entry is hierarchy, not a mailbox: SELECTing it refuses deterministically,
-    // which would abort every reset mid-wipe.
+    // A \Noselect entry is hierarchy, not a mailbox; SELECTing it refuses.
     const boxes = listed.value.filter(
       box => !box.attributes.some(a => a.toLowerCase() === '\\noselect'),
     );
     const sent = boxes.find(box => box.attributes.some(a => a.toLowerCase() === '\\sent'))?.name;
-    // No Sent folder means the thread's middle message has nowhere to be, and the conversation
-    // the judge is asked to trace stops spanning two folders. Found out BEFORE the wipe — the one
-    // ordering worse than refusing is destroying the mailbox and then refusing.
+    // Found out before the wipe: no Sent folder means the thread stops spanning two folders.
     if (sent === undefined) {
       return { ok: false, error: { kind: 'error', detail: 'no \\Sent folder' } };
     }
 
-    // Every refusal aborts BEFORE a single fixture is appended. Appending onto a wipe that only
-    // half happened is the one outcome worse than not running: it leaves the strays this exists
-    // to remove AND duplicates the fifteen on top of them.
+    // Every refusal aborts before a fixture is appended; appending onto a half-done wipe duplicates the fifteen on top of the strays.
     let wiped = 0;
     for (const box of boxes.map(b => b.name)) {
       const selected = await client.select(box);

@@ -1,9 +1,4 @@
-/**
- * Test-only replay hooks for injecting published RFC 8448 ClientHello messages
- * and ephemeral private keys into the TLS 1.3 client state machine.
- *
- * NOT exported from index.ts, NOT part of the public package API.
- */
+/** Test-only: injects RFC 8448's published ClientHellos and private keys. Not exported from index.ts. */
 
 import { type HandshakeResult, runHandshake, type StartTlsOptions } from './handshake.ts';
 

@@ -47,11 +47,7 @@ const VAULT_ERROR_MESSAGES: Record<VaultFailureCode, string> = {
 
 const PASSKEY_CANCELLED = 'The passkey prompt was cancelled or timed out. Try again.';
 
-/**
- * A dismissed or timed-out WebAuthn prompt reaches us two ways: as the browser's own
- * `NotAllowedError` DOMException, or re-thrown by SimpleWebAuthn / Better Auth as a plain Error
- * whose message is the spec boilerplate ("The operation either timed out or was not allowed…").
- */
+/** A dismissed WebAuthn prompt arrives as `NotAllowedError`, or re-thrown by SimpleWebAuthn / Better Auth as a plain Error carrying the spec boilerplate. */
 const isPasskeyCancelled = (error: Error) =>
   error.name === 'NotAllowedError' || /timed out or was not allowed/i.test(error.message);
 

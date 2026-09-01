@@ -1,22 +1,9 @@
 /**
- * M8's Node half: the nine stage-3 mail servers, through THIS client.
+ * The nine stage-3 mail servers through this client, validated against `ROOT_BUNDLE` alone.
+ * Network, so by hand only:
  *
  *     pnpm -F @yozz.app/tls live            # all nine
  *     pnpm -F @yozz.app/tls live posteo.de  # just the hosts named
- *
- * Run by hand, never in CI and never from `pnpm test` — it needs the network,
- * and a gate that fails when someone else's mail server is down is a gate that
- * gets muted. What keeps it honest instead is that it is COMMITTED and exits
- * non-zero: the numbers it prints are reproducible by anyone, rather than a
- * paste from a one-off script nobody else has.
- *
- * The chain is validated against `ROOT_BUNDLE` alone — the bundle we ship, not
- * `node:tls`'s store — so this is where the compiled anchors carry real
- * traffic. And our own ClientHello chooses the chain, which is the only way to
- * find out whether what we ADVERTISE and what we can VERIFY agree: handing a
- * chain pulled off the wire by `node:tls` to the validator exercises the
- * validator and never the advertisement, which is exactly how the
- * `signature_algorithms_cert` defect survived to M7.
  */
 import { connect, type Socket } from 'node:net';
 import { compileAnchors, ROOT_BUNDLE, YOZZ_VALIDATOR } from '@yozz.app/x509';
@@ -37,13 +24,7 @@ const openSocket = (host: string): Promise<Socket> =>
     });
   });
 
-/**
- * The IMAP greeting, which every server sends unprompted and which precedes
- * authentication — so nine servers need no nine accounts.
- *
- * A `line` only when the server actually greeted us. Everything else is a
- * failed host, not a footnote: see `isReadyGreeting`.
- */
+/** The IMAP greeting precedes authentication, so nine servers need no accounts. `line` only when the server greeted; see `isReadyGreeting`. */
 type Greeting =
   | { readonly ok: true; readonly line: string }
   | { readonly ok: false; readonly why: string };
@@ -70,13 +51,8 @@ for (const host of targets) {
     socket = await openSocket(host);
     const transport = socketTransport(socket);
 
-    /**
-     * The record layer's first write IS the ClientHello record, so its length
-     * less the 5-byte header is the message RFC 7685 pads. Every real mail
-     * hostname measured lands under the 256..511 range padding engages on,
-     * which is why BoGo's `ClientHelloPadding` is what proves a peer accepts
-     * the padded version — no live host here will ever exercise it.
-     */
+    // The first write is the ClientHello record; less the 5-byte header, it is what RFC 7685 pads.
+    // Every real hostname measured lands under the 256..511 range.
     let clientHello: Uint8Array | undefined;
 
     const result = await startTls({
@@ -113,9 +89,7 @@ for (const host of targets) {
       `ok    ${host.padEnd(22)} hello=${hello.padEnd(5)} ${result.negotiatedGroup} / ${result.peerSignatureScheme}${retry}`,
     );
     console.log(`      ${greeting.line.slice(0, 74)}`);
-    // First use, against the real thing. Nothing here stores it — the point is
-    // that a pin is derivable from a live mail leaf, and that re-running this
-    // prints the same one until the host actually rotates its key.
+    // Nothing stores it; re-running prints the same pin until the host rotates its key.
     console.log(`      pin=${result.peerPublicKeyPin ?? '(none)'}`);
   } catch (error) {
     failures += 1;

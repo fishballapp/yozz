@@ -1,7 +1,3 @@
-/**
- * CertificateVerify signature verification and leaf public key importing (RFC 9846 §4.5.2).
- */
-
 import { decodeDer, decodeInteger } from '@yozz.app/x509';
 import { concat } from './bytes.ts';
 import { type AlertDescription, SIGNATURE_SCHEMES } from './wire.ts';
@@ -28,15 +24,7 @@ const parseOid = (bytes: Uint8Array): string => {
   return arcs.join('.');
 };
 
-/**
- * The key's algorithm and, for an EC key, the curve it names.
- *
- * The curve matters: RFC 9846 §4.5.2 requires the signature algorithm to be
- * "compatible with the key in the sender's end-entity certificate", and in TLS
- * 1.3 an ECDSA scheme names its curve — `ecdsa_secp384r1_sha384` over a P-256
- * key is not a signature that can verify. Leaving that to WebCrypto's import
- * throwing turned a mismatch into "corrupt certificate".
- */
+/** RFC 9846 §4.5.2: an ECDSA scheme names its curve, and a mismatch is `illegal_parameter`, not a failed import. */
 type SpkiAlgorithm = { readonly oid: string; readonly curveOid: string | undefined };
 
 const SCHEME_CURVE_OIDS: Readonly<Record<number, string>> = {
@@ -119,12 +107,8 @@ export const importLeafKey = async (
     return { ok: false, description: 'bad_certificate' };
   }
 
-  /**
-   * §4.3.3 names the two RSA-PSS families apart: `rsa_pss_rsae_*` are
-   * "RSASSA-PSS algorithms with public key OID rsaEncryption", and an
-   * id-RSASSA-PSS key belongs to `rsa_pss_pss_*`, which this client does not
-   * offer. Accepting both OIDs here took a key the scheme forbids.
-   */
+  // §4.3.3: `rsa_pss_rsae_*` keys carry OID rsaEncryption; an id-RSASSA-PSS key belongs to
+  // `rsa_pss_pss_*`, which is not offered.
   const requiredCurveOid = SCHEME_CURVE_OIDS[scheme];
   if (
     requiredCurveOid !== undefined &&

@@ -1,11 +1,6 @@
 import type { ReactNode } from 'react';
 
-/**
- * The reading column the page surfaces share — Settings and Add an address. It is only the
- * column: the rail, the status line and the mobile bar around it belong to `AppShell` and are
- * already on screen before this renders. `nav` is the optional strip of section links under the
- * title; it closes the header with the same hairline the sections below open with.
- */
+/** The reading column Settings and Add an address share; the shell around it is `AppShell`'s. */
 export const PageColumn = ({
   title,
   description,

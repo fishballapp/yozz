@@ -2,12 +2,7 @@ import type { ReactNode } from 'react';
 import { getApiBaseUrl, isApiConfigured } from '../vault/api-base-url.ts';
 import { Wordmark } from './Wordmark';
 
-/**
- * The bare page frame the vault screens share. Siblings of `_app` render with no
- * rail, no mobile bar and no StatusBar, so this supplies its own shell — and
- * owns the "backend not configured" refusal, since nothing on these screens
- * works without the API.
- */
+/** The bare frame the vault screens share; owns the "backend not configured" refusal. */
 export const AuthColumn = ({
   title,
   description,

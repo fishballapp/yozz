@@ -1,7 +1,4 @@
-// Transactional email over the forwardemail.net REST API, behind a Resend-shaped client
-// (`createForwardEmailClient(...).send({ from?, to, subject, text/html })`) so consumers never
-// touch the provider wire format and a provider swap stays inside this package. Web-standard
-// `fetch` only — runs on workerd and Node alike.
+// A Resend-shaped client over the forwardemail.net REST API. Web-standard `fetch` only.
 
 export type SendEmailInput = {
   // Defaults to the client's alias. May carry a display name: 'Acme <no-reply@acme.example>'.
@@ -17,8 +14,7 @@ export type EmailClient = {
 };
 
 export type ForwardEmailClientOptions = {
-  // The sending alias (bare address, e.g. no-reply@acme.example) — forwardemail authenticates
-  // sends with the alias's own credentials (HTTP Basic: alias as username).
+  // Bare address; forwardemail authenticates sends with the alias's own credentials (HTTP Basic).
   alias: string;
   password: string;
 };

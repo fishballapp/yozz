@@ -1,14 +1,3 @@
-/**
- * IMAP client state machine over ByteDuplex.
- *
- * Invariants:
- * - One IMAP connection object per device (no connection pool).
- * - Transport is ByteDuplex from @yozz.app/tls.
- * - Parsing is total: parser never throws, returns typed ImapFailure and closes.
- * - Commands are serialised: one in-flight command at a time, queued in order (no pipelining in this slice).
- * - Greeting is captured immediately upon creation.
- */
-
 import { asciiToString, concatByteArrays, stringToBytes } from './bytes.ts';
 import {
   buildAppendCommand,
@@ -85,7 +74,7 @@ export type ImapSelected = {
 
 export type ImapClientOptions = {
   readonly onUntagged?: (response: ImapUntagged) => void;
-  /** Max bytes of a single literal the client will buffer; default 32 MiB. Larger → protocol failure. */
+  /** Default 32 MiB; a larger literal is a protocol failure. */
   readonly maxLiteralBytes?: number;
 };
 
@@ -101,7 +90,8 @@ export type ImapClient = {
     ImapResult<{ readonly text: string; readonly capabilities: readonly string[] | null }>
   >;
   readonly capability: () => Promise<ImapResult<readonly string[]>>;
-  readonly capabilities: () => readonly string[]; // last known
+  /** Last known. */
+  readonly capabilities: () => readonly string[];
   /** Case-insensitive check against the last known capability list. */
   readonly hasCapability: (name: string) => boolean;
   readonly authenticate: (username: string, password: string) => Promise<ImapResult<void>>;
@@ -113,83 +103,45 @@ export type ImapClient = {
     mailbox: string,
     options?: { readonly readOnly?: boolean },
   ) => Promise<ImapResult<ImapSelected>>;
-  /**
-   * UID FETCH with FLAGS ENVELOPE INTERNALDATE RFC822.SIZE, the `References` header and, on a
-   * server advertising `X-GM-EXT-1`, `X-GM-THRID`. `set` is an IMAP sequence-set string, e.g.
-   * "1:*" or "100:200".
-   */
+  /** `uidSet` is an IMAP sequence-set, e.g. "1:*" or "100:200". */
   readonly fetchSummaries: (uidSet: string) => Promise<ImapResult<readonly ImapMessageSummary[]>>;
-  /**
-   * The same FETCH read by message SEQUENCE number rather than uid. Sequence numbers are dense
-   * (1..EXISTS in the selected mailbox), so a fixed-width window is that many real messages —
-   * which uids, sparse wherever mail has been deleted, cannot promise.
-   */
+  /** By message sequence number (dense, 1..EXISTS) rather than uid (sparse after deletions). */
   readonly fetchSummariesBySeq: (
     seqSet: string,
   ) => Promise<ImapResult<readonly ImapMessageSummary[]>>;
-  /** UID FETCH FLAGS only — what a resync of already-known messages asks for. */
   readonly fetchFlags: (uidSet: string) => Promise<ImapResult<readonly ImapMessageFlags[]>>;
-  /** UID FETCH BODY.PEEK[] — the whole raw message. */
   readonly fetchRaw: (uid: number) => Promise<ImapResult<Uint8Array>>;
   readonly storeFlags: (
     uidSet: string,
     mode: 'add' | 'remove' | 'set',
     flags: readonly string[],
   ) => Promise<ImapResult<void>>;
-  /**
-   * APPEND a whole RFC 5322 message to a mailbox, e.g. a Sent copy after SMTP accepted it.
-   * Without `internalDate` the server stamps the message with its own clock.
-   *
-   * Resolves with the `APPENDUID` the server issued (RFC 4315), or `null` where it issued none —
-   * a server without UIDPLUS. That locator is how a caller addresses what it just wrote without
-   * searching for it, which matters for a draft: the alternative is finding it by Message-ID, and
-   * a retry after a lost response would then be indistinguishable from a duplicate.
-   */
+  /** Resolves with the RFC 4315 `APPENDUID`, or `null` from a server without UIDPLUS. */
   readonly append: (
     mailbox: string,
     message: Uint8Array,
     flags: readonly string[],
     internalDate?: Date,
   ) => Promise<ImapResult<AppendUid | null>>;
-  /** EXPUNGE: erases every `\\Deleted` message in the selected mailbox. */
   readonly expunge: () => Promise<ImapResult<void>>;
-  /**
-   * RFC 4315 UID EXPUNGE: erases only these `\\Deleted` messages, leaving anything another
-   * client flagged alone. Refuses without UIDPLUS rather than falling back to plain EXPUNGE,
-   * which would erase more than was asked.
-   */
+  /** RFC 4315. Refuses without UIDPLUS rather than falling back to EXPUNGE, which erases more than asked. */
   readonly uidExpunge: (uidSet: string) => Promise<ImapResult<void>>;
-  /**
-   * UID SEARCH over one header's exact value in the selected mailbox, newest-last uid order as
-   * the server gives it. An empty array means the mailbox does not hold it.
-   */
   readonly uidSearchHeader: (
     header: string,
     value: string,
   ) => Promise<ImapResult<readonly number[]>>;
-  /** RFC 6851 UID MOVE. Refuses without the MOVE capability (no COPY+EXPUNGE fallback). */
+  /** RFC 6851. Refuses without the MOVE capability. */
   readonly move: (uidSet: string, mailbox: string) => Promise<ImapResult<void>>;
-  /** CREATE a mailbox. */
   readonly create: (mailbox: string) => Promise<ImapResult<void>>;
   readonly noop: () => Promise<ImapResult<void>>;
-  /**
-   * RFC 2177 IDLE. Occupies the command queue until `done()`: every other command waits
-   * behind it, so the caller MUST call `done()` before awaiting anything else. Untagged
-   * responses that arrive while idling (EXISTS, EXPUNGE, FETCH) go to `onUntagged`.
-   * Resolves once the server's tagged completion of the IDLE arrives after DONE.
-   */
+  /** RFC 2177. Occupies the command queue until `done()`; untagged responses meanwhile go to `onUntagged`. */
   readonly idle: () => ImapIdle;
   readonly logout: () => Promise<ImapResult<void>>;
 };
 
-/** Where an APPEND landed: RFC 4315's `[APPENDUID <uidvalidity> <uid>]`. */
+/** RFC 4315 `[APPENDUID <uidvalidity> <uid>]`. */
 export type AppendUid = { readonly uidValidity: number; readonly uid: number };
 
-/**
- * The `APPENDUID` of a tagged OK, when the server issued one. It arrives as an unrecognised
- * response code, which is exactly what `other` is for — no parser change, and a server without
- * UIDPLUS simply has nothing here.
- */
 const appendUidOf = (tagged: ImapTagged): AppendUid | null => {
   const code = tagged.code;
   if (code?.kind !== 'other' || code.code !== 'APPENDUID') return null;
@@ -198,10 +150,6 @@ const appendUidOf = (tagged: ImapTagged): AppendUid | null => {
   return Number.isInteger(uidValidity) && Number.isInteger(uid) ? { uidValidity, uid } : null;
 };
 
-/**
- * The msg-ids out of a `HEADER.FIELDS (REFERENCES)` section: the header unfolded, then every
- * `<...>` in order. A truncated or absent header is simply fewer ids.
- */
 export const parseReferencesHeader = (bytes: Uint8Array | null): readonly string[] => {
   if (bytes === null) return [];
   const unfolded = asciiToString(bytes).replace(/\r?\n[ \t]+/g, ' ');
@@ -210,10 +158,6 @@ export const parseReferencesHeader = (bytes: Uint8Array | null): readonly string
   return line.slice(line.indexOf(':') + 1).match(/<[^<>\s]+>/g) ?? [];
 };
 
-/**
- * The summaries in a FETCH response's untagged lines, whether the command asked by uid or by
- * sequence number: `* <seq> FETCH (UID n …)` carries both either way.
- */
 const summariesFrom = (untagged: readonly ImapUntagged[]): readonly ImapMessageSummary[] =>
   untagged.flatMap(item => {
     if (item.kind !== 'fetch') return [];
@@ -257,9 +201,6 @@ export const createImapClient = (
 
   const nextTag = (): string => `A${String(tagCounter++).padStart(4, '0')}`;
 
-  /**
-   * Reads and parses the next complete IMAP response from the transport.
-   */
   const readNextResponse = async (): Promise<ImapResult<ImapResponse>> => {
     if (failureReason !== null) {
       return { ok: false, reason: failureReason };
@@ -312,8 +253,7 @@ export const createImapClient = (
         resumeState = lineResult;
       }
 
-      // Need more data from transport. A transport that throws is a transport that closed;
-      // nothing here may ever reject, least of all the greeting read nobody has awaited yet.
+      // A transport that throws has closed; the greeting read is not awaited by anyone, so this must never reject.
       const chunk = await transport.read().catch(() => null);
       if (chunk === null) {
         isClosed = true;
@@ -326,9 +266,6 @@ export const createImapClient = (
     }
   };
 
-  /**
-   * Greeting is captured immediately as soon as client is created.
-   */
   const greetingPromise: Promise<
     ImapResult<{ readonly text: string; readonly capabilities: readonly string[] | null }>
   > = (async () => {
@@ -365,8 +302,6 @@ export const createImapClient = (
     };
   })();
 
-  // Keep this one-purpose tail local: the live harness runs TypeScript directly under Node 26,
-  // which cannot execute the monorepo's extensionless multi-file source barrels.
   let commandQueue: Promise<void> = Promise.resolve();
 
   const enqueueCommand = <T>(task: () => Promise<ImapResult<T>>): Promise<ImapResult<T>> => {
@@ -378,9 +313,6 @@ export const createImapClient = (
     return result.catch(() => ({ ok: false, reason: { kind: 'closed' } }));
   };
 
-  /**
-   * Sends a command and collects untagged responses until matching tagged response.
-   */
   const executeCommand = async (
     build: (tag: string) => OutgoingCommand,
     options?: {
@@ -394,8 +326,7 @@ export const createImapClient = (
       readonly seenCapability: boolean;
     }>
   > => {
-    // Once closed, later commands report closed — the bye/protocol reason belonged to the
-    // command that observed it, not to everything that follows.
+    // The bye/protocol reason belonged to the command that observed it; later commands report closed.
     if (isClosed) {
       return { ok: false, reason: { kind: 'closed' } };
     }
@@ -419,7 +350,6 @@ export const createImapClient = (
     let seenCapability = false;
     let allowedByeReason: Extract<ImapFailure, { readonly kind: 'bye' }> | null = null;
 
-    // Send command lines, interleaving literals with continuation waits when required
     for (const line of command.lines) {
       try {
         await transport.write(line.text);
@@ -443,7 +373,6 @@ export const createImapClient = (
             return { ok: false, reason: { kind: 'closed' } };
           }
         } else {
-          // Emit {len}\r\n and wait for '+' continuation
           try {
             await transport.write(stringToBytes(`{${len}}\r\n`));
           } catch {
@@ -508,7 +437,6 @@ export const createImapClient = (
       }
     }
 
-    // Await tagged completion
     while (true) {
       const respResult = await readNextResponse();
       if (!respResult.ok) {
@@ -620,7 +548,6 @@ export const createImapClient = (
               buildAuthenticatePlainSaslIrCommand(tag, username, password),
             );
           } else {
-            // Two-step AUTHENTICATE PLAIN through executeCommand
             authCmdRes = await executeCommand(tag => buildAuthenticatePlainInitialCommand(tag), {
               onContinuation: async () => {
                 try {
@@ -651,7 +578,6 @@ export const createImapClient = (
 
         if (!authCmdRes.ok) return authCmdRes;
 
-        // Post-login CAPABILITY check (Fix E)
         if (!authCmdRes.value.seenCapability) {
           const postAuthCapRes = await executeCommand(buildCapabilityCommand);
           if (!postAuthCapRes.ok) return postAuthCapRes;
@@ -831,7 +757,6 @@ export const createImapClient = (
         const greetRes = await greetingPromise;
         if (!greetRes.ok) return greetRes;
         // MOVE is an extension to rev1 (RFC 6851) and part of rev2 itself (RFC 9051 §6.4.8).
-        // ponytail: COPY+EXPUNGE is the upgrade path if a host we care about lacks both.
         const hasMove = knownCapabilities.some(c => {
           const name = c.toUpperCase();
           return name === 'MOVE' || name === 'IMAP4REV2';
@@ -870,9 +795,8 @@ export const createImapClient = (
 
       let doneRequested = false;
       let doneSent = false;
-      /** True once '+' arrived; DONE may be written (including from `done()` while a read waits). */
+      /** Set once '+' arrived; only then may DONE be written. */
       let isIdling = false;
-      /** True once the IDLE has settled either way; a `done()` after that has nothing to end. */
       let isEnded = false;
 
       const sendDone = async (): Promise<ImapResult<void> | null> => {
@@ -912,7 +836,6 @@ export const createImapClient = (
           }
         }
 
-        // Wait for '+' continuation (or a tagged NO/BAD refusing IDLE).
         while (true) {
           const respResult = await readNextResponse();
           if (!respResult.ok) return respResult;
@@ -951,13 +874,12 @@ export const createImapClient = (
         }
 
         isIdling = true;
-        // done() before '+' still works: send DONE right after the continuation.
+        // A `done()` that arrived before '+' sends DONE now.
         if (doneRequested) {
           const sendFail = await sendDone();
           if (sendFail !== null) return sendFail;
         }
 
-        // Read untagged until DONE's tagged completion (DONE may be written by done() mid-read).
         while (true) {
           const respResult = await readNextResponse();
           if (!respResult.ok) return respResult;

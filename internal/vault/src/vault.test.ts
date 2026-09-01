@@ -1,13 +1,3 @@
-/**
- * The record store's cryptography.
- *
- * Every test here is a move an untrusted store can make. It holds `id`, `type`
- * and `ciphertext` in the clear and it chooses which row answers a read, so "it
- * round-trips" is the least interesting property in the file — what matters is
- * which rearrangements of those three fields, and which substitutions of whole
- * genuine rows, fail.
- */
-
 import { beforeAll, describe, expect, it } from 'vitest';
 import { VaultError } from './bytes.ts';
 import { type AccountKeys, deriveAccountKeys } from './keys.ts';
@@ -18,7 +8,7 @@ const PASSWORD = 'correct horse battery staple';
 
 const ACCOUNT = { email: EMAIL, password: PASSWORD };
 
-/** PBKDF2 at 650,000 iterations is ~0.2s, so derive each distinct account once. */
+/** PBKDF2 is ~0.2 s, so each account derives once. */
 let keys: AccountKeys;
 let other: AccountKeys;
 let vault: Vault;
@@ -32,7 +22,6 @@ beforeAll(async () => {
   ({ vault, wrappedDek } = await createVault(keys));
 });
 
-/** Enough to break the GCM tag, and total under `noUncheckedIndexedAccess`. */
 const flipLastByte = (base64: string): string => {
   const bytes = Uint8Array.fromBase64(base64);
   return bytes.map((byte, index) => (index === bytes.length - 1 ? byte ^ 0x01 : byte)).toBase64();
@@ -43,11 +32,9 @@ const NATURAL_KEY = 'jason@posteo.de';
 const record = (plaintext: string, revision = 1) =>
   vault.encryptRecord({ type: 'account', naturalKey: NATURAL_KEY, revision, plaintext });
 
-/** What the caller asked for, handed whatever the store answered with. */
 const read = (v: Vault, ciphertext: string) =>
   v.decryptRecord({ type: 'account', naturalKey: NATURAL_KEY, ciphertext });
 
-/** The plaintext alone, for the tests whose subject is not freshness. */
 const readPlaintext = async (v: Vault, ciphertext: string): Promise<string> =>
   (await read(v, ciphertext)).plaintext;
 
@@ -95,8 +82,7 @@ describe('the blind index', () => {
   });
 
   it('cannot be framed into a collision', async () => {
-    // `${type}:${naturalKey}` would give these two the same id, and with it one
-    // record's row to the other record's lookup.
+    // `${type}:${naturalKey}` would give these two the same id.
     expect(await vault.recordId('account:x', 'y')).not.toBe(await vault.recordId('account', 'x:y'));
   });
 
@@ -131,10 +117,6 @@ describe('a record', () => {
       plaintext: 'send-only',
     });
 
-    // The enumeration path: the caller fetched rows of a type and knew no
-    // natural key going in, so the vault tells it which record this is — and at
-    // which revision, which is the one thing a row beside it cannot be believed
-    // about.
     expect(await vault.decryptListedRecord('identity', stored)).toEqual({
       revision: 4,
       naturalKey: 'jason@yozz.app',
@@ -150,9 +132,6 @@ describe('a record', () => {
       plaintext: 'send-only',
     });
 
-    // Genuine row, genuine id, tag intact — and returned to a caller that asked
-    // for accounts. The caller knows the TYPE it asked for even when it knows no
-    // natural key, so the type is a parameter rather than a field off the row.
     await expect(vault.decryptListedRecord('account', identity)).rejects.toMatchObject({
       code: 'unreadable',
     });
@@ -169,13 +148,7 @@ describe('a record', () => {
     const before = await record('{"host":"old-host.example"}', 3);
     const after = await record('{"host":"new-host.example"}', 4);
 
-    // The replay itself still OPENS, and it has to: `[id, type]` is identical
-    // for every revision of one record, so AES-GCM has nothing to object to.
-    // What changed is that the revision is now sealed INSIDE, so the stale read
-    // announces itself as 3 while the caller's high-water mark says 4. This
-    // package cannot refuse it — refusing needs that mark, which is state it
-    // holds none of — so reporting is the whole contract, and a caller that
-    // compares is what closes the gap.
+    // A replay still opens: `[id, type]` is identical for every revision. It reports 3, and refusing is the caller's job.
     expect(await read(vault, before.ciphertext)).toEqual({
       revision: 3,
       plaintext: '{"host":"old-host.example"}',
@@ -187,17 +160,13 @@ describe('a record', () => {
   });
 
   it('round-trips revisions that a string comparison would order wrongly', async () => {
-    // `"10" < "9"` as strings, and the freshness check is an ordering. Both
-    // survive the tuple as numbers or the defence fails open on the tenth write.
+    // `"10" < "9"` as strings.
     expect((await read(vault, (await record('x', 9)).ciphertext)).revision).toBe(9);
     expect((await read(vault, (await record('x', 10)).ciphertext)).revision).toBe(10);
     expect((await read(vault, (await record('x', 0)).ciphertext)).revision).toBe(0);
   });
 
   it('refuses a revision it could not read back, at the door', async () => {
-    // A revision that does not round-trip writes a record that never opens
-    // again, and the symptom would arrive one fetch later wearing "did not
-    // authenticate" — a failure with nothing pointing at its cause.
     for (const revision of [-1, 1.5, Number.NaN, 2 ** 53]) {
       await expect(record('x', revision)).rejects.toMatchObject({ code: 'malformed' });
     }

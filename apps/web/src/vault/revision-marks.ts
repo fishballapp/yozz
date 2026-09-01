@@ -8,12 +8,7 @@ type StoredMark = {
 };
 
 export type PersistentRevisionMarks = RevisionMarks & {
-  /**
-   * Opens the database, or rejects. Unlock must await this so a denied or
-   * unavailable IndexedDB blocks the unlock rather than surfacing later on a
-   * read — the marks are the whole rollback defence, and a session that
-   * "unlocked" without them is a session running with the defence off.
-   */
+  /** Rejects on a denied or unavailable IndexedDB; the marks are the whole rollback defence. */
   readonly open: () => Promise<void>;
   readonly close: () => void;
 };
@@ -23,7 +18,7 @@ export const createIndexedDbRevisionMarks = (
   idbFactory?: IDBFactory,
 ): PersistentRevisionMarks => {
   const factory = getIdbFactory(idbFactory);
-  // A lazy handle and a closed flag: both are mutated by design.
+  // A lazy handle and a closed flag.
   let dbPromise: Promise<IDBDatabase> | null = null;
   let isClosed = false;
 
@@ -48,8 +43,7 @@ export const createIndexedDbRevisionMarks = (
 
   const raiseTo = async (recordId: string, revision: number): Promise<void> =>
     runTransaction<void>(await getDb(), STORES.marks.name, 'readwrite', (store, done) => {
-      // Read-and-max inside ONE readwrite transaction, which IndexedDB
-      // serialises against every other readwrite on this store.
+      // Read-and-max inside one readwrite transaction, which IndexedDB serialises.
       const req = store.get([userId, recordId]);
       req.onsuccess = () => {
         const current = (req.result as StoredMark | undefined)?.revision;
@@ -74,7 +68,7 @@ export const createIndexedDbRevisionMarks = (
         try {
           (await pending)?.close();
         } catch {
-          // Never opened, so there is nothing to close.
+          // Never opened.
         }
       })();
     },

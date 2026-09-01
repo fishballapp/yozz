@@ -2,16 +2,6 @@ import type { MailAutoconfig, MailServer } from '@yozz.app/vault-contract';
 import { z } from 'zod';
 import { parseClientConfig, usableServer, usernameForm } from './clientconfig.ts';
 
-/**
- * Where a domain says its mail servers are, tried the way Thunderbird tries them: the provider's
- * own autoconfig URLs, then the Thunderbird ISPDB, then both again under the domain of the MX
- * host (a custom domain hosted at Fastmail, Google or Forward Email answers this way), then
- * RFC 6186 SRV records. Everything runs at once and the first answer in that order wins.
- *
- * Only the DOMAIN is looked up. The address's local part never leaves the browser, so the
- * server learns no more than the relay already does when it opens the socket.
- */
-
 const TIMEOUT_MS = 4000;
 
 type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
@@ -29,7 +19,6 @@ const DnsAnswerSchema = z.object({
   Answer: z.array(z.object({ type: z.number(), data: z.string() })).optional(),
 });
 
-/** Every answer's `data` for one record type, over Cloudflare's DNS-over-HTTPS. */
 const dnsData = async (
   fetchFn: FetchLike,
   name: string,
@@ -87,13 +76,9 @@ const firstConfig = async (
   return null;
 };
 
-/**
- * `in1-smtp.messagingengine.com` → `messagingengine.com`; `aspmx.l.google.com` → `l.google.com`,
- * `google.com`. The ISPDB keys the shared providers under their MX domains for exactly this.
- */
+/** `aspmx.l.google.com` → `l.google.com`, `google.com`: the ISPDB keys shared providers under their MX domains. */
 export const mxDomains = (mxHost: string): readonly string[] => {
   const labels = mxHost.toLowerCase().replace(/\.$/, '').split('.');
-  // A two-label MX host is already the provider's domain.
   if (labels.length === 2) return [labels.join('.')];
   const domains: string[] = [];
   for (let start = 1; start <= labels.length - 2; start += 1) {
@@ -114,11 +99,7 @@ const lowestMx = (records: readonly string[]): string | null => {
   return best?.host ?? null;
 };
 
-/**
- * Under the MX host's domain, both the provider's own file and the ISPDB are tried. Thunderbird
- * checks only the ISPDB here, which misses a provider that publishes autoconfig but is not in the
- * database — Forward Email, for one.
- */
+/** Thunderbird checks only the ISPDB here, which misses a provider (Forward Email) that publishes autoconfig but is not in it. */
 const viaMx = async (
   fetchFn: FetchLike,
   domain: string,
@@ -134,12 +115,7 @@ const viaMx = async (
   return null;
 };
 
-/**
- * `0 1 993 imap.fastmail.com` → the target, chosen the way RFC 2782 says: lowest priority first,
- * heaviest weight within it (deterministically — a client adding one address is not balancing a
- * fleet), and a target of `.` means the service is deliberately absent. Only a record on the
- * one port the relay can use counts.
- */
+/** RFC 2782: lowest priority, then heaviest weight; a target of `.` means the service is absent. */
 export const srvTarget = (records: readonly string[], port: MailServer['port']): string | null => {
   const usable = records.flatMap(record => {
     const [priority, weight, recordPort, target] = record.split(/\s+/);
@@ -164,7 +140,7 @@ const viaSrv = async (fetchFn: FetchLike, domain: string): Promise<Found | null>
   return {
     imap: imap === null ? null : { host: imap, port: 993 },
     smtp: smtp === null ? null : { host: smtp, port: 465 },
-    // SRV says where, never who: the whole address is what nearly every provider wants.
+    // SRV says where, never who.
     username: 'address',
     source: 'srv',
   };

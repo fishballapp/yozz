@@ -13,10 +13,7 @@ import { baseSubject, groupIntoThreads } from '../lib/threading';
 import type { ThreadState } from '../state/mail';
 import { toParagraphs } from './bodies';
 
-/**
- * What a sync hands the threader: each folder's summaries, and the UIDVALIDITY they were read
- * under. The uids in a folder are only meaningful together with it, so they travel together.
- */
+/** Each folder's summaries with the UIDVALIDITY they were read under; uids mean nothing without it. */
 export type FolderSummaries = Partial<
   Record<
     Folder,
@@ -27,12 +24,7 @@ export type FolderSummaries = Partial<
 /** The folders whose messages are threaded as mail. Drafts are synced but are not mail. */
 const THREADED_FOLDERS = FOLDERS.filter(folder => folder !== 'drafts');
 
-/**
- * Sent mail the vault holds because no mailbox does: what a send-only address leaves behind.
- *
- * It joins the same grouping pass as everything else, so a reply you sent from an alias sits in
- * its conversation rather than in a list of its own. Structurally a `SentRecord` without bytes.
- */
+/** Sent mail the vault holds because no mailbox does. Structurally a `SentRecord` without bytes. */
 export type VaultSentMessage = {
   readonly messageId: string;
   readonly at: number;
@@ -46,7 +38,7 @@ export type VaultSentMessage = {
   readonly references?: readonly string[];
 };
 
-/** Every account's folders, which is what one grouping pass reads. Keyed by address. */
+/** Every account's folders, keyed by address: what one grouping pass reads. */
 export type AccountSummaries = Readonly<Record<string, FolderSummaries>>;
 
 const MONTHS: Record<string, number> = {
@@ -64,11 +56,7 @@ const MONTHS: Record<string, number> = {
   dec: 11,
 };
 
-/**
- * Parses the IMAP INTERNALDATE format (e.g. `23-Aug-2026 09:00:00 +0000`).
- *
- * `Date.parse` does not accept this format reliably across JavaScript engines.
- */
+/** IMAP INTERNALDATE (`23-Aug-2026 09:00:00 +0000`); `Date.parse` does not accept it reliably across engines. */
 export const parseInternalDate = (dateStr: string | null | undefined): number | null => {
   if (dateStr === null || dateStr === undefined) return null;
   const trimmed = dateStr.trim();
@@ -125,7 +113,7 @@ const upper = (flags: readonly string[]) => flags.map(f => f.toUpperCase());
 const addressOf = (address: ImapAddress | undefined) =>
   address?.mailbox && address?.host ? `${address.mailbox}@${address.host}` : null;
 
-/** The envelope's `To` + `Cc` as addresses: lowercased so a comparison is case-blind, distinct, in header order. */
+/** The envelope's `To` + `Cc`, lowercased, distinct, in header order. */
 const recipientsOf = (envelope: ImapMessageSummary['envelope']): readonly string[] => [
   ...new Set(
     [...(envelope?.to ?? []), ...(envelope?.cc ?? [])].flatMap(
@@ -135,11 +123,8 @@ const recipientsOf = (envelope: ImapMessageSummary['envelope']): readonly string
 ];
 
 /**
- * One displayed message from every copy of it. `toAddress` answers "which of my addresses did
- * this reach", so it is read from a copy that ARRIVED — the account holding it in any folder but
- * Sent — and a message with only Sent copies is one you wrote, whose recipient the envelope
- * names. With copies in two accounts the earliest arriving one wins, which is the same
- * oldest-first order everything else here uses.
+ * `toAddress` is read from a copy that arrived (any folder but Sent); a message with only Sent
+ * copies is one you wrote. With copies in two accounts the earliest arriving one wins.
  */
 const messageFromCopies = (
   id: string,
@@ -157,8 +142,7 @@ const messageFromCopies = (
     locations,
     fromName,
     fromAddress: fromMailboxHost ?? '',
-    // Your own copy went to whoever the envelope names — in Sent, or wherever a delete or restore
-    // moved it; everything else arrived here whatever its To says (aliases, Bcc, lists).
+    // Your own copy went to whoever the envelope names; everything else arrived here whatever its To says.
     toAddress: outbound ? (addressOf(summary.envelope?.to?.[0]) ?? '') : owner,
     recipients: recipientsOf(summary.envelope),
     at: parseDate(summary),
@@ -175,7 +159,7 @@ const subjectOf = (summary: ImapMessageSummary | undefined): string => {
   return raw !== undefined && raw !== '' ? raw : '(no subject)';
 };
 
-/** `name@host` as an envelope address, which is all the threader reads them for. */
+/** `name@host` as an envelope address. */
 const asImapAddress = (address: string): ImapAddress | null => {
   const at = address.lastIndexOf('@');
   if (at <= 0) return null;
@@ -186,12 +170,8 @@ const asImapAddresses = (list: string): readonly ImapAddress[] =>
   list.split(',').flatMap(part => asImapAddress(part.trim()) ?? []);
 
 /**
- * A vault-held sent message, dressed as the summary the rest of this file reads.
- *
- * `uidValidity: 0` marks the location as one no server issued — nothing syncs, moves or flags it,
- * because no account owns it. When the same message later turns up in a real Sent folder (the
- * address gained a mailbox, or the provider kept its own copy), the fingerprint collapses the two
- * into one row and the real copy leads, which is what "adoption" amounts to.
+ * `uidValidity: 0` marks a location no server issued. When the same message later turns up in a
+ * real Sent folder the fingerprint collapses the two and the real copy leads.
  */
 const asSyntheticCopy = (message: VaultSentMessage) => ({
   location: { account: message.from, folder: 'sent' as const, uidValidity: 0, uid: 0 },
@@ -222,25 +202,10 @@ const asSyntheticCopy = (message: VaultSentMessage) => ({
 });
 
 /**
- * Every synced summary of EVERY account, grouped into conversations (`lib/threading.ts`).
- *
- * One pass over all accounts, not one per account, because a conversation is not the property of
- * a mailbox: two of your addresses copied on the same mail hold the same conversation, and
- * running the grouping per account leaves each with half of it and the other half orphaned.
- *
- * **Physical copies collapse into one displayed message** when they are the same RFC message:
- * equal Message-ID AND equal From, envelope Date and base subject. The fingerprint is what keeps
- * a Message-ID collision (two different messages, one id — rare but real, and cheap for a
- * hostile sender to arrange) from merging strangers into one row. INTERNALDATE is deliberately
- * NOT in it: the Inbox copy and the Sent copy of one message have different ones.
- *
- * A message is named by `mid/<Message-ID>` when that id names exactly one displayed message, else
- * by one physical copy; a thread by its EARLIEST message, so an id keeps naming the same mail
- * through every move, and only an older message backfilled by paging can change a thread's root.
- * Its messages run oldest first, its subject is the root's, and its flags are the union across
- * every copy — a thread is unread while any copy anywhere is. `folders` are the distinct
- * mailboxes it occupies across all accounts; `foldersByAccount` is the same per account, which is
- * what one address's view filters on. Newest conversation first.
+ * Every account's summaries grouped into conversations (`lib/threading.ts`) in one pass. Copies
+ * collapse into one displayed message on equal Message-ID, From, envelope Date and base subject
+ * (not INTERNALDATE, which differs between the Inbox and Sent copies). Flags are the union across
+ * copies. See DECISIONS.md, "Threads span accounts, and an id stops naming one".
  */
 export const threadsFromAccounts = (
   byAccount: AccountSummaries,
@@ -249,10 +214,8 @@ export const threadsFromAccounts = (
   const copies = [
     ...vaultSent.map(asSyntheticCopy),
     ...Object.entries(byAccount).flatMap(([account, byFolder]) =>
-      // Drafts are synced so the mirror can be built on them, but they are NOT mail: threading a
-      // server-side draft in would make it an ordinary message in its conversation — counted in the
-      // unread rollup, reachable from Starred or Archive through its siblings, and eligible for
-      // flag writes and body loads. Until the mirror and the foreign-draft badge land, they stay out.
+      // Drafts are synced for the mirror but are not mail: threaded in, a server-side draft would be
+      // counted unread and eligible for flag writes and body loads.
       THREADED_FOLDERS.flatMap(folder => {
         const read = byFolder[folder];
         return read === undefined
@@ -267,10 +230,7 @@ export const threadsFromAccounts = (
     ),
   ];
 
-  /**
-   * What makes two copies the same message. A copy with no Message-ID is its own message: there
-   * is nothing to claim it is the same as anything else.
-   */
+  /** A copy with no Message-ID is its own message. */
   const fingerprint = ({ summary }: (typeof copies)[number]) => {
     const messageId = summary.envelope?.messageId;
     if (!messageId) return null;
@@ -283,11 +243,8 @@ export const threadsFromAccounts = (
   };
 
   /**
-   * Oldest copy first, and ties broken by FOLDERS order then by the physical id. Deterministic,
-   * so which copy leads a displayed message never depends on the order accounts happened to sync
-   * in; and folder-ranked, so the copy that leads is the liveliest one — `locations[0]` is what a
-   * body fetch reads and what names a message with no usable Message-ID, and reading either out
-   * of the bin while the inbox still holds it would be a strange answer.
+   * Oldest first, ties by FOLDERS order then physical id, so the leading copy never depends on sync
+   * order and `locations[0]` is the liveliest copy.
    */
   const ordered = copies
     .map(copy => ({ ...copy, at: parseDate(copy.summary), print: fingerprint(copy) }))
@@ -300,13 +257,7 @@ export const threadsFromAccounts = (
       return ia < ib ? -1 : ia > ib ? 1 : 0;
     });
 
-  /**
-   * `summary` is the leading copy's, which is what names and dates the message — they are the
-   * same message, so any copy answers. FLAGS are not like that: they are per copy, and a message
-   * read in one account is still unread in the other. So every copy's flags are kept and the
-   * rollups union them, or a thread unread in one account would show as read because the copy
-   * that happened to lead was seen.
-   */
+  // Flags are per copy: a message read in one account is still unread in the other.
   type Merged = (typeof ordered)[number] & {
     readonly locations: Location[];
     readonly flags: string[][];
@@ -329,8 +280,7 @@ export const threadsFromAccounts = (
     if (copy.print !== null) byPrint.set(copy.print, entry);
   }
 
-  // `mid/` is only a name when it names ONE message. Two fingerprint-distinct messages sharing a
-  // Message-ID both fall back, rather than one of them silently answering for the other.
+  // `mid/` is only a name when it names one message.
   const midCounts = new Map<string, number>();
   for (const entry of merged) {
     const messageId = entry.summary.envelope?.messageId;
@@ -366,8 +316,7 @@ export const threadsFromAccounts = (
     const messages = members
       .map(({ id, entry }) => {
         const message = messageFromCopies(id, entry.summary, entry.locations);
-        // A vault-held message carries its own text: there is no server to fetch it from, and
-        // leaving it `pending` would spin for ever on a body that is already here.
+        // A vault-held message carries its own text; `pending` would spin for ever.
         const held = vaultBodies.get(entry.summary.envelope?.messageId ?? '');
         return held === undefined
           ? message
@@ -403,14 +352,7 @@ export const threadsFromAccounts = (
   return threads.sort((a, b) => (b.messages.at(-1)?.at ?? 0) - (a.messages.at(-1)?.at ?? 0));
 };
 
-/**
- * A vault draft as its conversation shows it: a message in the thread it replies to, or a thread
- * of its own when it replies to nothing.
- *
- * Folded in AFTER the grouping pass rather than through it, because a draft is not mail — it has
- * no Message-ID until it is sent, no copy on any server this client owns, and no flags. Its id is
- * `draft/<draftKey>`, which survives every edit and every changing mirror id.
- */
+/** Folded in after the grouping pass: a draft has no Message-ID, no server copy and no flags. Its id is `draft/<draftKey>`. */
 export const withDrafts = (
   threads: readonly ThreadState[],
   drafts: readonly {
@@ -437,8 +379,7 @@ export const withDrafts = (
       draftKey,
       draftId,
     };
-    // The conversation it is a reply to: named outright by the record, else found by the message
-    // its `In-Reply-To` points at.
+    // Named by the record, else found by the message its `In-Reply-To` points at.
     const parent =
       (record.threadId === undefined ? undefined : byId.get(record.threadId)) ??
       (record.inReplyTo === undefined
@@ -464,7 +405,7 @@ export const withDrafts = (
     own.set(parent.id, {
       ...carrying,
       messages: [...carrying.messages, message],
-      // The thread is now in Drafts as well as wherever its mail is, which is what lists it there.
+      // Now in Drafts as well as wherever its mail is.
       folders: carrying.folders.includes('drafts')
         ? carrying.folders
         : [...carrying.folders, 'drafts'],

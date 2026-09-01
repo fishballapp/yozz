@@ -3,10 +3,7 @@ import type { PutPrecondition, VaultRecordEnvelope } from '@yozz.app/vault-contr
 import type { VaultApi } from './api.ts';
 import { createIndexedDbRevisionMarks } from './revision-marks.ts';
 
-/**
- * The store served a row whose clear-text revision is not the one sealed inside its ciphertext.
- * Nothing legitimate produces that: the client writes both from the same number.
- */
+/** The clear-text revision is not the one sealed inside the ciphertext; the client writes both from one number. */
 export class VaultStoreDisagreementError extends Error {
   constructor(id: string) {
     super(`Vault record ${id} states a revision its ciphertext does not`);
@@ -23,11 +20,7 @@ export type RecordStore = {
     readonly type: string;
     readonly naturalKey: string;
     readonly plaintext: string;
-    /**
-     * What this write claims about the row it replaces. Omitted is the pre-CAS last-write-wins;
-     * a record two devices can edit at once states one, and a refusal comes back as
-     * `VaultApiError` with code `CONFLICT`.
-     */
+    /** Omitted is last-write-wins; stated, a refusal comes back as `VaultApiError` with code `CONFLICT`. */
     readonly precondition?: PutPrecondition;
   }) => Promise<void>;
   readonly remove: (type: string, naturalKey: string, ifRevision?: number) => Promise<void>;
@@ -46,21 +39,13 @@ export const createRecordStore = async ({
   readonly idbFactory?: IDBFactory;
 }): Promise<RecordStore> => {
   const marks = createIndexedDbRevisionMarks(userId, idbFactory);
-  /**
-   * Async, and that is the point: opening here means a caller cannot obtain a
-   * store whose marks were never reachable. A denied or missing IndexedDB
-   * rejects the unlock instead of yielding a session that fails on first read —
-   * the difference between refusing and pretending.
-   */
+  /** Async so a denied or missing IndexedDB rejects the unlock rather than failing on first read. */
   await marks.open();
   const vault = freshVault(rawVault, marks);
 
   /**
-   * The column is a claim, the sealed number is the fact, and a store that disagrees with itself
-   * is hostile rather than merely wrong: it is offering a revision the ciphertext does not
-   * attest. A NULL column is a row written before the column existed and has nothing to say, so
-   * it is skipped — the next write to that row fills it. This is a check ON TOP of the
-   * high-water mark, which keeps doing its own job of refusing replays.
+   * The column is a claim, the sealed number is the fact. A NULL column predates the column and is
+   * skipped. On top of the high-water mark, which keeps refusing replays.
    */
   const agreeing = <T extends OpenedRecord>(envelope: VaultRecordEnvelope, opened: T): T => {
     if (envelope.revision !== null && envelope.revision !== opened.revision) {
@@ -94,20 +79,8 @@ export const createRecordStore = async ({
   };
 
   /**
-   * The revision is allocated HERE, from this device's own high-water mark, and
-   * is deliberately not a parameter.
-   *
-   * A caller cannot compute it. After a client-initiated `remove` the mark
-   * stays — correctly, because clearing it would reopen the omission-then-replay
-   * hole a hostile store could drive — but `get` then returns `null`, so there
-   * is no way to learn the number a recreate has to exceed. Writing the same
-   * natural key again at revision 1 was refused as `stale`, and "remove this
-   * account and add it back" is a primary flow for this product.
-   *
-   * `mark + 1` is always above anything this device has seen, so the write is
-   * accepted and any older ciphertext replayed afterwards is not. It also
-   * removes the whole class of caller-picked revisions: there is no longer a
-   * wrong value to pass.
+   * Allocated here from this device's mark, not passed in: after a `remove` the mark stays and
+   * `get` returns `null`, so a caller cannot learn the number a recreate must exceed.
    */
   const put = async (input: {
     readonly type: string;
@@ -118,19 +91,9 @@ export const createRecordStore = async ({
     const id = await vault.recordId(input.type, input.naturalKey);
     const mark = await marks.highWaterMark(id);
     /**
-     * A CAS update allocates from the ROW it is replacing, not from this device's mark.
-     *
-     * Marks are per device, so two devices editing one record allocate independently: one seals
-     * 10 (mark 9), the other seals 3 (mark 2) and WINS. Encrypting raises the mark either way, so
-     * the loser's mark is 10 while the authoritative record is 3 — and every later read of the
-     * winner is refused as a replay. The device is locked out of a record it can legitimately
-     * read, which is the one failure this whole mechanism exists to prevent, arriving by another
-     * door.
-     *
-     * Allocating from the row makes every device agree on the sequence: both write `n + 1`, so
-     * the loser's mark equals the winner's revision and reading it passes. Replay protection is
-     * untouched — anything BELOW that is still refused. Nothing to base on (a create, or a
-     * pre-CAS row) keeps `mark + 1`.
+     * A CAS update allocates from the row it replaces. Marks are per device, so allocating from the
+     * mark lets a losing device's mark exceed the winning revision and refuse every later read of
+     * it. Anything below `n + 1` is still refused.
      */
     const base =
       input.precondition !== undefined &&
@@ -138,7 +101,7 @@ export const createRecordStore = async ({
       input.precondition.revision !== null
         ? input.precondition.revision
         : (mark ?? 0);
-    // Encrypting through freshVault raises the high-water mark before the network PUT
+    // Encrypting through freshVault raises the high-water mark before the network PUT.
     const revision = base + 1;
     const encrypted = await vault.encryptRecord({ ...input, revision });
     await api.put(encrypted, revision, input.precondition);
@@ -147,12 +110,7 @@ export const createRecordStore = async ({
   const remove = async (type: string, naturalKey: string, ifRevision?: number): Promise<void> => {
     const id = await vault.recordId(type, naturalKey);
     await api.remove(type, id, ifRevision);
-    /**
-     * The mark SURVIVES a delete, deliberately. Clearing it would let a store
-     * that simply withholds a row reset this device to trust-on-first-use and
-     * then replay an old ciphertext. `put` allocates above the surviving mark,
-     * so a recreate still works.
-     */
+    /** The mark survives a delete: clearing it would let a store that withholds a row replay an old ciphertext. */
   };
 
   const close = () => {

@@ -2,37 +2,22 @@ import { cn } from '@fishballapps/cn';
 import { cva, type VariantProps } from 'class-variance-authority';
 import type { ButtonHTMLAttributes } from 'react';
 
+/** Square by design: nothing in Ink & Rule has a corner radius. */
 /**
- * Square by design. Nothing in Ink & Rule has a corner radius, so the button reads as a cut block
- * of the surface rather than a pill sitting on top of it.
+ * Disabled is a colour change, never `opacity` (the signal fill at 40% put its label at 2.2:1),
+ * and drops the fill rather than borrowing `--ink-hover`, which is `secondary`'s ground.
  */
-/**
- * Disabled is a colour change, never `opacity`. Fading a filled button fades its label with its
- * ground, so the pair keeps its ratio to each other and loses it to the page — the signal fill at
- * 40% put its label at 2.2:1.
- *
- * It removes emphasis rather than adding any: disabled drops the fill entirely instead of taking
- * a neutral one, because `--ink-hover` is already the `secondary` ground and a disabled control
- * that borrows it reads as an ordinary enabled button. `--paper-faint` on any app ground is >=4.96:1.
- */
-/**
- * Exported because some buttons are LINKS — compose, "back to mail", "connect an account" all
- * change the URL, so they must be anchors a middle-click can open in a tab. They wear this rather
- * than a hand-copied approximation of it, which is how the third copy of a primary block drifts.
- */
+/** Exported because some buttons are links a middle-click must open in a tab. */
 export const buttonClass = cva(
   'inline-flex shrink-0 items-center justify-center gap-1.5 whitespace-nowrap font-medium outline-offset-0 transition-colors disabled:pointer-events-none disabled:bg-transparent disabled:text-paper-faint',
   {
     variants: {
       variant: {
-        // Primary keeps a ground when disabled: dropping the fill entirely is right for a control
-        // that never had one, but it turns the surface's ONE primary action into a caption.
+        // Primary keeps a ground when disabled, or the one primary action turns into a caption.
         primary: 'bg-signal text-signal-ink hover:bg-signal/85 disabled:bg-ink-sunken',
         secondary: 'bg-ink-hover text-paper hover:bg-rule',
         ghost: 'text-paper-dim hover:bg-ink-hover hover:text-paper',
-        // Dark on the chromatic fill, exactly as primary puts `signal-ink` on `signal`. Paper on
-        // `danger` measures 3.08:1 and misses AA at this size; `ink` measures 5.38:1. The variant
-        // had been declared and never rendered, so the hover had never been read off a screen.
+        // Paper on `danger` measures 3.08:1 and misses AA; `ink` measures 5.38:1.
         danger: 'text-danger hover:bg-danger hover:text-ink',
       },
       size: {

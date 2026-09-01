@@ -20,7 +20,6 @@ import { type AppEnv, apiError, readJsonBody, requireSession } from '../http.ts'
 
 const RecordKeySchema = z.object({ type: RecordTypeSchema, id: BlindRecordIdSchema });
 
-/** The `/:type/:id` pair every single-record route addresses. */
 const readRecordKey = (c: Context<AppEnv>) => {
   const parsed = RecordKeySchema.safeParse(c.req.param());
   return parsed.success

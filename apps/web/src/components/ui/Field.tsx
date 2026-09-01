@@ -1,13 +1,7 @@
 import { cn } from '@fishballapps/cn';
 import type { ComponentPropsWithRef, ReactNode } from 'react';
 
-/**
- * Plain label-associated native controls. Anything with real behaviour (select, dialog) goes
- * through Base UI in its own wrapper.
- *
- * Controls are wells rather than boxes: a darker inset ground with a hairline only on the bottom
- * edge, so a form reads as ruled lines down the page instead of a stack of outlined rectangles.
- */
+/** Plain label-associated native controls; anything with real behaviour goes through Base UI. Wells, not boxes. */
 
 const control =
   'w-full bg-ink-sunken px-2.5 py-2 text-base text-paper outline-none transition-colors placeholder:text-paper-faint border-b border-rule hover:border-paper-faint focus:border-signal';

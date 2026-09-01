@@ -20,7 +20,6 @@ describe('RFC 2047 decoder', () => {
     if (isGb2312Supported) {
       expect(decodeRfc2047('=?GB2312?B?1tDOxA==?=')).toBe('中文');
     } else {
-      // Node without full-icu / GB2312 leaves raw word intact
       expect(decodeRfc2047('=?GB2312?B?1tDOxA==?=')).toBe('=?GB2312?B?1tDOxA==?=');
     }
   });
@@ -47,8 +46,7 @@ describe('RFC 2047 decoder', () => {
   });
 
   it('never re-scans the output (single-pass decode)', () => {
-    // '=3D=3FUTF-8=3FQ=3Fx=3F=3D' decodes to '=?UTF-8?Q?x?='
-    // A recursive or re-scanning decoder would erroneously decode that to 'x'.
+    // The Q-encoded text decodes to `=?UTF-8?Q?x?=`; a decoder that re-scans its output would then produce `x`.
     const nested = '=?UTF-8?Q?=3D=3FUTF-8=3FQ=3Fx=3F=3D?=';
     expect(decodeRfc2047(nested)).toBe('=?UTF-8?Q?x?=');
   });

@@ -1,27 +1,18 @@
 /**
- * Which messages are one conversation. Pure: message ids in, groups of ids out.
- *
- * Gmail's own answer (`X-GM-THRID`) is one edge among the others, scoped to the account that
- * issued it. Everything else follows JMAP's recommendation (RFC 8621 §3): two messages share a
- * thread when an identical msg-id appears in either's `Message-ID` / `In-Reply-To` / `References`
- * AND their base subjects match. Union-find over that relation, rather than JWZ's tree, because
- * the list shows a flat conversation and never a tree
- * (docs/knowledge/email-threading.md).
+ * Pure: message ids in, groups out. JMAP's rule (RFC 8621 §3) under union-find, with Gmail's
+ * `X-GM-THRID` as one extra edge scoped to its account. See docs/knowledge/email-threading.md
+ * and DECISIONS.md, "Threading is union-find over JMAP's rule".
  */
 
 export type ThreadableMessage = {
-  /** Any id unique across the input; a group is named by the FIRST of its members in input order. */
+  /** Any id unique across the input; a group is named by the first of its members in input order. */
   readonly id: string;
   readonly messageId: string | null;
   readonly inReplyTo: string | null;
   readonly references: readonly string[];
   readonly subject: string | null;
   readonly gmailThreadId: string | null;
-  /**
-   * Which account the Gmail thread id belongs to. A THRID is Gmail's own number for a
-   * conversation inside ONE mailbox, so two accounts can hand out the same one for unrelated
-   * mail; scoping it keeps that from merging strangers. Absent for a message with no THRID.
-   */
+  /** A THRID is Gmail's number inside one mailbox, so two accounts can hand out the same one. */
   readonly gmailAccount?: string;
 };
 
@@ -32,7 +23,7 @@ const LEADER =
 const LIST_TAG = /^\[[^\]]*\]\s*/;
 const FWD_TRAILER = /\s*\(fwd\)\s*$/i;
 
-/** RFC 5256 §2.1's base subject, case-folded and with a wider prefix list than the RFC's. */
+/** RFC 5256 §2.1's base subject, case-folded, with a wider prefix list. */
 export const baseSubject = (subject: string | null): string => {
   let text = (subject ?? '').replace(/\s+/g, ' ').trim().toLowerCase();
   for (;;) {
@@ -47,11 +38,7 @@ export const baseSubject = (subject: string | null): string => {
   }
 };
 
-/**
- * Every msg-id in a header field. `In-Reply-To` may legally hold several (RFC 5322 §3.6.4), and
- * a value may carry CFWS, so the bracketed ids are pulled out; a bare unbracketed id (some MUAs)
- * is wrapped. `References` arrives pre-split, so its entries pass straight through this.
- */
+/** `In-Reply-To` may hold several ids (RFC 5322 §3.6.4) and CFWS; a bare unbracketed id is wrapped. */
 const msgIdsIn = (field: string | null): readonly string[] => {
   if (field === null) return [];
   const bracketed = field.match(/<[^<>\s]+>/g);
@@ -66,12 +53,7 @@ const msgIdsOf = (message: ThreadableMessage): readonly string[] => [
   ...message.references.flatMap(msgIdsIn),
 ];
 
-/**
- * Groups by conversation. The key of each group is the id of its EARLIEST member in input order,
- * which is what a thread id is built from. Callers pass messages oldest first, so a thread keeps
- * its id through every later sync and every move until an older message is backfilled, and a
- * route that names it keeps resolving.
- */
+/** The key is the earliest member's id in input order, so a thread keeps its id until an older message is backfilled. */
 export const groupIntoThreads = (
   messages: readonly ThreadableMessage[],
 ): ReadonlyMap<string, readonly string[]> => {
@@ -99,10 +81,7 @@ export const groupIntoThreads = (
   };
 
   for (const message of messages) {
-    // A THRID is an EXTRA edge, never a replacement for the header edges: it links what Gmail
-    // considers one conversation inside one account, and the headers are what link that
-    // conversation to the copies other accounts hold. Taking the THRID and skipping the headers
-    // (which this did) meant two accounts in one conversation never joined.
+    // An extra edge, never a replacement: the headers are what link the copies other accounts hold.
     if (message.gmailThreadId !== null) {
       link(`gmail:${message.gmailAccount ?? ''}:${message.gmailThreadId}`, message.id);
     }

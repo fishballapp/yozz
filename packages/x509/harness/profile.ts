@@ -1,11 +1,4 @@
-/**
- * The declared profile. Naming one is not optional: x509-limbo ships three pairs
- * of deliberately contradictory cases (`rfc5280::` against `webpki::`), so a
- * perfect score does not exist. With no declared profile, whatever gets skipped
- * BECOMES the profile — chosen by accident and invisible in a green result.
- *
- * We are a browser-facing client, so: WebPKI.
- */
+/** x509-limbo ships contradictory `rfc5280::` / `webpki::` pairs, so a profile must be declared. This is a browser-facing client: WebPKI. */
 export const PROFILE = 'webpki' as const;
 
 /** Namespaces skipped wholesale, with the reason. */
@@ -23,10 +16,7 @@ export const SKIPPED_FEATURES: Readonly<Record<string, string>> = {
   'pedantic-public-suffix-wildcard': 'needs a public suffix list, which we do not ship',
 };
 
-/**
- * `denial-of-service` is deliberately NOT skipped: those cases hang a naive
- * implementation, which is a reason to run them.
- */
+/** `denial-of-service` is not skipped: those cases hang a naive implementation. */
 export const isSkipped = (id: string, features: readonly string[]): string | undefined => {
   const namespace = id.split('::')[0] ?? '';
   const byNamespace = SKIPPED_NAMESPACES[namespace];
@@ -37,19 +27,13 @@ export const isSkipped = (id: string, features: readonly string[]): string | und
     if (byFeature !== undefined) return `feature ${feature}: ${byFeature}`;
   }
 
-  // The other half of a conflicting pair. Under WebPKI the twin is an expected
-  // mismatch rather than a failure. Not namespace-gated: `pathlen::` states RFC
-  // 5280 semantics too, and conflicts with `webpki::` just as `rfc5280::` does.
+  // The other half of a conflicting pair is an expected mismatch under WebPKI. `pathlen::` states RFC 5280 semantics too.
   const conflict = CONFLICTING_IDS[id];
   if (conflict !== undefined) return `conflicts with ${conflict}; we declared ${PROFILE}`;
   return undefined;
 };
 
-/**
- * Each entry names the WebPKI case it contradicts, so a reader can check the
- * claim rather than take it. A pair means the suite asks for opposite verdicts
- * on the same shape, and a declared profile is the only way to answer both.
- */
+/** Each entry names the WebPKI case it contradicts. */
 const CONFLICTING_IDS: Readonly<Record<string, string>> = {
   'rfc5280::ca-as-leaf': 'webpki::ca-as-leaf',
   'rfc5280::eku::ee-without-eku': 'webpki::eku::ee-without-eku',

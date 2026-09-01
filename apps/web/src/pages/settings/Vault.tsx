@@ -18,11 +18,7 @@ import {
   switchModeToPassword,
 } from '../../vault/unlock.ts';
 
-/**
- * The vault, one section per thing you might come here to do: how you sign in, which
- * authenticators can open it, which server keys this device trusts, and the two exits. Each
- * section says up front what it changes; the controls underneath do only that.
- */
+/** One section per thing you might come here to do. */
 export const Vault = () => {
   const navigate = useNavigate();
   const { session, setSession, lock } = useVault();
@@ -289,8 +285,7 @@ export const Vault = () => {
               setIsBusy(true);
               setError(null);
               try {
-                // Better Auth reports a refused sign-out as `{ error }`, not a throw. The local
-                // vault is closed either way: a failure must never leave decrypted state open.
+                // Better Auth reports a refused sign-out as `{ error }`; the local vault is closed either way.
                 const res = await signOut();
                 if (res.error) {
                   setError(res.error.message || 'Signing out failed.');

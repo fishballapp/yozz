@@ -28,38 +28,17 @@ import { Button, buttonClass } from './ui/Button';
 import { IconSwitch } from './ui/IconSwitch';
 
 /**
- * The reader states which of your addresses the mail was delivered to, on its own line under the
- * subject. That is not decoration: it is the fact that decides which identity Reply sends from.
- *
- * The star sits BEFORE the subject, matching its position at the head of a list row, so the same
- * control lives in the same place whether you are scanning or reading.
- *
- * Reply and Forward sit under EVERY message, not once at the foot of the thread. A thread is a
- * sequence of things you can each act on: forwarding the attachment someone sent three messages ago
- * should not mean forwarding the newest message instead, and replying under your own last message
- * is a follow-up that quotes what you wrote. Which message you press decides what gets quoted; it
- * never decides who the mail goes to (see `seedFor`).
+ * The delivered-to address sits under the subject: it decides which identity Reply sends from.
+ * Reply and Forward sit under every message; which one you press decides what is quoted, never
+ * who the mail goes to (`seedFor`).
  */
 
 /**
- * The pair that closes every message. Both state an INTENT in the URL and nothing more.
- *
- * They step down to the `sm` control on a pointer, because there is now one pair per message rather
- * than one per thread and the old size repeated marched down the pane. On touch they take the full
- * 44px instead — the same per-callsite override the header buttons use, since a control that
- * repeats is not a reason to make it hard to hit.
- *
- * The accessible name says what each one QUOTES, not who it reaches. "Reply to Kate" would assert
- * a recipient this deliberately does not use — pressing Reply under your own message quotes you and
- * still addresses the other party — and a screen-reader user would be the only one told otherwise.
- *
- * Reply all appears only when it would reach someone Reply would not (`replyAllCc`). A third button
- * that produces the identical message is a choice with no answer, and on the two-party threads that
- * are most of anyone's mail it would be there every time.
+ * `sm` on a pointer, full 44px on touch. The accessible name says what each quotes, not who it
+ * reaches. Reply all appears only when it would reach someone Reply would not (`replyAllCc`).
  */
 const MessageActions = ({ message, canReplyAll }: { message: Message; canReplyAll: boolean }) =>
-  // An unsent draft is not something to reply to or forward — it is something to finish, and the
-  // composer is where that happens.
+  // An unsent draft is finished in the composer, not replied to.
   message.isDraft === true ? (
     <div className="mt-4 flex gap-2">
       <Link
@@ -72,8 +51,7 @@ const MessageActions = ({ message, canReplyAll }: { message: Message; canReplyAl
       </Link>
     </div>
   ) : (
-    // Both quote the body, so neither is offered until it has arrived: a reply seeded from a
-    // message still loading would quote nothing and never notice.
+    // Both quote the body, so neither is offered until it has arrived.
     <div className={cn('mt-4 flex gap-2', message.bodyStatus !== undefined && 'invisible')}>
       <Link
         to="."
@@ -107,7 +85,7 @@ const MessageActions = ({ message, canReplyAll }: { message: Message; canReplyAl
     </div>
   );
 
-/** Saves the bytes as the sender's filename. The URL is revoked once the click has been handed off. */
+/** Saves the bytes as the sender's filename; the URL is revoked once the click has been handed off. */
 const download = (file: Attachment) => {
   if (file.content === undefined) return;
   const url = URL.createObjectURL(new Blob([file.content]));
@@ -118,12 +96,7 @@ const download = (file: Attachment) => {
   setTimeout(() => URL.revokeObjectURL(url), 0);
 };
 
-/**
- * Attachments are listed as real objects — kind, name, size — not a paperclip and a guess.
- *
- * Names, like every string a sender wrote, get `dir="auto"`: that isolates the bidi run, so a
- * U+202E in `invoice\u202Efdp.exe` cannot reorder the extension into `.pdf` across the rest of the row.
- */
+/** `dir="auto"` isolates the bidi run, so a U+202E in `invoice\u202Efdp.exe` cannot reorder the extension. */
 const AttachmentList = ({ attachments }: { attachments: Attachment[] }) => (
   <ul className="mt-4 flex flex-wrap gap-2">
     {attachments.map(file => (
@@ -147,17 +120,10 @@ const AttachmentList = ({ attachments }: { attachments: Attachment[] }) => (
   </ul>
 );
 
-/**
- * `html` is the sender's document in the sandboxed frame; `text` is the sender's own `text/plain`
- * alternative, shown as we show plain mail. Nothing is derived: a message that shipped no text
- * part says so and points at the other mode rather than showing a reduction dressed as one.
- */
+/** `html` is the sender's document; `text` is the sender's own `text/plain` part. Nothing is derived. */
 type ReadingMode = 'html' | 'text';
 
-/**
- * Paragraphs keep the sender's line breaks (`whitespace-pre-line`) and are bidi-isolated per
- * paragraph. They render directly for plain mail and remain the fail-closed fallback for HTML.
- */
+/** Paragraphs keep the sender's line breaks and are bidi-isolated; the fail-closed fallback for HTML. */
 const MessageBody = ({
   message,
   mode,
@@ -195,9 +161,7 @@ const MessageBody = ({
             </p>
           ))
         );
-      // `hasTextPart === false` is a parsed message whose only body was HTML — including one
-      // too large to frame, where `html` is absent and `body` is our reduction. Plain-text mode
-      // must not present that reduction as the sender's text, whichever the case.
+      // `hasTextPart === false` includes an HTML message too large to frame, where `body` is our reduction.
       if (mode === 'text')
         return message.hasTextPart === false ? (
           <p className="text-paper-dim">
@@ -232,7 +196,7 @@ export const ThreadReader = ({
 }: {
   thread: ThreadState;
   onClose: () => void;
-  /** After a move: the reader is done with this thread, and the next one in the list is up. */
+  /** After a move the next thread in the list is up. */
   onTriaged: () => void;
 }) => {
   const {
@@ -244,19 +208,15 @@ export const ThreadReader = ({
     markUnread,
     loadBody,
   } = useMail();
-  // One choice for every HTML body, kept like the list layout: which way mail reads best is a
-  // fact about the reader, not about the message.
+  // One choice for every HTML body, kept like the list layout.
   const [mode, setMode] = useChromePref<ReadingMode>('yozz:reading-mode', 'html', raw =>
     raw === 'text' ? 'text' : 'html',
   );
   const newest = thread.messages.at(-1);
   if (newest === undefined) throw new Error(`Thread ${thread.id} has no messages`);
-  // Everything that answers "who wrote to me, and at which of my addresses" must come from the
-  // newest message that ARRIVED — not the newest message, which is yours whenever you replied last.
+  // From the newest message that arrived, not the newest message, which is yours whenever you replied last.
   const inbound = newestInbound(thread, ownedAddresses) ?? newest;
-  // A question about the THREAD, not about the message a button sits under: `seedFor` copies the
-  // group off the newest message that arrived whichever Reply all you press, so the offer has to
-  // be read from the same place or a button would appear that seeds nothing.
+  // Read from the same place `seedFor` reads, or a button would appear that seeds nothing.
   const canReplyAll = replyAllCc(inbound, ownedAddresses).length > 0;
   const { mailbox } = useParams({ strict: false });
 
@@ -268,7 +228,7 @@ export const ThreadReader = ({
             variant="ghost"
             size="icon"
             onClick={() => toggleStar(thread.id)}
-            // Same mark, same colour as the list: starred is the accent wherever it appears.
+            // Same mark, same colour as the list.
             className={cn(
               '-ml-1.5 size-11 shrink-0 lg:size-7',
               thread.isStarred && 'text-signal hover:text-signal',

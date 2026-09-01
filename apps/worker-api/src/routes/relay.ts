@@ -6,22 +6,13 @@ import { pipeSocket } from '../relay/pipe.ts';
 import { resolvePublicAddress } from '../relay/resolve.ts';
 import { parseRelayTarget } from '../relay/target.ts';
 
-/**
- * `GET /api/v1/relay?host=<hostname>&port=<993|465>` — the WebSocket-to-TCP byte pipe the
- * browser's own TLS client runs over. Every rejection before the upgrade is a plain HTTP error,
- * so each one is reachable with curl. The order is the order of cost: header checks, then the
- * session, then DNS, then TCP.
- *
- * `secureTransport` is never set on the socket: TLS belongs in the browser, and "on" would hand
- * this Worker the session key and every password (ARCHITECTURE.md).
- */
+/** `secureTransport` is never set on the socket: TLS belongs in the browser. */
 export const relayRoute = new Hono<AppEnv>()
   .use('/', async (c, next) => {
     if (c.req.header('Upgrade')?.toLowerCase() !== 'websocket') {
       return apiError(c, 426, 'UPGRADE_REQUIRED', 'WebSocket upgrade required');
     }
-    // Browsers always send Origin on an upgrade; CORS never applies to one, so this is the
-    // cross-site check.
+    // CORS never applies to an upgrade, so this is the cross-site check.
     if (c.req.header('Origin') !== getWebOrigin(c.env)) {
       return apiError(c, 403, 'FORBIDDEN', 'Forbidden');
     }
@@ -39,7 +30,7 @@ export const relayRoute = new Hono<AppEnv>()
       return apiError(c, 429, 'RATE_LIMITED', 'Rate limit exceeded');
     }
 
-    // Connect to the address the check saw, so a name cannot resolve differently twice.
+    // Connect to the address that passed the check, not the name.
     const address = await resolvePublicAddress(target.hostname);
     if (!address) {
       return apiError(c, 403, 'FORBIDDEN', 'Host is not publicly routable');

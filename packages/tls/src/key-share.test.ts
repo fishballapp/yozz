@@ -68,9 +68,8 @@ describe('Stage 4: Key share & ECDH against RFC 8448', () => {
         expect(hsExtract).toBeDefined();
         const expectedIkm = bytesOf(hsExtract!, 'IKM')!;
 
-        // Find the effective ephemeral key pairs used for ECDH
         const ephemSteps = collectEphemeralKeySteps(trace);
-        // For §5, the effective keys are the second client key (P-256) and the server P-256 key
+        // For §5 the effective keys are the second client key (P-256) and the server P-256 key.
         const clientKeyStep =
           trace.section === '5'
             ? ephemSteps.filter(s => s.actor === 'client' && s.group === 'secp256r1')[0]!
@@ -84,7 +83,6 @@ describe('Stage 4: Key share & ECDH against RFC 8448', () => {
         expect(clientKeyStep).toBeDefined();
         expect(serverKeyStep).toBeDefined();
 
-        // Client perspective: client private + server public
         const clientShare = await importPrivateShare(clientKeyStep.group, clientKeyStep.privateKey);
         const clientDerivedSecret = await deriveSharedSecret(
           clientKeyStep.group,
@@ -93,7 +91,6 @@ describe('Stage 4: Key share & ECDH against RFC 8448', () => {
         );
         expect(clientDerivedSecret).toEqual(expectedIkm);
 
-        // Server perspective: server private + client public
         const serverShare = await importPrivateShare(serverKeyStep.group, serverKeyStep.privateKey);
         const serverDerivedSecret = await deriveSharedSecret(
           serverKeyStep.group,

@@ -1,7 +1,3 @@
-/**
- * @yozz.app/imap — Transport-agnostic IMAP client core for YOZZ.
- */
-
 export {
   createImapClient,
   type ImapAddress,

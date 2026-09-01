@@ -13,13 +13,12 @@ const DRAFTS: ImapMailbox = {
   attributes: ['\\Drafts'],
 };
 
-/** Records what the task asked the server to do, which is the whole subject of these tests. */
+/** Records what the task asked the server to do. */
 const server = (present: readonly number[] = [], over: Partial<ImapClient> = {}) => {
   const did: string[] = [];
   const client = stubImapClient({
     list: async () => ({ ok: true, value: [DRAFTS] }),
-    // Which messages in the mailbox carry this draft's header — how the mirror finds every copy
-    // of itself, including one a failed erase left behind.
+    // How the mirror finds every copy of itself, including one a failed erase left behind.
     uidSearchHeader: async (header, value) => {
       did.push(`search ${header} ${value}`);
       return { ok: true, value: [...present] };
@@ -91,7 +90,7 @@ describe('the draft mirror', () => {
   });
 
   it('leaves the old copy alone when the mailbox has been renumbered', async () => {
-    // Same uid, different message: erasing it would take somebody else's mail with it.
+    // Same uid, different message.
     const { store } = fakeRecordStore();
     const handle = await draftFor(store);
     await writeMirror(
@@ -106,7 +105,7 @@ describe('the draft mirror', () => {
     const { did, run } = server([77]);
 
     await mirrorDraft(run, store, handle, bytes, 'me@x.co');
-    // Only the copy just appended is there, so there is nothing to erase.
+    // Only the copy just appended is there.
     expect(did).toEqual([
       'append Drafts',
       `search Message-ID ${draftMirrorMessageId(handle.draftKey, 'me@x.co')}`,
@@ -152,7 +151,7 @@ describe('the draft mirror', () => {
       'flag 77 add \\Deleted',
       'expunge 77',
     ]);
-    // The locator is gone: every copy of it is off the server.
+    // Every copy is off the server.
     expect((await readMirror(store, handle.draftKey))?.mirror).toEqual({ mirroredVersion: 1 });
   });
 
@@ -163,7 +162,7 @@ describe('the draft mirror', () => {
     expect(
       mirrorAccountOf({ ...base, from: 'alias@x.co', ownerAccount: 'work@x.co' }, inbound),
     ).toBe('work@x.co');
-    // A new message from an address with no mailbox belongs nowhere, so it is mirrored nowhere.
+    // A new message from an address with no mailbox is mirrored nowhere.
     expect(mirrorAccountOf({ ...base, from: 'alias@x.co' }, inbound)).toBeNull();
   });
 });
@@ -176,12 +175,7 @@ describe('draftMirrorMessageId', () => {
     );
   });
 
-  /**
-   * The bug this replaced: a custom header is searchable only if the server chose to index it, and
-   * Forward Email does not. `SEARCH HEADER X-Yozz-Draft <key>` answered an empty list for a message
-   * carrying that exact header, `eraseOthers` read empty as "nothing to erase, done", and every
-   * discard left its copy on the server. Message-ID is a header IMAP names, so it is indexed.
-   */
+  /** Forward Email does not index a custom header, so `SEARCH HEADER X-Yozz-Draft` answered empty and every discard leaked its copy. */
   it('is a Message-ID, because a server need not index a header IMAP does not name', () => {
     expect(draftMirrorMessageId('key-1', 'me@x.co')).toMatch(/^<[^<>@]+@x\.co>$/);
   });

@@ -19,13 +19,7 @@ export type OutgoingMail = {
   readonly attachments: readonly Attachment[];
 };
 
-/**
- * Who the server is told to deliver to: To, then Cc, then Bcc, each address once.
- *
- * The envelope is the whole reason a blind copy works — it carries every recipient regardless of
- * what the headers say, and `RCPT TO` is where Bcc exists at all. Deduplicated case-insensitively
- * because an address on two lines is one delivery, and some servers reject the repeat outright.
- */
+/** To, Cc, Bcc, each once (case-insensitively; some servers reject a repeat). `RCPT TO` is where Bcc exists. */
 export const envelopeRecipients = (
   mail: Pick<OutgoingMail, 'to' | 'cc' | 'bcc'>,
 ): readonly string[] => {
@@ -38,27 +32,16 @@ export const envelopeRecipients = (
   });
 };
 
-/** Gmail's ceiling, which every other big provider matches or beats; base64 adds a third on top. */
+/** Gmail's ceiling; base64 adds a third on top. */
 export const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
 
 export type SentCopyFailure = MailConnectionFailure | { readonly kind: 'no-sent-mailbox' };
 
 type Run = <T>(task: LiveTask<T>) => Promise<Result<T, MailConnectionFailure>>;
 
-/**
- * The private header every message this client sends carries: the draft it came from.
- *
- * It is how a send finds its OWN earlier copy when a step is retried. A Message-ID cannot do that
- * job — providers rewrite it — and a subject match is a guess.
- */
+/** The draft a message came from: how a send finds its own earlier copy on a retry. */
 
-/**
- * The exact bytes a send is made of, built once and then stored on the draft record.
- *
- * Built once because a resend after a crash must be the SAME message, not a new one that happens
- * to say the same thing: rebuilding would mint a fresh Date and boundary, and the recipient would
- * see two messages instead of one delivered twice.
- */
+/** Built once and stored: a rebuild would mint a fresh Date and boundary, and the recipient would see two messages. */
 export const buildOutgoing = (
   record: AddressRecord,
   mail: OutgoingMail,
@@ -108,15 +91,8 @@ export const submitBytes = async (
 };
 
 /**
- * The Sent copy, in a form a retry can run twice: it searches the mailbox for its own Message-ID
- * first, and appends only when the copy is not already there.
- *
- * Without that search a crash between the APPEND and the record that remembers it would leave the
- * person with two copies of everything they sent through a flaky connection.
- *
- * Message-ID and NOT the `X-Yozz-Draft` header this used to search: a server only has to index the
- * headers IMAP names, and Forward Email indexes none of ours, so the search answered empty for
- * every message and the guarantee above was never in force there.
+ * Searches the mailbox for its own Message-ID before appending, so a retry cannot duplicate.
+ * Message-ID, not `X-Yozz-Draft`: Forward Email indexes only the headers IMAP names.
  */
 export const storeSentCopy = async (
   run: Run,
@@ -126,7 +102,7 @@ export const storeSentCopy = async (
   let missingSent = false;
   const result = await run({
     priority: 'user',
-    // The search makes a second run safe, so a retry here cannot duplicate the copy.
+    // The search makes a second run safe.
     retry: true,
     run: async client => {
       const folders = await resolveFolders(client);

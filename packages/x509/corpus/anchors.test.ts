@@ -1,11 +1,4 @@
-/**
- * M5's gate, minus the part the limbo harness already covers.
- *
- * The suite proves the compiled provider returns the SAME verdicts as an
- * unindexed scan. What it cannot show is the reason the provider exists — that
- * a lookup does not parse the store — or that removing a root is visible. Those
- * are here.
- */
+/** What the limbo harness cannot show: a lookup does not parse the store, and a removed root is visible. */
 import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { rootCertificates } from 'node:tls';
@@ -27,12 +20,7 @@ describe('the compiled store', () => {
     expect(bundle.length).toBeGreaterThan(100);
   });
 
-  /**
-   * The property, proved directly rather than counted: a lookup never parses a
-   * certificate. The entry below carries a valid subject with GARBAGE bytes, so
-   * anything that decoded during compile or lookup would throw — and nothing
-   * does. What the validator does with those bytes afterwards is its business.
-   */
+  /** Entries carry garbage bytes under a valid subject, so any decode during compile or lookup throws. */
   it('parses no certificate while building the index or serving a lookup', () => {
     const index = indexAnchors(bundle);
     const real = index[0];
@@ -69,33 +57,9 @@ describe('the compiled store', () => {
   });
 
   /**
-   * Indexing is the BUILD-time cost and does not ship; loading plus the first
-   * usable anchor is what a cold page pays. The ceiling is deliberately loose —
-   * it is a regression guard against the runtime path decoding the whole store
-   * again, not a benchmark, and a tight wall-clock here would only be noise.
-   *
-   * Measured on this machine: 120 roots, ~3.1ms to index, ~0.33ms to first
-   * usable anchor, against the 314ms the spike measured for parsing a bundle
-   * eagerly. So the 50ms ceiling sits ~150x above the real cost and ~6x below
-   * the regression it exists to catch.
-   *
-   * **There is deliberately no `loadingMs < indexingMs` comparison, and it was
-   * removed for flaking.** It read as the stronger assertion and was in fact
-   * the weaker one twice over. The loading window is ~0.33ms, so under
-   * `pnpm test` — 44 packages running at once — a single OS deschedule inside
-   * it is a 10x perturbation, while the same hiccup inside the 3ms indexing
-   * window barely moves the baseline it was being compared against. A
-   * sub-millisecond wall-clock measured under contention is a coin flip, not a
-   * bound.
-   *
-   * And it was redundant. The claim it stood for — the runtime path does not
-   * decode the whole store — is already asserted STRUCTURALLY by `parses no
-   * certificate while building the index or serving a lookup`, which hands the
-   * store entries whose DER cannot parse at all, so any parse throws rather
-   * than merely costing time. Mutating `findCandidates` to decode every entry
-   * fails that test on a `DerError` and leaves this one green, which is the
-   * right division of labour: the structural test proves the property, and this
-   * one is only a backstop against a cost that is real but not a parse.
+   * A loose ceiling: a regression guard against decoding the whole store, not a benchmark. Measured
+   * ~0.33 ms to first usable anchor against the 314 ms the spike saw. No `loadingMs < indexingMs`
+   * comparison: sub-millisecond wall clock under `pnpm test` contention is a coin flip.
    */
   it('pays a cold cost far below the build-time one', () => {
     const index = indexAnchors(bundle);
@@ -104,8 +68,7 @@ describe('the compiled store', () => {
     const store = compileAnchors(index);
     const entry = index[0];
     if (entry === undefined) throw new Error('the bundle is empty');
-    // The whole runtime path, not the lookup alone: the validator decodes the
-    // candidate it is handed, and measuring only `findCandidates` would hide it.
+    // The whole runtime path: the validator decodes the candidate it is handed.
     const anchor = store.source.findCandidates({
       issuerNameDer: entry.subjectDer,
       authorityKeyIdentifier: null,
@@ -118,11 +81,7 @@ describe('the compiled store', () => {
   });
 });
 
-/**
- * A root being distrusted upstream is a thing that HAPPENS — Symantec, Camerfirma,
- * Entrust. The failure has to be a verdict, not a silent fallback to some other
- * path, which is exactly the class of bug a dual-read bridge would introduce.
- */
+/** A distrusted root must be a verdict, never a silent fallback. */
 describe.skipIf(!existsSync(LIMBO_CACHE))('a distrusted root', () => {
   it('turns a chain that validated into one that visibly does not', async () => {
     const { testcases } = z

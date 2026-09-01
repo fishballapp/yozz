@@ -28,11 +28,9 @@ import { createRecordStore, type RecordStore } from './record-store.ts';
 import { forgetUnlockKeys, loadUnlockKeys, type UnlockKeys } from './unlock-keys.ts';
 
 /**
- * The password is the ONLY entropy in password mode — nothing device-local sits beside it — so
- * this floor is what stands between a leaked `wrappedDek` and the vault, together with PBKDF2's
- * 650,000 iterations. Twelve rather than eight for that reason, and the copy asks for a
- * passphrase rather than a password. The server never sees it, so this is the only place to
- * refuse.
+ * The password is the only entropy in password mode, so this floor plus PBKDF2's 650,000
+ * iterations is what stands between a leaked `wrappedDek` and the vault. The server never sees
+ * it, so this is the only place to refuse.
  */
 export const MIN_PASSWORD_LENGTH = 12;
 
@@ -71,11 +69,7 @@ const resolveUser = async (): Promise<{ userId: string; email: string }> => {
   };
 };
 
-/**
- * The tail every unlock shares: the Better Auth session names the user, and
- * the record store opens over that user's revision marks. Opening the store is
- * what can still refuse here (no IndexedDB), so it runs last.
- */
+/** The tail every unlock shares. Opening the store can still refuse (no IndexedDB), so it runs last. */
 const openSession = async ({
   mode,
   encKey,
@@ -113,9 +107,7 @@ export const createPasswordVault = async ({
   const keys = await deriveAccountKeys({ email, password });
 
   const { vault, wrappedDek } = await createVault(keys);
-  // The Worker sets the Better Auth credential inside this same call: its
-  // `setPassword` is serverOnly and has no HTTP path, so the browser cannot
-  // create the credential itself.
+  // The Worker sets the Better Auth credential inside this call: its `setPassword` is serverOnly.
   await api.finalizePasswordUnlock({ isNewVault: true, wrappedDek, authValue: keys.authValue });
 
   return openSession({ mode: 'password', encKey: keys.encKey, wrappedDek, vault, api, idbFactory });
@@ -156,22 +148,10 @@ export const loginWithPassword = async ({
 };
 
 /**
- * Refuse to MINT a new DEK over an account that already has one.
- *
- * `createPasswordVault` / `createPasskeyVault` call `createVault()`, which is a
- * fresh random DEK, and finalisation upserts the wrap. Every existing
- * ciphertext is bound to the previous DEK, so running a create against an
- * enrolled account silently strands the whole vault — and the server cannot
- * tell a new DEK from a rewrap, because both arrive as opaque wrapped bytes.
- * The guard therefore has to live here.
- *
- * A deliberate wipe goes through `resetVault` first; changing unlock mode on a
- * live vault goes through `switchModeTo*`, which rewraps the SAME DEK.
- *
- * This check is for the MESSAGE, not the guarantee: two tabs can both pass it.
- * The guarantee is `isNewVault: true` on the finalisation, which the Worker
- * turns into a plain INSERT so exactly one creator commits and the other gets
- * 409 with its DEK wrapping nothing.
+ * `createVault()` is a fresh DEK, and every existing ciphertext is bound to the previous one;
+ * the server cannot tell a new DEK from a rewrap. A wipe goes through `resetVault`, a mode
+ * change through `switchModeTo*`. This is for the message only: `isNewVault: true` on the
+ * finalisation is the guarantee (a plain INSERT, so one creator commits).
  */
 const refuseIfAlreadyEnrolled = async (api: VaultApiClient): Promise<void> => {
   const status = await api.getUnlockStatus();
@@ -183,21 +163,9 @@ const refuseIfAlreadyEnrolled = async (api: VaultApiClient): Promise<void> => {
 };
 
 /**
- * Remove a passkey that was registered but never wrapped, and REPORT it if that
- * fails.
- *
- * An orphaned credential stays in the user's chooser and is refused at sign-in
- * for having no wrap, which reads as "my passkey stopped working" with nothing
- * pointing at the enrolment that left it. `.catch(() => {})` hid that, and so
- * did ignoring Better Auth's resolved `{ error }` — it rejects only on
- * transport failure.
- *
- * Takes the passkey ROW id. `/passkey/delete-passkey` deletes by `field: 'id'`,
- * so addressing it with the WebAuthn credential id deletes nothing and then
- * reports a failure that never happened.
- *
- * One helper because there are four call sites: enrolment, and the three
- * finalisation paths. Fixing the one a review named would have left three.
+ * An orphaned credential stays in the chooser and is refused at sign-in for having no wrap.
+ * Better Auth rejects only on transport failure, so the resolved `{ error }` is checked too.
+ * Takes the passkey row id: `/passkey/delete-passkey` deletes by `field: 'id'`.
  */
 const discardProvisionalPasskey = async (credentialId: string, cause: unknown): Promise<never> => {
   if (!credentialId) throw cause;
@@ -211,32 +179,14 @@ const discardProvisionalPasskey = async (credentialId: string, cause: unknown): 
 };
 
 /**
- * Better Auth's passkey client returns `{ ...verified, webauthn: { response,
- * clientExtensionResults } }` when `returnWebAuthnResponse` is set, so the
- * WebAuthn half lives on `webauthn` and NOT on `data` — `data` is the server's
- * verify response, the persisted passkey row on registration and the session on
- * authentication.
- *
- * Reading `data.clientExtensionResults` therefore yields `undefined` on every
- * path, which silently disables PRF entirely. It went unnoticed because the
- * tests built their own response objects in the shape the code expected rather
- * than the shape the plugin returns. One accessor, used everywhere, so the two
- * cannot drift apart again.
- *
- * `response.id` is the base64url WebAuthn CREDENTIAL id, which is what every
- * wrap lookup and finalisation takes. `data.id` on registration is Better
- * Auth's row id, which `allowCredentials` cannot use and only deletion wants.
+ * With `returnWebAuthnResponse` the WebAuthn half lives on `webauthn`, not `data` (the server's
+ * verify response). `response.id` is the base64url credential id every wrap lookup takes;
+ * `data.id` on registration is Better Auth's row id, which only deletion wants.
  */
 type PasskeyCeremony = {
-  /** base64url WebAuthn credential id — `allowCredentials`, and wrap lookup. */
+  /** base64url WebAuthn credential id: `allowCredentials`, and wrap lookup. */
   readonly credentialId: string;
-  /**
-   * Better Auth's passkey ROW id. Not interchangeable with the credential id:
-   * `POST /passkey/delete-passkey` resolves `where: [{ field: 'id' }]`, so a
-   * deletion addressed by credential id matches nothing and the orphan
-   * survives. The Worker matches each id only in its own column, so the
-   * mix-up fails loudly there rather than silently.
-   */
+  /** Better Auth's passkey row id, for `/passkey/delete-passkey`. The Worker matches each id only in its own column. */
   readonly rowId: string;
   readonly clientExtensionResults: unknown;
 };
@@ -259,18 +209,9 @@ const readCeremony = (result: unknown): PasskeyCeremony => {
 };
 
 /**
- * Register an authenticator and get its PRF bytes — the two ceremonies that
- * enrolment actually needs.
- *
- * `create()` associates the PRF key; it does not reliably return PRF output.
- * So the bytes come from a scoped local assertion afterwards. Two prompts at
- * enrolment, one code path: an opportunistic version that used `create()`
- * results when present would leave the assertion path firing only on some
- * hardware, which is a path that rots unnoticed.
- *
- * A failure at any step deletes the provisional passkey, so a browser that
- * cannot do PRF does not leave a credential behind that could later satisfy a
- * sign-in it has no wrap for.
+ * `create()` associates the PRF key but does not reliably return PRF output, so the bytes come
+ * from a scoped assertion afterwards, on every hardware. A failure at any step deletes the
+ * provisional passkey.
  */
 const enrolPrfPasskey = async (): Promise<{
   readonly credentialId: string;
@@ -350,14 +291,8 @@ export const addPasskeyToSession = async ({
   readonly currentSession: UnlockedVaultSession;
   readonly api?: VaultApiClient;
 }): Promise<void> => {
-  /**
-   * Adding an authenticator is NOT a mode switch, and the finalisation it calls
-   * cannot tell the difference: that SQL sets `unlock_mode = 'passkey'`, nulls
-   * the password wrap and deletes the `credential` account row. Called from a
-   * password session it would destroy the password credential silently, while
-   * the in-memory session still reported `mode: 'password'` — the next reload
-   * simply could not unlock. `switchModeToPasskey` is the deliberate version.
-   */
+  // Not a mode switch: the finalisation sets `unlock_mode = 'passkey'` and deletes the
+  // password credential. `switchModeToPasskey` is the deliberate version.
   if (currentSession.mode !== 'passkey') {
     throw new PasskeyPrfError(
       'This account is in password mode; use switchModeToPasskey to change mode, not addPasskeyToSession',
@@ -424,11 +359,7 @@ export const switchModeToPasskey = async ({
   return { ...currentSession, mode: 'passkey', encKey, wrappedDek: newWrappedDek };
 };
 
-/**
- * The server's view of the vault as one string. A stored `encKey` + `wrappedDek` pair stays
- * mutually valid forever, so nothing local can notice a reset or a re-enrolment from another
- * device; this is what can. Adding a passkey changes it too, which only costs one re-login.
- */
+/** The server's view of the vault as one string; the only thing that can notice a reset or re-enrolment elsewhere. */
 export const vaultStamp = (status: UnlockStatusResponse): string => {
   switch (status.mode) {
     case null:
@@ -455,13 +386,7 @@ export const unlockKeysOf = async (
   stamp: vaultStamp(await api.getUnlockStatus()),
 });
 
-/**
- * Reopen the vault this device already unlocked: a live Better Auth session
- * plus the unlock keys `VaultProvider` persisted for that user, provided the
- * server still describes the vault they were saved against. `null` is the
- * ordinary case — signed out, locked on this device, or the vault changed
- * elsewhere (in which case the stale keys are forgotten here).
- */
+/** Reopen with persisted keys if the server still describes the vault they were saved against; stale keys are forgotten. */
 export const resumeSession = async ({
   api = vaultApi,
   idbFactory,

@@ -1,6 +1,4 @@
-// Env bindings for this Worker. MODE is optional and absent from wrangler.jsonc vars on
-// purpose; production deploys set it via `scripts/deploy-worker.ts` (`--var MODE:production`).
-// Custom ambient modules below are for the vitest-pool-workers test harness.
+// MODE is absent from wrangler.jsonc vars on purpose; `scripts/deploy-worker.ts` sets it (`--var MODE:production`).
 
 interface Env {
   DB: D1Database;

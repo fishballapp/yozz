@@ -1,15 +1,4 @@
-/**
- * Builds REAL, SIGNED certificates, so the validator can be tested end to end
- * without the 39MB x509-limbo cache.
- *
- * This exists because of a measured failure: `pnpm test` had no coverage of
- * `validate.ts` at all, and two authentication bypasses passed every green gate.
- * The limbo suite is the exhaustive gate and it cannot run in CI; this is the
- * one that always runs.
- *
- * Test support. It is NOT exported from `index.ts`, nothing in the validation
- * path imports it, and it never reaches a browser.
- */
+/** Real, signed certificates for tests. Nothing in the validation path imports it. */
 import { decodeCertificate } from './certificate.ts';
 
 const encodeLength = (length: number): number[] => {
@@ -48,7 +37,7 @@ const oid = (dotted: string): Uint8Array => {
   return tlv(0x06, Uint8Array.from([first * 40 + second, ...rest.flatMap(base128)]));
 };
 
-/** Minimal two's complement, which is what DER wants and what our decoder checks. */
+/** Minimal two's complement. */
 const integer = (bytes: Uint8Array): Uint8Array => {
   const firstMeaningful = bytes.findIndex(byte => byte !== 0);
   const trimmed = firstMeaningful === -1 ? Uint8Array.of(0) : bytes.subarray(firstMeaningful);
@@ -63,7 +52,7 @@ export const SERVER_AUTH = '1.3.6.1.5.5.7.3.1';
 const distinguishedName = (commonName: string): Uint8Array =>
   sequence(set(sequence(oid(COMMON_NAME), ascii(0x13, commonName))));
 
-/** RFC 5280 UTCTime: two-digit year, seconds mandatory, Z only. */
+/** RFC 5280 UTCTime. */
 const utcTime = (when: Date): Uint8Array => {
   const pad = (value: number): string => String(value).padStart(2, '0');
   const text =
@@ -80,13 +69,12 @@ const utcTime = (when: Date): Uint8Array => {
 const extension = (extnOid: string, value: Uint8Array, isCritical = false): Uint8Array =>
   sequence(oid(extnOid), ...(isCritical ? [asBoolean(true)] : []), octetString(value));
 
-/** ECDSA signs to fixed-width `r || s`; a certificate carries DER `SEQUENCE { r, s }`. */
+/** WebCrypto's fixed-width `r || s` to the DER `SEQUENCE { r, s }` a certificate carries. */
 const derFromP1363 = (signature: Uint8Array): Uint8Array => {
   const half = signature.length / 2;
   return sequence(integer(signature.subarray(0, half)), integer(signature.subarray(half)));
 };
 
-/** WebCrypto's types want a buffer proven not to be shared; a copy proves it. */
 const nonShared = (bytes: Uint8Array): Uint8Array<ArrayBuffer> => new Uint8Array(bytes);
 
 const keyIdentifierOf = async (spki: Uint8Array): Promise<Uint8Array> =>
@@ -94,10 +82,7 @@ const keyIdentifierOf = async (spki: Uint8Array): Promise<Uint8Array> =>
 
 export type IssuedCertificate = {
   readonly der: Uint8Array;
-  /**
-   * The key this certificate attests to — BOTH halves, so a caller can hand the
-   * pair back as `keyPair` and get a second certificate over the same key.
-   */
+  /** Both halves, so a caller can reissue over the same key. */
   readonly keyPair: CryptoKeyPair;
   readonly subjectKeyIdentifier: Uint8Array;
   readonly subjectDer: Uint8Array;
@@ -105,26 +90,20 @@ export type IssuedCertificate = {
 
 export type IssueOptions = {
   readonly commonName: string;
-  /** Omitted means self-signed, which is how a root is made. */
+  /** Omitted means self-signed. */
   readonly issuer?: IssuedCertificate;
   readonly isCa?: boolean;
   readonly pathLength?: number;
   readonly notBefore?: Date;
   readonly notAfter?: Date;
   readonly dnsNames?: readonly string[];
-  /** OIDs. A leaf needs `SERVER_AUTH` to be usable; a root must state none. */
+  /** OIDs. */
   readonly extendedKeyUsages?: readonly string[];
   readonly permittedDnsNames?: readonly string[];
   readonly excludedDnsNames?: readonly string[];
-  /** Signs with a key that is not the issuer's, to produce a bad signature. */
+  /** For a bad signature. */
   readonly signWith?: CryptoKey;
-  /**
-   * Issue over an existing key instead of a fresh one — a REISSUE, which is what
-   * a certificate renewal is and what an SPKI pin has to stay silent through.
-   * Without it every certificate this builder makes carries a new key, so a rig
-   * cannot tell "the host renewed" from "the host rotated its key" and the two
-   * halves of the pin gate collapse into one.
-   */
+  /** A reissue over an existing key, which is what a renewal is and what an SPKI pin must stay silent through. */
   readonly keyPair?: CryptoKeyPair;
 };
 
@@ -171,7 +150,7 @@ export const issueCertificate = async ({
             ),
             true,
           ),
-          // keyCertSign, bit 5 of the first octet.
+          // keyCertSign is bit 5.
           extension('2.5.29.15', tlv(0x03, Uint8Array.of(1, 0x04)), true),
         ]
       : []),
@@ -220,7 +199,6 @@ export const issueCertificate = async ({
   );
   const der = sequence(tbsCertificate, ECDSA_WITH_SHA256, bitString(derFromP1363(signature)));
 
-  // Fails loudly here rather than as a mysterious rejection inside a test.
   decodeCertificate(der);
   return { der, keyPair: pair, subjectKeyIdentifier, subjectDer };
 };

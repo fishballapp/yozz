@@ -1,7 +1,3 @@
-/**
- * TLS 1.3 protocol wire constants and code-point tables (RFC 9846).
- */
-
 export type ContentType = 'change_cipher_spec' | 'alert' | 'handshake' | 'application_data';
 
 export const CONTENT_TYPES: Readonly<Record<ContentType, number>> = {
@@ -46,17 +42,7 @@ export const NAMED_GROUPS: Readonly<Record<NamedGroup, number>> = {
   x25519: 0x001d,
 };
 
-/**
- * Every group this client implements, in the order it offers them — so the
- * first one carries the key share, and a server that accepts our first choice
- * negotiates without a HelloRetryRequest.
- *
- * P-384 is not optional here: `posteo.de` refuses X25519 and P-256 outright.
- *
- * It doubles as the default for `supportedGroups`, and `wire.test.ts` holds it
- * to covering every key of `NAMED_GROUPS` — `namedGroupFromCode` searches this
- * list, so a group implemented but missing from it would decode as unknown.
- */
+/** In offer order; the first carries the key share. P-384 is required: `posteo.de` refuses X25519 and P-256. */
 export const SUPPORTED_GROUPS: readonly NamedGroup[] = ['x25519', 'secp256r1', 'secp384r1'];
 
 /** The wire code back to the name, `undefined` for a group we do not implement. */
@@ -81,20 +67,8 @@ export const SIGNATURE_SCHEMES: Readonly<Record<SignatureScheme, number>> = {
 };
 
 /**
- * Every scheme this client can verify a CertificateVerify with, in the order it
- * offers them, and the default for `signatureSchemes`.
- *
- * The list is the security boundary, not just a preference: RFC 9846 §4.5.2
- * says a server's "signature algorithm MUST be one offered in the client's
- * `signature_algorithms` extension", and the handshake refuses one that is not.
- * So a scheme missing from here is a scheme the server may not sign with, and a
- * scheme present but unimplemented in `verify.ts` is a hole — `wire.test.ts`
- * holds this to covering every key of `SIGNATURE_SCHEMES`, the same way
- * `SUPPORTED_GROUPS` is held to `NAMED_GROUPS`.
- *
- * Ed25519 is offered where BoringSSL disables it by default. It is a smaller,
- * misuse-resistant signature over a curve we already carry for key exchange,
- * and refusing it would only push a server onto RSA.
+ * The security boundary, not a preference: RFC 9846 §4.5.2 lets a server sign a CertificateVerify
+ * only with a scheme offered here. Ed25519 is offered though BoringSSL disables it by default.
  */
 export const SUPPORTED_SIGNATURE_SCHEMES: readonly SignatureScheme[] = [
   'ecdsa_secp256r1_sha256',
@@ -110,32 +84,9 @@ export const signatureSchemeFromCode = (code: number): SignatureScheme | undefin
   SUPPORTED_SIGNATURE_SCHEMES.find(name => SIGNATURE_SCHEMES[name] === code);
 
 /**
- * The schemes `signature_algorithms_cert` offers — which certificate signatures
- * this client can verify, and a DIFFERENT question from the one
- * `SUPPORTED_SIGNATURE_SCHEMES` answers.
- *
- * RFC 9846 §4.3.3 draws the line: `signature_algorithms` "applies to signatures
- * in CertificateVerify messages", `signature_algorithms_cert` "applies to
- * signatures in certificates", and "if no `signature_algorithms_cert` extension
- * is present, then the `signature_algorithms` extension also applies to
- * signatures appearing in certificates". **Sending one list for both was a
- * defect, not a simplification**: it advertised RSA-PSS and Ed25519, which
- * `@yozz.app/x509` refuses in a chain, and withheld RSA-PKCS1, which signs most of
- * the real WebPKI. §4.5.1.2 turns the first half into a broken handshake — "All
- * certificates provided by the sender MUST be signed by a signature algorithm
- * advertised by the peer, if it is able to provide such a chain" — so a CA able
- * to present a PSS chain was told to prefer the one we would refuse.
- *
- * A separate TYPE, not three more names in `SignatureScheme`, and that is
- * load-bearing. `signatureSchemeFromCode` is what the handshake uses to refuse a
- * CertificateVerify, and RSA-PKCS1 returning a name there instead of `undefined`
- * would make this client accept a signature §4.3.3 says is "not defined for use
- * in signed TLS handshake messages". The two overlapping ECDSA names carry the
- * same code point in both tables, and `wire.test.ts` holds them to it.
- *
- * The OIDs are here so a test can compare this table against the ONE place that
- * knows the answer — `CERTIFICATE_SIGNATURE_ALGORITHM_OIDS` in `@yozz.app/x509`,
- * which is that package's own vocabulary because it may never learn TLS's.
+ * What `signature_algorithms_cert` offers (RFC 9846 §4.3.3): the certificate signatures
+ * `@yozz.app/x509` can verify. A separate type, so RSA-PKCS1 never becomes a CertificateVerify
+ * scheme. The OIDs let `wire.test.ts` compare this against x509's own table.
  */
 export type CertificateSignatureScheme =
   | 'ecdsa_secp256r1_sha256'
@@ -166,13 +117,7 @@ export const CERTIFICATE_SIGNATURE_SCHEMES: Readonly<
     algorithmOid: '1.2.840.10045.4.3.3',
     curveOid: '1.3.132.0.34',
   },
-  /**
-   * P-521 as a CERTIFICATE signature, which is not the P-521 that DECISIONS puts
-   * out of v1. That one is the ECDHE group and the CertificateVerify scheme —
-   * things a peer negotiates with us. This is a curve an intermediate we did not
-   * choose may already have been signed with, and `@yozz.app/x509` verifies it, so
-   * withholding it would understate the validator for no gain.
-   */
+  // A curve an intermediate may already be signed with; not the P-521 group, which is out of v1.
   ecdsa_secp521r1_sha512: {
     code: 0x0603,
     algorithmOid: '1.2.840.10045.4.3.4',
@@ -195,12 +140,7 @@ export const CERTIFICATE_SIGNATURE_SCHEMES: Readonly<
   },
 };
 
-/**
- * What goes on the wire, in preference order. ECDSA first because those chains
- * are smaller and this client pays for every byte of a mail server's flight;
- * RSA-PKCS1 after, because that is what most of the WebPKI is actually signed
- * with and a server MUST be able to find it here.
- */
+/** ECDSA first, for smaller chains. RSA-PKCS1 must be here: most of the WebPKI is signed with it. */
 export const OFFERED_CERTIFICATE_SIGNATURE_SCHEMES: readonly CertificateSignatureScheme[] = [
   'ecdsa_secp256r1_sha256',
   'ecdsa_secp384r1_sha384',
@@ -238,11 +178,7 @@ export const EXTENSION_TYPES: Readonly<Record<ExtensionType, number>> = {
   key_share: 51,
 };
 
-/**
- * RFC 9846 §4.3.9. This client offers `psk_dhe_ke` alone: `psk_ke` resumes with
- * no fresh key exchange, so one stolen ticket decrypts every session that ever
- * used it. Forward secrecy is the reason to run our own TLS in the first place.
- */
+/** RFC 9846 §4.3.9. Only `psk_dhe_ke` is offered: `psk_ke` gives up forward secrecy. */
 export const PSK_KEY_EXCHANGE_MODES = {
   psk_ke: 0,
   psk_dhe_ke: 1,
@@ -305,9 +241,7 @@ export const ALERT_DESCRIPTIONS: Readonly<Record<AlertDescription, number>> = {
   bad_certificate_status_response: 113,
   unknown_psk_identity: 115,
   certificate_required: 116,
-  // New in RFC 9846 §6.2 — "an error condition in cases when the peer should
-  // not learn the specific cause". A conforming peer can send it today, and
-  // without it here that peer reads as an unknown alert code.
+  // New in RFC 9846 §6.2.
   general_error: 117,
   no_application_protocol: 120,
 };
@@ -323,9 +257,7 @@ export const TLS_VERSION = {
   V1_3: 0x0304,
 } as const;
 
-/**
- * RFC 9846 §4.2.3: SHA-256("HelloRetryRequest")
- */
+/** RFC 9846 §4.2.3: SHA-256("HelloRetryRequest"). */
 export const HRR_MAGIC_RANDOM: Uint8Array<ArrayBuffer> = Uint8Array.of(
   0xcf,
   0x21,
@@ -361,9 +293,7 @@ export const HRR_MAGIC_RANDOM: Uint8Array<ArrayBuffer> = Uint8Array.of(
   0x9c,
 );
 
-/**
- * RFC 9846 §4.2.3: Downgrade sentinels in the last 8 octets of ServerHello.random.
- */
+/** RFC 9846 §4.2.3: the last 8 octets of ServerHello.random. */
 export const DOWNGRADE_SENTINEL_TLS_1_2: Uint8Array<ArrayBuffer> = Uint8Array.of(
   0x44,
   0x4f,

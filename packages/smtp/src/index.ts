@@ -1,6 +1,3 @@
-/**
- * @yozz.app/smtp — transport-agnostic SMTP client core plus an RFC 5322 message builder.
- */
 export {
   createSmtpClient,
   dotStuff,

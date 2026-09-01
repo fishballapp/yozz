@@ -6,11 +6,7 @@ import { createLineReader, readReply } from './reply.ts';
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 
-/**
- * A scripted server: each step is what the client's next write must be and what the server says
- * back; the first step, with `expect: null`, is the banner. One write is one unit, which is how
- * the client sends both commands and the DATA payload.
- */
+/** What the client's next write must be and what the server says back; `expect: null` is the banner. */
 type Step = { readonly expect: string | null; readonly reply: string };
 
 const scriptedDuplex = (steps: readonly Step[]) => {
@@ -145,8 +141,7 @@ describe('client session', () => {
       data: encoder.encode('Subject: hi\r\n\r\nbody'),
     });
     expect(sent).toMatchObject({ ok: false, reason: { kind: 'protocol' } });
-    // QUIT would be read as a body line and never answered; the script has no step for it, so
-    // any write here would throw "unexpected client write".
+    // The script has no QUIT step, so a write here would throw.
     expect(await client.quit()).toMatchObject({ ok: false, reason: { kind: 'protocol' } });
   });
 

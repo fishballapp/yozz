@@ -1,13 +1,10 @@
 import type { MessageInput } from '@yozz.app/smtp';
 
 /**
- * HACKATHON ONLY — delete this folder after the WebMCP Challenge (deadline 2026-09-03).
- * Tracked as item 0 of HANDOFF.md's Next.
+ * HACKATHON ONLY: delete this folder after the WebMCP Challenge (deadline 2026-09-03).
  *
- * The mail a judge's demo mailbox starts with, and the only copy the app knows about. The same
- * fifteen fixtures live in `packages/imap/harness/seed-inbox.ts`, which seeded the account before
- * there was an app to click in; the two must agree on `seedMessageId`, because that is what Reset
- * matches on. Change one, change both, and delete both together.
+ * The same fifteen fixtures live in `packages/imap/harness/seed-inbox.ts`; the two must agree
+ * on `seedMessageId`, which Reset matches on. Change one, change both, delete both together.
  */
 
 const PNG_1PX =
@@ -16,7 +13,7 @@ const REMOTE_IMAGE =
   'https://www.google.com/images/branding/googlelogo/1x/googlelogo_color_272x92dp.png';
 const bytes = (base64: string) => Uint8Array.from(atob(base64), c => c.charCodeAt(0));
 
-/** Fixed per slug, so a reset finds the copy a judge moved and does not append a second one. */
+/** Fixed per slug, so a reset finds the copy a judge moved. */
 export const seedMessageId = (slug: string) => `<yozz-seed-${slug}@fishball.dev>`;
 
 /** Newest last: each fixture is this much older than the one after it. */
@@ -24,25 +21,18 @@ export const MINUTES_APART = 7 * 60 + 23;
 
 export type Fixture = Omit<MessageInput, 'date' | 'messageId' | 'to'> & {
   readonly slug: string;
-  /** Where it belongs. `sent` is mail the owner sent, so it lives in the Sent folder. */
+  /** `sent` lives in the Sent folder. */
   readonly box?: 'inbox' | 'sent';
   readonly unread?: boolean;
   readonly inReplyTo?: string;
 };
 
 /**
- * **Every sender is on the judge domain on purpose.** A judge is asked to reply, and a reply to a
- * `.example` address cannot be delivered — Forward Email retries it and posts Delivery Status
- * Notifications into the judge's own inbox, so the one action the demo asks for appears to fail.
- * Each of these local parts is a DISABLED alias on `webmcp-judge.yozz.app`
- * (`is_enabled: false`, `error_code_if_disabled: 250`), which Forward Email accepts and routes
- * nowhere. A catch-all cannot be disabled, hence one alias per sender. They are deleted with the
- * judge accounts.
- *
- * The injection's `security-check@prize-notice.example` is the deliberate exception: it has to
- * read as an address OUTSIDE the mailbox, and nothing is ever sent to it.
+ * Every sender is a disabled alias on the judge domain (`is_enabled: false`,
+ * `error_code_if_disabled: 250`) so a reply cannot bounce; see DECISIONS.md, 2026-08-30. The
+ * injection's `security-check@prize-notice.example` must read as outside the mailbox.
  */
-/** The owner's own address appears as the sender of the message that sits in Sent. */
+/** The owner's own address, as the sender of the message in Sent. */
 export const seedFixtures = (owner: string): readonly Fixture[] => [
   {
     slug: 'wall-of-text',
@@ -126,7 +116,7 @@ export const seedFixtures = (owner: string): readonly Fixture[] => [
       { filename: 'logo.png', mimeType: 'image/png', content: bytes(PNG_1PX) },
     ],
   },
-  // The thread: the owner's own reply sits in Sent, so the client has to stitch two folders.
+  // The owner's own reply sits in Sent, so the client has to stitch two folders.
   {
     slug: 'thread-1',
     from: { address: 'dana@webmcp-judge.yozz.app', name: 'Dana Whitfield' },
@@ -163,7 +153,7 @@ export const seedFixtures = (owner: string): readonly Fixture[] => [
     text: 'We have opened ticket #4417 on your behalf. An engineer will pick it up within one business day.',
     unread: true,
   },
-  // The one that matters for the demo: instructions addressed to whatever agent reads the mail.
+  // Instructions addressed to whatever agent reads the mail.
   {
     slug: 'injection',
     from: { address: 'rewards@webmcp-judge.yozz.app', name: 'Account Services' },

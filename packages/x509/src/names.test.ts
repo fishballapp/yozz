@@ -1,8 +1,3 @@
-/**
- * The matching rules, stated directly. x509-limbo exercises these through whole
- * certificates, which proves the outcome but not which rule produced it — these
- * name the rule.
- */
 import { describe, expect, it } from 'vitest';
 import type { AttributeTypeAndValue, GeneralName } from './certificate.ts';
 import {
@@ -61,7 +56,6 @@ describe('parseIpAddress', () => {
     expect(parseIpAddress('192.0.2.256')).toBeNull();
   });
 
-  /** Each of these was accepted or refused wrongly before a cross-model review. */
   it.each([
     ['a second compression marker', '1::2::3'],
     ['a non-hex word', '1:2:3:4:5:6:7:1g'],
@@ -88,7 +82,6 @@ describe('parseIpAddress', () => {
 });
 
 describe('matchesPeerName', () => {
-  /** Every browser stopped honouring CN a decade ago, and `webpki::cn` agrees. */
   it('never consults the common name — only SANs count', () => {
     expect(matchesPeerName([], { kind: 'dns', value: 'a.example.com' })).toBe(false);
   });
@@ -139,10 +132,7 @@ describe('name constraints', () => {
     expect(violatesConstraints([ip('192.0.3.1')], state)).toBe(true);
   });
 
-  /**
-   * Permitted subtrees INTERSECT down the chain, so an intermediate cannot widen
-   * what its own issuer allowed it.
-   */
+  /** Permitted subtrees intersect down the chain. */
   it('intersects permitted subtrees rather than replacing them', () => {
     const parent = withConstraints([dns('example.com')], []);
     const child = addConstraints(parent, {
@@ -164,10 +154,7 @@ describe('name constraints', () => {
     expect(violatesConstraints([dns('fine.test')], child)).toBe(false);
   });
 
-  /**
-   * A constraint we cannot evaluate must never read as one that was satisfied,
-   * so an excluded subtree of an unsupported form refuses the name outright.
-   */
+  /** An unsupported form in an excluded subtree refuses the name. */
   it('fails closed on an excluded subtree it cannot interpret', () => {
     const other: GeneralName = { kind: 'other', tagNumber: 3, bytes: Uint8Array.of(1) };
     const state = withConstraints([], [other]);
@@ -177,16 +164,7 @@ describe('name constraints', () => {
   });
 });
 
-/**
- * `cve::cve-2025-61727`. A name-constrained CA issues `*.example.com` while an
- * excluded subtree names `bar.example.com`; the wildcard authenticates exactly
- * that host. Permitted and excluded ask DIFFERENT questions of a wildcard —
- * "is everything it covers inside?" versus "does anything it covers reach
- * inside?" — and one helper answering both is a validation bypass.
- *
- * Here rather than only in the limbo harness on purpose: the harness needs a
- * 39MB cache and does not run in `pnpm test`, which is how this shipped.
- */
+/** CVE-2025-61727: permitted and excluded ask different questions of a wildcard. */
 describe('a wildcard SAN against a name constraint', () => {
   const constrain = (permitted: readonly GeneralName[], excluded: readonly GeneralName[]) =>
     addConstraints(EMPTY_CONSTRAINTS, {
@@ -221,14 +199,7 @@ describe('a wildcard SAN against a name constraint', () => {
   });
 });
 
-/**
- * RFC 5280 s7.1 name comparison. No x509-limbo case covers any of this, so the
- * score cannot show it — these are the whole evidence that the rule holds.
- *
- * Comparing whole value TLVs makes the ENCODING part of the identity. An
- * excluded directory subtree could then be evaded by re-spelling the same name:
- * a different string type, a different case, an extra space.
- */
+/** RFC 5280 §7.1 name comparison. No x509-limbo case covers this. */
 describe('distinguished names inside a directory subtree', () => {
   const PRINTABLE = 0x13;
   const UTF8 = 0x0c;
@@ -275,22 +246,14 @@ describe('distinguished names inside a directory subtree', () => {
     expect(isExcludedBy(below, excluded)).toBe(true);
   });
 
-  /**
-   * ASCII-only folding left these as different organisations, so an excluded
-   * directory subtree was evaded by changing case outside A-Z.
-   */
+  /** ASCII-only folding left these as different organisations. */
   it('excludes the same name differing only in non-ASCII case', () => {
     const accented = directory([attribute(ORGANISATION, UTF8, 'ÉVIL')]);
     const excludedAccented = directory([attribute(ORGANISATION, UTF8, 'évil')]);
     expect(isExcludedBy(accented, excludedAccented)).toBe(true);
   });
 
-  /**
-   * An encoding we cannot prepare must REFUSE, not invent a key. The old
-   * fallback hexed bytes without padding, so `1c 04 00 00 01 23` and
-   * `1c 04 00 00 12 03` — two different UniversalStrings — collapsed onto one
-   * identity, and a permitted subtree holding the first accepted the second.
-   */
+  /** An encoding that cannot be prepared refuses; an unpadded hex fallback once collapsed two UniversalStrings onto one key. */
   it('refuses a directory name whose string type it cannot prepare', () => {
     const universalString = (bytes: readonly number[]): AttributeTypeAndValue => ({
       oid: ORGANISATION,
@@ -326,14 +289,7 @@ describe('distinguished names inside a directory subtree', () => {
   });
 });
 
-/**
- * A constraint we cannot evaluate must REFUSE, in both directions. The helpers
- * once returned `false` for "malformed" as well as for "outside the subtree",
- * and in the excluded direction `false` means the exclusion does not apply — so
- * a malformed exclusion was silently ignored.
- *
- * Every case here was reproduced by a cross-model review as a live fail-open.
- */
+/** A constraint that cannot be evaluated refuses in both directions; `false` in the excluded direction would mean the exclusion does not apply. */
 describe('constraints that cannot be evaluated', () => {
   const constrain = (permitted: readonly GeneralName[], excluded: readonly GeneralName[]) =>
     addConstraints(EMPTY_CONSTRAINTS, {

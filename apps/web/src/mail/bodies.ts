@@ -8,19 +8,18 @@ import type { LiveTask } from './live';
 
 export type FetchedBody = {
   readonly paragraphs: string[];
-  /** The sender shipped a `text/plain` part and `paragraphs` is it, not a reduction of the HTML. */
+  /** `paragraphs` is the sender's `text/plain` part, not a reduction of the HTML. */
   readonly hasTextPart: boolean;
-  /** The sender's HTML body, `cid:` images inlined as `data:` URIs. Sanitized at render, not here. */
+  /** `cid:` images inlined as `data:` URIs. Sanitized at render, not here. */
   readonly html?: string;
-  /** True when a CID allocation ceiling left one or more inline images unavailable. */
+  /** A CID allocation ceiling left one or more inline images unavailable. */
   readonly inlineImagesTruncated: boolean;
   readonly attachments: Attachment[];
 };
 
-// Provider limits are typically below this, but the boundary is ours: RFC822.SIZE is checked
-// before BODY.PEEK[] is requested, then the received byte count is checked again before parsing.
+// RFC822.SIZE is checked before BODY.PEEK[], then the received byte count again before parsing.
 const MAX_RAW_MESSAGE_BYTES = DEFAULT_MAX_LITERAL_BYTES;
-// Markup beyond this becomes the bounded text fallback. HTML email is layout, not an attachment.
+// Markup beyond this becomes the bounded text fallback.
 const MAX_HTML_BODY_CODE_UNITS = 2 * 1024 * 1024;
 const MAX_RENDERED_HTML_CODE_UNITS = 8 * 1024 * 1024;
 const MAX_INLINE_IMAGE_BYTES = 8 * 1024 * 1024;
@@ -57,8 +56,7 @@ const textOf = (node: Node, depth = 0): string => {
   if (!(node instanceof Element)) return '';
   if (DROPPED.has(node.tagName)) return '';
   if (node.tagName === 'BR') return '\n';
-  // Native textContent handles pathological nesting without growing our JavaScript call stack.
-  // Below the ceiling, keep the richer paragraph/link reduction.
+  // Native textContent handles pathological nesting without growing our call stack.
   const inner =
     depth >= MAX_HTML_TEXT_DEPTH
       ? (() => {
@@ -69,7 +67,7 @@ const textOf = (node: Node, depth = 0): string => {
       : Array.from(node.childNodes)
           .map(child => textOf(child, depth + 1))
           .join('');
-  // A link's destination is part of what the sender wrote; without it "click here" says nothing.
+  // Without the destination "click here" says nothing.
   if (node.tagName === 'A') {
     const href = node.getAttribute('href') ?? '';
     const text = inner.trim();
@@ -80,7 +78,7 @@ const textOf = (node: Node, depth = 0): string => {
   return BLOCK.has(node.tagName) ? `\n\n${inner}\n\n` : inner;
 };
 
-/** Reduce HTML to the text fallback/snippet without mounting it or allowing document fetches. */
+/** Reduce HTML to text without mounting it or allowing document fetches. */
 export const htmlToText = (html: string): string =>
   textOf(new DOMParser().parseFromString(html, 'text/html').body);
 
@@ -91,7 +89,7 @@ export const toParagraphs = (text: string): string[] =>
     .map(paragraph => paragraph.trim())
     .filter(paragraph => paragraph !== '');
 
-/** `btoa` takes a binary string; built in chunks so a large image cannot blow the call stack. */
+/** `btoa` takes a binary string; chunked so a large image cannot blow the call stack. */
 const toBase64 = (bytes: Uint8Array): string => {
   const CHUNK = 0x8000;
   let binary = '';
@@ -100,11 +98,7 @@ const toBase64 = (bytes: Uint8Array): string => {
   return btoa(binary);
 };
 
-/**
- * An HTML body's `cid:` references point at sibling MIME parts. Inlining them as `data:` URIs
- * makes the stored body self-contained: no lifecycle to manage (a blob URL would leak or need
- * revoking), and the frame's CSP can stay `img-src data:` with no network at all.
- */
+/** `data:` URIs make the stored body self-contained (no blob URL lifecycle) and keep the frame's CSP at `img-src data:`. */
 const inlineCidImages = (
   html: string,
   parts: Awaited<ReturnType<typeof PostalMime.parse>>['attachments'],
@@ -115,9 +109,8 @@ const inlineCidImages = (
   const rendered = parts.reduce((acc, part) => {
     const cid = part.contentId?.replace(/^<|>$/g, '');
     if (cid === undefined || cid === '') return acc;
-    // `cid:` is case-insensitive (RFC 2392). Bounded both sides: on the left so `mycid:` never
-    // matches, on the right so `cid:chart@x` cannot eat into a sibling `cid:chart@x2`. The
-    // replacement is a function so sender-controlled text is never interpreted as `$&` syntax.
+    // `cid:` is case-insensitive (RFC 2392). Bounded both sides so `mycid:` and `cid:chart@x2` do not
+    // match; a replacement function so sender text is never read as `$&` syntax.
     const pattern = new RegExp(
       `(?<![a-z0-9.+-])cid:${cid.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?=["')\\s>]|$)`,
       'gi',
@@ -153,19 +146,17 @@ export const parseBody = async (raw: Uint8Array): Promise<FetchedBody> => {
   if (raw.byteLength > MAX_RAW_MESSAGE_BYTES)
     throw new Error('Message is too large to open safely');
   const mail = await PostalMime.parse(raw);
-  // The text part (or the reduction) stays even when HTML renders: it is the snippet and, one
-  // day, the search source — and the fallback wherever the frame cannot mount.
+  // The text part stays even when HTML renders: it is the snippet and the fallback.
   const senderText = mail.text?.trim() ? mail.text : null;
   const text =
     senderText ??
     (mail.html !== undefined ? htmlToText(mail.html.slice(0, MAX_HTML_BODY_CODE_UNITS)) : '');
   const attachments = mail.attachments
-    // A `cid:`-referenced part is an HTML body's image, not a file the sender attached.
+    // A `cid:`-referenced part is an HTML body's image, not an attachment.
     .filter(part => part.related !== true)
     .map(part => {
-      // `content` is a string only under `attachmentEncoding: 'base64'`, which is never set here;
-      // the branch exists to satisfy the type. `slice()` makes the `ArrayBuffer`-backed copy
-      // `Blob` can take.
+      // `content` is a string only under `attachmentEncoding: 'base64'`, never set here. `slice()`
+      // makes the `ArrayBuffer`-backed copy `Blob` can take.
       const content =
         typeof part.content === 'string'
           ? new TextEncoder().encode(part.content)
@@ -185,8 +176,7 @@ export const parseBody = async (raw: Uint8Array): Promise<FetchedBody> => {
   return {
     paragraphs: toParagraphs(text),
     hasTextPart: senderText !== null,
-    // A present-but-blank or oversized HTML part falls through to text, not to an empty or
-    // attacker-sized frame. CID expansion has a second, post-replacement ceiling of its own.
+    // A blank or oversized HTML part falls through to text. CID expansion has its own post-replacement ceiling.
     ...(inlinedHtml === null ? {} : { html: inlinedHtml.html }),
     inlineImagesTruncated: inlinedHtml?.truncated ?? false,
     attachments,

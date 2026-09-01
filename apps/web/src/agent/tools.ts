@@ -13,37 +13,23 @@ import {
 } from '../state/mail';
 
 /**
- * The tools an agent driving this tab can call, as pure functions over a port. Nothing here knows
- * React or `document.modelContext`: `AgentTools` builds the port from the store and registers
- * what this returns, and the tests drive the same tools through a fake.
- *
- * SIX tools, one per thing an agent does with mail: what addresses are there, read conversations,
- * change their state, write a draft, throw a draft away, put something on screen. Twelve narrower
- * ones were worse at exactly the moments that matter — every extra name is another wrong guess
- * available to the model, and `read_thread` vs `read_threads` vs `search_mail` were three spellings
- * of one question.
- *
- * Every input is parsed before it is used, because the browser hands the agent's arguments through
- * unchecked (docs/knowledge/webmcp.md). Every failure is RETURNED as `{ error }` rather than
- * thrown: a rejected `execute` reaches the agent as an opaque failure with no text, while a
- * returned message is something it can correct from.
- *
- * Nothing here sends mail. A draft is written to the vault and the human presses Send in the
- * composer, which is the design and not a limitation: see DECISIONS.md, "the agent sends through
- * the composer".
+ * The tools an agent can call, as pure functions over a port; `AgentTools` registers them and
+ * the tests drive a fake. Every input is parsed (docs/knowledge/webmcp.md) and every failure is
+ * returned as `{ error }`, since a rejected `execute` reaches the agent with no text. Nothing
+ * here sends mail. See DECISIONS.md, "Six agent tools" and "the agent sends through the composer".
  */
 
-/** What the tools need from the app. Read through a getter, because the store changes under them. */
+/** Read through a getter, because the store changes under the tools. */
 export type AgentPort = {
   readonly addresses: readonly { readonly address: string; readonly isInbound: boolean }[];
-  /** The records themselves, for seeding a reply the way the Reply button seeds one. */
+  /** For seeding a reply the way the Reply button does. */
   readonly identities: readonly AddressRecord[];
   readonly ownedAddresses: readonly string[];
   readonly threads: readonly ThreadState[];
   readonly drafts: readonly DraftHandle[];
-  /** The body itself, fetched if need be: read from the outcome, never from a later render. */
+  /** Read from the outcome, never from a later render. */
   readonly loadBody: (threadId: string, messageId: string) => Promise<BodyOutcome>;
-  /** The writes answer `false` while a move of that thread is still being confirmed. */
+  /** The writes answer `false` while a move of that thread is being confirmed. */
   readonly markRead: (threadId: string) => boolean;
   readonly markUnread: (threadId: string) => boolean;
   readonly setStar: (threadId: string, isStarred: boolean) => boolean;
@@ -52,7 +38,7 @@ export type AgentPort = {
   readonly trash: (threadId: string) => boolean;
   /** Archive or Trash back to the inbox; one direction, like `archive`. */
   readonly restore: (threadId: string) => boolean;
-  /** Shows the thread in the reader; settles once the navigation has, so the screen agrees. */
+  /** Settles once the navigation has. */
   readonly openThread: (thread: ThreadState) => Promise<void>;
   /** Opens the composer on a draft the vault already holds. Never creates one. */
   readonly openDraft: (draftKey: string) => Promise<void>;
@@ -77,10 +63,7 @@ export type AgentTool = {
   readonly execute: (input: unknown) => Promise<unknown>;
 };
 
-/**
- * Output budgets. Chrome's guidance is ~1.5K characters per tool output; ChatGPT quotes results
- * verbatim into its context. These are the one place the numbers live.
- */
+/** Chrome's guidance is ~1.5K characters per tool output; ChatGPT quotes results verbatim. */
 export const LIST_LIMIT_DEFAULT = 20;
 export const LIST_LIMIT_MAX = 50;
 export const BATCH_MAX = 50;
@@ -88,21 +71,20 @@ export const SNIPPET_CHARS = 120;
 export const BODY_CHARS = 1_500;
 export const BODY_CHARS_MAX = 6_000;
 export const OUTPUT_CHARS = 6_000;
-/** How deep each `body` mode goes: reading whole conversations costs more than skimming rows. */
+/** How deep each `body` mode goes. */
 export const DEPTH: Record<'none' | 'latest' | 'full', number> = { none: 50, latest: 10, full: 3 };
-/** A skim gets a short body per thread, so ten of them still fit one output. */
+/** A skim gets a short body per thread, so ten still fit one output. */
 export const SKIM_CHARS = 400;
 
 const clip = (text: string, max: number) =>
   text.length <= max ? text : `${text.slice(0, max)}…[truncated ${text.length - max} chars]`;
 
 const readOnly = { readOnlyHint: true, untrustedContentHint: true } as const;
-// `readOnlyHint: false` is stated, not left absent: ChatGPT counts a tool as a write only when it
-// says so ("4 read, 0 write tools" with it missing), and its confirmation policy keys off that.
+// Stated, not left absent: ChatGPT counts a tool as a write only when it says so.
 const write = { readOnlyHint: false, untrustedContentHint: true } as const;
 const consequential = { ...write, consequentialHint: true } as const;
 
-/** Name, schema and body in one place; the schema is both what the agent sees and what parses. */
+/** The schema is both what the agent sees and what parses. */
 const tool = <Schema extends z.ZodType>({
   name,
   description,
@@ -158,14 +140,7 @@ const idsSchema = z
     `Up to ${BATCH_MAX} thread ids from a previous get_threads. Any message id in a conversation names it too.`,
   );
 
-/**
- * The conversations a batch of ids names, each one once, in the order first asked for.
- *
- * A handle is a thread's own id or the id of ANY message in it, so two ids an agent collected
- * from different calls can name one conversation. Resolving them independently reported that
- * conversation twice, and in a write ran the change twice: the second pass saw the first one's
- * pending move and called a change that did happen a refusal.
- */
+/** Each conversation once: two ids from different calls can name one thread, and a write resolved twice ran twice. */
 const resolve = (
   threads: readonly ThreadState[],
   ids: readonly string[],
@@ -181,11 +156,7 @@ const resolve = (
   return entries;
 };
 
-/**
- * The threads a query selects: a mailbox, narrowed to one account and one search, in the same
- * order and by the same rules as the list the user is looking at. One implementation, so a tool
- * and the screen can never disagree about what is in the inbox.
- */
+/** The same order and rules as the list the user is looking at. */
 const selected = (
   port: AgentPort,
   {
@@ -202,14 +173,13 @@ const selected = (
     starred?: boolean | undefined;
   },
 ) => {
-  // An address's own view IS the inbox filtered to that account, which is what the rail shows.
+  // An address's own view is the inbox filtered to that account.
   const view = mailbox === 'inbox' ? (account ?? 'unified') : mailbox;
   const inView = visibleThreads(port.threads, view, query);
   return inView.filter(thread => {
     if (unread !== undefined && thread.isUnread !== unread) return false;
     if (starred !== undefined && thread.isStarred !== starred) return false;
-    // With both an account and a named mailbox, the thread must be in that mailbox IN that
-    // account: archived here and still in another account's inbox is that account's business.
+    // With both an account and a mailbox, the thread must be in that mailbox in that account.
     if (account === undefined || mailbox === 'inbox') return true;
     return (thread.foldersByAccount[account] ?? []).includes(mailbox);
   });
@@ -227,9 +197,7 @@ const messageOf = (
   ...(message.isDraft === true
     ? { isDraft: true, draftKey: message.draftKey, draftId: message.draftId }
     : {}),
-  // Which mailboxes hold a copy of THIS message — what makes a thread's ["inbox", "sent"]
-  // legible, and what a thread-level move actually touches. A draft lives only in Drafts;
-  // fixture messages have no locations and claim nothing.
+  // A draft lives only in Drafts; fixture messages have no locations.
   ...(message.isDraft === true
     ? { mailboxes: ['drafts'] }
     : message.locations !== undefined && message.locations.length > 0
@@ -245,8 +213,7 @@ const threadOf = async (
 ) => {
   const newestFirst = thread.messages.toReversed();
   const wanted = depth === 'none' ? [] : depth === 'latest' ? newestFirst.slice(0, 1) : newestFirst;
-  // The text comes from each fetch's own outcome: the render that puts it in the store is later
-  // than this promise, so re-reading the port here would still see "loading".
+  // The render that puts the text in the store is later than this promise.
   const bodies = new Map(
     await Promise.all(
       wanted.map(async message => {
@@ -280,17 +247,13 @@ const threadOf = async (
   };
 };
 
-/** Which of the user's addresses a draft should be sent as, and whether the agent may say so. */
+/** Which address a draft should be sent as, and whether the agent may say so. */
 const identityFor = (port: AgentPort, from: string | undefined, fallback: string | undefined) => {
   if (from === undefined) return fallback ?? port.addresses[0]?.address ?? null;
   return port.addresses.some(({ address }) => address === from) ? from : null;
 };
 
-/**
- * Which account a reply belongs to: the sending address when it has a mailbox, else the account
- * holding the conversation. A send-only address has nowhere of its own to keep the draft or the
- * sent copy, so the thread decides — and the choice is stored, not re-derived later.
- */
+/** The sending address when it has a mailbox, else the account holding the conversation. Stored, not re-derived. */
 const ownerAccountOf = (thread: ThreadState, from: string): string | null =>
   thread.accounts.includes(from) ? from : (thread.accounts[0] ?? null);
 
@@ -396,15 +359,13 @@ export const buildAgentTools = (port: () => AgentPort): readonly AgentTool[] => 
           : resolved.flatMap(({ thread }) => (thread === null ? [] : [thread]));
       const notFound = resolved?.flatMap(({ id, thread }) => (thread === null ? [id] : [])) ?? [];
       const page = matching.slice(offset, offset + Math.min(limit ?? DEPTH[depth], DEPTH[depth]));
-      // A default per depth — one message read whole, or several skimmed short — and the caller
-      // overrides it when it knows it wants one long message.
+      // A default per depth; the caller overrides when it wants one long message.
       const chars = bodyChars ?? (depth === 'full' && page.length > 1 ? SKIM_CHARS : BODY_CHARS);
       const threads = await Promise.all(
         page.map(thread => threadOf(port(), thread, { depth, bodyChars: chars })),
       );
       const kept = fitting(threads, OUTPUT_CHARS);
-      // Advance by what was RETURNED, not by what was paged: `fitting` drops the tail that does
-      // not fit, and advancing past it would make those conversations unreachable.
+      // Advance by what was returned: `fitting` drops the tail.
       const advanced = offset + kept.length;
       return {
         threads: kept,
@@ -456,8 +417,7 @@ export const buildAgentTools = (port: () => AgentPort): readonly AgentTool[] => 
           }
           if (mailbox === 'archive') {
             if (isArchived(thread)) notes.push('already archived');
-            // Archiving takes the inbox copies; a thread with none there has nothing to move, and
-            // saying "ok" would claim a move that did not happen.
+            // A thread with no inbox copies has nothing to move, and "ok" would claim a move.
             else if (!thread.folders.includes('inbox'))
               notes.push('nothing in the inbox to archive');
             else if (!port().archive(thread.id)) return true;
@@ -561,8 +521,7 @@ export const buildAgentTools = (port: () => AgentPort): readonly AgentTool[] => 
           : thread.messages.find(
               message => message.id === replyToMessageId && message.isDraft !== true,
             );
-      // Named but not found is a mistake worth reporting: falling back to the newest message would
-      // quote and answer something the caller did not choose, and say nothing about it.
+      // Falling back to the newest message would quote something the caller did not choose.
       if (replyToMessageId !== undefined && named === undefined) {
         return {
           error: `No message ${replyToMessageId} in ${thread.id} can be replied to; get_threads with body to see them.`,
@@ -570,9 +529,7 @@ export const buildAgentTools = (port: () => AgentPort): readonly AgentTool[] => 
       }
       const parent = named ?? thread.messages.findLast(message => message.isDraft !== true);
       if (parent === undefined) return { error: 'That conversation has no message to reply to.' };
-      // The same seed the Reply all button produces, so an agent's reply and a click's reply are
-      // the same message: recipients and identity from the newest message that ARRIVED, the quote
-      // from the one being answered.
+      // The same seed the Reply all button produces.
       const seed = seedFor(
         `reply-all:${parent.id}`,
         port().threads,
@@ -592,8 +549,7 @@ export const buildAgentTools = (port: () => AgentPort): readonly AgentTool[] => 
             subject: subject ?? seed.subject ?? '',
             body: `${body}${quoteForReply(parent)}`,
             threadId: thread.id,
-            // Which account's Drafts and Sent hold this reply. Fixed at creation, because the
-            // sending address may have no mailbox of its own and the thread is where it belongs.
+            // Fixed at creation: the sending address may have no mailbox of its own.
             ...(ownerAccountOf(thread, identity) === null
               ? {}
               : { ownerAccount: ownerAccountOf(thread, identity) ?? '' }),
@@ -659,8 +615,7 @@ export const buildAgentTools = (port: () => AgentPort): readonly AgentTool[] => 
       if (thread === null)
         return { error: `No conversation ${input.threadId} is cached on this device.` };
       await port().openThread(thread);
-      // The page's own effect marks read after it renders; marking here as well makes the result
-      // true the moment it returns, and the second write is a no-op.
+      // The page's own effect marks read after it renders; the second write is a no-op.
       if (thread.isUnread && !port().markRead(thread.id))
         return { ok: true, showing: 'thread', note: MOVE_PENDING };
       return { ok: true, showing: 'thread', id: thread.id };

@@ -50,13 +50,7 @@ describe('public export allowlist & encapsulation guards', () => {
     }
   });
 
-  /**
-   * `replay.ts` reaches the state machine through `runHandshake`, which takes the
-   * injection hooks as a second argument. Guarding imports of `replay.ts` alone
-   * leaves that door open: any production file could import `runHandshake` and
-   * pass hooks itself, and the check above would not see it. `replay.ts` is the
-   * only file allowed to name it.
-   */
+  /** `runHandshake` takes the injection hooks directly; only `replay.ts` may name it. */
   it('only replay.ts imports runHandshake', () => {
     const callers = readdirSync(__dirname, { recursive: true })
       .map(entry => String(entry))

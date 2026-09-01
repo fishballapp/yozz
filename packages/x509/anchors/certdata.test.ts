@@ -1,12 +1,4 @@
-/**
- * The fixture is hand-built rather than a slice of the real file, because the
- * property under test is structural: the cutoff hangs off two DIFFERENT object
- * classes, and a parser that reads one of them looks correct until the day the
- * root it missed is the one that matters.
- *
- * The real 1.3MB file is not committed. `anchors:fetch` pins it, and the last
- * test here runs against it when it is cached.
- */
+/** Hand-built: the cutoff hangs off two different object classes. The real file runs only when `anchors:fetch` cached it. */
 import { existsSync, readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import {
@@ -50,11 +42,7 @@ const object = (
       : `CKA_NSS_SERVER_DISTRUST_AFTER MULTILINE_OCTAL\n${octalOf(cutoff)}\nEND`,
   ].join('\n');
 
-/**
- * Izenpe's exact shape: the certificate lives on one object and the cutoff on
- * ANOTHER, joined only by issuer and serial. The certificate object itself says
- * `CK_FALSE`, which is what makes this the case a DER-keyed lookup gets wrong.
- */
+/** Izenpe's shape: the certificate on one object, the cutoff on another, joined by issuer and serial. */
 const SPLIT_DER = '\\060\\202\\001\\052';
 const SPLIT_SERIAL = '\\002\\001\\004';
 const SPLIT_PAIR = [
@@ -77,12 +65,7 @@ const FIXTURE = [
 describe('the NSS distrust-after reader', () => {
   const cutoffs = serverDistrustAfter(FIXTURE);
 
-  /**
-   * The whole reason this module exists. Measured against NSS `70a8ff50`: three
-   * cutoffs sit on `CKO_CERTIFICATE` and one on `CKO_NSS_TRUST`, and the one on
-   * the trust object is `Izenpe.com` — the only root that is both still in
-   * curl's bundle and already past its cutoff.
-   */
+  /** Against NSS `70a8ff50`: three cutoffs on `CKO_CERTIFICATE`, one (Izenpe.com) on `CKO_NSS_TRUST`. */
   it('reads a cutoff off either object class', () => {
     expect([...cutoffs.values()].map(entry => entry.label).toSorted()).toEqual([
       'Retired Root',
@@ -100,11 +83,7 @@ describe('the NSS distrust-after reader', () => {
     expect(entry?.notAfter.toISOString()).toBe('2026-04-15T23:59:59.000Z');
   });
 
-  /**
-   * RFC 5280 §4.1.2.5.1: "Where YY is greater than or equal to 50, the year
-   * SHALL be interpreted as 19YY." Getting this backwards turns a 2049 cutoff
-   * into 1949 and distrusts a root outright.
-   */
+  /** RFC 5280 §4.1.2.5.1: YY >= 50 is 19YY. */
   it('splits the two-digit year at 50', () => {
     const past = serverDistrustAfter(
       object('CKO_CERTIFICATE', '\\002\\001\\011', '990101000000Z', 'Nineties'),
@@ -116,11 +95,7 @@ describe('the NSS distrust-after reader', () => {
     expect([...future.values()][0]?.notAfter.getUTCFullYear()).toBe(2049);
   });
 
-  /**
-   * Runs only when `anchors:fetch` has cached the pinned file, so `pnpm test`
-   * stays offline. The numbers are the measurement the build step rests on, and
-   * if they move, the pin moved and somebody should have read why.
-   */
+  /** Runs only when `anchors:fetch` has cached the pinned file. */
   it.runIf(existsSync(CERTDATA_CACHE))('finds four cutoffs in the pinned NSS data', () => {
     const real = serverDistrustAfter(readFileSync(CERTDATA_CACHE, 'utf8'));
     expect(real.size).toBe(4);
@@ -133,13 +108,7 @@ describe('the NSS distrust-after reader', () => {
   });
 });
 
-/**
- * The join the build step actually uses. `cacert.pem` hands it certificates, so
- * the cutoff has to arrive keyed by DER — and for Izenpe the DER and the cutoff
- * are on two different objects. Break this and a rebuild silently emits an
- * artifact with zero cutoffs, which no committed test would notice until the
- * next `anchors:build`.
- */
+/** The join the build uses: `cacert.pem` hands it certificates, so cutoffs must arrive keyed by DER. */
 describe('cutoffs keyed by certificate, the way the build step reads them', () => {
   it("carries a trust object's cutoff onto its certificate's DER", () => {
     const byDer = serverDistrustByCertificate(SPLIT_PAIR);

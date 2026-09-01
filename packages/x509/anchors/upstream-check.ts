@@ -1,19 +1,7 @@
 /**
- * The cron: fetch what upstream publishes today, diff it against the trust
- * store we ship, and fail loudly when anything moved.
- *
- * **It reports rather than updates, and that is the design and not a shortcut.**
- * The obvious version bumps the pins, rebuilds the artifact and pushes — and
- * that hands whoever controls `curl.se` or the NSS mirror the ability to change
- * what YOZZ trusts, unattended, which is the exact thing `pin.ts` exists to
- * prevent. A trust store that changes without a human reading the diff is the
- * failure mode; automating the change is not a stronger version of the pin, it
- * is the pin removed. So this prints the diff, prints the two hashes ready to
- * paste, and exits non-zero. Shipping it is two commands and one read.
- *
- * `anchors:fetch` is the pinned fetch and is a different job: it verifies that
- * upstream still serves the bytes we pinned. This one asks what upstream serves
- * NOW, and never writes what it downloads anywhere.
+ * The cron: fetch what upstream publishes today, diff it against the shipped store, and exit
+ * non-zero with the hashes to paste. It reports rather than updates: an automated bump would let
+ * whoever controls `curl.se` change what YOZZ trusts unattended.
  */
 
 import { createHash } from 'node:crypto';
@@ -42,10 +30,7 @@ const fetchText = async (url: string): Promise<{ text: string; sha256: string }>
 const cacert = await fetchText(CACERT_URL);
 const certdata = await fetchText(upstreamCertdataUrl(UPSTREAM_CERTDATA_REF));
 
-/**
- * Best effort, and the output says so when it fails. A rate-limited API must not
- * turn a real trust change into a job that reports nothing.
- */
+/** Best effort: a rate-limited API must not turn a trust change into a job that reports nothing. */
 const commit = await resolveCertdataCommit(async url => {
   const response = await fetch(url, { headers: { accept: 'application/vnd.github+json' } });
   if (!response.ok) throw new Error(`${response.status}`);
@@ -63,11 +48,7 @@ if (changes.length === 0) {
   process.exit(0);
 }
 
-/**
- * Cutoffs first. A root gaining one is a CA being retired while its
- * certificates stay in the bundle, which is both the most urgent kind of change
- * and the one no other check in this repo can see.
- */
+/** Cutoffs first: a root gaining one is a CA being retired while its certificates stay in the bundle. */
 const order = { 'cutoff-changed': 0, 'root-removed': 1, 'root-added': 2 } as const;
 const sorted = [...changes].sort((a, b) => order[a.kind] - order[b.kind]);
 

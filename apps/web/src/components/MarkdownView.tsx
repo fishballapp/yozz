@@ -1,21 +1,9 @@
 import { Markdown, type MarkdownComponents } from '@tanstack/markdown/react';
 
-/**
- * Renders a markdown draft the way the recipient will read it.
- *
- * YOZZ composes in markdown rather than rich text: the source stays plain, diffable and pasteable,
- * and TanStack Markdown parses it to a serializable AST — which is the hand-off point for later
- * turning a draft into the narrow HTML subset mail clients actually accept. Rich-text editing is
- * deliberately not a v1 concern.
- *
- * Every element is mapped, because the point of a preview is to be honest about the output. An
- * unmapped tag would render with browser defaults (blue underlined links, serif blockquotes) and
- * quietly lie about what gets sent.
- */
+/** Renders a markdown draft the way the recipient will read it. Every element is mapped: an unmapped tag would render with browser defaults and lie about what gets sent. */
 const COMPONENTS: MarkdownComponents = {
   p: ({ children }) => <p className="my-2 first:mt-0 last:mb-0">{children}</p>,
-  // TanStack's parser applies the same scheme allowlist to this preview and renderHtml()'s sent
-  // alternative. The received-mail policy is deliberately stricter and does not belong here.
+  // The same scheme allowlist as renderHtml()'s sent alternative; received mail is stricter and does not belong here.
   a: ({ children, href }) => (
     <a
       href={href}
@@ -42,8 +30,7 @@ const COMPONENTS: MarkdownComponents = {
   ul: ({ children }) => <ul className="my-2 list-disc space-y-1 pl-5">{children}</ul>,
   ol: ({ children }) => <ol className="my-2 list-decimal space-y-1 pl-5">{children}</ol>,
   li: ({ children }) => <li className="pl-1">{children}</li>,
-  // The quoted original in a reply lands here, so it gets the one treatment in the system that
-  // means "someone else's words": a hairline on the leading edge and dimmer ink.
+  // The quoted original in a reply: a hairline on the leading edge and dimmer ink.
   blockquote: ({ children }) => (
     <blockquote className="my-3 border-l border-rule pl-3 text-paper-dim">{children}</blockquote>
   ),

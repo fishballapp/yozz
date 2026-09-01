@@ -1,7 +1,3 @@
-/**
- * TLS 1.3 Handshake Message Codec (RFC 9846 §4).
- */
-
 import {
   concat,
   readUint8,
@@ -41,17 +37,9 @@ export type Extension =
   | { readonly kind: 'server_name'; readonly serverNames: readonly string[] }
   | { readonly kind: 'supported_groups'; readonly groups: readonly number[] }
   | { readonly kind: 'signature_algorithms'; readonly schemes: readonly number[] }
-  /**
-   * RFC 9846 §4.3.3, and the same body shape as `signature_algorithms` — a
-   * `SignatureSchemeList`. A separate kind because they answer different
-   * questions and go in different tables of what a server may echo.
-   */
+  /** RFC 9846 §4.3.3; the same body as `signature_algorithms`. */
   | { readonly kind: 'signature_algorithms_cert'; readonly schemes: readonly number[] }
-  /**
-   * RFC 7685's padding extension: a run of zero octets whose only job is to move
-   * the ClientHello out of a length range some middleboxes mishandle. The body
-   * carries no meaning, so the LENGTH is the whole content.
-   */
+  /** RFC 7685: only the length carries meaning. */
   | { readonly kind: 'padding'; readonly length: number }
   | {
       readonly kind: 'supported_versions';
@@ -247,7 +235,7 @@ const encodeExtensions = (extensions: readonly Extension[]): Uint8Array<ArrayBuf
           const idBytes = concat(...idParts);
 
           if (ext.truncatedPreBinder) {
-            declaredExtLen = idBytes.length + 2 + 35; // declared PSK len with 35B binders
+            declaredExtLen = idBytes.length + 2 + 35;
             body = concat(writeUint16(idBytes.length), idBytes);
           } else if (ext.binders !== undefined) {
             const binderParts: Uint8Array[] = [];
@@ -307,14 +295,8 @@ const encodeExtensions = (extensions: readonly Extension[]): Uint8Array<ArrayBuf
 };
 
 /**
- * Which message an extension block belongs to.
- *
- * It decides more than the shapes of `key_share` and friends. An extension's
- * body is only ours to parse in a message where that extension is DEFINED —
- * elsewhere it stays `unknown` bytes, and the caller applies RFC 9846 §4.3's
- * rule about extensions in the wrong message. Parsing a ClientHello-shaped
- * `key_share` out of an EncryptedExtensions produced a decode_error where the
- * RFC asks for `illegal_parameter`, and hid what was actually wrong.
+ * An extension is parsed only in a message where it is defined; elsewhere it stays `unknown` for
+ * RFC 9846 §4.3's wrong-message rule, which wants `illegal_parameter` rather than `decode_error`.
  */
 type ExtensionContext = 'client_hello' | 'server_hello' | 'other';
 
@@ -350,9 +332,7 @@ const decodeExtensions = (
     }
     seenTypes.add(typeCode);
 
-    // Pre-binder ClientHello (§4): the final pre_shared_key extension may declare
-    // 35 binder bytes that are intentionally absent. Every other message requires
-    // the declared body length to be fully present.
+    // A pre-binder ClientHello (§4.3.11.2) declares 35 binder bytes that are absent.
     let extData: Uint8Array;
     if (offset + dataLen <= bytes.length) {
       extData = bytes.subarray(offset, offset + dataLen);
@@ -414,15 +394,6 @@ const decodeExtensions = (
       }
       extensions.push({ kind: 'signature_algorithms', schemes });
     } else if (typeCode === EXTENSION_TYPES.signature_algorithms_cert) {
-      /**
-       * Same `SignatureSchemeList` body as its sibling above, decoded for one
-       * reason: **so a test can read back what the ClientHello actually sent.**
-       * Left as `unknown` it still travelled correctly — `offeredExtensionCodes`
-       * keys on `typeCode` — but the drift gate in `wire.test.ts` could not name
-       * it, and a review found that gate passing with the extension deleted
-       * outright. A wire format nothing can assert on is a wire format nothing
-       * holds.
-       */
       if (extData.length < 2) return { ok: false, description: 'decode_error' };
       const listLen = readUint16(extData, 0);
       if (extData.length !== 2 + listLen || listLen % 2 !== 0) {
@@ -434,8 +405,6 @@ const decodeExtensions = (
       }
       extensions.push({ kind: 'signature_algorithms_cert', schemes });
     } else if (typeCode === EXTENSION_TYPES.padding) {
-      // RFC 7685: the body is `padding_data`, "SHOULD be zero" and carries no
-      // meaning. Only the length matters, which is what the kind holds.
       extensions.push({ kind: 'padding', length: extData.length });
     } else if (isHello && typeCode === EXTENSION_TYPES.supported_versions) {
       if (isServerHello) {
@@ -491,8 +460,7 @@ const decodeExtensions = (
       if (extData.length < 2) return { ok: false, description: 'decode_error' };
       const cLen = readUint16(extData, 0);
       if (extData.length !== 2 + cLen) return { ok: false, description: 'decode_error' };
-      // RFC 9846 §4.3.2 declares `opaque cookie<1..2^16-1>`, so an empty one is
-      // not a cookie. Echoing it back sends the server something it cannot use.
+      // RFC 9846 §4.3.2: `opaque cookie<1..2^16-1>`.
       if (readUint16(extData, 0) === 0) return { ok: false, description: 'decode_error' };
       extensions.push({ kind: 'cookie', cookie: extData.subarray(2) });
     } else if (isHello && typeCode === EXTENSION_TYPES.pre_shared_key) {
@@ -524,7 +492,7 @@ const decodeExtensions = (
         }
 
         if (idOffset === extData.length && dataLen === extData.length + 35) {
-          // Truncated pre-binder ClientHello (§4 vector)
+          // A truncated pre-binder ClientHello.
           extensions.push({
             kind: 'pre_shared_key',
             identities,
@@ -550,9 +518,7 @@ const decodeExtensions = (
         }
       }
     } else if (context === 'client_hello' && typeCode === EXTENSION_TYPES.psk_key_exchange_modes) {
-      // `PskKeyExchangeMode ke_modes<1..255>` — §4.3.9, and defined in the
-      // ClientHello alone, so anywhere else it stays unknown bytes for §4.3's
-      // wrong-message rule to judge.
+      // §4.3.9: `ke_modes<1..255>`, defined in the ClientHello alone.
       if (extData.length < 2) return { ok: false, description: 'decode_error' };
       const modesLen = readUint8(extData, 0);
       if (modesLen === 0 || extData.length !== 1 + modesLen) {
@@ -773,15 +739,8 @@ export const decodeHandshakeMessage = (bytes: Uint8Array): DecodeResult<Handshak
     case HANDSHAKE_TYPES.server_hello: {
       if (body.length < 34) return { ok: false, description: 'decode_error' };
       const legacyVersion = readUint16(body, 0);
-      /**
-       * Two bytes in, and they decide whether the rest is even this message.
-       * RFC 9846 §4.2.3: "A client which receives a TLS 1.3 Server Hello with a
-       * legacy_version value not equal to 0x0303 MUST abort the handshake with a
-       * protocol_version alert." An SSL 3.0 ServerHello has no extensions block
-       * at all, so parsing on gets a decode_error where the honest answer — and
-       * the one that tells a self-hosted user their server is too old — is right
-       * here.
-       */
+      // RFC 9846 §4.2.3: a legacy_version other than 0x0303 is `protocol_version`, checked before
+      // parsing on, since an SSL 3.0 ServerHello has no extensions block.
       if (legacyVersion !== 0x0303) return { ok: false, description: 'protocol_version' };
       const random = body.subarray(2, 34);
       let offset = 34;
@@ -924,9 +883,7 @@ export const decodeHandshakeMessage = (bytes: Uint8Array): DecodeResult<Handshak
       if (offset + 2 > body.length) return { ok: false, description: 'decode_error' };
       const ticketLen = readUint16(body, offset);
       offset += 2;
-      // `opaque ticket<1..2^16-1>` — §4.7.1 gives it a floor of one octet, so an
-      // empty ticket is not a ticket. In TLS 1.2 an empty one meant the server
-      // had changed its mind; here there is no such reading.
+      // §4.7.1: `opaque ticket<1..2^16-1>`.
       if (ticketLen === 0) return { ok: false, description: 'decode_error' };
       if (offset + ticketLen > body.length) return { ok: false, description: 'decode_error' };
       const ticket = body.subarray(offset, offset + ticketLen);
@@ -999,11 +956,7 @@ export type ProductionClientHelloOptions = {
   readonly random?: Uint8Array;
   readonly legacySessionId?: Uint8Array;
   readonly cookie?: Uint8Array;
-  /**
-   * The one session being offered for resumption, with the binder left as
-   * zeroes — its value covers these bytes and so cannot be written by the same
-   * pass that lays them out. `bindClientHello` fills it in.
-   */
+  /** The binder is left as zeroes; `bindClientHello` fills it in. */
   readonly psk?: {
     readonly identity: Uint8Array;
     readonly obfuscatedTicketAge: number;
@@ -1011,50 +964,12 @@ export type ProductionClientHelloOptions = {
   };
 };
 
-/**
- * How many trailing octets of a ClientHello the binder list occupies, given one
- * offered identity: a uint16 list length, a uint8 entry length, and the binder.
- *
- * It is the tail of the message because `pre_shared_key` MUST be its last
- * extension (RFC 9846 §4.3.11), and that is the whole reason the truncation
- * §4.3.11.2 asks for needs no parsing to find.
- */
+/** The tail of the message, since `pre_shared_key` must be last (RFC 9846 §4.3.11): list length, entry length, binder. */
 export const binderListLength = (binderLength: number): number => 3 + binderLength;
 
 /**
- * Builds a production ClientHello per RFC 9846 §4.2.2.
- */
-/**
- * RFC 7685's padding rule, and how many octets of body it wants — `null` when
- * the message needs no padding at all.
- *
- * §4, *Example Usage*: "if the ClientHello message length is between 256 and
- * 511 bytes, then a padding extension SHOULD be added to make the ClientHello
- * 512 bytes long." The range is not arithmetic, it is a bug: F5 load balancers
- * of a certain vintage hang on a ClientHello in it, and a mail client that
- * dials whatever host a user names meets middleboxes nobody chose.
- *
- * **The extension is not free, which is what the `- 4` is.** §4: "Note that a
- * padding extension of length zero adds 4 bytes to the ClientHello" — its own
- * type and length fields. So a 509-byte message cannot be padded to exactly 512
- * and takes an empty one instead, landing at 513, out of the range and past the
- * hazard. The zero floor is that case, not a rounding guard.
- *
- * **A retried ClientHello may be padded independently, and that is spelled out
- * rather than inferred.** §4.1.2 lists what a second ClientHello may change from
- * the first and includes "Optionally adding, removing, or changing the length of
- * the `padding` extension [RFC7685]" — so a HelloRetryRequest that alters the
- * key share, and with it the length, does not have to carry the first hello's
- * padding forward. Table 1 gives the extension `CH` and nothing else, so a
- * server echoing it earns `illegal_parameter` from `misplacedExtensionAlert`
- * like any other extension in a message where it is not defined.
- *
- * **This client only reached the range when `signature_algorithms_cert` was
- * added.** Before it, the 84-character hostname BoGo picks for
- * `ClientHelloPadding` produced 255 bytes — one byte short, and `scope.ts`
- * carried a rule saying so and predicting that any further extension would make
- * its premise false. It did: 273. The prediction is the reason this is
- * implemented rather than discovered against a real mail host.
+ * RFC 7685 §4: a ClientHello of 256..511 bytes is padded to 512. The extension's own 4-byte header
+ * counts, so a 509-byte message takes an empty one and lands at 513.
  */
 const PADDING_TARGET = 512;
 const PADDING_RANGE_START = 256;
@@ -1084,14 +999,8 @@ export const encodeProductionClientHello = (
         name => SIGNATURE_SCHEMES[name],
       ),
     },
-    /**
-     * NOT derived from `signatureSchemes`, and not configurable with it. That
-     * option is the caller's policy about what may sign a CertificateVerify;
-     * this is a fact about what `@yozz.app/x509` can verify in a chain, and a caller
-     * narrowing the first has said nothing about the second. RFC 9846 §4.3.3 is
-     * why both must be sent: omitting this one makes `signature_algorithms`
-     * answer for certificates too, which is the answer that was wrong.
-     */
+    // Not derived from `signatureSchemes`: that is policy about CertificateVerify, this is what
+    // `@yozz.app/x509` can verify in a chain (RFC 9846 §4.3.3).
     {
       kind: 'signature_algorithms_cert',
       schemes: OFFERED_CERTIFICATE_SIGNATURE_SCHEMES.map(
@@ -1109,19 +1018,13 @@ export const encodeProductionClientHello = (
     extensions.push({ kind: 'cookie', cookie: options.cookie });
   }
 
-  /**
-   * Offered on every ClientHello, resumption in hand or not: RFC 9846 §4.7.1
-   * lets a server decline to issue a ticket to a client that has not said it
-   * can use one, and BoringSSL's server does exactly that. Without it the first
-   * connection never earns the session the second one needs.
-   */
+  // Offered even without a session: RFC 9846 §4.7.1 lets a server withhold a ticket otherwise, and BoringSSL does.
   extensions.push({
     kind: 'psk_key_exchange_modes',
     modes: [PSK_KEY_EXCHANGE_MODES.psk_dhe_ke],
   });
 
-  // §4.3.11: "The 'pre_shared_key' extension MUST be the last extension in the
-  // ClientHello", which is what lets the binder cover a prefix of the message.
+  // §4.3.11: `pre_shared_key` must be the last extension.
   if (options.psk !== undefined) {
     extensions.push({
       kind: 'pre_shared_key',
@@ -1135,13 +1038,7 @@ export const encodeProductionClientHello = (
     });
   }
 
-  /**
-   * §4.3.11 puts `pre_shared_key` last, and `bindClientHello` DEPENDS on it: it
-   * cuts a fixed-size tail off the finished message rather than parsing for the
-   * binder list. An extension appended after this point would move that tail, so
-   * the binder would cover the wrong bytes — and the only symptom is a server
-   * refusing a handshake for no stated reason. Cheaper to fail here.
-   */
+  // `bindClientHello` cuts a fixed-size tail off the message, so this must really hold.
   if (options.psk !== undefined && extensions.at(-1)?.kind !== 'pre_shared_key') {
     throw new Error('pre_shared_key must be the last ClientHello extension');
   }
@@ -1161,11 +1058,7 @@ export const encodeProductionClientHello = (
   const padding = paddingFor(unpadded.length);
   if (padding === null) return unpadded;
 
-  /**
-   * BEFORE `pre_shared_key`, which §4.3.11 requires to be last and which
-   * `bindClientHello` reads as a fixed-size tail. Appending after it would move
-   * that tail and the binder would cover the wrong bytes.
-   */
+  // Before `pre_shared_key`, which must stay last.
   const insertAt = extensions.at(-1)?.kind === 'pre_shared_key' ? -1 : extensions.length;
   return build(extensions.toSpliced(insertAt, 0, { kind: 'padding', length: padding }));
 };

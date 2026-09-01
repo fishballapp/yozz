@@ -4,31 +4,12 @@ import { cn } from '@fishballapps/cn';
 import { useRef, useState } from 'react';
 
 /**
- * The hairline BETWEEN two panes, made draggable. It replaces the pane's own `border-r`, so the
- * separator you grab is the separator you already saw — nothing widens, appears or lights up to
- * announce that this edge is special.
- *
- * Ink & Rule has one separator, so the affordance is the rule's COLOUR, not its size: `--rule-soft`
- * at rest, `--paper-faint` under the pointer, `--paper` while dragging, `--signal` on keyboard
- * focus (focus is one of the three things the accent is allowed to buy). The line never grows —
- * a 1px rule that becomes a 4px slab on hover is a scrollbar, not a rule.
- *
- * The grab zone does grow, invisibly: a 9px child straddles the line so the pointer does not have
- * to find a single pixel. It sits OUTSIDE the flow box, so widening it never moves a pane.
- *
- * Desktop only. Below `lg` the panes are shown one at a time and there is no edge to drag.
+ * The pane's own `border-r`, made draggable: the affordance is the rule's colour, never its
+ * size, and an invisible 9px grab zone straddles it outside the flow box. Desktop only.
  */
 
-/**
- * The rail's designed width and its drag bounds, in px. It lives here rather than in either shell
- * because the mailbox and the page shell must agree: the rail is one object, and navigating to
- * Settings must not resize it.
- */
-/**
- * `max` is 304, not 320, so the shell still fits its narrowest supported viewport: at exactly
- * 1024px (iPad mini landscape, and the `lg` breakpoint itself) a 320px rail leaves 702px against
- * the list's 320 and the reader's 384 floors, and the page overflows horizontally by 2px.
- */
+/** Here rather than in either shell, because the mailbox and the page shell must agree on the rail. */
+/** 304, not 320: at exactly 1024px a 320px rail overflows the list and reader floors by 2px. */
 export const RAIL_WIDTH = { min: 176, max: 304, base: 224 };
 export const Resizer = ({
   label,
@@ -38,9 +19,9 @@ export const Resizer = ({
   onResize,
   onReset,
 }: {
-  /** Names the pane being sized, e.g. "Mailbox list width" — this is the control's whole label. */
+  /** The control's whole label, e.g. "Mailbox list width". */
   label: string;
-  /** The pane's stored width. Used for the keyboard step and the announced value, not the drag. */
+  /** Used for the keyboard step and the announced value, not the drag. */
   width: number;
   min: number;
   max: number;
@@ -53,12 +34,7 @@ export const Resizer = ({
 
   const clamp = (value: number) => Math.min(max, Math.max(min, Math.round(value)));
 
-  /**
-   * The pane's RENDERED width, not its stored one. The two diverge whenever the viewport has
-   * squeezed the pane below the width you asked for, and both interactions have to start from what
-   * is actually on screen — a keyboard stepping from the stored number moves an invisible value:
-   * at a 490px pane with 720 stored, ArrowLeft has to be pressed fifteen times before a pixel moves.
-   */
+  /** The rendered width, not the stored one: a keyboard step from a stored 720 on a 490px pane moves nothing visible for fifteen presses. */
   const measure = (handle: HTMLElement) => {
     const pane = handle.previousElementSibling;
     return pane instanceof HTMLElement ? pane.getBoundingClientRect().width : width;
@@ -74,15 +50,11 @@ export const Resizer = ({
       aria-valuemax={max}
       tabIndex={0}
       onPointerDown={event => {
-        // Primary button only. `pointerdown` fires for whichever button goes down first, so
-        // without this a middle-press resizes the pane and a right-press opens the context menu
-        // over a handle that has already taken the drag — and on platforms that then withhold
-        // `lostpointercapture`, the pane keeps tracking a cursor with no button held. `isPrimary`
-        // covers the same hole for touch: a second finger would otherwise overwrite the drag
-        // origin mid-gesture and kill the drag when it lifts.
+        // Primary button only: a middle-press would take the drag, and a right-press opens the context
+        // menu over it; on platforms that then withhold `lostpointercapture` the pane tracks a cursor
+        // with no button held. `isPrimary` covers a second finger the same way.
         if (event.button !== 0 || !event.isPrimary) return;
-        // Suppresses the drag-selection the pointer would otherwise start across both panes.
-        // Focus is then moved by hand, since preventDefault would have skipped it.
+        // Suppresses drag-selection across both panes; focus is then moved by hand.
         event.preventDefault();
         const handle = event.currentTarget;
         handle.focus();

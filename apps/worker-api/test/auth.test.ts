@@ -17,7 +17,6 @@ describe('Worker auth policies and magic link', () => {
 
     const app = createApp({ emailSender });
 
-    // Request magic link
     const sendRes = await app.request(
       'http://localhost/api/auth/sign-in/magic-link',
       {
@@ -38,14 +37,12 @@ describe('Worker auth policies and magic link', () => {
     expect(mail.to).toBe('alice@example.com');
     expect(mail.url).toContain('/api/auth/magic-link/verify?token=');
 
-    // Follow the magic link
     const verifyRes = await app.request(mail.url, { method: 'GET' }, env);
     expect([200, 302]).toContain(verifyRes.status);
 
     const cookies = verifyRes.headers.get('set-cookie') ?? '';
     expect(cookies).toContain('better-auth.session_token');
 
-    // Magic link completion produces session only, no wrap or key
     const verifyBody = await verifyRes.text();
     expect(verifyBody).not.toContain('wrappedDek');
     expect(verifyBody).not.toContain('encKey');
@@ -86,7 +83,6 @@ describe('Worker auth policies and magic link', () => {
   it('refuses password sign-in when account is not in password mode', async () => {
     const app = createApp();
 
-    // Create user in DB with no vault_account
     await env.DB.prepare(
       'INSERT INTO "user" (id, name, email, emailVerified, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?)',
     )
@@ -110,7 +106,6 @@ describe('Worker auth policies and magic link', () => {
     const bodyNoMode = await resNoMode.json<{ message: string; code: string }>();
     expect(bodyNoMode.code).toBe('INVALID_MODE');
 
-    // Create user in passkey mode
     await env.DB.prepare(
       'INSERT INTO "user" (id, name, email, emailVerified, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?)',
     )
@@ -143,7 +138,6 @@ describe('Worker auth policies and magic link', () => {
   it('refuses passkey authentication when account is not in passkey mode or unwrapped', async () => {
     const app = createApp();
 
-    // Create user with passkey in DB but mode is password
     await env.DB.prepare(
       'INSERT INTO "user" (id, name, email, emailVerified, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?)',
     )
@@ -185,7 +179,6 @@ describe('Worker auth policies and magic link', () => {
       },
     });
 
-    // Create authenticated user via magic link
     await app.request(
       'http://localhost/api/auth/sign-in/magic-link',
       {
@@ -240,7 +233,6 @@ describe('Worker auth policies and magic link', () => {
       )
       .run();
 
-    // Attempting to delete wrapped passkey must be refused
     const resWrapped = await app.request(
       'http://localhost/api/auth/passkey/delete-passkey',
       {
@@ -259,7 +251,6 @@ describe('Worker auth policies and magic link', () => {
     const bodyWrapped = await resWrapped.json<{ code: string }>();
     expect(bodyWrapped.code).toBe('PASSKEY_IN_USE');
 
-    // Deleting unwrapped provisional passkey is allowed
     const resUnwrapped = await app.request(
       'http://localhost/api/auth/passkey/delete-passkey',
       {

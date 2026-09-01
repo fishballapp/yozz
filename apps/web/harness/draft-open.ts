@@ -1,12 +1,6 @@
 /**
- * Open a vault draft in the composer, in a REAL browser, and read what the fields actually hold.
- *
- * The reproduction for the blank recipient ChatGPT reported: `save_draft` writes a draft record
- * the composer never staged, `navigate` puts `?compose=draft:<key>` in the URL, and the To field
- * comes up empty while Subject and Body are right. Nothing in the unit tests renders the composer,
- * so this is the only place that question can be asked.
- *
- * Needs both dev servers up (AGENTS.md, "Running the vault locally").
+ * Open a vault draft in the composer in a real browser and read what the fields hold. Nothing
+ * in the unit tests renders the composer. Needs both dev servers up.
  *
  *   pnpm -F @yozz.app/web draft:drive
  */
@@ -72,8 +66,7 @@ const run = async () => {
   const email = `draft-open-${Date.now()}@example.com`;
   await signUp(page, email);
 
-  // The vault, an address to send from, and a draft written the way `save_draft` writes one:
-  // straight into the record store, with the composer never having seen it.
+  // A draft written the way `save_draft` writes one: straight into the record store.
   const draftKey = await page.evaluate(
     async ({ e, address, UNLOCK, KEYS, DRAFTS }) => {
       const u = (await import(UNLOCK)) as UnlockModule;
@@ -101,8 +94,7 @@ const run = async () => {
         Date.now(),
       );
       if (!outcome.ok) throw new Error(`draft not created: ${outcome.reason}`);
-      // A second draft with a DIFFERENT recipient, so switching between them while the composer
-      // stays open shows whose fields are on screen.
+      // A second draft with a different recipient, for switching while the composer stays open.
       const other = await d.createDraft(
         s.store,
         {
@@ -125,8 +117,7 @@ const run = async () => {
 
   await page.goto(`${WEB}/m/unified?compose=draft:${draftKey.first}`);
   await page.waitForSelector('#compose-to', { timeout: 15_000 });
-  // Both the property and the attribute: a controlled input React re-rendered after mount keeps a
-  // stale `value` attribute, which is all a DOM snapshot (and an agent reading one) ever sees.
+  // A controlled input keeps a stale `value` attribute, which is all a DOM snapshot sees.
   const fields = await page.evaluate(
     (selectors: readonly string[]) =>
       selectors.map(selector => {
@@ -143,8 +134,7 @@ const run = async () => {
   );
   console.log('fresh load:', JSON.stringify(fields, null, 2));
 
-  // The path `navigate` actually takes: the app is already running and the composer opens from a
-  // client-side navigation, not from a page load with the intent already in the URL.
+  // The path `navigate` takes: a client-side navigation with the app already running.
   await page.goto(`${WEB}/m/unified`);
   await page.getByRole('link', { name: 'Drafts' }).click();
   await page
@@ -170,8 +160,7 @@ const run = async () => {
   );
   console.log('in-app open:', JSON.stringify(inApp, null, 2));
 
-  // What `navigate` actually does in a session where the composer is ALREADY open: the intent in
-  // the URL changes from one draft to another without the dialog, or its inputs, ever unmounting.
+  // The intent changes from one draft to another without the dialog unmounting.
   await page.evaluate((key: string) => {
     const url = new URL(window.location.href);
     url.searchParams.set('compose', `draft:${key}`);
@@ -201,11 +190,7 @@ const run = async () => {
   );
   console.log('switched while open:', JSON.stringify(switched, null, 2));
 
-  // What an AGENT sees. ChatGPT reads the accessibility tree, not the DOM: a field whose value the
-  // tree does not carry is invisible to it however plainly it renders on screen.
-  // What an AGENT sees, and an assertion rather than a printout: the whole reason the recipient
-  // rides in the accessible name is that ChatGPT reads this tree and not the DOM property, so a
-  // regression that fills the input and drops the name has to fail here.
+  // ChatGPT reads the accessibility tree, not the DOM, so the recipient rides in the accessible name.
   const tree = await page.locator('#compose-to').locator('xpath=..').ariaSnapshot();
   console.log('accessibility tree:');
   console.log(tree);

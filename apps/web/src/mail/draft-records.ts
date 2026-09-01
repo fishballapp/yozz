@@ -15,16 +15,8 @@ import { VaultApiError } from '../vault/api';
 import type { RecordStore } from '../vault/record-store';
 
 /**
- * Drafts in the vault, under compare-and-swap.
- *
- * Every write states the version it read, so two devices with the same draft open cannot
- * overwrite each other silently: the loser is refused and told the current version, and the
- * person decides. There are no forks and no merge — a mail draft is prose, and a machine merging
- * two versions of prose produces something neither person wrote.
- *
- * Online only, deliberately: `save` awaits the vault PUT, like every vault write today. The
- * offline story is the encrypted local store and write queue that arrive with offline-first, and
- * the key + version model already accommodates them.
+ * Drafts in the vault under compare-and-swap: the loser is refused and told the current version,
+ * and the person decides. Online only, like every vault write today.
  */
 
 export type DraftHandle = {
@@ -35,20 +27,15 @@ export type DraftHandle = {
 
 export type SaveOutcome =
   | { readonly ok: true; readonly handle: DraftHandle }
-  /** Someone else's version is current. `currentDraftId` is what a retry must name. */
+  /** Someone else's version is current; `currentDraftId` is what a retry must name. */
   | { readonly ok: false; readonly reason: 'conflict'; readonly currentDraftId: string | null }
-  /** A send is in flight for this draft on some device; its bytes must not change. */
+  /** A send is in flight for this draft on some device. */
   | { readonly ok: false; readonly reason: 'sending' }
   | { readonly ok: false; readonly reason: 'offline' };
 
 const isConflict = (error: unknown) => error instanceof VaultApiError && error.code === 'CONFLICT';
 
-/**
- * The id that actually WON, read after a refusal rather than reported from the read that lost.
- *
- * The pre-race id is the caller's own stale one, and a caller told that cannot find the winner to
- * show it — so the conflict banner never appears and the newest text sits only in the editor.
- */
+/** The id that won, read after the refusal: the pre-race id is the caller's own stale one. */
 const winnerIdAfterRefusal = async (
   store: RecordStore,
   draftKey: string,
@@ -82,8 +69,7 @@ export const createDraft = async (
       type: DRAFT_RECORD_TYPE,
       naturalKey: draftKey,
       plaintext: JSON.stringify(record),
-      // There is no row yet, and a key collision is the one thing that would silently take
-      // somebody else's draft.
+      // No row yet; a key collision would silently take somebody else's draft.
       precondition: { expect: 'absent' },
     });
   } catch (error) {
@@ -94,10 +80,7 @@ export const createDraft = async (
   return { ok: true, handle: { draftKey, draftId: draftIdOf(draftKey, 1), record } };
 };
 
-/**
- * A full snapshot, never a patch: the editor holds the whole text, and a field-level patch of
- * prose is a merge by another name. `draftId` names the version this replaces.
- */
+/** A full snapshot, never a patch. `draftId` names the version this replaces. */
 export const replaceDraft = async (
   store: RecordStore,
   draftId: string,
@@ -109,23 +92,19 @@ export const replaceDraft = async (
   const current = await readDraft(store, parsed.key);
   if (current === null) return { ok: false, reason: 'conflict', currentDraftId: null };
   const currentId = draftIdOf(parsed.key, current.record.contentVersion);
-  // A send in flight freezes the content on every device: the bytes SMTP was handed are the
-  // message, and editing them now would make the record disagree with what went out.
+  // A send in flight freezes the content on every device.
   if (heldSend(current.record, now) !== undefined) return { ok: false, reason: 'sending' };
   if (current.record.contentVersion !== parsed.version) {
     return { ok: false, reason: 'conflict', currentDraftId: currentId };
   }
-  // Which conversation the draft belongs to is a fact about the draft, not text in the editor:
-  // the composer's saves do not carry it, and dropping it would leave the reply to be re-found
-  // from `In-Reply-To` alone.
+  // Which conversation the draft belongs to is not text in the editor, so the composer's saves do not carry it.
   const threadId = content.threadId ?? current.record.threadId;
   const record: DraftRecord = {
     ...content,
     ...(threadId === undefined ? {} : { threadId }),
     contentVersion: parsed.version + 1,
     updatedAt: now,
-    // Editing does not settle an unconfirmed send: that message may be at its recipient, so the
-    // bytes and the refusal to discard survive every save until a sync says otherwise.
+    // Editing does not settle an unconfirmed send: the bytes and the refusal to discard survive.
     ...(current.record.unconfirmedSend === undefined
       ? {}
       : { unconfirmedSend: current.record.unconfirmedSend }),
@@ -155,24 +134,15 @@ export const replaceDraft = async (
 };
 
 /**
- * Phase (0) of a send: the record states, under CAS, that a send is in flight. Every device then
- * refuses to edit or discard it — including this one — so the message SMTP is about to be handed
- * cannot change underneath the send, and a SECOND device cannot start its own send of the same
- * draft and deliver a duplicate to the recipient.
- *
- * The claim is written BEFORE SMTP for exactly that reason: tidying up afterwards can only
- * discover the race, never prevent it.
+ * Phase (0): the record states under CAS that a send is in flight, written before SMTP so a
+ * second device cannot deliver a duplicate.
  */
 export const claimSend = async (
   store: RecordStore,
   draftId: string,
   send: NonNullable<DraftRecord['send']>,
   now: number,
-  /**
-   * The editor's newest text, written in the SAME CAS write as the claim. Sending does not wait
-   * for the autosave, so without this the record would say one thing and the bytes SMTP was
-   * handed another — and the frozen bytes are supposed to BE the record.
-   */
+  // The editor's newest text, in the same CAS write as the claim: sending does not wait for the autosave.
   content?: Omit<DraftRecord, 'contentVersion' | 'send' | 'sentMessageId' | 'deletedAt'>,
 ): Promise<SaveOutcome> => {
   const parsed = parseDraftId(draftId);
@@ -214,12 +184,8 @@ export const claimSend = async (
 };
 
 /**
- * Phases (1) and (2): the send reached a new phase, written down BEFORE the next irreversible
- * step so a crash resumes from that step rather than repeating it. Only the device holding the
- * claim writes here.
- *
- * A refusal answers `null`: the record moved on without us (another device took a stale claim
- * over), and the next unlock reads what is actually there rather than this device's idea of it.
+ * Phases (1) and (2), written before the next irreversible step so a crash resumes rather than
+ * repeats. `null` means the record moved on without us.
  */
 export const advanceSend = async (
   store: RecordStore,
@@ -244,10 +210,7 @@ export const advanceSend = async (
   return { draftKey: parsed.key, draftId: draftIdOf(parsed.key, record.contentVersion), record };
 };
 
-/**
- * Ends a send that never reached SMTP's acceptance: the claim is lifted and the draft is editable
- * again. Only the device holding the claim calls this, and only when it knows the send failed.
- */
+/** Ends a send that never reached SMTP's acceptance: the claim is lifted. */
 export const releaseSend = async (store: RecordStore, draftId: string): Promise<void> => {
   const parsed = parseDraftId(draftId);
   if (parsed === null) return;
@@ -265,12 +228,8 @@ export const releaseSend = async (store: RecordStore, draftId: string): Promise<
 };
 
 /**
- * "Back to editing" for a send nobody saw the end of: the claim moves aside so the draft can be
- * written again, and the frozen bytes come with it.
- *
- * Not a release. A release says the message never went out, which is exactly what this case
- * cannot say — so discarding stays refused and the bytes stay, until a sync finds the message in
- * a Sent folder or the person sends it again.
+ * "Back to editing" for an unconfirmed send. Not a release: that would say the message never went
+ * out, so discarding stays refused until a sync finds it in Sent or the person sends again.
  */
 export const unconfirmSend = async (
   store: RecordStore,
@@ -300,10 +259,7 @@ export const unconfirmSend = async (
   return { draftKey: parsed.key, draftId: draftIdOf(parsed.key, record.contentVersion), record };
 };
 
-/**
- * "Send again" for an unconfirmed send: the frozen bytes go back under a fresh claim, so the
- * machine re-runs phase (1) with the SAME message rather than composing a second one.
- */
+/** "Send again": the frozen bytes go back under a fresh claim, so phase (1) re-runs the same message. */
 export const reclaimSend = async (
   store: RecordStore,
   draftId: string,
@@ -333,11 +289,7 @@ export const reclaimSend = async (
   return { draftKey: parsed.key, draftId: draftIdOf(parsed.key, record.contentVersion), record };
 };
 
-/**
- * Phase (3): the send went out, so the draft becomes a tombstone that remembers what it became.
- * Unlike `deleteDraft` this is allowed to act on a record carrying a `send` — it IS that send
- * finishing, and refusing here would leave every sent draft alive for ever.
- */
+/** Phase (3): the draft becomes a tombstone. Unlike `deleteDraft`, allowed on a record carrying a `send`. */
 export const completeSend = async (
   store: RecordStore,
   draftId: string,
@@ -371,14 +323,7 @@ export type DeleteOutcome =
   | { readonly outcome: 'sending' }
   | { readonly outcome: 'offline' };
 
-/**
- * A soft delete: the record is tombstoned rather than removed, hidden everywhere, and revivable
- * by naming its exact id for 30 days.
- *
- * That window is NOT an undo, which is the thing to keep straight here: no screen in YOZZ brings
- * a discarded draft back, so reviving one means an agent tool and an exact id. The recoverability
- * is real and it is unreachable, which is why the screens above this ask first.
- */
+/** Soft delete, revivable by exact id for 30 days. No screen revives one, so the screens above ask first. */
 export const deleteDraft = async (
   store: RecordStore,
   draftId: string,
@@ -434,14 +379,7 @@ export const reviveDraft = async (
   return replaceDraft(store, draftIdOf(parsed.key, current.record.contentVersion), rest, now);
 };
 
-/**
- * Erases tombstones past their revival window. Run from the unlock that lists drafts, because a
- * retention promise nothing enforces is just unbounded growth in somebody's vault — and these are
- * records the server can never garbage-collect for us, since it cannot read them.
- *
- * Best effort per record: a refusal means that tombstone moved on (revived, or purged by another
- * device), and the next unlock will look again.
- */
+/** Erases tombstones past their window, from the unlock that lists drafts; the server cannot read them to collect them. Best effort per record. */
 export const purgeExpiredDrafts = async (store: RecordStore, now: number): Promise<number> => {
   const rows = await store.list(DRAFT_RECORD_TYPE);
   let purged = 0;
@@ -453,13 +391,13 @@ export const purgeExpiredDrafts = async (store: RecordStore, now: number): Promi
       await store.remove(DRAFT_MIRROR_RECORD_TYPE, row.naturalKey).catch(() => undefined);
       purged += 1;
     } catch {
-      // Moved on since the list: leave it for the next unlock.
+      // Moved on since the list.
     }
   }
   return purged;
 };
 
-/** Every live draft: tombstones and their 30-day wait are nobody's business but the purge's. */
+/** Every live draft. */
 export const listDrafts = async (store: RecordStore): Promise<readonly DraftHandle[]> => {
   const rows = await store.list(DRAFT_RECORD_TYPE);
   return rows.flatMap(row => {
@@ -486,14 +424,8 @@ export const readMirror = async (
 };
 
 /**
- * Mirror bookkeeping is its OWN record, so writing it never bumps the content's version and never
- * races an edit: a mirror task finishing late must not make the person's next save a conflict.
- *
- * Written under compare-and-swap like everything else in this file. Two devices that mirrored the
- * same draft would otherwise overwrite each other's bookkeeping out of order, and the locator the
- * loser wrote — the one naming a real message on the server — would be lost with nothing left to
- * clean it up. `false` says another device got there first; the caller re-reads rather than
- * insisting.
+ * Its own record, so a late mirror task never makes the next save a conflict. Under CAS too:
+ * `false` says another device got there first, and the caller re-reads.
  */
 export const writeMirror = async (
   store: RecordStore,

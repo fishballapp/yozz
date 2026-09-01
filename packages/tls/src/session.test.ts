@@ -1,15 +1,7 @@
 /**
- * Resumption against RFC 8448 §3 and §4, which publish both halves of it.
- *
- * §3 ends with a `NewSessionTicket` and the `res master` it was minted from;
- * §4 opens by resuming that exact session and publishes the PSK, the truncated
- * ClientHello, the binder key and the binder itself. So the whole chain — ticket
- * to PSK to binder to the 512 octets that go on the wire — is checked against
- * the document rather than against our own arithmetic, which is the only way to
- * catch a mistake both the writer and the reader would make.
- *
- * The unit checks below it are the parts no trace covers: a document has one
- * clock and one host, and the rules that drop a session have neither.
+ * Resumption against RFC 8448 §3 and §4: §3 publishes the ticket and `res master`, §4 the PSK,
+ * the truncated ClientHello, the binder key and the binder. The unit checks below cover what no
+ * trace can: a document has one clock and one host.
  */
 
 import type { PeerName } from '@yozz.app/x509';
@@ -55,11 +47,7 @@ const bytesOf = (step: Rfc8448Step, label: string): Uint8Array => {
   return bytes;
 };
 
-/**
- * §3's server certificate, for the same reason the ticket below is read rather
- * than transcribed: the document publishes one, so the session's stored chain
- * can be a real certificate instead of a shape that merely satisfies the type.
- */
+/** §3's server certificate, so the stored chain is a real one. */
 const chainFromTheDocument = (trace3: Rfc8448Trace): PeerCertificateChain => {
   const certificateBytes = bytesOf(
     stepOf(trace3, 'construct a Certificate handshake message'),
@@ -74,14 +62,7 @@ const chainFromTheDocument = (trace3: Rfc8448Trace): PeerCertificateChain => {
   return { leafDer: leaf.certData, intermediateDer: intermediates.map(entry => entry.certData) };
 };
 
-/**
- * §3's ticket, read with our own decoder and expanded with our own schedule.
- *
- * Transcribing the ticket's fields by hand would test the transcription. The
- * 205 published octets go through `decodeHandshakeMessage`, so a decoder that
- * mislocates the nonce derives the wrong PSK and every assertion below it
- * fails.
- */
+/** §3's ticket through `decodeHandshakeMessage`; a decoder that mislocates the nonce fails everything below. */
 const sessionFromTheDocument = async (): Promise<TlsSession> => {
   const trace3 = traceOf('3');
   const ticketBytes = bytesOf(
@@ -111,10 +92,8 @@ const sessionFromTheDocument = async (): Promise<TlsSession> => {
 };
 
 /**
- * §4's ClientHello with its binder zeroed — the state a real one is in between
- * being laid out and being bound, and the input `bindClientHello` is built for.
- * The 3 octets are the binder list's own framing: a uint16 list length of 33
- * and a uint8 entry length of 32.
+ * §4's ClientHello with its binder zeroed, the input `bindClientHello` takes. The 3 octets are
+ * the binder list's framing: a uint16 list length of 33 and a uint8 entry length of 32.
  */
 const zeroBinderClientHello = (prefix: Uint8Array): Uint8Array =>
   concat(prefix, Uint8Array.of(0x00, 0x21, 0x20), new Uint8Array(32));
@@ -123,8 +102,7 @@ describe('resumption against RFC 8448', () => {
   it("derives §4's pre-shared key from §3's ticket", async () => {
     const session = await sessionFromTheDocument();
 
-    // §4's Early Secret takes the PSK as its IKM, so the document states the
-    // answer twice — once as what §3 generated, once as what §4 consumed.
+    // The document states the PSK twice: what §3 generated and what §4 consumed.
     expect(session.preSharedKey).toEqual(
       bytesOf(stepOf(traceOf('4'), 'extract secret "early"'), 'IKM'),
     );
@@ -140,8 +118,7 @@ describe('resumption against RFC 8448', () => {
       [],
     );
 
-    // "The PSK binder uses the same construction as Finished and so is labeled
-    // as finished here" — §4's own note on the field name.
+    // "The PSK binder uses the same construction as Finished and so is labeled as finished here" (§4).
     expect(bound.subarray(bound.length - 32)).toEqual(bytesOf(binderStep, 'finished'));
   });
 
@@ -153,22 +130,11 @@ describe('resumption against RFC 8448', () => {
       [],
     );
 
-    // The record the document sends is the whole message, which the "construct"
-    // step above it does NOT publish — it prints the ClientHello as it stands
-    // before the binder exists.
+    // The "construct" step prints the ClientHello before the binder exists; the record sent is the whole message.
     expect(bound).toEqual(bytesOf(stepOf(trace4, 'send handshake record'), 'payload'));
   });
 
-  /**
-   * The check this file was written to earn.
-   *
-   * §4 was the one trace of the five whose running transcript did not
-   * reproduce, and a tripwire in `key-schedule.test.ts` asserted that it did
-   * not — because the document publishes the TRUNCATED ClientHello under the
-   * name `ClientHello`, and hashing that is 35 octets short. It reproduces the
-   * moment the binder can be computed, which is the whole point of the rule
-   * landing, so the tripwire is gone and this stands in its place.
-   */
+  /** §4 publishes the truncated ClientHello under the name `ClientHello`, 35 octets short of what the transcript hashes. */
   it('reproduces every running transcript hash §4 publishes', async () => {
     const trace4 = traceOf('4');
     const clientHello = await bindClientHello(
@@ -186,8 +152,7 @@ describe('resumption against RFC 8448', () => {
         );
         continue;
       }
-      // `derive secret for handshake | master "tls13 derived"` is excluded on
-      // purpose: it hashes the EMPTY transcript, not the handshake so far.
+      // `derive secret for handshake | master "tls13 derived"` hashes the empty transcript.
       if (!/^derive secret "tls13 /.test(step.title)) continue;
       const published = step.fields.find(field => field.label === 'hash')?.bytes;
       if (published === undefined) continue;
@@ -195,35 +160,16 @@ describe('resumption against RFC 8448', () => {
       checked.push(step.title);
     }
 
-    // A walk that matched nothing would pass every assertion above it.
+    // A walk that matched nothing would pass every assertion above.
     expect(checked.length).toBe(8);
   });
 });
 
 /**
- * §4 driven through the STATE MACHINE, which is what this file could not reach
- * before, and the only place the renewal rule is observable end to end.
- *
- * Everything above proves §4 at the binder level: the ticket becomes a PSK,
- * the PSK becomes a binder, the binder reproduces the document's ClientHello.
- * None of it runs a handshake. So the fields `inheritedAuthentication` carries
- * forward were pinned as a rule and NEVER observed arriving in a minted ticket
- * — no peer this package can drive mints one on a resumed connection: Node's
- * OpenSSL issues none on the resumption, BoGo runs every resumption test at
- * `-resume-count 1`, and §4 itself publishes no `NewSessionTicket`.
- *
- * **§4 is the "Resumed 0-RTT Handshake", and this client has no 0-RTT.** That
- * sounds fatal and is not, because of WHERE the two flights diverge. The
- * server's application traffic secret runs over ClientHello..server Finished
- * (§4 derives it before the client's `EndOfEarlyData`), so this client
- * reproduces it exactly. Only the CLIENT's Finished and `res master` differ,
- * because the document's transcript carries an `EndOfEarlyData` ours never
- * sends. So the server half of §4 replays byte-exact and the client half does
- * not — and the server half is the one that seals a ticket.
- *
- * That makes the decryption below load-bearing twice over: it is the renewal
- * test's delivery mechanism AND the proof that our key schedule lands on §4's
- * published `s ap traffic` key, which nothing else in this package checks.
+ * §4 through the state machine. §4 is the 0-RTT trace, but the server's application traffic
+ * secret runs over ClientHello..server Finished, so the server half replays byte-exact; only
+ * the client's Finished and `res master` differ (the document's transcript carries an
+ * `EndOfEarlyData`). See DECISIONS.md, "The authentication ceiling is inherited through renewals".
  */
 describe('§4 resumed through the state machine, and the ticket it renews', () => {
   const trace4 = () => traceOf('4');
@@ -254,15 +200,7 @@ describe('§4 resumed through the state machine, and the ticket it renews', () =
   const resume = async () => {
     const offered = await sessionFromTheDocument();
     const trace = trace4();
-    /**
-     * The SENT record's payload, not the `construct a ClientHello` step above
-     * it — and this file already knew why. §4 publishes the message under that
-     * name with the binder not yet computed, 35 octets short, which is the same
-     * trap the running-transcript test three blocks up was written for. Feeding
-     * the truncated one here produces a handshake that resumes and then fails
-     * `bad_record_mac`, because every key hangs off a transcript missing the
-     * binder.
-     */
+    // The sent record's payload, not the "construct" step: the latter is 35 octets short of the binder.
     const clientHello = bytesOf(
       trace.steps.find(
         step => step.actor === 'client' && step.title.startsWith('send handshake record'),
@@ -279,22 +217,9 @@ describe('§4 resumed through the state machine, and the ticket it renews', () =
       serverName: 'server',
       trustAnchors: { findCandidates: () => [] },
       validationTime: new Date(0),
-      /**
-       * Both clocks are frozen an INSTANT after the document's, not at it. §3's
-       * ticket is dated `new Date(0)` and lives 30 seconds, so a real clock puts
-       * it decades past both its lifetime and the §4.7.1 ceiling and it is never
-       * offered at all. One second in, every rule that reads a clock is
-       * satisfied and none of them is disabled.
-       */
+      // An instant after the document's clock: §3's ticket is dated `new Date(0)` and lives 30 seconds.
       now: () => new Date(1_000),
-      /**
-       * Accepting, and NOT a way of skipping the re-check: `reverifyOnResume`
-       * defaults on, so this runs §4 through that path too, over the chain §3's
-       * Certificate message put on the session. **`revalidated` is what makes
-       * that a fact rather than a claim** — a review pointed out that deleting
-       * the re-check left this test green, because an accepting validator that
-       * is never called looks exactly like one that is.
-       */
+      // `reverifyOnResume` defaults on, so §4 runs through the re-check too; `revalidated` proves it ran.
       validator: {
         name: 'accept-the-document',
         validatePath: async request => {
@@ -330,21 +255,12 @@ describe('§4 resumed through the state machine, and the ticket it renews', () =
       throw new Error(`the §4 replay did not complete: ${JSON.stringify(result.reason)}`);
     expect(result.isResumed).toBe(true);
 
-    /**
-     * A resumed handshake carries no Certificate, so the ONLY chain there is to
-     * validate is the one §3 put on the session — and it was validated, which is
-     * what `reverifyOnResume` defaulting on is supposed to mean. Deleting the
-     * re-check fails here and nowhere else in this file.
-     */
+    // The only chain there is to validate is the one §3 put on the session.
     expect(revalidated).toEqual([offered.peerCertificateChain.leafDer]);
 
     /**
-     * §3's own `NewSessionTicket`, sealed under §4's PUBLISHED server key at
-     * sequence 0 — the first record that server writes under its application
-     * key. The document publishes no ticket on the resumed connection, so the
-     * message is borrowed and the KEY is the part under test: if this client
-     * derived anything but §4's `s ap traffic`, the AEAD open fails and nothing
-     * below runs.
+     * §3's `NewSessionTicket` sealed under §4's published server application key at sequence 0.
+     * The key is what is under test: anything but §4's `s ap traffic` fails the AEAD open.
      */
     const { key, iv } = publishedServerAppKeys();
     const ticket = bytesOf(
@@ -352,14 +268,7 @@ describe('§4 resumed through the state machine, and the ticket it renews', () =
       'NewSessionTicket',
     );
     await duplex.server.write(await sealAead(key, iv, 0n, 'handshake', ticket));
-    /**
-     * And then a `close_notify` at sequence 1, without which this test hangs.
-     * A `NewSessionTicket` is not application data: `read()` consumes it, fires
-     * `onSession` and goes back to waiting, because the caller asked for DATA
-     * and none has arrived. That is the right behaviour and it is why the
-     * session cannot be observed by a return value — the goodbye is what gives
-     * `read()` something to return.
-     */
+    // `read()` consumes the ticket and keeps waiting for data, so the close_notify gives it something to return.
     await duplex.server.write(
       await sealAead(
         key,
@@ -378,20 +287,12 @@ describe('§4 resumed through the state machine, and the ticket it renews', () =
     const next = renewed[0];
     if (next === undefined) throw new Error('the renewed ticket produced no session');
 
-    /**
-     * **The wiring nothing else in this package can reach.** Each of the three
-     * describes the CertificateVerify from §3 — the connection that actually
-     * authenticated this peer — and a renewal that took any of them fresh would
-     * let a chain of tickets outlive the one signature behind it. The rule is
-     * tested directly in `inheritedAuthentication`; that these values reach a
-     * MINTED ticket is what only this replay observes.
-     */
+    /** That the inherited fields reach a minted ticket is what only this replay observes. */
     expect(next.authenticatedAt).toEqual(offered.authenticatedAt);
     expect(next.peerSignatureScheme).toBe(offered.peerSignatureScheme);
     expect(next.peerCertificateChain).toEqual(offered.peerCertificateChain);
 
-    // And it really is a NEW session, not the one that was offered: same peer,
-    // different secret.
+    // A new session, not the one offered: same peer, different secret.
     expect(next.preSharedKey).not.toEqual(offered.preSharedKey);
     expect(next.receivedAt).toEqual(new Date(1_000));
   });
@@ -399,11 +300,7 @@ describe('§4 resumed through the state machine, and the ticket it renews', () =
 
 const HOST: PeerName = { kind: 'dns', value: 'mail.example.com' };
 
-/**
- * Two chains that are only ever compared to each other. Nothing below decodes
- * them — `inheritedAuthentication` moves a chain without reading it, and which
- * of the two comes out is the whole assertion.
- */
+/** Only ever compared to each other; `inheritedAuthentication` moves a chain without reading it. */
 const STORED_CHAIN: PeerCertificateChain = {
   leafDer: Uint8Array.of(0x30, 0x01),
   intermediateDer: [Uint8Array.of(0x30, 0x02)],
@@ -453,12 +350,7 @@ const ticketOf = (
   });
 
 describe('when a stored session may still be offered', () => {
-  /**
-   * DNS is case-insensitive, so a caller that round-trips the hostname through
-   * anything normalising must not silently lose resumption. The fold is
-   * `@yozz.app/x509`'s ASCII-only one, NOT `toLowerCase()` — full Unicode folding
-   * would make KELVIN SIGN match `k` and widen a security comparison.
-   */
+  /** DNS is case-insensitive; the fold is x509's ASCII-only one, not `toLowerCase()`. */
   it('matches a host that differs only in ASCII case, and nothing wider', () => {
     const session = sessionAt();
     const now = new Date(1_000_000);
@@ -491,13 +383,7 @@ describe('when a stored session may still be offered', () => {
     );
   });
 
-  /**
-   * The one that matters most, because a resumed handshake sends no certificate:
-   * whatever identity the issuing connection proved is the only identity this
-   * session can ever stand for. `expectedPeerName` overrides `serverName`, so
-   * the two can disagree — and `null` means the issuing connection checked no
-   * name at all, which may never satisfy a connection that asks for one.
-   */
+  /** `expectedPeerName` overrides `serverName`; `null` means the issuing connection checked no name. */
   it('drops one whose validated identity is not the one being asked for', () => {
     const session = sessionAt();
     const other: PeerName = { kind: 'dns', value: 'evil.example.com' };
@@ -523,33 +409,18 @@ describe('when a stored session may still be offered', () => {
     expect(isSessionOfferable(session, session.serverName, HOST, new Date(1_060_000))).toBe(false);
   });
 
-  /**
-   * A clock that moved backwards makes the age negative, and a negative age
-   * encodes as an enormous `obfuscated_ticket_age` — which a server running
-   * 0-RTT anti-replay reads as a replayed ticket rather than as a wrong clock.
-   */
+  /** A negative age encodes as an enormous `obfuscated_ticket_age`, which reads as a replay. */
   it('drops one from the future', () => {
     const session = sessionAt();
     expect(isSessionOfferable(session, session.serverName, HOST, new Date(999_999))).toBe(false);
   });
 
-  /**
-   * RFC 9846 §4.7.1: a client "MUST NOT cache tickets for longer than 7 days,
-   * regardless of the ticket_lifetime", and a server "MUST NOT use any value
-   * greater than 604800 seconds". A server that sends more earns no alert — the
-   * RFC names none — so the ceiling lands on the way in.
-   */
+  /** RFC 9846 §4.7.1: 7 days regardless of `ticket_lifetime`; no alert is named, so the ceiling lands on the way in. */
   it('caps a lifetime the server had no business sending', async () => {
     expect((await ticketOf({ ticketLifetime: 0xffffffff }))?.lifetimeSeconds).toBe(604_800);
   });
 
-  /**
-   * A ticket with no window to be used in, and one the next ClientHello could
-   * not carry. The second is the dangerous one: `opaque ticket<1..2^16-1>`
-   * allows 65535, the ClientHello declares its extensions with a uint16 too, and
-   * the encoder throws — on the connection AFTER the one that received it, out
-   * of a session the caller has already stored.
-   */
+  /** `opaque ticket<1..2^16-1>` allows 65535, and the ClientHello's extension block is a uint16 too. */
   it('is not a session at all when the ticket could never be used', async () => {
     expect(await ticketOf({ ticketLifetime: 0 })).toBeUndefined();
     expect(await ticketOf({ ticket: new Uint8Array(16_385) })).toBeUndefined();
@@ -557,26 +428,12 @@ describe('when a stored session may still be offered', () => {
   });
 });
 
-/**
- * RFC 9846 §4.7.1: renewal "can indefinitely extend the lifetime of the keying
- * material originally derived from an initial non-PSK handshake", and asks for a
- * limit. `authenticatedAt` is carried FORWARD through every renewal, so this is
- * the check that a chain of tickets cannot outlive the one signature behind it.
- */
+/** RFC 9846 §4.7.1: `authenticatedAt` is carried forward through every renewal. */
 describe('how long a resumption chain may outlive its certificate', () => {
   const WEEK = 604_800 * 1000;
 
-  /**
-   * The two clocks are deliberately far apart. A fixture where `receivedAt` and
-   * `authenticatedAt` are the same instant cannot test this at all: the ticket's
-   * own lifetime runs out first and answers `false` for the other reason, so
-   * deleting the ceiling entirely leaves the test green. That is exactly what
-   * the first version of it did.
-   *
-   * Here the ticket is minted fresh at the moment of each check — a renewal, six
-   * days into a chain — so its own lifetime never expires and the ONLY clause
-   * that can refuse is the age of the certificate behind it.
-   */
+  // The ticket is minted fresh at each check so only the chain's age can refuse; with the two
+  // clocks at one instant, the ticket's own lifetime answers first and the ceiling is never read.
   const renewedAt = (authenticatedDaysAgo: number, now: Date): TlsSession =>
     sessionAt({
       authenticatedAt: new Date(now.getTime() - authenticatedDaysAgo * 24 * 3600 * 1000),
@@ -595,8 +452,6 @@ describe('how long a resumption chain may outlive its certificate', () => {
   });
 
   it('is exact to the millisecond', () => {
-    // The ticket is re-minted at every instant checked, so its own age is always
-    // zero and cannot be the clause that answers. Only the chain's age moves.
     const authenticatedAt = new Date(1_000_000_000);
     const at = (offset: number) => {
       const now = new Date(authenticatedAt.getTime() + offset);
@@ -611,11 +466,7 @@ describe('how long a resumption chain may outlive its certificate', () => {
     expect(at(WEEK)).toBe(false);
   });
 
-  /**
-   * The same rule on the way IN. A connection held open on `IDLE` past the
-   * ceiling still gets renewals, and a session refused for its whole life is a
-   * liability to store rather than a session.
-   */
+  /** The same rule on the way in: a connection held on `IDLE` past the ceiling still gets renewals. */
   it('does not mint a session already past the ceiling', async () => {
     expect(
       await ticketOf({ authenticatedAt: new Date(0), receivedAt: new Date(WEEK) }),
@@ -632,23 +483,14 @@ describe('the age reported on the wire', () => {
     expect(obfuscatedTicketAge(session, new Date(1_010_000))).toBe(10_000 + 1234);
   });
 
-  // §4.3.11.1 makes it a uint32, so the sum wraps rather than widening — and a
-  // sum that did not wrap would be truncated by the encoder instead, silently.
+  // §4.3.11.1 makes it a uint32, so the sum wraps; unwrapped, the encoder would truncate it.
   it('wraps at 2^32 rather than overflowing the field', () => {
     const session = sessionAt({ ticketAgeAdd: 0xffffffff });
     expect(obfuscatedTicketAge(session, new Date(1_000_001))).toBe(0);
   });
 });
 
-/**
- * The renewal rule, tested where nothing else can reach it.
- *
- * A ticket minted ON a resumed connection is invisible to every peer this
- * package can drive — Node's OpenSSL mints none on a resumption, BoGo never
- * runs a third connection, RFC 8448 §4 publishes no NewSessionTicket. So the
- * one thing standing between a working authentication ceiling and a silently
- * retired one is right here.
- */
+/** No peer this package can drive mints a ticket on a resumed connection, so the rule is tested here. */
 describe('what a renewed ticket inherits', () => {
   const DAY = 24 * 3600 * 1000;
   const proved = new Date(1_000_000_000);
@@ -659,9 +501,7 @@ describe('what a renewed ticket inherits', () => {
   };
 
   it('a resumed handshake keeps the ORIGINAL instant, so the ceiling still bites', () => {
-    // The whole of RFC 9846 §4.7.1's concern: take `later` here and a chain of
-    // renewals is indistinguishable from a fresh handshake forever. Five days
-    // in, an inherited instant is five days old; a reset one is zero.
+    // Take `later` here and a chain of renewals never ages.
     const resumed = sessionAt({
       authenticatedAt: proved,
       peerSignatureScheme: 'ecdsa_secp384r1_sha384',
@@ -675,9 +515,7 @@ describe('what a renewed ticket inherits', () => {
   });
 
   it('carries the inherited instant far enough to actually expire', () => {
-    // Inheritance is only worth anything if the ceiling reads it. Eight days
-    // after the signature, a session renewed on day 7 is no longer offerable —
-    // which is false the moment the instant resets.
+    // Eight days after the signature, a session renewed on day 7 is no longer offerable.
     const resumed = sessionAt({ authenticatedAt: proved, receivedAt: new Date(proved.getTime()) });
     const renewed = inheritedAuthentication(resumed, later);
     const eightDaysOn = new Date(proved.getTime() + 8 * DAY);
@@ -706,13 +544,7 @@ describe('what a renewed ticket inherits', () => {
     );
   });
 
-  /**
-   * The chain is the one field a JSON round trip corrupts without losing: a
-   * `Uint8Array` comes back as `{"0":48,...}`, which is typed `Uint8Array` and
-   * is not one. Unchecked it reaches `validatePath`, which refuses it as a
-   * malformed certificate — so a caller whose store dropped the shape would be
-   * told its mail host has a bad certificate.
-   */
+  /** A JSON round trip turns a `Uint8Array` into `{"0":48,...}`, still typed `Uint8Array`. */
   it.each([
     ['dropped the field', undefined],
     ['revived the leaf as a plain object', { leafDer: { 0: 0x30 }, intermediateDer: [] }],

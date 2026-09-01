@@ -1,11 +1,4 @@
-/**
- * Reads the harvested corpus. The shape lives here rather than in `harvest.ts`
- * so the generator and every consumer agree by construction.
- *
- * Zod checks the SHAPE, and it is not an integrity check — that is what
- * `loadManifest`'s explicit guards below are for, because a decoder gate over
- * an emptied or truncated corpus passes while testing nothing at all.
- */
+/** The shape lives here so the harvester and every consumer agree. Zod checks shape; `loadManifest` guards integrity. */
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { z } from 'zod';
@@ -22,14 +15,8 @@ export type CertificatePosition = (typeof POSITIONS)[number];
 const Sha256Schema = z.string().regex(/^[0-9a-f]{64}$/, 'not a lowercase hex SHA-256');
 
 /**
- * What makes a certificate interesting, and therefore what deduplicates it.
- * Two certificates agreeing on all four decode along the same paths, so the
- * second one buys the decoder nothing.
- *
- * Chain position is deliberately NOT here. It is a property of the chain that
- * presented the certificate, not of the certificate, so folding it in stores
- * one cross-signed root twice — once as a root and once as the intermediate
- * another host serves it as.
+ * What deduplicates a certificate. Chain position is not here: it is a property of the chain, and
+ * folding it in stores one cross-signed root twice.
  */
 const FingerprintSchema = z.object({
   signatureAlgorithm: z.string(),
@@ -42,16 +29,8 @@ const FingerprintSchema = z.object({
 });
 
 /**
- * One place the harvest saw a certificate with this entry's fingerprint —
- * **not necessarily this entry's bytes.** Deduplication is by fingerprint, so a
- * DIFFERENT certificate sharing all four axes collapses into this entry and
- * records its sighting here.
- *
- * `sha256` is what tells the two apart, and it is the reason this field exists:
- * a sighting whose hash equals the entry's is where THESE bytes came from, and
- * any other is a certificate dropped for being uninteresting. Read this array
- * as provenance without checking the hash and you get claims like "rambler.ru
- * served DigiCert Global Root G2" — which is false, and was.
+ * A sighting of this entry's FINGERPRINT, not necessarily its bytes: a sighting is provenance only
+ * when its `sha256` equals the entry's.
  */
 const SightingSchema = z.object({
   target: z.string(),
@@ -80,11 +59,7 @@ export type Manifest = z.infer<typeof ManifestSchema>;
 export type Sighting = z.infer<typeof SightingSchema>;
 export type CorpusCertificate = Manifest['certificates'][number] & { readonly der: Uint8Array };
 
-/**
- * Not a "reasonable" number — it only has to be high enough that a corpus which
- * silently emptied cannot pass as one. The diversity floors in `corpus.test.ts`
- * are the real bound.
- */
+/** Only high enough that an emptied corpus cannot pass; the diversity floors in `corpus.test.ts` are the real bound. */
 const MINIMUM_CERTIFICATES = 20;
 
 export const loadManifest = async (): Promise<Manifest> => {

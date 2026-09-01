@@ -32,24 +32,8 @@ import { Input } from './ui/Field';
 import { toast } from './ui/Toast';
 
 /**
- * Composing is a DOCUMENT, not a chat window.
- *
- * The docked bottom-right panel every webmail ships treats a message as an afterthought you type
- * beside your inbox. YOZZ treats it the way an issue tracker treats an issue: a modal that owns the
- * screen, wide enough to actually write in, and dismissed deliberately rather than by a stray click.
- *
- * Field order inverts Gmail's: From comes FIRST and largest, because in a client whose reason to
- * exist is sending as any address you own, the identity is the decision you make before the
- * recipient.
- *
- * The body is markdown with a Write/Preview pair, the way an issue tracker does it. Rich text is
- * deliberately out of scope for v1.
- *
- * WHETHER it is open is the URL's answer (`?compose=`), and WHAT you have typed is the store's.
- * That split is what makes Back close a draft, a compose link openable in a new tab, and a draft
- * survive switching mailboxes — while keeping a message body, which can be pages long, out of a
- * query string. The store follows the URL and never the other way round: everything that starts a
- * message navigates, and this is the only place that seeds a draft.
+ * A modal document, From first. `?compose=` says whether it is open and the store holds the text;
+ * the store follows the URL, and this is the only place that seeds a draft. See DECISIONS.md.
  */
 
 const FieldLabel = ({ children, htmlFor }: { children: string; htmlFor?: string }) => (
@@ -63,12 +47,7 @@ const TABS = [
   { value: 'preview', label: 'Preview', Icon: EyeIcon },
 ] as const;
 
-/**
- * A send outlives the composer that started it, so its result arrives as a toast rather than as a
- * line under a form that has closed. The "Sending…" toast carries no timeout because it is
- * replaced, never expired; the two that report a problem carry none either, because a message
- * that did not go is not news to show for four seconds and take away.
- */
+/** A send outlives the composer, so its result is a toast. None of these time out. */
 const reportSend = (settled: Promise<SendReport>, reopen: (draftKey: string) => void) => {
   const id = toast.add({ title: 'Sending…', timeout: 0 });
   void settled.then(report => {
@@ -86,8 +65,7 @@ const reportSend = (settled: Promise<SendReport>, reopen: (draftKey: string) => 
       return;
     }
     if (report.state === 'unsettled') {
-      // Deliberately not "Sent" and not "Not sent": nobody knows which, and saying either would
-      // be the app guessing on the user's behalf about whether a message reached somebody.
+      // Neither "Sent" nor "Not sent": nobody knows which.
       toast.update(id, {
         title: 'Send unfinished',
         description: report.detail,
@@ -101,7 +79,7 @@ const reportSend = (settled: Promise<SendReport>, reopen: (draftKey: string) => 
       description: report.detail,
       timeout: 0,
       priority: 'high',
-      // Nothing else on screen knows WHICH draft this was, and Drafts may hold several.
+      // Nothing else on screen knows which draft this was.
       actionProps: { children: 'Reopen', onClick: () => reopen(report.draftKey) },
     });
   });
@@ -129,32 +107,23 @@ export const Compose = () => {
     backToEditing,
     discardDraft,
   } = useMail();
-  // `to: '.'` — closing a draft leaves you exactly where you were reading, and only drops the
-  // param. `replace` because opening and closing a composer is one round trip, not two history
-  // entries: without it, Back after closing re-opened a blank draft instead of going back.
+  // `to: '.'` only drops the param. `replace`, or Back after closing re-opened a blank draft.
   const close = () => {
     void navigate({ to: '.', search: withoutCompose, replace: true });
   };
 
-  /** Puts a refused send back in front of the person: the draft is still in the vault, by key. */
+  /** Puts a refused send back in front of the person, by key. */
   const reopenDraft = (draftKey: string) => {
     void navigate({ to: '.', search: withCompose(`draft:${draftKey}`), replace: true });
   };
 
-  // The URL → store sync, and the only one in the app. It is guarded by the intent it last acted
-  // on rather than by a dependency list, because the store values it reads change on every
-  // keystroke — a plain dependency list would re-seed the draft out from under you as you type.
+  // The URL → store sync, guarded by the intent it last acted on: the store values change on every keystroke.
   const [isSending, setIsSending] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
   const [pendingReads, setPendingReads] = useState(0);
-  // Cc and Bcc are folded away until asked for: most mail has neither, and two more empty wells
-  // above the subject is two more things to read past on every message that does not. A reply-all
-  // arrives with a Cc already in it, so it opens with them out.
+  // Cc and Bcc are folded away until asked for; a reply-all opens with them out.
   const [showCopies, setShowCopies] = useState(false);
-  // This component sits in the root route, above the vault gate, so it is on screen while the
-  // session is still resuming. Seeding then would be undone by the lock branch of the provider,
-  // and the intent alone would never seed again: the seed is keyed on the session as well, and
-  // waits for one.
+  // Above the vault gate, so on screen while the session resumes; the seed waits for one.
   const { session } = useVault();
   const canSeed = isDemo() || session !== null;
   const seedKey = `${compose ?? ''}\0${session?.userId ?? ''}`;
@@ -162,19 +131,12 @@ export const Compose = () => {
   useEffect(() => {
     if (seeded.current === seedKey || !canSeed) return;
     const seed = compose === undefined ? {} : seedFor(compose, threads, identities, ownedAddresses);
-    // A reply or forward names a MESSAGE. Until the mail it names has loaded `seedFor` has
-    // nothing, and seeding then would fix an empty draft for good — so a referenced intent is not
-    // marked seeded until it resolves; the effect simply runs again as mail arrives.
-    //
-    // A `draft:` intent is not one of those: its content comes from the vault record rather than
-    // from a message, so `seedFor` returns nothing for it BY DESIGN and waiting for a seed here
-    // would leave every draft URL stuck open-but-empty for ever.
+    // A referenced intent is not marked seeded until its message has loaded. A `draft:` intent
+    // gets nothing from `seedFor` by design; its content is the vault record's.
     const draftKey = compose === undefined ? null : draftKeyOfIntent(compose);
     const namesMessage = compose !== undefined && compose !== 'new' && draftKey === null;
     if (namesMessage && Object.keys(seed).length === 0) return;
-    // The same wait, for the same reason, one step later: a `draft:` intent resolves against the
-    // vault records, which load after unlock. Seeding before they arrive would mark the intent
-    // done and leave the composer empty even once the record is here.
+    // The same wait for a `draft:` intent: the records load after unlock.
     if (draftKey !== null && !drafts.some(candidate => candidate.draftKey === draftKey)) return;
     seeded.current = seedKey;
     setSendError(null);
@@ -186,12 +148,9 @@ export const Compose = () => {
   const bodyInput = useRef<HTMLTextAreaElement>(null);
   const toInput = useRef<HTMLInputElement>(null);
 
-  // A reply opens with the quoted original already in the body, and you write ABOVE a quote — so
-  // the caret starts at position 0, not after the quote. A blank draft has nothing to write above,
-  // so it starts in the recipient field instead. Keyed on open/close only, never on keystrokes.
+  // You write above a quote, so a reply starts at position 0; a blank draft starts in To. Keyed on open/close only.
   const isOpen = draft !== null;
-  // A reply has both a quote AND a recipient. A forward has a quote but no recipient yet, so
-  // the thing to fill first is To, not the body.
+  // A forward has a quote but no recipient yet.
   const startedAsReply = (draft?.startedAsReply ?? false) && (draft?.to ?? '') !== '';
   useEffect(() => {
     if (!isOpen) return;
@@ -204,18 +163,13 @@ export const Compose = () => {
       toInput.current?.focus();
     });
     return () => cancelAnimationFrame(frame);
-    // Both deps are fixed for the life of a draft, so this never fires on a keystroke.
+    // Both deps are fixed for the life of a draft.
   }, [isOpen, startedAsReply]);
 
   return (
     <Dialog.Root
-      // Open once there is a draft to show, not merely an intent in the URL: the intent is there
-      // during the resume too, and a dialog with no fields in it is what that looked like.
-      //
-      // Clicking past it closes it, like the X and like Escape. It carried `disablePointerDismissal`
-      // for as long as closing meant DISCARDING — a draft must not vanish because you clicked
-      // beside it — and that reason went when Discard became its own button. Closing keeps the
-      // draft now, so the stray click is free.
+      // Open once there is a draft to show, not merely an intent: the intent is there during the
+      // resume too. A stray click closes, since closing keeps the draft.
       open={compose !== undefined && draft !== null}
       onOpenChange={open => {
         if (!open) close();
@@ -258,11 +212,7 @@ export const Compose = () => {
             )}
 
             {draftConflict !== null && (
-              /**
-               * Both versions still exist and nothing has been written: the person picks. No
-               * merge, and no "newest wins" — either would silently throw away prose somebody
-               * typed, which is the one outcome a draft store must never produce.
-               */
+              // Both versions exist and nothing has been written; the person picks.
               <div className="flex shrink-0 flex-wrap items-center gap-3 border-b border-rule bg-ink-sunken px-4 py-3">
                 <p role="alert" className="text-base text-paper-dim">
                   Edited on another device.
@@ -281,11 +231,7 @@ export const Compose = () => {
             )}
 
             {openSendState !== null && (
-              /**
-               * A send that never reported back. Nothing here resends on its own: the message may
-               * be at its recipient already, and only the person can decide that a second copy is
-               * better than a lost one.
-               */
+              // Nothing resends on its own: the message may be at its recipient already.
               <div className="flex shrink-0 flex-wrap items-center gap-3 border-b border-rule bg-ink-sunken px-4 py-3">
                 <p role="alert" className="text-base text-paper-dim">
                   {openSendState === 'sending'
@@ -452,9 +398,7 @@ export const Compose = () => {
                         onChange={event => {
                           const files = [...(event.target.files ?? [])];
                           event.target.value = '';
-                          // Sizes are known before a byte is read: the refusal costs nothing and
-                          // an accidental multi-gigabyte pick never reaches memory. Same dedupe as
-                          // `attach`: a re-picked filename replaces, not adds.
+                          // Sizes are known before a byte is read. Same dedupe as `attach`.
                           const kept = draft.attachments.filter(
                             file => !files.some(next => next.name === file.name),
                           );
@@ -469,8 +413,7 @@ export const Compose = () => {
                             return;
                           }
                           setSendError(null);
-                          // Send waits for the bytes: a send snapshotted mid-read would go out
-                          // without the file and still report success.
+                          // A send snapshotted mid-read would go out without the file.
                           setPendingReads(count => count + files.length);
                           void (async () => {
                             try {
@@ -564,7 +507,7 @@ export const Compose = () => {
                           }
                         })();
                       }}
-                      // A Bcc-only send is a real message — any one of the three fields is enough.
+                      // A Bcc-only send is a real message.
                       disabled={
                         isSending ||
                         // Frozen by a send in flight, here or on another device.

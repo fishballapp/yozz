@@ -92,7 +92,7 @@ const fakeCache = (seed: Partial<Record<Folder, Seed>> = {}) => {
       deleteSummaries: async (uids: readonly number[]) => {
         state[folder].summaries = state[folder].summaries.filter(x => !uids.includes(x.uid));
       },
-      // The double only answers "is a body cached"; the seeded shape is never read back.
+      // The double only answers "is a body cached".
       getBody: async (uid: number) =>
         (state[folder].bodies.get(uid) as FetchedBody | undefined) ?? null,
       putBody: async (uid: number, body: unknown) => {
@@ -108,7 +108,7 @@ const fakeCache = (seed: Partial<Record<Folder, Seed>> = {}) => {
   };
 };
 
-/** The mocked `select` answers per mailbox name, so a test can tell the folders apart. */
+/** Answers per mailbox name, so a test can tell the folders apart. */
 const selectAnswers = (
   byName: Record<string, { uidValidity: number; uidNext: number; exists: number }>,
 ) =>
@@ -139,9 +139,9 @@ describe('syncAccount', () => {
     fetchSummariesBySeq.mockResolvedValue({ ok: true, value: [summary(150), summary(151)] });
     const cache = fakeCache();
     const { state } = await syncAccount(run, cache);
-    // 250 messages exist, so the window is the newest 200 of them by sequence number.
+    // 250 messages exist, so the window is the newest 200 by sequence number.
     expect(fetchSummariesBySeq).toHaveBeenCalledWith('51:*');
-    // A folder the server lacks has nothing older; only the inbox, larger than a window, is open.
+    // A folder the server lacks has nothing older; only the inbox is larger than a window.
     expect(state).toMatchObject({
       status: 'synced',
       complete: ['sent', 'archive', 'trash', 'drafts'],
@@ -152,7 +152,7 @@ describe('syncAccount', () => {
       lastUid: 151,
       complete: false,
     });
-    // No Sent folder listed: nothing asked of one, nothing stored for one.
+    // No Sent folder listed.
     expect(select).toHaveBeenCalledTimes(1);
     expect(cache.read('sent').sync).toBeNull();
   });
@@ -194,11 +194,11 @@ describe('syncAccount', () => {
     expect(fetchFlags).toHaveBeenCalledWith('9:10');
     expect(fetchSummaries).toHaveBeenCalledWith('11:*');
     const { summaries, sync } = cache.read('inbox');
-    // uid 9 was not in the flags refresh → expunged; 10 kept with new flags; 11 added.
+    // uid 9 was not in the flags refresh, so expunged; 10 kept with new flags; 11 added.
     expect(summaries.map(s => s.uid).sort((a, b) => a - b)).toEqual([10, 11]);
     expect(summaries.find(s => s.uid === 10)?.flags).toEqual(['\\Seen']);
     expect(sync?.lastUid).toBe(11);
-    // An incremental sync says nothing about how far back the cache goes; it keeps that answer.
+    // An incremental sync says nothing about how far back the cache goes.
     expect(sync?.complete).toBe(true);
   });
 
@@ -225,8 +225,7 @@ describe('syncAccount', () => {
       });
     const cache = fakeCache();
     const { byFolder, state } = await syncAccount(run, cache);
-    // Grouping is the store's one global pass, so the sync hands back summaries and this test
-    // runs the same pass over the one account it synced.
+    // Grouping is the store's one global pass, run here over the one account synced.
     const threads = threadsFromAccounts({ 'me@x': byFolder });
     expect(select.mock.calls.map(([name]) => name)).toEqual(['INBOX', 'Sent']);
     expect(cache.read('sent').sync).toEqual({
@@ -235,14 +234,14 @@ describe('syncAccount', () => {
       lastUid: 2,
       complete: true,
     });
-    // One message in each: both folders were read whole, so neither has older mail behind it.
+    // Both folders were read whole.
     expect(state).toMatchObject({
       status: 'synced',
       complete: ['inbox', 'sent', 'archive', 'trash', 'drafts'],
     });
-    // One conversation: the inbox message and the reply that went out, not two threads.
+    // One conversation across the inbox message and the reply.
     expect(threads.map(t => t.messages.map(m => m.id))).toEqual([['mid/<m2@x>', 'mid/<reply@x>']]);
-    // Two folders, two uid spaces, and each copy carries the UIDVALIDITY of its own folder.
+    // Two folders, two uid spaces, each copy carrying its own folder's UIDVALIDITY.
     expect(threads[0]?.messages.map(m => m.locations?.[0])).toEqual([
       { account: 'me@x', folder: 'inbox', uidValidity: 5, uid: 2 },
       { account: 'me@x', folder: 'sent', uidValidity: 8, uid: 2 },
@@ -312,7 +311,7 @@ describe('loadOlder', () => {
     expect(res).toEqual({ ok: true, value: { loaded: 1, complete: true } });
     expect(cache.read('inbox').sync?.complete).toBe(true);
 
-    // Already at the start: nothing left to ask for, and the folder is marked complete anyway.
+    // Already at the start; marked complete anyway.
     const atStart = paged(1);
     fetchSummariesBySeq.mockClear();
     expect(await loadOlder(run, atStart.folder('inbox'))).toEqual({
@@ -362,7 +361,7 @@ describe('prefetchBodies', () => {
         bodies: new Map([[2, { paragraphs: ['cached'] }]]),
       },
     });
-    // uid 3 oversized, uid 2 already cached → only uid 1 is fetched.
+    // uid 3 oversized, uid 2 already cached, so only uid 1 is fetched.
     prefetchBodies(
       run,
       cache,
@@ -477,8 +476,7 @@ describe('moveThread', () => {
   });
 
   it('refuses to move uids the server has renumbered since they were read', async () => {
-    // The same uid names different mail after a UIDVALIDITY change, so a move aimed at one
-    // message would bin a stranger's.
+    // After a UIDVALIDITY change the same uid names different mail.
     list.mockResolvedValue({ ok: true, value: [...INBOX_ONLY, TRASH] });
     ensureSelected.mockResolvedValue({ ok: true, value: { uidValidity: 9 } });
     const res = await moveThread(run, [{ mailbox: 'INBOX', uidValidity: 1, uids: [1] }], 'trash');

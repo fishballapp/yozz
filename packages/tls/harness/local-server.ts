@@ -1,14 +1,7 @@
 /**
- * A real TLS 1.3 server, on a real socket, pinned to one group and one suite.
- *
- * This is the peer RFC 8448 cannot be. The traces are a SHA-256 / X25519
- * document, so `TLS_AES_256_GCM_SHA384` and P-384 — the pair `posteo.de`
- * requires — have no published bytes anywhere and can only be proven against
- * something that actually negotiates them.
- *
- * The chain is issued at test time by `@yozz.app/x509`'s own certificate builder, so
- * the client is validated by **`YOZZ_VALIDATOR` against a real root**, not by a
- * test double. That is the first time the two packages meet end to end.
+ * A real TLS 1.3 server pinned to one group and one suite: RFC 8448 covers only SHA-256 and
+ * X25519, so `TLS_AES_256_GCM_SHA384` and P-384 are proven here. The chain is issued by
+ * `@yozz.app/x509`'s builder, so `YOZZ_VALIDATOR` validates against a real root.
  */
 
 import type { AddressInfo } from 'node:net';
@@ -24,20 +17,11 @@ const pem = (label: string, der: Uint8Array): string =>
 
 export const LOCAL_SERVER_NAME = 'localhost';
 
-/**
- * `ciphers`, NOT `ciphersuites`. Node accepts the latter and silently ignores it
- * for TLS 1.3, so a matrix built on it negotiates whatever the server preferred
- * and reports a green row for a suite it never used.
- */
+/** `ciphers`, not `ciphersuites`: Node silently ignores the latter for TLS 1.3. */
 export type SuiteName = 'TLS_AES_128_GCM_SHA256' | 'TLS_AES_256_GCM_SHA384';
 export type CurveName = 'X25519' | 'P-256' | 'P-384';
 
-/**
- * The root and the leaf the server is presenting. Exposed so a test can issue a
- * SECOND leaf under the same root and stand a second server on it — which is
- * how a reissue is staged, and the only way to tell a renewal apart from a key
- * rotation from the client's side.
- */
+/** Exposed so a test can issue a second leaf under the same root and stand a second server on it. */
 export type LocalServerChain = {
   readonly root: IssuedCertificate;
   readonly leaf: IssuedCertificate;
@@ -92,8 +76,7 @@ export const startLocalServer = async ({
     ecdhCurve: curve,
   });
 
-  // OpenSSL reports a received fatal alert as a connection error naming it, which
-  // is how the client's alerts get read by something that is not the client.
+  // OpenSSL reports a received fatal alert as a connection error naming it.
   server.on('tlsClientError', error => alertsReceived.push(error.message));
   server.on('secureConnection', socket => {
     socket.on('error', error => alertsReceived.push(error.message));
@@ -108,7 +91,7 @@ export const startLocalServer = async ({
     port: (address as AddressInfo).port,
     chain: { root, leaf },
     trustAnchors: {
-      // The rig issues its own root; no distrust metadata exists for it.
+      // The rig issues its own root.
       findCandidates: () => [
         { id: 'yozz-local-root', certificateDer: root.der, serverDistrustAfter: null },
       ],

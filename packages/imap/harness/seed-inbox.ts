@@ -1,19 +1,10 @@
 /**
- * Seeds a real mailbox with fixture mail over IMAP APPEND, for demoing the client against
- * something worth reading. APPEND rather than a send, so every message names an outside
- * sender and no third party has to accept anything.
+ * Seeds a mailbox with the fixture mail over IMAP APPEND. Reruns duplicate, so name slugs for a resend:
  *
- *     YOZZ_IMAP_HOST=… YOZZ_IMAP_USER=… YOZZ_IMAP_PASSWORD=… node harness/seed-inbox.ts
- *     … node harness/seed-inbox.ts injection thread-1   # only these slugs, for a resend
+ *     YOZZ_IMAP_HOST=… YOZZ_IMAP_USER=… YOZZ_IMAP_PASSWORD=… node harness/seed-inbox.ts [slug…]
  *
- * Reruns duplicate: Message-IDs are fixed, but APPEND does not de-duplicate. Name slugs.
- * Run by hand only, never in CI or `pnpm test`.
- *
- * **Every sender is on `webmcp-judge.yozz.app` on purpose**, and each local part is a DISABLED
- * alias there (`is_enabled: false`, `error_code_if_disabled: 250`) so a reply is accepted and
- * routed nowhere. Against a `.example` sender the reply cannot be delivered and Forward Email
- * posts Delivery Status Notifications back into the mailbox being demoed. These fifteen must stay
- * in step with `apps/web/src/judge/fixtures.ts`, which carries the same reasoning.
+ * Every sender is a disabled alias on `webmcp-judge.yozz.app` (accepts and drops replies), so a reply
+ * never bounces a DSN into the demoed mailbox. Keep in step with `apps/web/src/judge/fixtures.ts`.
  */
 import { connect, type Socket } from 'node:net';
 import { buildMessage, type MessageInput } from '@yozz.app/smtp';
@@ -36,13 +27,11 @@ const REMOTE_IMAGE =
 const bytes = (base64: string) => Uint8Array.from(atob(base64), c => c.charCodeAt(0));
 const id = (slug: string) => `<yozz-seed-${slug}@fishball.dev>`;
 
-/** Newest last: each fixture is `MINUTES_APART` older than the one after it. */
 const MINUTES_APART = 7 * 60 + 23;
 const now = Date.now();
 
 type Fixture = Omit<MessageInput, 'date' | 'messageId' | 'to'> & {
   readonly slug: string;
-  /** Where it goes. `sent` is mail the mailbox's owner sent, so it lands in the Sent folder. */
   readonly box?: 'inbox' | 'sent';
   readonly unread?: boolean;
   readonly inReplyTo?: string;
@@ -131,7 +120,6 @@ const fixtures: readonly Fixture[] = [
       { filename: 'logo.png', mimeType: 'image/png', content: bytes(PNG_1PX) },
     ],
   },
-  // The thread: the owner's own reply sits in Sent, so the client has to stitch two folders.
   {
     slug: 'thread-1',
     from: { address: 'dana@webmcp-judge.yozz.app', name: 'Dana Whitfield' },
@@ -168,7 +156,6 @@ const fixtures: readonly Fixture[] = [
     text: 'We have opened ticket #4417 on your behalf. An engineer will pick it up within one business day.',
     unread: true,
   },
-  // The one that matters for the demo: instructions addressed to whatever agent reads the mail.
   {
     slug: 'injection',
     from: { address: 'rewards@webmcp-judge.yozz.app', name: 'Account Services' },

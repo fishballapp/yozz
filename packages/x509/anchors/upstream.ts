@@ -1,24 +1,7 @@
 /**
- * What upstream has done to the trust store since we pinned it.
- *
- * The pins in `pin.ts` freeze two files by hash, which is what stops a trust
- * store changing without a diff to read. The cost of freezing is that it also
- * stops the trust store changing when it SHOULD: a CA distrusted this morning
- * is still trusted by a client shipping last month's pin, and nothing in the
- * build says so. This module is the other half — it compares the artifact we
- * ship against what upstream publishes today, and names what moved.
- *
- * **Three kinds of movement, and the third is the reason this exists.** A root
- * ADDED and a root REMOVED are both visible in `cacert.pem` and a hash mismatch
- * would catch them. A root that GAINED A CUTOFF is not: the certificate is
- * byte-for-byte identical, so the PEM does not change at all, and only
- * `certdata.txt` knows. That is the case the shipped bundle already has one of
- * (`Izenpe.com`), and the case a bundle-only diff misses completely.
- *
- * The comparison is a pure function over bytes so the gate can hand it a
- * SIMULATED distrust — see `upstream.test.ts`. A checker that can only be
- * exercised by waiting for a real CA to be retired is a checker nobody has ever
- * seen work.
+ * What upstream has done to the trust store since the pin. A root added or removed shows in
+ * `cacert.pem`; a root that gained a cutoff does not, and only `certdata.txt` knows. Pure over bytes
+ * so the test can hand it a simulated distrust.
  */
 
 import { derFromPem } from '../harness/pem.ts';
@@ -26,32 +9,13 @@ import type { AnchorIndexEntry } from '../src/anchors.ts';
 import { decodeCertificate } from '../src/certificate.ts';
 import { derKey, serverDistrustByCertificate, trustedCertificateDerKeys } from './certdata.ts';
 
-/**
- * A moving ref on purpose, and the one place in this package that has one.
- *
- * `pin.ts` takes `certdata.txt` by COMMIT because a moving trust input is what
- * pinning exists to prevent. This job wants the opposite: its entire question is
- * "what does upstream say TODAY", and a pinned answer to that is no answer. The
- * bytes it fetches are never compiled into anything — they are read, compared
- * and thrown away.
- */
+/** A moving ref on purpose: the question is what upstream says today, and the bytes are never compiled. */
 export const UPSTREAM_CERTDATA_REF = 'master';
 export const UPSTREAM_CERTDATA_PATH = 'lib/ckfw/builtins/certdata.txt';
 export const upstreamCertdataUrl = (ref: string): string =>
   `https://raw.githubusercontent.com/nss-dev/nss/${ref}/${UPSTREAM_CERTDATA_PATH}`;
 
-/**
- * What `master` points at right now, because a hash without its ref is not a
- * pin and the failure output says so in as many words.
- *
- * A review caught this printing `CERTDATA_SHA256` beside an instruction to bump
- * `CERTDATA_COMMIT` "to the ref you read", with no ref anywhere in the log —
- * true advice the output could not be used to follow. Resolving it costs one
- * more request. **Resolved for the PATH, not the branch tip**: certdata.txt
- * changes far less often than NSS does, so the commit that last touched the file
- * is the one worth pinning, and pinning a branch tip that merely happens to
- * contain it makes every unrelated NSS commit look like a trust change.
- */
+/** Resolved for the path, not the branch tip: certdata.txt changes far less often than NSS. */
 export const resolveCertdataCommit = async (
   fetchJson: (url: string) => Promise<unknown>,
 ): Promise<string | null> => {
@@ -77,39 +41,10 @@ export type TrustStoreChange =
       readonly label: string;
     };
 
-/**
- * WHICH root moved, for a human reading a failed cron.
- *
- * The common name, which is what a CA is called everywhere else — root
- * programs, browser UI, the news story about a distrust. It takes the whole
- * CERTIFICATE rather than the `subjectDer` beside it in the artifact, because a
- * root upstream has ADDED has no artifact entry to take a subject from, and one
- * function covering both cases is one behaviour to read.
- *
- * The value TLV is kept verbatim by the decoder (RFC 5280 name comparison turns
- * on the string type), so the text is that TLV minus its two header bytes,
- * decoded as UTF-8: exact for `UTF8String`, and `PrintableString` is ASCII.
- *
- * Falling back to the printable runs of the raw bytes is not decoration. A root
- * with no common name, or one this decoder chokes on, is still a root that
- * moved, and a report that dropped it would be worse than one that names it
- * badly.
- */
+/** The common name, from the whole certificate (an added root has no artifact entry), with a raw-bytes fallback. */
 const COMMON_NAME_OID = '2.5.4.3';
 
-/**
- * A certificate subject is attacker-chosen text on its way into a CI log, and
- * this job's whole premise is that upstream might do something we did not
- * expect. A review demonstrated the consequence: a common name of
- * `EvilCA\n::error::forged trust change` becomes a second line in the GitHub
- * Actions log, and `::error::` is a workflow COMMAND — so a hostile root could
- * forge or bury the very report that is supposed to catch it. ANSI escapes do
- * the same to a terminal.
- *
- * So: no control characters, no escapes, and a length cap. A CA name is a
- * label here, never a value anything parses, so mangling a pathological one
- * costs nothing and the alternative is a log that lies.
- */
+/** A subject is attacker-chosen text going into a CI log, where `::error::` is a workflow command. */
 const MAX_LABEL_CHARACTERS = 120;
 
 const printable = (text: string): string => {
@@ -146,13 +81,7 @@ export const subjectLabel = (certificateDer: Uint8Array): string => {
     : printable(runs.slice(0, 3).join(' / '));
 };
 
-/**
- * What upstream would compile to, against what we ship.
- *
- * Matching is by certificate DER, not by `id`: the ids are positional
- * (`cacert.pem#37`), so one root leaving the bundle renumbers every root after
- * it and an id-keyed diff would report 84 changes for one removal.
- */
+/** Matched by certificate DER, not by positional `id`. */
 export const diffTrustStore = ({
   shipped,
   upstreamCacertPem,
@@ -170,28 +99,8 @@ export const diffTrustStore = ({
     );
   }
   /**
-   * The one way this diff could report a FALSE "no change", and it is the
-   * dangerous direction. A root that GAINS a cutoff is detected by finding that
-   * cutoff in `certdata.txt` — so a certdata that fetched short, or came back as
-   * something that parses to nothing, yields no cutoff, compares equal to the
-   * `null` we ship, and the retirement passes in silence. The PEM guard above
-   * cannot see it: `cacert.pem` is unchanged in exactly that case, which is the
-   * whole reason this second file is fetched at all.
-   *
-   * The check is `build.ts`'s, applied to the upstream pair rather than the
-   * pinned one: **every root in the PEM must be described by the certdata beside
-   * it.** That is exact rather than a threshold — a root genuinely REMOVED from
-   * NSS leaves both files together and is reported as a removal, while a short
-   * read leaves roots in the PEM that certdata cannot account for, and those are
-   * precisely the roots whose cutoffs would be read as absent.
-   *
-   * **Described means it has a TRUST object, not merely a certificate one**, and
-   * a review is why. A cutoff usually hangs off `CKO_NSS_TRUST`, and NSS writes
-   * those after the `CKO_CERTIFICATE` they belong to — so a file truncated
-   * between the two blocks holds every certificate and no trust at all, which
-   * the weaker check called complete while every cutoff read as absent. Measured
-   * on the real file: 172 certificates, 172 with a trust object, so the stricter
-   * demand costs nothing on a good read.
+   * Every root in the PEM must have a trust object in the certdata beside it. A short certdata read
+   * leaves the PEM intact and every cutoff reading as absent, which is the one false "no change".
    */
   const described = trustedCertificateDerKeys(upstreamCertdata);
   const undescribed = upstreamRoots.filter(der => !described.has(derKey(der)));
@@ -207,13 +116,7 @@ export const diffTrustStore = ({
   const upstreamByDer = new Map(upstreamRoots.map(der => [derKey(der), der] as const));
   const shippedByDer = new Map(shipped.map(entry => [derKey(entry.der), entry] as const));
 
-  /**
-   * Both sides are keyed by DER, so a root appearing TWICE collapses and the
-   * per-root walk below sees nothing — a review's finding, and the consequence
-   * is not academic: `anchors:build` indexes positionally, so a duplicated root
-   * upstream produces an artifact with one more entry while this job reports
-   * "no change". Comparing the counts costs two numbers and closes it.
-   */
+  /** Both sides are keyed by DER, so a duplicated root upstream would otherwise collapse. */
   if (upstreamRoots.length !== upstreamByDer.size || shipped.length !== shippedByDer.size) {
     throw new Error(
       `duplicate roots: upstream has ${upstreamRoots.length} certificates for ` +
@@ -232,11 +135,7 @@ export const diffTrustStore = ({
       continue;
     }
     const now = upstreamDistrust.get(key);
-    /**
-     * The invisible one. Both sides hold the same certificate, so nothing about
-     * the PEM has moved; what changed is what NSS says that certificate may
-     * still vouch for.
-     */
+    // Same certificate on both sides; only what NSS says it may vouch for changed.
     if ((now?.notAfter ?? null)?.getTime() !== (entry.serverDistrustAfter ?? null)?.getTime()) {
       changes.push({
         kind: 'cutoff-changed',
@@ -267,8 +166,6 @@ export const describeChange = (change: TrustStoreChange): string => {
     case 'root-removed':
       return `REMOVED  ${change.id}  ${change.subject}`;
     case 'cutoff-changed': {
-      // NSS's own `CKA_LABEL` when it has one, and nothing rather than empty
-      // parentheses when it does not — this is read by a person once.
       const label = change.label === '' || change.label === 'none' ? '' : `  (${change.label})`;
       return `CUTOFF   ${change.id}  ${change.subject}\n           ${iso(change.was)} -> ${iso(
         change.now,

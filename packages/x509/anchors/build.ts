@@ -1,21 +1,11 @@
 /**
- * Compile the shipped trust store from the two pinned inputs.
- *
- * `cacert.pem` decides WHICH roots ship — it is NSS already filtered to the
- * ones trusted for server authentication, and reproducing that filter ourselves
- * is how a root nobody meant to trust gets shipped. `certdata.txt` decides what
- * each of them may still vouch for, which is the one thing a PEM cannot say.
- *
- * The output is committed. A trust store that changes without a diff to read is
- * the thing the pinned hashes exist to prevent, and the artifact is the only
- * place a reviewer can see the result rather than the inputs.
+ * `cacert.pem` decides which roots ship (NSS filtered to server auth); `certdata.txt` decides what each
+ * may still vouch for. The output is committed so a trust change arrives as a diff.
  */
 import { createHash } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { derFromPem } from '../harness/pem.ts';
-// From the module, NOT from `../src/index.ts`. The index re-exports the artifact
-// this script WRITES, so going through it makes the build unable to regenerate a
-// missing or malformed one — a bootstrap loop, verified by deleting the file.
+// Not from `../src/index.ts`, which re-exports the artifact this script writes.
 import { indexAnchors } from '../src/anchors.ts';
 import { certificateDerKeys, derKey, serverDistrustByCertificate } from './certdata.ts';
 import {
@@ -28,17 +18,7 @@ import {
 
 const ARTIFACT = new URL('../src/root-bundle-generated.ts', import.meta.url).pathname;
 
-/**
- * Hash what we are about to COMPILE, not what `anchors:fetch` happened to verify
- * on some earlier run.
- *
- * `.anchors/` is a gitignored cache. Bump `pin.ts` without re-fetching and the
- * old bytes are still sitting there — so the artifact would be stamped with the
- * new hashes and built from the old files, and a reviewer reading
- * `root-bundle-generated.ts` is told it matches something it was never checked
- * against. That is precisely the silent trust change the pins exist to prevent,
- * so the header below carries these MEASURED hashes rather than the constants.
- */
+/** Hashes of what is compiled, not what `anchors:fetch` verified on an earlier run: `.anchors/` is a cache. */
 const sha256 = (bytes: Uint8Array): string => createHash('sha256').update(bytes).digest('hex');
 
 const readVerified = (name: string, cache: string, expected: string): string => {
@@ -64,13 +44,7 @@ if (bundle.length === 0) throw new Error('cacert.pem yielded no certificates');
 const distrust = serverDistrustByCertificate(certdata);
 const known = certificateDerKeys(certdata);
 
-/**
- * A bundle root that certdata has never heard of means the two pins are out of
- * step with each other — curl republishes on its own schedule, so one can be
- * newer than the other. That is a real thing to catch: the cutoffs would be
- * read from a file that does not describe the roots being shipped, and every
- * missing root would silently get `null`.
- */
+/** A bundle root certdata has never heard of means the two pins are out of step; its cutoff would read as `null`. */
 const unknown = bundle.filter(der => !known.has(derKey(der)));
 if (unknown.length > 0) {
   throw new Error(
@@ -89,13 +63,7 @@ const entries = indexAnchors(
   })),
 );
 
-/**
- * `indexAnchors` drops a certificate it cannot decode, which is right for a
- * runtime lookup — one corrupt row must not take down an unrelated connection.
- * It is wrong HERE. A decoder regression or a truncated PEM block would compile
- * a quieter, shorter trust store and exit 0, and the only thing that would
- * notice is a committed test asserting the count.
- */
+/** Unlike `indexAnchors`, a certificate that does not decode fails the build rather than shrinking the store. */
 if (entries.length !== bundle.length) {
   throw new Error(
     `${bundle.length - entries.length} of ${bundle.length} roots in cacert.pem did not decode.\n` +

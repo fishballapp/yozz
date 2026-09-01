@@ -34,28 +34,10 @@ import { IconSwitch } from './ui/IconSwitch';
 import { toast } from './ui/Toast';
 
 /**
- * TWO LAYOUTS OVER ONE RECORD. The same thread is either a COLUMN record or a STACKED record, and
- * the choice is the reader's, kept across reloads.
- *
- * - **Columns** is the scanning shape: a fixed-width 34px line whose x-positions hold down the
- *   whole list, so the eye runs vertically instead of re-finding each field per row. Address is
- *   compressed to a single gutter letter, and a header rule names the columns — which is also the
- *   only place that letter gets explained.
- * - **Stacked** is the reading shape: the subject as the focal line, a `from → to` attribution
- *   under it spelling out WHICH OF YOUR ADDRESSES the message arrived at, then three lines of the
- *   body. It costs roughly three times the height per thread and buys back both the fact the gutter
- *   letter only hints at — the one this product is organised around — and enough of the message to
- *   answer it without opening it.
- *
- * Both shapes hold their invariants: the star LEADS the row, where a Gmail user's hand already
- * goes, and keeps that position at the head of the reader too. Selection is INVERSION — a solid
- * --select bar with --ink reversed out of it; everything reversed out holds >=4.5:1 (ink/60) and
- * the unstarred star, a non-text mark, holds >=3:1 (ink/50).
- *
- * The accent buys two things in this list and nothing else: UNREAD, and STARRED. Unread takes the
- * same column in both layouts — the letter mark in columns, a solid square in stacked — so
- * switching layouts never moves it. Starred takes the star itself, which is the one place a reader
- * expects colour and the one mark they applied by hand.
+ * Two layouts over one record, the reader's choice kept across reloads: columns (one 34px line,
+ * address as a gutter letter) and stacked (subject, `from → to`, three lines of body). The star
+ * leads the row in both; selection inverts; the accent marks unread and starred only. Contrast
+ * figures and rationale are in DESIGN.md.
  */
 
 type Layout = 'columns' | 'stacked';
@@ -65,13 +47,9 @@ const DESKTOP_COLUMNS = 'lg:grid-cols-[1.5rem_1.75rem_9.375rem_minmax(0,1fr)_1re
 type RowProps = { thread: ThreadState; mailbox: MailboxId; isSelected: boolean };
 
 /**
- * Everything a row reads off a thread, derived in ONE place so the two shapes cannot disagree.
- *
- * The distinction is load-bearing. `latest` decides where the thread SITS and what time it shows;
- * `inbound` decides everything the row SAYS about correspondence. Mixing them composes a routing
- * that never happened — on a thread you replied to, `latest` is your own reply, so `latest.fromName`
- * printed beside `inbound.toAddress` reads "you → your own address". Three of the fixture threads
- * did exactly that. Both ends come off `inbound`, so a row always states one real message.
+ * Derived in one place so the two shapes cannot disagree. `latest` decides where the thread sits
+ * and its time; `inbound` decides everything the row says about correspondence (on a thread you
+ * replied to, `latest` is your own reply).
  */
 const useRecord = (thread: ThreadState) => {
   const { ownedAddresses } = useMail();
@@ -83,11 +61,7 @@ const useRecord = (thread: ThreadState) => {
   };
 };
 
-/**
- * One link covers the row and carries the whole record as its accessible name; the visible spans
- * are then decorative, so the row announces once instead of six times. Unread is in that name
- * because otherwise it exists only as colour and weight.
- */
+/** One link covers the row and carries the whole record as its accessible name; the visible spans are decorative. */
 const RowLink = ({ thread, mailbox, isSelected }: RowProps) => {
   const { latest, inbound, attachments } = useRecord(thread);
 
@@ -95,13 +69,10 @@ const RowLink = ({ thread, mailbox, isSelected }: RowProps) => {
     <Link
       to="/m/$mailbox/t/$"
       params={{ mailbox, _splat: thread.id }}
-      // Spread rather than replace: a link that states a whole search object silently drops every
-      // param beside the one it cares about, and opening a message must not clear the search that
-      // found it.
+      // Spread rather than replace: opening a message must not clear the search that found it.
       search={previous => previous}
       aria-current={isSelected ? true : undefined}
-      // The ring is drawn INSIDE the row, so on the inverted bar a --signal outline sits on
-      // --select at 1.5:1 and disappears exactly where you are working. Invert it too.
+      // The ring is drawn inside the row; on the inverted bar a --signal outline sits on --select at 1.5:1.
       className={cn(
         'absolute inset-0 -outline-offset-2',
         isSelected && 'focus-visible:outline-ink',
@@ -135,10 +106,7 @@ const StarButton = ({
         'relative z-10 flex items-center justify-center -outline-offset-2',
         className,
         isSelected && 'focus-visible:outline-ink',
-        // Starred is the accent, and it stays the accent on the inverted bar — a star that turns
-        // --ink there reads as switched OFF, the one thing this mark must never do. On --select it
-        // steps to --signal-deep: the same hue at 3.37:1, still C 0.177, still visibly green.
-        // That one step is why the accent is this hue at all — see DECISIONS.md.
+        // On --select the star steps to --signal-deep (same hue at 3.37:1); an --ink star there reads as off.
         thread.isStarred
           ? isSelected
             ? 'text-signal-deep'
@@ -161,12 +129,7 @@ type DiscardOutcome = Exclude<
   'deleted' | 'absent'
 >;
 
-/**
- * Why the discard did not happen, in the words the person clicking needs.
- *
- * A refusal is never "it failed": every one of these names a different thing to do next, and the
- * draft is still on screen while they read it.
- */
+/** Each refusal names a different thing to do next. */
 const discardRefusal = (outcome: DiscardOutcome) =>
   outcome === 'busy'
     ? 'It is open in the composer — close that first.'
@@ -178,12 +141,7 @@ const discardRefusal = (outcome: DiscardOutcome) =>
           ? 'The vault is locked.'
           : 'The vault could not be reached.';
 
-/**
- * Triage without leaving the list. With the shortcut layer gone this is the only way to clear a row
- * without opening it, so it is revealed by hover AND by keyboard focus. Archive and delete in that
- * order everywhere the row is a server message; in Trash the single mark that undoes them, and in
- * Drafts the single one that discards, because neither of the other two can touch a draft.
- */
+/** Revealed by hover and by keyboard focus. Archive and delete for server messages; undo in Trash; discard in Drafts. */
 /** One mark in the hover cluster. `confirm` present means it asks before it acts. */
 type RowAction = {
   readonly icon: Icon;
@@ -204,8 +162,7 @@ const RowTriage = ({
   className,
 }: RowProps & { className: string }) => {
   const { toggleArchive, trashThread, restoreThread, removeDraft } = useMail();
-  // A draft is a vault record with no IMAP copy, so the archive and delete below — which move
-  // server messages — can do nothing to it. In Drafts the one meaningful action is discarding it.
+  // A draft has no IMAP copy, so archive and delete can do nothing to it.
   const draftId = thread.messages.find(message => message.isDraft === true)?.draftId;
   const actions: readonly RowAction[] =
     mailbox === 'drafts' && draftId !== undefined
@@ -213,8 +170,7 @@ const RowTriage = ({
           {
             icon: TrashIcon,
             label: `Discard ${thread.subject}`,
-            // The same sheet the composer's Discard takes: one action, one level of protection,
-            // whichever screen it is offered from.
+            // The same sheet the composer's Discard takes.
             confirm: {
               title: 'Discard this draft?',
               description: DISCARD_WARNING,
@@ -265,11 +221,8 @@ const RowTriage = ({
             {...(confirm === undefined ? { onClick: () => void act() } : {})}
             className={cn(
               'flex w-6 justify-center -outline-offset-2 opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100',
-              // A row action that opens a sheet stays visible while the sheet is up: the pointer
-              // has left the row by then, and a trigger that vanishes under its own dialog is
-              // what makes the sheet look like it came from nowhere. Keyed on `aria-expanded`,
-              // which is what Base UI's trigger actually sets — it emits no `data-popup-open`,
-              // checked in the browser rather than assumed.
+              // Stays visible while its sheet is up, or the trigger vanishes under its own dialog. Keyed on
+              // `aria-expanded`, which is what Base UI's trigger sets (it emits no `data-popup-open`).
               confirm === undefined ? '' : 'aria-expanded:opacity-100',
               isSelected
                 ? 'text-ink/60 hover:text-ink focus-visible:outline-ink'
@@ -295,7 +248,7 @@ const RowTriage = ({
   );
 };
 
-/** Above `lg` only: the two-line folded column record has no columns to head. */
+/** Above `lg` only: the folded column record has no columns to head. */
 const ColumnHeader = () => (
   <div
     className={cn(
@@ -311,10 +264,8 @@ const ColumnHeader = () => (
 );
 
 /**
- * One grid, two shapes. Above `lg` a record is a single 34px line. Below it there is no width for
- * a 150px sender column beside a subject, so the record folds onto two lines rather than truncating
- * every subject to a dozen characters, and the star spans both lines so its 44px touch target is a
- * real cell instead of an overhang across the row link.
+ * One grid, two shapes. Below `lg` the record folds onto two lines rather than truncating every
+ * subject, and the star spans both lines so its 44px touch target is a real cell.
  */
 const ColumnsRow = ({ thread, mailbox, isSelected }: RowProps) => {
   const isUnread = thread.isUnread;
@@ -412,20 +363,7 @@ const ColumnsRow = ({ thread, mailbox, isSelected }: RowProps) => {
   );
 };
 
-/**
- * Three rows, and the SUBJECT leads: it is first, alone at the base step, in full `--paper`, and
- * the only line carrying weight. Under it sits its attribution — `from → to`, the whole routing of
- * the message on one `--text-2xs` line — and under that three lines of the body. Neither can be
- * mistaken for the subject: both are a step down in size, in colour, or in both.
- *
- * The arrow does what a colon and two labels used to: a message went FROM someone TO one of your
- * addresses, and WHICH address is the fact this product is organised around. Spelling it out is the
- * entire reason this layout exists — the column record can only afford a letter for it.
- *
- * The record runs top-left to bottom-right: it opens on WHAT and closes on WHEN, level with the
- * last line of the excerpt. Triage sits at the top corner beside the star, so both controls are
- * found in one place.
- */
+/** Subject first and alone at the base step; `from → to` under it; three lines of body; date level with the last line. */
 const StackedRow = ({ thread, mailbox, isSelected }: RowProps) => {
   const isUnread = thread.isUnread;
   const { latest, inbound, attachments } = useRecord(thread);
@@ -559,8 +497,7 @@ export const ThreadList = ({
   query: string;
   onQueryChange: (query: string) => void;
 }) => {
-  // Which row is open is a fact about the URL. Reading it here rather than receiving it as a prop
-  // keeps the answer in one place — the row link and the row's inversion cannot disagree.
+  // Which row is open is a fact about the URL, so the row link and its inversion cannot disagree.
   const { _splat: threadId } = useParams({ strict: false });
   const { accounts, recordsError, syncStates, sync, loadOlder, isLoadingOlder, isDemo } = useMail();
   const [layout, setLayout] = useChromePref<Layout>('yozz:list-layout', 'columns', raw =>
@@ -670,9 +607,7 @@ export const ThreadList = ({
         <MagnifyingGlassIcon size={14} className="shrink-0 text-paper-faint" />
         <input
           type="search"
-          // Named even though nothing here submits: an unnamed field is the one thing this app
-          // trips Chrome's autofill advisory on, and a search box is the one field where the
-          // browser remembering what you typed is wanted rather than tolerated.
+          // Named: an unnamed field trips Chrome's autofill advisory, and here remembering is wanted.
           name="search"
           value={query}
           onChange={event => onQueryChange(event.target.value)}

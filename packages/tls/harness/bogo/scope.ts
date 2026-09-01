@@ -1,56 +1,24 @@
 /**
- * What BoGo tests YOZZ declares out of scope, and why each one is.
- *
- * BoGo covers BoringSSL's whole surface — TLS 1.2, DTLS, QUIC, client
- * certificates, renegotiation, early data — and a client that implements none
- * of that can reach a green board by skipping nearly everything. So the scope
- * is stated here, as rules over what the runner itself tells us about a test,
- * and `manifest.txt` is what survives them. Everything NOT excluded here is in
- * scope; a test in scope that the shim declines is backlog, and `run.ts` prints
- * it as debt rather than letting it read as coverage.
- *
- * Two of these rules lean on the runner's own invariants, which is what makes
- * them trustworthy rather than guesses about names:
- *
- *  - `checkTests` in `ssl/test/runner/runner.go` PANICS if a test's name carries
- *    a version or protocol token its config does not match. So `-TLS12-` in a
- *    name really is TLS 1.2, and `-DTLS-` really is DTLS.
- *  - The side (client or server) and the protocol arrive from the runner
- *    directly, in the `-write-settings` path it hands the shim.
+ * BoGo tests declared out of scope, as rules over what the runner tells us about each test;
+ * `manifest.txt` is what survives them. A version token in a name is trustworthy because
+ * `checkTests` (`ssl/test/runner/runner.go`) panics when the name and config disagree; the side
+ * and protocol arrive in the `-write-settings` path.
  */
 
 export type InventoryRow = {
   readonly name: string;
   readonly protocol: 'tls' | 'dtls' | 'quic';
   readonly side: 'client' | 'server';
-  /**
-   * Every flag the runner handed the shim. Presence only — a repeated flag
-   * appears once per occurrence and its VALUE is not here, which is what
-   * `argv` is for.
-   */
+  /** Presence only; a repeated flag appears once per occurrence. Values are in `argv`. */
   readonly flags: readonly string[];
   /**
-   * The whole argv, values included, because some rules cannot be written over
-   * flag names alone: `-curves` and `-verify-prefs` name the algorithm in the
-   * NEXT token, so `-curves 25` and `-curves 23` are P-521 and X25519 behind
-   * one flag.
-   *
-   * Reading argv rather than the shim's decline reason is deliberate. The
-   * reason names the FIRST flag the shim refused, so a test that needs both
-   * P-521 and something in scope is filed under whichever came first — which is
-   * how six CBC tests hid behind `-write-different-record-sizes`. A rule over
-   * argv sees the whole request.
+   * Whole argv, because `-curves` and `-verify-prefs` name the algorithm in the next token. Rules
+   * read argv rather than the shim's decline reason, which names only the first refused flag.
    */
   readonly argv: readonly string[];
   /**
-   * The peer refused the version we offered, measured in the inventory run. It
-   * is how a TLS 1.2 test whose NAME says nothing about versions gets
-   * attributed — the peer, not us, decides.
-   *
-   * Two forms, because one is not enough. The runner says so in its own error
-   * when the test FAILS; when the test passes it says nothing, and a TLS 1.2
-   * test can pass by accident on an error our client raised for its own
-   * reasons. So the client's `alert-received protocol_version` counts too.
+   * Measured in the inventory run, in two forms: the runner's own error when the test fails, and
+   * the client's `alert-received protocol_version` when a TLS 1.2 test passes by accident.
    */
   readonly peerRefusedVersion: boolean;
 };
@@ -64,11 +32,7 @@ export type ScopeRule = {
 const hasAny = (flags: readonly string[], names: readonly string[]): boolean =>
   names.some(name => flags.includes(name));
 
-/**
- * Every value given to `flag`, in argv order. `-curves` and `-verify-prefs` are
- * repeated once per entry rather than given a list, so this returns one string
- * per occurrence.
- */
+/** Every value given to `flag`, one string per occurrence. */
 const valuesOf = (argv: readonly string[], flag: string): readonly string[] =>
   argv.flatMap((token, index) => (token === flag ? [argv[index + 1] ?? ''] : []));
 
@@ -82,10 +46,7 @@ const offersScheme = (row: InventoryRow, ids: Readonly<Record<number, string>>):
 
 const VERSION_TOKEN = /(^|-)(SSL3|TLS1|TLS11|TLS12)(-|$)/;
 
-/**
- * The post-quantum algorithms, key exchange and signature both. Decided out of
- * v1 together, so they are one table and one rule.
- */
+/** Post-quantum key exchange and signatures, out of v1 together. */
 const POST_QUANTUM_GROUPS: Readonly<Record<number, string>> = {
   514: 'MLKEM1024',
   4588: 'X25519MLKEM768',
@@ -102,14 +63,9 @@ const P521_GROUP: Readonly<Record<number, string>> = { 25: 'P-521' };
 const P521_SCHEME: Readonly<Record<number, string>> = { 1539: 'ECDSA_P521_SHA512' };
 
 /**
- * Schemes TLS 1.3 does not define for CertificateVerify, which is the message
- * `-verify-prefs` configures. RFC 9846 §4.3.3 on the RSA-PKCS1 group: "These
- * values refer solely to signatures which appear in certificates (see Section
- * 4.5.1.2) and are not defined for use in signed TLS handshake messages,
- * although they MAY appear in `signature_algorithms` and
- * `signature_algorithms_cert` for backward compatibility with TLS 1.2." And
- * §4.5.2 on SHA-1: "The SHA-1 algorithm MUST NOT be used in any signatures of
- * CertificateVerify messages."
+ * Not CertificateVerify schemes: RFC 9846 §4.3.3 (RSA-PKCS1 "not defined for use in signed TLS
+ * handshake messages") and §4.5.2 ("SHA-1 ... MUST NOT be used in any signatures of
+ * CertificateVerify messages").
  */
 export const LEGACY_SCHEMES: Readonly<Record<number, string>> = {
   513: 'RSA_PKCS1_SHA1',
@@ -121,12 +77,8 @@ export const LEGACY_SCHEMES: Readonly<Record<number, string>> = {
 };
 
 /**
- * Groups BoGo tests that this client does not implement, named so the backlog
- * reads as "we do not have P-521" rather than "we do not parse `-curves`". The
- * two are different debts and only one of them is harness work.
- *
- * The shim declines by these names and the rules below exclude by the same
- * ids, so a curve cannot be out of scope in one place and debt in the other.
+ * Named so the backlog reads "we do not have P-521" rather than "we do not parse `-curves`".
+ * The shim declines by these names and the rules exclude by the same ids.
  */
 export const UNIMPLEMENTED_CURVES: Readonly<Record<number, string>> = {
   ...P521_GROUP,
@@ -139,13 +91,7 @@ export const UNIMPLEMENTED_SCHEMES: Readonly<Record<number, string>> = {
   ...POST_QUANTUM_SCHEMES,
 };
 
-/**
- * Tests where our behaviour follows RFC 9846 and BoringSSL chose otherwise.
- *
- * A divergence list is exactly the place a bug hides, so an entry without the
- * sentence it rests on is not an entry. Each of these was read out of the RFC
- * text, not remembered.
- */
+/** Tests where RFC 9846 and BoringSSL disagree. Every entry quotes the sentence it rests on. */
 export const RFC_DIVERGENCES: readonly { readonly test: string; readonly rfc: string }[] = [
   {
     test: 'TLS13-InvalidCompressionMethod',
@@ -243,15 +189,8 @@ export const SCOPE_RULES: readonly ScopeRule[] = [
         '-accepted-peer-cert-types',
         '-expect-certificate-types',
         '-expect-client-ca-list',
-        // Not a client-auth flag by its name, and every test that carries it is
-        // one: BoringSSL's cert callback is where a client PICKS the
-        // certificate it will send, so both `FailCertCallback-Client-*` tests
-        // set `ClientAuth: RequestClientCert` (`basic_tests.go`); their two
-        // Server siblings do not, and are already out under `server`. Only the
-        // TLS 1.3 client one was ever in scope, and it sat in the manifest because the
-        // shim exits 89 on the flag before the runner can ask for a
-        // certificate — a config the rules above cannot see, because it is the
-        // runner's and not in argv.
+        // A client-auth flag in effect: both `FailCertCallback-Client-*` tests set
+        // `ClientAuth: RequestClientCert` (`basic_tests.go`), which is runner config, not argv.
         '-fail-cert-callback',
       ]),
   },
@@ -298,19 +237,12 @@ export const SCOPE_RULES: readonly ScopeRule[] = [
         'Ed25519DefaultDisable-NoAdvertise',
         'Client-VerifyDefault-Ed25519-TLS13',
         'PostQuantumEnabledByDefaultInClients',
-        // The runner is an SSL 3.0 server and never reaches a ServerHello: it
-        // refuses our ClientHello for want of a shared cipher suite, because we
-        // offer only the two TLS 1.3 ones. The unsolicited SSL 3.0 ServerHello
-        // the test is named for never arrives.
+        // An SSL 3.0 server that refuses our ClientHello for want of a shared suite; the
+        // unsolicited ServerHello the test is named for never arrives.
         'NoSSL3-Client-Unsolicited',
-        // The same shape one version up, and the only test in the suite using
-        // `-cipher`. It is `MaxVersion: VersionTLS12` (`cipher_suite_tests.go`),
-        // so the runner refuses our 1.3-only ClientHello and the
-        // WRONG_CIPHER_RETURNED it exists for never arises. `pre-tls13-by-peer`
-        // would take it on that measurement, and cannot: the shim exits 89 on
-        // `-cipher` first, which takes an OpenSSL cipher STRING (`DEFAULT:!AES`)
-        // rather than suite ids, and mis-parsing one to reach a TLS 1.2 test is
-        // a worse trade than naming it here.
+        // `MaxVersion: VersionTLS12` (`cipher_suite_tests.go`), and the only test using `-cipher`,
+        // which takes an OpenSSL cipher string; the shim exits 89 on it before `pre-tls13-by-peer`
+        // could measure the refusal.
         'UnsupportedCipherSuite',
       ].includes(row.name),
   },

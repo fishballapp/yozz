@@ -10,21 +10,17 @@ const hostSchema = z.object({
 /** The plaintext of an `address` vault record. The natural key is `address`. */
 export const addressRecordSchema = z.object({
   address: z.string().email(),
-  /**
-   * The display name recipients see on mail sent from this address (`Jason Yu <jason@…>`). It
-   * is part of the outgoing From header and nothing else: inside YOZZ an address is always shown
-   * as itself (DECISIONS.md).
-   */
+  /** The outgoing From display name and nothing else: inside YOZZ an address is always shown as itself (DECISIONS.md). */
   senderName: z.string().optional(),
   smtp: hostSchema,
-  /** Absent means send-only: an address with no inbox here. The normal case, not an error. */
+  /** Absent means send-only: the normal case, not an error. */
   imap: hostSchema.optional(),
 });
 export type AddressRecord = z.infer<typeof addressRecordSchema>;
 
 export const ADDRESS_RECORD_TYPE = 'address';
 
-/** Total: a record this build cannot read is skipped, never thrown on, and logged by the caller. */
+/** Total: a record this build cannot read is skipped and logged by the caller. */
 export const parseAddressRecord = (plaintext: string): AddressRecord | null => {
   try {
     const parsed: unknown = JSON.parse(plaintext);
@@ -40,16 +36,11 @@ export type InboundAddress = AddressRecord & { imap: NonNullable<AddressRecord['
 export const isInbound = (record: AddressRecord): record is InboundAddress =>
   record.imap !== undefined;
 
-/**
- * The gutter letters for a conversation: one per account holding some of it, in address order.
- * A thread spans accounts, so a single letter would have to pick one of them and would change
- * when that account's copy was the one filed away. Two accounts sharing a first letter collapse
- * to one mark, which is what a two-character gutter can honestly say.
- */
+/** One letter per account holding some of the thread, in address order; two accounts sharing a letter collapse to one mark. */
 export const marksOf = (addresses: readonly string[]): string =>
   [...new Set(addresses.map(markOf))].join('');
 
-/** The gutter letter: first character of the local part, upper-cased. `?` for an empty local part. */
+/** First character of the local part, upper-cased; `?` for an empty local part. */
 export const markOf = (address: string): string => {
   const local = address.slice(0, address.indexOf('@'));
   const first = local[0];

@@ -1,11 +1,4 @@
-/**
- * The pin itself, and the wrapper's ordering.
- *
- * What a real handshake does with these is `interop.test.ts` — the two halves of
- * the M9 gate, against a server that reissues. Here the question is narrower:
- * that the pin is a digest of the right bytes, and that a matching pin can never
- * carry a chain the inner validator refused.
- */
+/** The pin is a digest of the right bytes, and a matching pin never carries a refused chain. `interop.test.ts` has the rest. */
 
 import { createHash } from 'node:crypto';
 import {
@@ -46,12 +39,7 @@ const spkiOf = async (keyPair: CryptoKeyPair): Promise<Uint8Array> =>
   new Uint8Array(await crypto.subtle.exportKey('spki', keyPair.publicKey));
 
 describe('publicKeyPin', () => {
-  /**
-   * Against `node:crypto` rather than a transcribed constant. A hard-coded
-   * digest checks that this function still does what it did last week; a second
-   * implementation checks that it does what it CLAIMS, which is SHA-256 over
-   * exactly these bytes with nothing prepended.
-   */
+  /** Against `node:crypto`, so this checks what the function claims rather than what it did last week. */
   it('is base64 of SHA-256 over the SPKI DER, and nothing else', async () => {
     const spki = await spkiOf(
       await crypto.subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, true, [
@@ -65,11 +53,7 @@ describe('publicKeyPin', () => {
     );
   });
 
-  /**
-   * The property the whole mechanism rests on, stated over real certificates
-   * rather than over raw keys: a reissue is a different document — different
-   * serial, different validity, different signature — and the pin does not move.
-   */
+  /** A reissue is a different document with the same key, and the pin does not move. */
   it('is unchanged by a reissue over the same key, and changes when the key does', async () => {
     const root = await issueCertificate({ commonName: 'pin test root', isCa: true });
     const first = await issueCertificate({
@@ -127,15 +111,8 @@ describe('pinnedValidator', () => {
   });
 
   /**
-   * The direction that would make pinning a way to WEAKEN validation, and the
-   * setup is the load-bearing part: the request carries a REAL leaf and the pin
-   * is that leaf's own SPKI, so a wrapper that reached for the pin first — from
-   * the only place it could, `request.peerCertificateDer` — would find a match
-   * and return `ok` for a chain nothing trusts.
-   *
-   * An earlier version pinned three invented bytes against an empty request.
-   * That pin matched nothing anywhere, so the dangerous branch was unreachable
-   * and the test passed for a wrapper that skipped the inner validator entirely.
+   * The request carries a real leaf whose own SPKI is the pin, so a wrapper that read the pin
+   * before the inner validator would find a match and return `ok` for a chain nothing trusts.
    */
   it('never lets a matching pin rescue a chain the inner validator refused', async () => {
     const root = await issueCertificate({ commonName: 'rescue test root', isCa: true });

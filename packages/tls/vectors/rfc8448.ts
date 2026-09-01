@@ -1,16 +1,7 @@
 /**
- * RFC 8448's handshake traces, parsed out of the RFC's own text.
- *
- * The document is committed verbatim beside this file rather than transcribed
- * into a fixture. A hand-copied vector that is wrong is a test that passes
- * against the wrong answer, and the published RFC is the only authority worth
- * diffing against — see [README.md](README.md) for the pin.
- *
- * The traces are uniform enough to read structurally: a step is
- * `{client}`/`{server}` plus a title, and under it labelled hex fields whose
- * declared octet count this parser checks against what it actually read. That
- * check is the point — a hex run silently truncated at a page break would
- * otherwise produce a shorter vector that still looks like a vector.
+ * RFC 8448's traces parsed out of the RFC's own text (committed verbatim; see README.md for the
+ * pin). Each field's declared octet count is checked against what was read, so a hex run
+ * truncated at a page break cannot pass as a shorter vector.
  */
 
 import { readFileSync } from 'node:fs';
@@ -43,10 +34,8 @@ const RUNNING_HEAD = /^(Thomson +Informational +\[Page \d+\]|RFC 8448 .+January 
 const DECLARED_OCTETS = /^(.+) \((\d+) octets\)$/;
 
 /**
- * `(empty)` and `0 (all zero octets)` are the RFC's two prose stand-ins for
- * bytes. The second is the Early Secret's salt, which RFC 9846 §7.1 draws as a
- * bare `0`; RFC 5869 §2.2 defines an absent salt as HashLen zeros, so reading it
- * as zero-length is faithful and `hkdfExtract` applies that rule itself.
+ * The RFC's two prose stand-ins for bytes. `0 (all zero octets)` is the Early Secret's salt,
+ * which RFC 5869 §2.2 defines as HashLen zeros; `hkdfExtract` applies that rule itself.
  */
 const bytesFrom = (label: string, value: string): Uint8Array => {
   if (value === '(empty)' || value === '0 (all zero octets)') return new Uint8Array(0);
@@ -79,8 +68,8 @@ const parse = (text: string): readonly Rfc8448Trace[] => {
     step.fields.push({ label, bytes });
   };
 
-  // Form feeds mark the page breaks that split hex runs; dropping them leaves
-  // the running head on its own line, which the filter below recognises.
+  // Form feeds mark the page breaks that split hex runs; dropping them leaves the running head
+  // on its own line for the filter below.
   for (const line of text.replaceAll('\f', '').split('\n')) {
     if (line.trim() === '' || RUNNING_HEAD.test(line)) continue;
 
@@ -123,9 +112,8 @@ const parse = (text: string): readonly Rfc8448Trace[] => {
       continue;
     }
 
-    // A step title too long for one line wraps to the field indent without a
-    // colon. Every wrapped title in the document is a `(same as …)` step, which
-    // carries no fields — so only a fieldless step can still be gaining one.
+    // A wrapped step title continues at the field indent without a colon; every wrapped title
+    // is a `(same as …)` step, which carries no fields.
     if (step !== undefined && step.fields.length === 0 && line.startsWith('      ')) {
       step.title = `${step.title} ${line.trim()}`;
     }

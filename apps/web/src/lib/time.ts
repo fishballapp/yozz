@@ -1,17 +1,10 @@
-/**
- * Timestamps in the list column are machine values: they sit in a fixed-width mono column and are
- * scanned vertically, so they are formatted to stay short (never more than six characters) and to
- * change unit as the message ages, the way a mail client has always done it.
- *
- * `Date` rather than `Temporal` deliberately — no web app in this repo has adopted Temporal, and a
- * relative label plus one absolute stamp does not justify pulling in the polyfill.
- */
+/** List timestamps are machine values in a fixed-width mono column: never more than six characters. `Date`, not `Temporal`: no web app here has adopted it. */
 
 const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
 const DAY = 24 * HOUR;
 
-/** Short form for the list's right-hand column: `now`, `12m`, `3h`, `Tue`, `13 Oct`. */
+/** Short form for the list column: `now`, `12m`, `3h`, `Tue`, `13 Oct`. */
 export const listTime = (at: number, now = Date.now()) => {
   const elapsed = now - at;
   if (elapsed < MINUTE) return 'now';
@@ -21,12 +14,7 @@ export const listTime = (at: number, now = Date.now()) => {
   return new Date(at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
 };
 
-/**
- * Middle form for the stacked record, which has a whole line to itself rather than a 44px column.
- * It stays relative while relative is the useful answer — an hour old is "23m", not "14:09" — then
- * switches to a clock, then to a weekday, then to a date. Never wider than nine characters, so it
- * still sits in a right-hand column without pushing the subject around.
- */
+/** Middle form for the stacked record: relative while useful, then a clock, a weekday, a date. Never wider than nine characters. */
 export const stackTime = (at: number, now = Date.now()) => {
   const elapsed = now - at;
   if (elapsed < MINUTE) return 'now';

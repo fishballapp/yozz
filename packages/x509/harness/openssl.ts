@@ -1,12 +1,4 @@
-/**
- * The control. `openssl verify` is a mature path validator we can drive from
- * Node, so pointing the harness at it first answers "is my harness right?"
- * before there is any validator of ours to blame.
- *
- * It deliberately consumes the same `PathValidationRequest` our own validator
- * will, converting back to PEM on the way out — that is what exercises the
- * contract, which is the other half of what M1 is for.
- */
+/** The control: `openssl verify` driven through the same `PathValidationRequest`, converted back to PEM. */
 import { execFile } from 'node:child_process';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -18,13 +10,8 @@ import { pemFromDer } from './pem.ts';
 const run = promisify(execFile);
 
 /**
- * `openssl verify` falls back to the Common Name when a leaf has no
- * subjectAltName, and the CLI cannot be told not to. RFC 9525 — the profile we
- * declared — forbids that fallback, and x509-limbo tests it 972 times: every
- * bettertls leaf without a SAN expects rejection.
- *
- * ponytail: a byte scan for the SAN OID (2.5.29.17), not a parser. This is the
- * control adapter, and @yozz.app/x509 is the thing that gets a real decoder.
+ * `openssl verify` falls back to the Common Name when a leaf has no SAN and cannot be told not to;
+ * RFC 9525 forbids that and limbo tests it 972 times. A byte scan for the SAN OID, not a parser.
  */
 const SAN_EXTENSION_OID = Uint8Array.of(0x55, 0x1d, 0x11);
 
@@ -86,13 +73,7 @@ const failureFor = (stderr: string): PathValidationResult => {
   return { ok: false, reason: { code: 'no-path-to-trust-anchor' } };
 };
 
-/**
- * `openssl verify` wants every anchor in one file, but the contract's lookup is
- * by issuer name and this adapter has no decoder to produce one. The harness's
- * source is unindexed and answers any query with the case's whole root set,
- * which the contract allows: over-approximating is sound because the validator
- * verifies each candidate anyway.
- */
+/** The contract allows over-approximating, so the harness's source answers every query with the case's whole root set. */
 const ANY_ISSUER = { issuerNameDer: new Uint8Array(), authorityKeyIdentifier: null };
 
 export const OPENSSL_VALIDATOR: Validator = {
@@ -110,14 +91,8 @@ export const OPENSSL_VALIDATOR: Validator = {
       const anchors = request.trustAnchors.findCandidates(ANY_ISSUER);
       await writeFile(roots, anchors.map(anchor => pemFromDer(anchor.certificateDer)).join(''));
 
-      // -x509_strict enforces the RFC 5280 requirements the CLI is lax about by
-      // default (AKI/SKI presence, critical basicConstraints on a CA).
-      // -auth_level 2 forbids the weak keys WebPKI forbids — P-192, small RSA.
-      // Without both, the control accepts things our declared profile must not.
-      // -trusted rather than -CAfile: -CAfile ADDS to the host's default store, so
-      // a machine with extra CAs installed would quietly false-accept. -trusted
-      // implies -no-CAfile -no-CApath -no-CAstore, which is the isolation a control
-      // has to have.
+      // -x509_strict: the RFC 5280 requirements the CLI is lax about. -auth_level 2: the weak keys
+      // WebPKI forbids. -trusted rather than -CAfile: -CAfile ADDS to the host's default store.
       const args = ['verify', '-trusted', roots, '-x509_strict', '-auth_level', '2'];
       if (request.untrustedIntermediateDer.length > 0) {
         const inter = join(dir, 'inter.pem');
@@ -136,10 +111,7 @@ export const OPENSSL_VALIDATOR: Validator = {
         // openssl exits 0 and still prints "error ..." for some rejections.
         const output = `${stdout}${stderr}`;
         if (output.includes('error') && !output.includes(': OK')) return failureFor(output);
-        // The CLI reports a verdict, not a path: which anchor it selected and the
-        // leaf's SPKI are both unavailable. Named rather than guessed at — the
-        // first candidate is not the chosen one, and the harness compares only
-        // `ok`. `@yozz.app/x509` at M4 is what fills these in.
+        // The CLI reports a verdict, not a path.
         return {
           ok: true,
           path: {
@@ -149,11 +121,7 @@ export const OPENSSL_VALIDATOR: Validator = {
           },
         };
       } catch (error) {
-        // A crash, a timeout or a missing binary must NEVER be scored as a
-        // legitimate rejection. 8838 of the cases expect rejection, so a control
-        // that turns every failure into `ok: false` reports 8838/8838 and reads as
-        // a harsh-but-working validator while running nothing at all. That is the
-        // exact failure this harness exists to prevent, so it throws instead.
+        // A crash, a timeout or a missing binary must never score as a rejection: 8838 cases expect one.
         if (error instanceof Error && 'killed' in error && error.killed === true) {
           throw new Error(`openssl timed out after 10s: ${args.join(' ')}`);
         }

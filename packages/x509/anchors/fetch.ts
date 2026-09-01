@@ -1,8 +1,4 @@
-/**
- * Fetch and verify the two trust inputs. Same shape as `harness/fetch.ts`, and
- * deliberately so — a hash mismatch here is a trust change, and it should read
- * the same way a moved conformance corpus does.
- */
+/** Fetch and verify the two trust inputs. */
 import { createHash } from 'node:crypto';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';

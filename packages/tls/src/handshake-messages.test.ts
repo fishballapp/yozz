@@ -47,7 +47,6 @@ describe('Stage 3: Handshake message codec', () => {
   const allHandshakeMessages = RFC_8448_TRACES.flatMap(collectHandshakeMessages);
 
   it('collects all published handshake messages across all 5 traces', () => {
-    // Check we collected the expected count (at least 35 messages across all traces)
     expect(allHandshakeMessages.length).toBeGreaterThanOrEqual(35);
   });
 
@@ -147,8 +146,7 @@ describe('Stage 3: Handshake message codec', () => {
     });
 
     it('offers every implemented scheme when it was given none', () => {
-      // The default is the security boundary as much as the explicit list is —
-      // a scheme dropped from it is one no server may sign with.
+      // The default is a security boundary too: a scheme dropped from it is one no server may sign with.
       const encoded = encodeProductionClientHello({
         serverName: 'imap.example.com',
         keySharePublicKey: new Uint8Array(32),
@@ -166,7 +164,7 @@ describe('Stage 3: Handshake message codec', () => {
 
   describe('codec edge cases', () => {
     it('decodes ServerHello without supported_versions successfully (TLS 1.2 shape)', () => {
-      // 1.2 ServerHello: version 0x0303, random 32B, sessId 0B, suite 0x1301, comp 0, extensions (no 43)
+      // A TLS 1.2 ServerHello: no supported_versions (43).
       const random = new Uint8Array(32);
       const rawSh12: HandshakeMessage = {
         kind: 'server_hello',
@@ -189,12 +187,10 @@ describe('Stage 3: Handshake message codec', () => {
     });
 
     it('rejects duplicate extension types with illegal_parameter', () => {
-      // Construct extensions block with two server_name extensions
       const ext1 = Uint8Array.of(0x00, 0x00, 0x00, 0x00); // type 0, len 0
       const ext2 = Uint8Array.of(0x00, 0x00, 0x00, 0x00); // type 0, len 0
       const extensionsBlock = Uint8Array.of(0x00, 0x08, ...ext1, ...ext2); // total len 8
 
-      // Wrap in EncryptedExtensions message (type 8, len 10)
       const eeMsg = Uint8Array.of(0x08, 0x00, 0x00, 0x0a, ...extensionsBlock);
 
       const decoded = decodeHandshakeMessage(eeMsg);
@@ -205,9 +201,8 @@ describe('Stage 3: Handshake message codec', () => {
     });
 
     it('rejects a short EncryptedExtensions whose extension declares 35 missing bytes', () => {
-      // 10-byte EE: extensions length claims 8, but the unknown extension declares
-      // a 35-byte body that is not present. The 35-byte pre-binder slack must not
-      // apply outside ClientHello.
+      // The extensions length claims 8 but the unknown extension declares a 35-byte body; the
+      // 35-byte pre-binder slack must not apply outside ClientHello.
       const eeMsg = Uint8Array.of(
         0x08,
         0x00,
@@ -270,11 +265,9 @@ describe('Stage 3: Handshake message codec', () => {
 
   describe('malformed extension blocks', () => {
     /**
-     * RFC 8448 §4's ClientHello is published without its 35 binder bytes, so the
-     * extension parser has to tolerate a block 35 octets shorter than declared.
-     * A review found that slack written as a GENERAL rule, which is a fail-open
-     * parser — any server message could declare bytes it never sent. It is now
-     * gated on the message, the length shape and `pre_shared_key` together.
+     * RFC 8448 §4's ClientHello is published without its 35 binder bytes. The slack is gated on
+     * the message, the length shape and `pre_shared_key` together; as a general rule it was a
+     * fail-open parser.
      */
     it('refuses a server message that declares 35 octets it does not carry', () => {
       const honest = encodeHandshakeMessage({ kind: 'encrypted_extensions', extensions: [] });
@@ -307,13 +300,8 @@ describe('Stage 3: Handshake message codec', () => {
 });
 
 /**
- * RFC 7685's boundaries, in a test that needs neither Go nor a 337MB checkout.
- *
- * BoGo's `ClientHelloPadding` was the only thing pinning this, and a review
- * named what that misses: a mutation that always escapes the 256..511 range
- * without landing on 512 — drop the `- 4` and a 508-byte hello becomes 516 —
- * breaks nothing a peer would notice and fails no vitest. The RFC asks for 512
- * where 512 is reachable, and for escape where it is not.
+ * RFC 7685's boundaries without BoGo. Drop the `- 4` and a 508-byte hello becomes 516: out of
+ * the range, so no peer notices, and off 512, which the RFC asks for where reachable.
  */
 describe('RFC 7685 padding boundaries', () => {
   const TARGET = 512;
@@ -329,16 +317,12 @@ describe('RFC 7685 padding boundaries', () => {
     for (const length of [256, 300, 400, 507, 508]) {
       const body = paddingFor(length);
       if (body === null) throw new Error(`${length} should have been padded`);
-      // +4 is the extension's own type and length fields, which §4 calls out.
+      // +4 is the extension's own type and length fields (§4).
       expect(length + 4 + body).toBe(TARGET);
     }
   });
 
-  /**
-   * 509..511 cannot reach 512 — an empty padding extension already adds 4 — so
-   * §4's remedy is to overshoot, which still leaves the range an F5 terminator
-   * hangs on. The zero floor is that case, not a rounding guard.
-   */
+  /** 509..511 cannot reach 512 (an empty extension already adds 4), so §4's remedy is to overshoot. */
   it('escapes the range when 512 is unreachable', () => {
     for (const length of [509, 510, 511]) {
       const body = paddingFor(length);

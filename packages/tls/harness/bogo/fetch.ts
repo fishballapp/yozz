@@ -1,11 +1,4 @@
-/**
- * Fetches the pinned BoringSSL revision into a gitignored checkout.
- *
- * A shallow fetch of one commit, not a clone: BoGo needs the runner and its
- * test certificates, never the history. The commit id IS the integrity check —
- * git verifies the object graph against it, so there is no separate hash to
- * paste.
- */
+/** A shallow fetch of the pinned commit; the commit id is the integrity check. */
 
 import { execFileSync } from 'node:child_process';
 import { mkdirSync } from 'node:fs';
@@ -14,8 +7,7 @@ import { BORINGSSL_CHECKOUT, BORINGSSL_COMMIT, BORINGSSL_REPO, BORINGSSL_TAG } f
 const git = (...args: readonly string[]): string =>
   execFileSync('git', ['-C', BORINGSSL_CHECKOUT, ...args], { encoding: 'utf8' }).trim();
 
-// A missing checkout is the normal first run, so git's own complaint about it
-// is noise rather than news.
+// A missing checkout is the normal first run.
 const head = (): string | undefined => {
   try {
     return execFileSync('git', ['-C', BORINGSSL_CHECKOUT, 'rev-parse', 'HEAD'], {

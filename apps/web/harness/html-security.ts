@@ -326,9 +326,7 @@ const runEngine = async (
 const headers = await readFile(HEADERS_PATH, 'utf8');
 const csp = headerValue(headers, 'Content-Security-Policy');
 await assertProductionDocumentHasNoInlineScripts();
-// The production document is HTTPS already. Keeping this directive on the harness's loopback HTTP
-// origin makes WebKit upgrade Vite's module requests to an HTTPS server that deliberately does not
-// exist, so omit only that no-op production directive during local execution.
+// On the harness's loopback HTTP origin this directive makes WebKit upgrade Vite's module requests to an HTTPS server that does not exist.
 const harnessCsp = csp.replace('; upgrade-insecure-requests', '');
 for (const header of [
   'Cross-Origin-Opener-Policy',

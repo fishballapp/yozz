@@ -60,11 +60,6 @@ export const jsonBodyLimit = bodyLimit({
     ),
 });
 
-/**
- * Parse a JSON body against a schema. Malformed JSON and a body that fails the
- * schema are the same 400 to the caller: neither message leaks what the
- * schema expected beyond the contract the client already ships with.
- */
 export const readJsonBody = async <S extends z.ZodType>(
   c: Context<AppEnv>,
   schema: S,

@@ -70,8 +70,7 @@ describe('Stage 1 — Alert encode/decode', () => {
       'missing_extension',
       'unsupported_extension',
       'unrecognized_name',
-      // RFC 9846's own addition to the list (§6.2). Absent, a peer sending it
-      // is reported as an unknown alert code rather than the alert it is.
+      // RFC 9846's own addition to the list (§6.2).
       'general_error',
     ];
     for (const description of required) {

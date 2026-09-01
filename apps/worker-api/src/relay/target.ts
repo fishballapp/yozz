@@ -25,29 +25,20 @@ const parseIpv4Octets = (ip: string): [number, number, number, number] | null =>
 };
 
 const isPublicIpv4Octets = (a: number, b: number, _c: number, _d: number): boolean => {
-  // 0.0.0.0/8
-  if (a === 0) return false;
-  // 10.0.0.0/8 (RFC 1918)
-  if (a === 10) return false;
-  // 100.64.0.0/10 (CGNAT: 100.64.0.0 - 100.127.255.255)
-  if (a === 100 && b >= 64 && b <= 127) return false;
-  // 127.0.0.0/8 (Loopback)
-  if (a === 127) return false;
-  // 169.254.0.0/16 (Link-local)
-  if (a === 169 && b === 254) return false;
-  // 172.16.0.0/12 (RFC 1918: 172.16.0.0 - 172.31.255.255)
-  if (a === 172 && b >= 16 && b <= 31) return false;
-  // 192.168.0.0/16 (RFC 1918)
-  if (a === 192 && b === 168) return false;
-  // 224.0.0.0/4 (Multicast 224..239) & 240.0.0.0/4 (Reserved / Broadcast 240..255 incl 255.255.255.255)
-  if (a >= 224) return false;
+  if (a === 0) return false; // 0.0.0.0/8
+  if (a === 10) return false; // 10.0.0.0/8
+  if (a === 100 && b >= 64 && b <= 127) return false; // 100.64.0.0/10 CGNAT
+  if (a === 127) return false; // loopback
+  if (a === 169 && b === 254) return false; // link-local
+  if (a === 172 && b >= 16 && b <= 31) return false; // 172.16.0.0/12
+  if (a === 192 && b === 168) return false; // 192.168.0.0/16
+  if (a >= 224) return false; // multicast and reserved
   return true;
 };
 
 const parseIpv6Hextets = (raw: string): number[] | null => {
   let ip = raw;
 
-  // Check for IPv4 embedded address at the end (e.g. ::ffff:192.0.2.1)
   const lastColonIndex = ip.lastIndexOf(':');
   if (lastColonIndex === -1) return null;
   const potentialV4 = ip.slice(lastColonIndex + 1);
@@ -60,7 +51,6 @@ const parseIpv6Hextets = (raw: string): number[] | null => {
     ip = `${ip.slice(0, lastColonIndex)}:${hex1}:${hex2}`;
   }
 
-  // Count '::'
   const doubleColonParts = ip.split('::');
   if (doubleColonParts.length > 2) return null;
 
@@ -111,13 +101,11 @@ export const isPublicIp = (ip: string): boolean => {
   const trimmed = ip.trim();
   if (trimmed === '') return false;
 
-  // Try IPv4
   const v4Octets = parseIpv4Octets(trimmed);
   if (v4Octets !== null) {
     return isPublicIpv4Octets(v4Octets[0], v4Octets[1], v4Octets[2], v4Octets[3]);
   }
 
-  // Try IPv6
   const v6Hextets = parseIpv6Hextets(trimmed);
   if (v6Hextets === null || v6Hextets.length !== 8) return false;
 
@@ -143,7 +131,6 @@ export const isPublicIp = (ip: string): boolean => {
     return false;
   }
 
-  // Unspecified :: (0:0:0:0:0:0:0:0)
   if (
     h0 === 0 &&
     h1 === 0 &&
@@ -157,7 +144,6 @@ export const isPublicIp = (ip: string): boolean => {
     return false;
   }
 
-  // Loopback ::1 (0:0:0:0:0:0:0:1)
   if (
     h0 === 0 &&
     h1 === 0 &&
@@ -171,7 +157,7 @@ export const isPublicIp = (ip: string): boolean => {
     return false;
   }
 
-  // IPv4-mapped IPv6 ::ffff:a.b.c.d (0:0:0:0:0:ffff:x:y)
+  // IPv4-mapped, ::ffff:a.b.c.d
   if (h0 === 0 && h1 === 0 && h2 === 0 && h3 === 0 && h4 === 0 && h5 === 0xffff) {
     const a = (h6 >> 8) & 0xff;
     const b = h6 & 0xff;
@@ -180,7 +166,7 @@ export const isPublicIp = (ip: string): boolean => {
     return isPublicIpv4Octets(a, b, c, d);
   }
 
-  // IPv4-compatible IPv6 ::a.b.c.d (0:0:0:0:0:0:x:y)
+  // IPv4-compatible, ::a.b.c.d
   if (h0 === 0 && h1 === 0 && h2 === 0 && h3 === 0 && h4 === 0 && h5 === 0) {
     const a = (h6 >> 8) & 0xff;
     const b = h6 & 0xff;
@@ -189,17 +175,17 @@ export const isPublicIp = (ip: string): boolean => {
     return isPublicIpv4Octets(a, b, c, d);
   }
 
-  // IPv6 ULA fc00::/7 (fc00:: to fdff:...)
+  // fc00::/7 unique local
   if ((h0 & 0xfe00) === 0xfc00) {
     return false;
   }
 
-  // IPv6 Link-local fe80::/10 (fe80:: to febf:...)
+  // fe80::/10 link-local
   if ((h0 & 0xffc0) === 0xfe80) {
     return false;
   }
 
-  // IPv6 Multicast ff00::/8 (ff00:: to ffff:...)
+  // ff00::/8 multicast
   if ((h0 & 0xff00) === 0xff00) {
     return false;
   }
@@ -207,29 +193,20 @@ export const isPublicIp = (ip: string): boolean => {
   return true;
 };
 
-/**
- * A public DNS name as the relay and the autoconfig lookup accept it: lowercase, at least two
- * labels, no IP literal, no all-numeric TLD, no trailing dot, never `localhost`.
- */
 export const parseHostname = (raw: string): string | null => {
   const hostname = raw.trim().toLowerCase();
 
-  // Reject trailing dot
   if (hostname.endsWith('.')) return null;
 
-  // Reject localhost
   if (hostname === 'localhost') return null;
 
-  // Reject IP literals
   if (parseIpv4Octets(hostname) !== null || parseIpv6Hextets(hostname) !== null) return null;
 
-  // Reject all-numeric TLDs
   const lastDot = hostname.lastIndexOf('.');
   if (lastDot === -1) return null;
   const tld = hostname.slice(lastDot + 1);
   if (/^\d+$/.test(tld)) return null;
 
-  // Check DNS hostname regex (at least two labels)
   if (!HOSTNAME_REGEX.test(hostname)) return null;
 
   return hostname;
@@ -243,7 +220,6 @@ export const parseRelayTarget = (search: URLSearchParams): RelayTarget | null =>
   const hostname = parseHostname(rawHost);
   if (hostname === null) return null;
 
-  // Check port: exactly 993 or 465
   if (rawPort !== '993' && rawPort !== '465') return null;
   const port = Number(rawPort);
   if (port !== 993 && port !== 465) return null;

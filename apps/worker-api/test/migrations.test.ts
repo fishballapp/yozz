@@ -7,12 +7,6 @@ describe('D1 migrations and schema invariants', () => {
     await applyMigrations(env.DB);
   });
 
-  /**
-   * `revision` joined the row deliberately in 0005, to compare-and-swap on. It is a nullable
-   * PRECONDITION, never the authority — the revision that counts stays sealed in the ciphertext,
-   * and the client refuses a row where the two disagree. `device_id` remains excluded: nothing
-   * the store keeps may identify a device.
-   */
   it('vault_record has exactly the specified columns: revision, and no device id', async () => {
     const info = await env.DB.prepare('PRAGMA table_info(vault_record)').all<{
       cid: number;
@@ -26,7 +20,6 @@ describe('D1 migrations and schema invariants', () => {
     const columns = info.results.map((col: { name: string }) => col.name);
     expect(columns).toEqual(['user_id', 'id', 'type', 'ciphertext', 'updated_at', 'revision']);
 
-    // Nullable, because every row written before 0005 has nothing to say about its revision.
     expect(info.results.find(col => col.name === 'revision')?.notnull).toBe(0);
     expect(columns).not.toContain('device_id');
     expect(columns).not.toContain('deviceId');
@@ -141,7 +134,6 @@ describe('D1 migrations and schema invariants', () => {
         .run(),
     ).rejects.toThrow(/user email is immutable/);
 
-    // Same email update should succeed
     await expect(
       env.DB.prepare('UPDATE "user" SET email = ?, name = ? WHERE id = ?')
         .bind('initial@example.com', 'New Name', 'user-immutable')

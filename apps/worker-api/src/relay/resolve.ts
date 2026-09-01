@@ -40,7 +40,6 @@ export const resolvePublicAddress = async (hostname: string): Promise<string | n
     }
   }
 
-  // Only query AAAA if A returned nothing
   if (aAnswers.length === 0) {
     const aaaaAnswers = await queryDns('AAAA');
     for (const answer of aaaaAnswers) {

@@ -1,17 +1,7 @@
 /**
- * The browser half of M8, as the browser sees it: our TLS 1.3 client running on
- * whatever WebCrypto the engine happens to ship, over a WebSocket to a byte
- * pipe, against a real mail server.
- *
- * Nothing here is Node. `@yozz.app/tls` and `@yozz.app/x509` import no `node:` module,
- * which is what makes this page possible at all — and `ROOT_BUNDLE` is the
- * whole reason it has to exist: a browser has no `node:tls` root store, so the
- * anchors compiled into the bundle are the ONLY thing that can validate a
- * chain here.
- *
- * `run.ts` drives it. It is exposed on `window` rather than run on load so the
- * driver decides when, and gets the results as a return value instead of
- * scraping the DOM.
+ * The TLS client on the engine's own WebCrypto, over a WebSocket byte pipe, against a real mail
+ * server. `ROOT_BUNDLE` is the only trust store a browser has. Exposed on `window` so `run.ts`
+ * decides when to run and gets the results as a return value.
  */
 import { compileAnchors, ROOT_BUNDLE, YOZZ_VALIDATOR } from '@yozz.app/x509';
 import { startTls } from '../../src/handshake.ts';
@@ -25,29 +15,16 @@ export type HostResult = {
   /** The negotiated group and the scheme the server signed with, or the failure. */
   readonly detail: string;
   readonly greeting: string;
-  /**
-   * The host's SPKI pin, as THIS engine derived it. The runner compares it
-   * across the three, which is the one thing about pinning only this harness can
-   * check: a pin learned in one browser and refused in another would alarm a
-   * user who changed nothing, and `crypto.subtle.digest` plus `btoa` are engine
-   * code the same way P-384 import and RSA-PSS are.
-   */
+  /** This engine's SPKI pin; the runner compares it across engines. */
   readonly pin: string | null;
 };
 
 /**
- * A `ByteDuplex` over a browser WebSocket. This is the RELAY half of the seam
- * [`socket-transport.ts`](../socket-transport.ts) names — the one the shipped
- * client will actually use, with the direct socket as its control.
- *
- * **`binaryType` is set before anything is read, and that line is the whole
- * trap.** The default is `"blob"`, and the conversion every naive queue reaches
- * for — `new Uint8Array(blob)` — returns ZERO bytes without throwing. The relay
- * spike lost a stage to it from the Worker side, and subtls' own
- * `WebSocketReadQueue` still does the unguarded conversion.
+ * A `ByteDuplex` over a browser WebSocket. `binaryType` must be set before anything is read:
+ * the default is `"blob"`, and `new Uint8Array(blob)` returns zero bytes without throwing.
  */
 type BridgeTransport = ByteDuplex & {
-  /** What the bridge said in band, if it said anything. See below. */
+  /** A diagnostic string the bridge wrote in band, if any. */
   readonly diagnostic: () => string | null;
 };
 
@@ -66,15 +43,8 @@ const webSocketTransport = (socket: WebSocket): BridgeTransport => {
 
   socket.binaryType = 'arraybuffer';
   socket.addEventListener('message', event => {
-    /**
-     * A bridge that writes a diagnostic string in band is a bridge that
-     * corrupts the stream, so the bytes never reach the record layer. **It is
-     * recorded and ends the stream rather than thrown**: a throw inside a
-     * listener is not on `handshake`'s stack, so it escapes as a `pageerror`
-     * while `startTls` stays parked on `read()` forever — which hangs the whole
-     * batch and blames every host it never reached. The spike Worker really
-     * does send `[bridge] WRITE FAILED: …` as text.
-     */
+    // An in-band text frame corrupts the stream, so it ends the stream instead of being thrown:
+    // a throw inside a listener escapes as a `pageerror` while `startTls` stays parked on `read()`.
     if (typeof event.data !== 'object' || !(event.data instanceof ArrayBuffer)) {
       diagnostic = String(event.data);
       isEnded = true;
@@ -111,8 +81,7 @@ const webSocketTransport = (socket: WebSocket): BridgeTransport => {
         waiter = resolve;
       }),
     write: async bytes => {
-      // Copy: `bytes` may be a view onto the record layer's own buffer, and
-      // `send` is asynchronous with respect to whatever writes into it next.
+      // `bytes` may be a view onto the record layer's own buffer, and `send` is asynchronous.
       socket.send(bytes.slice().buffer);
     },
   };
@@ -140,9 +109,7 @@ const handshake = async (
   host: string,
   isRelay?: boolean,
 ): Promise<HostResult> => {
-  // The bridge is opened INSIDE the try. A dead bridge is one host's failure to
-  // report, not a reason to abandon the other eight — the negative control
-  // opened it outside, and one refused connection took the whole batch with it.
+  // Opened inside the try so a dead bridge fails one host, not the batch.
   let socket: WebSocket | undefined;
   try {
     const url = isRelay
@@ -161,13 +128,7 @@ const handshake = async (
     if (said !== null) return failed(host, `bridge said: ${said}`);
     if (!result.ok) return failed(host, describeFailure(result.reason));
 
-    /**
-     * The greeting FAILS the host, rather than printing beside a pass. M8 is
-     * defined as handshake and greeting, and only the second proves the
-     * connection works rather than merely completed — so a regression that
-     * completes a handshake and then cannot decrypt the first record has to
-     * exit non-zero.
-     */
+    // The greeting fails the host: only it proves application data decrypts.
     const greeting = await result.connection.read();
     await result.connection.close();
     if (!greeting.ok)
@@ -202,11 +163,7 @@ declare global {
   }
 }
 
-/**
- * Serial, not parallel. Nine concurrent handshakes would measure the bridge's
- * multiplexing as much as the engine's crypto, and a failure would be ambiguous
- * between the two.
- */
+/** Serial: concurrent handshakes would measure the bridge's multiplexing as much as the engine. */
 window.yozzHandshake = async (endpoint, hosts, isRelay) => {
   const results: HostResult[] = [];
   for (const host of hosts) results.push(await handshake(endpoint, host, isRelay));

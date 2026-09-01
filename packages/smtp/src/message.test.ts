@@ -174,14 +174,11 @@ describe('message builder', () => {
       buildMessage({ ...base, cc: ['one@y.test', 'two@y.test', 'three@y.test'] }),
     );
     expect(withCc).toContain('\r\nCc: one@y.test, two@y.test, three@y.test\r\n');
-    // Cc belongs with the recipients, above Subject, the way every client writes it.
     expect(withCc.indexOf('\r\nCc:')).toBeLessThan(withCc.indexOf('\r\nSubject:'));
 
     expect(decoder.decode(buildMessage(base))).not.toContain('Cc:');
     expect(decoder.decode(buildMessage({ ...base, cc: [] }))).not.toContain('Cc:');
 
-    // A blind copy that names itself is not blind. `cc` is the only copy header there is, so no
-    // input can produce a Bcc line — this is the assertion that keeps it that way.
     for (const bytes of [buildMessage(base), buildMessage({ ...base, cc: ['one@y.test'] })])
       expect(decoder.decode(bytes).toLowerCase()).not.toContain('bcc:');
   });
@@ -233,7 +230,6 @@ describe('References', () => {
     const chain = Array.from({ length: 12 }, (_, index) => `<m${index}@example.com>`);
     const headers = headersOf({ ...base, inReplyTo: '<m11@example.com>', references: chain });
     expect(headers).toContain('In-Reply-To: <m11@example.com>');
-    // Unfolding (CRLF + WSP → space) gives the list back in order.
     const references = headers
       .split('\r\n')
       .join('\n')

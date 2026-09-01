@@ -14,13 +14,9 @@ const FrameMessageSchema = z.discriminatedUnion('type', [
 ]);
 
 /**
- * A received HTML body, rendered inside a sandboxed iframe. The containment design — sanitizer,
- * CSP, sandbox, and why images are off until asked — is documented on `mail/html.ts`.
- *
- * The frame cannot be measured from outside (opaque origin), so a nonce'd script inside it posts
- * its own height and the iframe follows; the listener trusts only messages whose source IS this
- * frame's window. Height is capped: a message may honestly be enormous, but it does not get to
- * make the reader arbitrarily tall faster than you can scroll away.
+ * A received HTML body in a sandboxed iframe (containment is documented on `mail/html.ts`). The
+ * frame cannot be measured from outside, so a nonce'd script posts its own height; only messages
+ * from this frame's window are trusted, and the height is capped.
  */
 export const HtmlBody = ({
   html,
@@ -33,12 +29,10 @@ export const HtmlBody = ({
   inlineImagesTruncated: boolean;
   fallback: ReactNode;
 }) => {
-  // Consent belongs to these exact bytes, not to this component instance: when selection changes
-  // React may reuse the component, and the next sender must not inherit the previous sender's opt-in.
+  // Consent belongs to these exact bytes: React may reuse the component for the next sender.
   const [remoteAllowedFor, setRemoteAllowedFor] = useState<string | null>(null);
   const isRemoteAllowed = remoteAllowedFor === html;
-  // A withheld picture looks like a picture, not a control, so the first click on one explains
-  // what loading costs. The button above the frame carries that line itself and asks nothing.
+  // A withheld picture looks like a picture, so the first click on one explains what loading costs.
   const [asksBeforeImageClick, setAsksBeforeImageClick] = useChromePref(
     'yozz:ask-before-remote-images',
     true,
@@ -112,7 +106,7 @@ export const HtmlBody = ({
         title="Show remote images?"
         description="The pictures in this message load from the sender's servers, so the sender may learn you opened it. This applies to this message only."
         confirmLabel="Show images"
-        // Not a deletion: this one wants a decision, so it takes the primary action's colour.
+        // Not a deletion: this one wants a decision.
         confirmVariant="primary"
         busyLabel="Showing…"
         onConfirm={async () => {

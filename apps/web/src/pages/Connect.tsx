@@ -18,12 +18,9 @@ import { describeMailFailure, useMail } from '../state/mail';
 import { vaultErrorMessage } from '../vault/screen-policy';
 
 /**
- * Add an address. The address is typed first because everything else follows from it: its domain
- * is looked up the way Thunderbird looks it up (the provider's autoconfig, the ISPDB, the MX
- * host's entry, SRV records), and the servers it publishes are shown as facts to confirm rather
- * than fields to fill. A domain that publishes nothing gets the fields, prefilled with the
- * standard ports. Either way the password is tried against each server before the record is
- * written, so a wrong one is refused on this form rather than found in the mailbox.
+ * The domain is looked up the way Thunderbird looks it up (autoconfig, ISPDB, the MX host's
+ * entry, SRV) and shown as facts to confirm; a domain that publishes nothing gets the fields.
+ * The password is tried against each server before the record is written.
  */
 
 type Lookup =
@@ -42,7 +39,7 @@ const BLANK_SERVERS: Servers = { imapHost: '', imapPort: '993', smtpHost: '', sm
 
 type Resolved = { readonly result: AutoconfigLookup; readonly servers: Servers };
 
-/** What the record will use: the found servers, unless the person is editing them by hand. */
+/** The found servers, unless the person is editing them by hand. */
 const serversWith = (config: MailAutoconfig | null, isEditing: boolean, typed: Servers): Servers =>
   config === null || isEditing
     ? typed
@@ -62,8 +59,7 @@ export const Connect = () => {
   const [isSendOnly, setIsSendOnly] = useState(false);
   const [servers, setServers] = useState<Servers>(BLANK_SERVERS);
   const [username, setUsername] = useState('');
-  // A ref as well as state: a lookup that lands after the person started editing the username
-  // must not overwrite what they typed, and the closure that started it cannot know.
+  // A ref as well: a lookup landing after the person started editing must not overwrite them.
   const [isUsernameEdited, setIsUsernameEdited] = useState(false);
   const usernameEdited = useRef(false);
   const [password, setPassword] = useState('');
@@ -71,8 +67,7 @@ export const Connect = () => {
   const [isEditingServers, setIsEditingServers] = useState(false);
   const [isBusy, setIsBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  // A blur can start a second lookup while the first is in flight; only the latest may land, and
-  // a submit that arrives mid-flight waits for it rather than reading whatever state was there.
+  // Only the latest lookup may land, and a submit mid-flight waits for it.
   const lookupSeq = useRef(0);
   const inFlight = useRef<{ domain: string; done: Promise<Resolved> } | null>(null);
 
@@ -83,12 +78,10 @@ export const Connect = () => {
     lookupSeq.current += 1;
     const seq = lookupSeq.current;
     setLookup({ state: 'looking', domain });
-    // Servers typed for another domain are not this domain's; start clean.
+    // Servers typed for another domain are not this domain's.
     setServers(BLANK_SERVERS);
     setIsEditingServers(false);
-    // The ref is set before any work runs and cleared once the lookup has landed, so it holds a
-    // promise exactly while one is in flight — a lookup that resolves without ever yielding (demo
-    // mode) must not leave a stale one behind for submit to prefer over the form.
+    // Holds a promise exactly while one is in flight; a lookup that resolves without yielding (demo) must not leave a stale one.
     const done = Promise.resolve().then(async (): Promise<Resolved> => {
       try {
         const result: AutoconfigLookup = demo
@@ -133,8 +126,7 @@ export const Connect = () => {
       setError(null);
       try {
         const trimmed = address.trim();
-        // A second record at the same address would REPLACE the first, IMAP credentials and all,
-        // because the address is the natural key.
+        // The address is the natural key, so a second record would replace the first.
         if (identities.some(existing => existing.address === trimmed)) {
           setError('That address is already stored. Open it from Settings.');
           return;
@@ -144,9 +136,7 @@ export const Connect = () => {
           setError('Enter a full email address.');
           return;
         }
-        // Submitting straight from the address field is the common path: wait for the lookup
-        // this domain already has in flight, or start one, rather than refusing or reusing
-        // servers that belonged to another address.
+        // Submitting straight from the address field: wait for this domain's lookup, or start one.
         const pending = inFlight.current;
         const awaited =
           pending !== null && pending.domain === domain
@@ -161,7 +151,7 @@ export const Connect = () => {
           setError('Enter the mail servers, then try again.');
           return;
         }
-        // A lookup submit just waited for has not re-rendered yet; take its username form directly.
+        // A lookup just waited for has not re-rendered yet.
         const awaitedConfig =
           awaited !== null && awaited.result.status === 'found' ? awaited.result.config : null;
         const login =
@@ -415,7 +405,7 @@ export const Connect = () => {
   );
 };
 
-/** Host and port as one ruled line: the pair is one fact about one server. */
+/** Host and port as one ruled line. */
 const ServerFields = ({
   protocol,
   idPrefix,

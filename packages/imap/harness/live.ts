@@ -1,12 +1,3 @@
-/**
- * Live IMAP harness: speaks real IMAP to the nine mail servers via @yozz.app/tls.
- *
- *     pnpm -F @yozz.app/imap live            # all nine
- *     pnpm -F @yozz.app/imap live posteo.de  # just the hosts named
- *
- * Run by hand only, never in CI or `pnpm test`.
- */
-
 import { connect, type Socket } from 'node:net';
 import { type ByteDuplex, startTls, type TlsConnection, type TlsFailure } from '@yozz.app/tls';
 import { endGracefully, HOSTS, IMAP_PORT, socketTransport } from '@yozz.app/tls/harness';
@@ -131,7 +122,6 @@ for (const host of targets) {
       .map(c => c.slice(5))
       .join(',');
 
-    // If authenticated session requested for this host
     if (isAuthSession && host === authHost) {
       console.log(`      Authenticating as ${authUser}...`);
       const authRes = await client.authenticate(authUser, authPass);

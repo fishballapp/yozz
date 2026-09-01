@@ -1,9 +1,3 @@
-/**
- * SMTP replies (RFC 5321 §4.2): one or more `NNN-text` lines closed by one `NNN text` line, all
- * carrying the same code. Parsed totally over attacker-controlled bytes: a line that is not a
- * reply, a code that changes mid-reply, a bare LF or a line past the cap is a `protocol` failure,
- * never a throw.
- */
 import type { ByteDuplex } from './transport.ts';
 
 export type SmtpReply = {
@@ -23,14 +17,12 @@ export type SmtpResult<T> =
   | { readonly ok: true; readonly value: T }
   | { readonly ok: false; readonly reason: SmtpFailure };
 
-/** RFC 5321 §4.5.3.1.5 says 512 octets; real servers write longer EHLO lines, so a lenient cap. */
+/** RFC 5321 §4.5.3.1.5 says 512 octets; real servers write longer EHLO lines. */
 const MAX_LINE_BYTES = 4096;
-/** A reply is a handful of lines; EHLO is the longest real one. Past this the server is not one. */
 const MAX_REPLY_LINES = 64;
 
 const asciiDecoder = new TextDecoder('ascii');
 
-/** Lines out of a byte stream, CRLF-terminated, buffered across reads. */
 export const createLineReader = (transport: ByteDuplex) => {
   let buffer = new Uint8Array(0);
   let isClosed = false;

@@ -1,13 +1,3 @@
-/**
- * Chain building and RFC 5280 s6.1 path validation — the package's reason to
- * exist, and the only file here that decides trust.
- *
- * Two shapes are load-bearing. Path building is a SEARCH, not a walk: a subject
- * name can be issued by several keys (that is what a cross-sign is), so finding
- * one chain that fails says nothing about whether another succeeds. And every
- * bound is explicit, because `pathological::` hands us cycles and
- * `denial-of-service` is deliberately not skipped from the profile.
- */
 import { type Certificate, decodeCertificate, type GeneralName } from './certificate.ts';
 import { DerError } from './der.ts';
 import {
@@ -27,22 +17,12 @@ import type {
 import { rejectKey, verifySignature } from './verify.ts';
 
 /**
- * Total work the search may do, counted in steps rather than in completed paths.
- *
- * Cycles are already broken by not reusing a certificate within one path, and
- * that is NOT enough: `pathological::pathological-chain-*` supplies 100 distinct
- * intermediates that all chain, so an acyclic search still explores
- * combinatorially many orderings. Bounding finished paths bounds nothing,
- * because the blow-up happens before any path finishes.
- *
- * ponytail: a flat budget, not a smarter search. Real WebPKI chains are three or
- * four links from a handful of candidates, so this is never approached in
- * practice; if a legitimate cross-signed graph ever exhausts it, order candidates
- * by authority key identifier before raising the number.
+ * Counted in steps, not finished paths: 100 distinct intermediates that all chain make an acyclic
+ * search explore combinatorially many orderings before any path finishes.
  */
 const MAXIMUM_SEARCH_STEPS = 512;
 
-/** Beyond this, no real WebPKI chain exists and we are being fed a graph to explore. */
+/** No real WebPKI chain is deeper. */
 const MAXIMUM_INTERMEDIATES = 8;
 
 const EXTENDED_KEY_USAGE_OIDS: Readonly<Record<string, string>> = {
@@ -51,19 +31,12 @@ const EXTENDED_KEY_USAGE_OIDS: Readonly<Record<string, string>> = {
 };
 const SERVER_AUTH_OID = '1.3.6.1.5.5.7.3.1';
 const ANY_EXTENDED_KEY_USAGE = '2.5.29.37.0';
-/** RFC 5280 s4.1.2.2. Twenty octets, and a CA that needs more has a different problem. */
+/** RFC 5280 §4.1.2.2. */
 const MAXIMUM_SERIAL_OCTETS = 20;
 
-/** Where a certificate sits in the path, which is what its conformance rules key off. */
 type PathRole = 'anchor' | 'issuer' | 'leaf';
 
-/**
- * The RFC 5280 and CABF MUSTs a certificate owes for its position in the path.
- *
- * These read like paperwork and are not. Each one closes a way for a
- * certificate to be ambiguous about who signed it, or about what name it
- * speaks for — and an ambiguity an attacker chooses is not paperwork.
- */
+/** The RFC 5280 and CABF MUSTs a certificate owes for its position in the path. */
 const conformanceViolation = (
   certificate: Certificate,
   role: PathRole,
@@ -74,48 +47,28 @@ const conformanceViolation = (
   const subjectAltName = certificate.extensions.subjectAltName;
   const hasSubjectName = certificate.subject.relativeDistinguishedNames.length > 0;
 
-  // RFC 5280 s4.2.1.1 and s4.2.1.2 both say non-critical, and CABF 7.1.2.11.1
-  // forbids an authority key identifier that names an issuer and serial rather
-  // than a key — a chain hint pointing at something other than a key.
+  // RFC 5280 §4.2.1.1 and §4.2.1.2: non-critical. CABF 7.1.2.11.1: no issuer-and-serial form.
   if (authority?.isCritical === true || subjectKeyId?.isCritical === true) return malformed;
-  // RFC 5280 s4.2.2.1 marks AIA non-critical. Recognising the extension means it
-  // no longer trips the unknown-critical rule, so state it directly.
+  // RFC 5280 §4.2.2.1: AIA is non-critical.
   if (certificate.extensions.authorityInfoAccess?.isCritical === true) return malformed;
   if (authority?.value.hasIssuerAndSerial === true) return malformed;
 
-  /**
-   * RFC 5280 s4.2.1.6: an empty subject means the SAN carries the whole
-   * identity, so the SAN MUST be critical — otherwise an implementation that
-   * skips non-critical extensions is left with a certificate that names nobody.
-   * CABF 7.1.2.7.12 states the other half: with a subject present, a critical
-   * SAN is forbidden.
-   */
+  // RFC 5280 §4.2.1.6: an empty subject needs a critical SAN. CABF 7.1.2.7.12: a subject forbids one.
   if (!hasSubjectName && (subjectAltName === null || !subjectAltName.isCritical)) return malformed;
   if (hasSubjectName && subjectAltName?.isCritical === true) return malformed;
 
   if (role !== 'leaf') {
-    // RFC 5280 s4.1.2.6. A CA has to be nameable: name constraints are matched
-    // against the subject, so a CA with no subject has nothing to constrain.
+    // RFC 5280 §4.1.2.6: a CA has a subject, since name constraints match against it.
     if (!hasSubjectName) return malformed;
     if (subjectKeyId === null) return malformed;
   }
 
-  /**
-   * Two separate rules, and folding them together cost two valid chains.
-   *
-   * A stated authority key identifier must NAME A KEY — always, anchors
-   * included, because one that states an issuer instead is pointing the path
-   * builder somewhere it cannot verify.
-   *
-   * Whether one must be stated at all is a different question, and only
-   * non-anchors owe it. Demanding it of an anchor rejects `cve::cve-2024-0567`
-   * and `rfc5280::root-and-intermediate-swapped`, both valid: a trust anchor is
-   * trusted because it is IN the store, not because it names its issuer.
-   */
+  // A stated authority key identifier must name a key; only a non-anchor must state one at all
+  // (`rfc5280::root-and-intermediate-swapped` is a valid anchor without one).
   if (authority !== null && authority.value.keyIdentifier === null) return malformed;
   if (role !== 'anchor' && authority === null) return malformed;
 
-  // nameConstraints is meaningless on something that issues nothing (s4.2.1.10).
+  // RFC 5280 §4.2.1.10: nameConstraints is meaningless on a leaf.
   if (role === 'leaf' && certificate.extensions.nameConstraints !== null) return malformed;
   return null;
 };
@@ -123,20 +76,19 @@ const conformanceViolation = (
 const isSameBytes = (a: Uint8Array, b: Uint8Array): boolean =>
   a.length === b.length && a.every((byte, index) => byte === b[index]);
 
-/** A certificate whose issuer is its own subject: exempt from several s6.1 steps. */
+/** Exempt from several §6.1 steps. */
 const isSelfIssued = (certificate: Certificate): boolean =>
   isSameBytes(certificate.issuer.der, certificate.subject.der);
 
 type Link = {
   readonly certificate: Certificate;
   readonly ref: CertificateRef;
-  /** Only ever set on an anchor. Carried here so the check has both halves. */
+  /** Only ever set on an anchor. */
   readonly serverDistrustAfter?: Date | null;
 };
 
-/** Subject DN and every SAN, which is the set name constraints apply to. */
+/** What name constraints apply to. */
 const constrainedNamesOf = (certificate: Certificate): readonly GeneralName[] => [
-  // An empty DN constrains nothing and must not be compared as if it did.
   ...(certificate.subject.relativeDistinguishedNames.length === 0
     ? []
     : [{ kind: 'directory' as const, name: certificate.subject }]),
@@ -150,10 +102,8 @@ const validatePathCandidate = async (
 ): Promise<ValidationFailure | null> => {
   const time = Math.floor(request.validationTime.getTime() / 1000) * 1000;
 
-  // RFC 5280 s6.1 treats an anchor as a name and a key, and x509-limbo does not:
-  // an expired root, a root without basic constraints, a root whose cA bit and
-  // keyCertSign disagree, and a root carrying an unknown critical extension are
-  // each expected to FAIL. A trust anchor is trusted to be a CA, not to be valid.
+  // RFC 5280 §6.1 treats an anchor as a name and a key; x509-limbo expects an expired or
+  // non-CA root to fail, and this validator follows limbo.
   const anchorBasicConstraints = anchor.certificate.extensions.basicConstraints;
   if (
     anchorBasicConstraints === null ||
@@ -168,16 +118,8 @@ const validatePathCandidate = async (
   }
   const anchorConformance = conformanceViolation(anchor.certificate, 'anchor');
   if (anchorConformance !== null) return { ...anchorConformance, certificate: anchor.ref };
-  /**
-   * A SELF-SIGNED root signs itself, so its authority key identifier — when it
-   * states one — must name its own key. One naming a different key is telling
-   * the path builder something untrue about who issued it.
-   *
-   * Only when self-signed. An intermediate can be placed in a trust store and
-   * used as an anchor, and its authority key identifier then correctly points at
-   * the root above it — `rfc5280::root-and-intermediate-swapped` is that exact
-   * shape, and checking every anchor rejects a chain the suite calls valid.
-   */
+  // A self-signed anchor's authority key identifier must name its own key. Only when self-signed:
+  // an intermediate used as an anchor correctly names the root above it.
   const anchorAuthorityKeyId =
     anchor.certificate.extensions.authorityKeyIdentifier?.value.keyIdentifier;
   const anchorSubjectKeyId = anchor.certificate.extensions.subjectKeyIdentifier?.value;
@@ -190,8 +132,7 @@ const validatePathCandidate = async (
   ) {
     return { code: 'malformed-certificate', certificate: anchor.ref };
   }
-  // CABF 7.1.2.1: a root states no EKU. One that does is constraining itself in
-  // a way no relying party is required to honour, which is worse than silence.
+  // CABF 7.1.2.1: a root states no EKU.
   if (anchor.certificate.extensions.extendedKeyUsage !== null) {
     return { code: 'extended-key-usage-violation', certificate: anchor.ref };
   }
@@ -211,9 +152,7 @@ const validatePathCandidate = async (
     EMPTY_CONSTRAINTS,
     anchor.certificate.extensions.nameConstraints?.value ?? null,
   );
-  // The anchor's own pathLenConstraint binds the path too. Under a
-  // whole-certificate anchor model, a root that says `pathlen:0` means it, and
-  // reading its cA bit while ignoring its depth limit honours half a statement.
+  // The anchor's own pathLenConstraint binds the path too.
   let remainingIntermediates = Math.min(
     request.maximumIntermediateCount ?? MAXIMUM_INTERMEDIATES,
     MAXIMUM_INTERMEDIATES,
@@ -223,16 +162,8 @@ const validatePathCandidate = async (
   for (const [index, { certificate, ref }] of chain.entries()) {
     const isLeaf = index === chain.length - 1;
 
-    /**
-     * Name CHAINING compares bytes, deliberately, while name CONSTRAINTS compare
-     * canonically (`names.ts`). The asymmetry is the point, not an oversight.
-     *
-     * We declared the WebPKI profile, and CABF requires a certificate's issuer
-     * field to be byte-identical to its CA's subject. Comparing canonically here
-     * would build chains the profile does not allow, which is the permissive
-     * direction. And a miss costs a REJECTION, where a missed name constraint
-     * costs an authorisation — so the two want opposite defaults.
-     */
+    // Chaining compares bytes (CABF requires the issuer field byte-identical to the CA's subject);
+    // name constraints compare canonically. A miss here costs a rejection, there an authorisation.
     if (!isSameBytes(certificate.issuer.der, workingIssuerName)) {
       return { code: 'no-path-to-trust-anchor' };
     }
@@ -242,8 +173,7 @@ const validatePathCandidate = async (
     if (certificate.serialNumberOctets > MAXIMUM_SERIAL_OCTETS) {
       return { code: 'malformed-certificate', certificate: ref };
     }
-    // RFC 5280 encodes validity to the SECOND, so a comparison at millisecond
-    // resolution invents a precision the certificate never stated.
+    // Validity is encoded to the second, so `time` is truncated to one.
     if (certificate.notBefore.getTime() > time) {
       return { code: 'certificate-not-yet-valid', certificate: ref };
     }
@@ -270,8 +200,7 @@ const validatePathCandidate = async (
     }
     if (verdict !== 'valid') return { code: 'invalid-signature', certificate: ref };
 
-    // s6.1.3(b)(c): a self-issued certificate that is not the leaf is exempt,
-    // because it re-states a name the issuer was already authorised for.
+    // §6.1.3(b)(c): a self-issued non-leaf is exempt.
     if (isLeaf || !isSelfIssued(certificate)) {
       if (violatesConstraints(constrainedNamesOf(certificate), constraints)) {
         return { code: 'name-constraints-violation', certificate: ref };
@@ -288,14 +217,8 @@ const validatePathCandidate = async (
     if (keyUsage !== null && !keyUsage.value.has('keyCertSign')) {
       return { code: 'key-usage-violation', certificate: ref };
     }
-    /**
-     * A CA that states an EKU has CONSTRAINED itself, and the constraint has to
-     * survive to the leaf. Without this, possession of a trusted CA key that was
-     * deliberately restricted away from `serverAuth` still lets its holder
-     * impersonate a mail server — the six `bettertls::pathbuilding` BAD_EKU
-     * cases are exactly that. `anyExtendedKeyUsage` IS accepted here, unlike on
-     * a leaf: on a CA it is a statement of breadth, not a refusal to be specific.
-     */
+    // A CA that states an EKU has constrained what it may issue (`bettertls::pathbuilding` BAD_EKU).
+    // `anyExtendedKeyUsage` is accepted on a CA, unlike on a leaf.
     const issuerExtendedKeyUsage = certificate.extensions.extendedKeyUsage;
     if (
       issuerExtendedKeyUsage !== null &&
@@ -322,25 +245,9 @@ const validatePathCandidate = async (
   const leaf = chain.at(-1);
   if (leaf === undefined) return { code: 'no-path-to-trust-anchor' };
 
-  /**
-   * Mozilla's server distrust-after, compared against the LEAF rather than the
-   * clock.
-   *
-   * A root program retires a CA by refusing what it issues from a date onward,
-   * because the certificates it already signed were issued in good faith and
-   * their owners did nothing wrong. Dropping the root outright would refuse
-   * those too — chains every browser still accepts — for up to the life of a
-   * leaf, which for public mail is 60-90 days. So a root past its cutoff still
-   * anchors everything it signed before it, and only newer leaves are refused.
-   *
-   * The LEAF, not every certificate in the chain: an intermediate is reissued
-   * on the CA's own schedule, and the rule is about what reaches subscribers.
-   *
-   * Checked here, after the chain has verified, rather than up with the other
-   * anchor checks. A chain that does not verify has a better diagnosis than
-   * this one, and reporting a distrusted CA for it would send the reader after
-   * the wrong thing.
-   */
+  // Mozilla's distrust-after is compared against the leaf's notBefore, not the clock: a root past
+  // its cutoff still anchors what it signed before it. After verification, so a broken chain gets
+  // its own diagnosis.
   if (
     anchor.serverDistrustAfter != null &&
     leaf.certificate.notBefore.getTime() > anchor.serverDistrustAfter.getTime()
@@ -348,12 +255,10 @@ const validatePathCandidate = async (
     return { code: 'certificate-authority-distrusted', certificate: anchor.ref };
   }
 
-  // WebPKI: a CA certificate is not a server certificate, however it was issued.
+  // A CA certificate is not a server certificate.
   if (leaf.certificate.extensions.basicConstraints?.value.isCa === true) {
     return { code: 'basic-constraints-violation', certificate: leaf.ref };
   }
-  // Widened to strings deliberately: x509-limbo supplies required usages as the
-  // RFC 5280 names, which is exactly how KeyUsage decodes them.
   const presentKeyUsages: ReadonlySet<string> =
     leaf.certificate.extensions.keyUsage?.value ?? new Set();
   const isKeyUsageDeclared = leaf.certificate.extensions.keyUsage !== null;
@@ -363,21 +268,15 @@ const validatePathCandidate = async (
   ) {
     return { code: 'key-usage-violation', certificate: leaf.ref };
   }
-  // A leaf that can sign certificates is a CA however its basicConstraints read.
+  // A leaf that can sign certificates is a CA.
   if (presentKeyUsages.has('keyCertSign')) {
     return { code: 'key-usage-violation', certificate: leaf.ref };
   }
 
-  /**
-   * CABF 7.1.2.7.9: a server certificate MUST carry an EKU naming serverAuth.
-   * `anyExtendedKeyUsage` does NOT stand in for it — x509-limbo's `ee-anyeku`
-   * and `ee-without-eku` both expect refusal, and this package exists to
-   * validate servers.
-   */
+  // CABF 7.1.2.7.9: a server certificate carries an EKU naming serverAuth.
   const extendedKeyUsage = leaf.certificate.extensions.extendedKeyUsage;
   const present = new Set(extendedKeyUsage?.value ?? []);
-  // CABF 7.1.2.7.10: an EE states the usages it has, so `anyExtendedKeyUsage`
-  // is a refusal to state them, and a critical EKU is forbidden outright.
+  // CABF 7.1.2.7.10: no `anyExtendedKeyUsage` and no critical EKU on an end entity.
   if (present.has(ANY_EXTENDED_KEY_USAGE) || extendedKeyUsage?.isCritical === true) {
     return { code: 'extended-key-usage-violation', certificate: leaf.ref };
   }
@@ -417,8 +316,7 @@ export const YOZZ_VALIDATOR: Validator = {
     })();
     if (!('subject' in peer)) return { ok: false, reason: peer };
 
-    // A malformed intermediate is UNUSABLE, not fatal: the set is untrusted
-    // input and a chain may well exist that never touches it.
+    // A malformed intermediate is unusable, not fatal.
     const intermediates = request.untrustedIntermediateDer.flatMap((der, inputIndex): Link[] => {
       try {
         return [
@@ -482,8 +380,7 @@ export const YOZZ_VALIDATOR: Validator = {
       if (chain.length > MAXIMUM_INTERMEDIATES) return null;
       for (const candidate of intermediates) {
         if (!isSameBytes(candidate.certificate.subject.der, issuerName)) continue;
-        // Cycle break. A chain is at most nine links, so scanning it beats
-        // hashing a multi-kilobyte certificate into a Set key.
+        // Cycle break.
         if (chain.some(link => isSameBytes(link.certificate.der, candidate.certificate.der))) {
           continue;
         }

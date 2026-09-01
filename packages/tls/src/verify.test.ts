@@ -182,27 +182,21 @@ describe('Stage 6: CertificateVerify & leaf key import against RFC 8448', () => 
     const trace3 = RFC_8448_TRACES.find(t => t.section === '3')!;
     const ctx = (await extractServerVerifyContext(trace3))!;
 
-    // §3 SPKI is RSA (1.2.840.113549.1.1.1)
-    // Importing with 0x0804 (RSA-PSS) succeeds:
+    // §3's SPKI is RSA (1.2.840.113549.1.1.1).
     const rsaRes = await importLeafKey(ctx.spkiDer, 0x0804);
     expect(rsaRes.ok).toBe(true);
 
-    // Importing with 0x0403 (ECDSA) fails with illegal_parameter:
     const ecdsaRes = await importLeafKey(ctx.spkiDer, 0x0403);
     expect(ecdsaRes).toEqual({ ok: false, description: 'illegal_parameter' });
   });
 
   it('refuses an id-RSASSA-PSS key for an rsa_pss_RSAE scheme', async () => {
-    // RFC 9846 §4.3.3 names the two families apart: rsa_pss_rsae_* are
-    // "RSASSA-PSS algorithms with public key OID rsaEncryption", and an
-    // id-RSASSA-PSS key belongs to rsa_pss_pss_*, which this client does not
-    // offer. Both OIDs were accepted here.
+    // RFC 9846 §4.3.3: rsa_pss_rsae_* is "public key OID rsaEncryption"; an id-RSASSA-PSS key
+    // belongs to rsa_pss_pss_*, which this client does not offer.
     const trace3 = RFC_8448_TRACES.find(t => t.section === '3')!;
     const ctx = (await extractServerVerifyContext(trace3))!;
 
-    // 1.2.840.113549.1.1.1 and .1.10 encode to the same length, so the only
-    // difference between an rsaEncryption SPKI and an id-RSASSA-PSS one is the
-    // last byte of the OID.
+    // The two OIDs encode to the same length and differ only in the last byte.
     const rsaEncryption = Uint8Array.of(0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x01);
     const start = ctx.spkiDer.findIndex((_, index) =>
       rsaEncryption.every((byte, offset) => ctx.spkiDer[index + offset] === byte),
@@ -218,10 +212,7 @@ describe('Stage 6: CertificateVerify & leaf key import against RFC 8448', () => 
   });
 
   it('refuses a P-256 key for ecdsa_secp384r1_sha384', async () => {
-    // §4.5.2: "the signature algorithm MUST be compatible with the key in the
-    // sender's end-entity certificate", and in TLS 1.3 an ECDSA scheme names
-    // its curve. Left to WebCrypto's import throwing, the mismatch was reported
-    // as a corrupt certificate.
+    // §4.5.2: the scheme "MUST be compatible with the key", and an ECDSA scheme names its curve.
     const pair = await crypto.subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, true, [
       'sign',
       'verify',
@@ -236,24 +227,15 @@ describe('Stage 6: CertificateVerify & leaf key import against RFC 8448', () => 
   });
 
   /**
-   * The list in `wire.ts` is what `signature_algorithms` advertises, and this is
-   * what stops it advertising something this file cannot import. Add a scheme to
-   * the `SignatureScheme` union without a case in `importLeafKey` and the switch
-   * falls through to `illegal_parameter` — every server offering that scheme gets
-   * refused, on a handshake we invited by naming it.
-   *
-   * The key-per-scheme table is deliberately a SECOND statement of what each
-   * scheme means, not a read of `verify.ts`'s own: `Record<SignatureScheme, …>`
-   * makes an unlisted scheme a compile error, and generating the key the scheme
-   * names is what makes a listed one more than an entry in two tables.
+   * A scheme in the `SignatureScheme` union without a case in `importLeafKey` falls through to
+   * `illegal_parameter`. The key-per-scheme table is a second statement of what each scheme
+   * means: `Record<SignatureScheme, …>` makes an unlisted scheme a compile error.
    */
   it('every scheme the client offers is one importLeafKey can import', async () => {
     const spkiOf = async (key: CryptoKey): Promise<Uint8Array> =>
       new Uint8Array(await crypto.subtle.exportKey('spki', key));
 
-    // WebCrypto exports an RSA-PSS public key under the rsaEncryption OID, which
-    // is what §4.3.3 requires of `rsa_pss_rsae_*` — an id-RSASSA-PSS key belongs
-    // to `rsa_pss_pss_*` and is refused above.
+    // WebCrypto exports an RSA-PSS public key under the rsaEncryption OID, as §4.3.3 requires of `rsa_pss_rsae_*`.
     const rsa = async (hash: string): Promise<Uint8Array> => {
       const pair = await crypto.subtle.generateKey(
         { name: 'RSA-PSS', modulusLength: 2048, publicExponent: Uint8Array.of(1, 0, 1), hash },
@@ -289,19 +271,8 @@ describe('Stage 6: CertificateVerify & leaf key import against RFC 8448', () => 
   });
 
   /**
-   * The other half: that a signature made under each scheme actually VERIFIES.
-   *
-   * RFC 8448 is a SHA-256 document, so its traces exercise
-   * `rsa_pss_rsae_sha256` and nothing else — until now the only thing standing
-   * behind the two larger PSS digests was BoGo, which needs a Go toolchain and
-   * a 337MB checkout. A salt length off by 16 bytes is invisible to `pnpm test`
-   * and rejects every signature a real server makes with that scheme; §4.3.3
-   * fixes it at the digest's own output length, and nothing else in this file
-   * reads that requirement.
-   *
-   * Signing here rather than replaying a vector: WebCrypto is both sides, so
-   * what this pins is that `verifyCertificateVerify` names the same parameters
-   * the signer did — which is exactly the mistake being guarded against.
+   * RFC 8448 exercises `rsa_pss_rsae_sha256` only; §4.3.3 fixes the salt at the digest's output
+   * length, and a salt off by 16 bytes is invisible to everything else in `pnpm test`.
    */
   it('verifies a real signature under every scheme the client offers', async () => {
     const transcript = crypto.getRandomValues(new Uint8Array(32));

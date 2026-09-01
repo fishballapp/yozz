@@ -1,13 +1,3 @@
-/**
- * Live SMTP harness: banner + EHLO over implicit TLS (465) against real submission hosts, through
- * @yozz.app/tls over node:net. With YOZZ_SMTP_HOST/USER/PASSWORD set it also authenticates there, and
- * with YOZZ_SMTP_TO set as well it sends one real message.
- *
- *     pnpm -F @yozz.app/smtp live                  # the matrix
- *     pnpm -F @yozz.app/smtp live smtp.gmail.com   # just the hosts named
- *
- * Run by hand only, never in CI or `pnpm test`.
- */
 import { connect, type Socket } from 'node:net';
 import { type ByteDuplex, startTls, type TlsConnection } from '@yozz.app/tls';
 import { socketTransport } from '@yozz.app/tls/harness';

@@ -5,16 +5,7 @@ import { type AddressRecord, isInbound } from '../lib/addresses';
 import { useMail } from '../state/mail';
 import { SendOnlyTag } from './ui/SendOnlyTag';
 
-/**
- * THE SIGNATURE CONTROL.
- *
- * YOZZ exists because Gmail is removing "Send as" for third-party addresses in January 2027, so
- * outbound identity is not a settings footnote here — it is the first and largest control in the
- * composer, it always states the SMTP host it will actually use, and it separates the addresses
- * that have an inbox from the ones that are send-only.
- *
- * A send-only address is the whole point of the product, so it is labelled, not hidden.
- */
+/** The first and largest control in the composer; it always states the SMTP host it will use, and a send-only address is labelled, not hidden. */
 
 const smtpVia = (identity: AddressRecord) => `${identity.smtp.host}:${identity.smtp.port}`;
 

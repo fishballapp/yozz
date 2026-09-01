@@ -1,28 +1,12 @@
 /**
- * The BoGo gate, and the inventory run that decides what it covers.
- *
  * ```
- * pnpm -F @yozz.app/tls bogo:inventory   # sweep all 7895 tests, rebuild manifest.txt
- * pnpm -F @yozz.app/tls bogo             # the gate: the manifest, strictly
+ * pnpm -F @yozz.app/tls bogo:inventory   # sweep every test, rebuild manifest.txt
+ * pnpm -F @yozz.app/tls bogo             # the gate: every manifest test must pass
  * ```
  *
- * "Passes BoGo" is not a claim on its own — `-allow-unimplemented` can skip
- * every test and still report green. So the gate runs a COMMITTED list of test
- * names ([manifest.txt](manifest.txt)) and demands a pass from every one of
- * them. A skip inside that list is something the shim declined, and it is
- * reported as debt by the MISSING THING with the tests it costs — a flag we do
- * not parse and a curve we do not implement are different debts and get
- * different lines.
- *
- * The inventory run is what builds the list: it drives the whole suite, learns
- * each test's protocol and side from the runner itself, and applies
- * [scope.ts](scope.ts). The manifest's diff is the review.
- *
- * **Re-run it when the pin moves OR when the shim learns a flag.** Two scope
- * rules classify a test by what the peer did to us, and a test the shim skips
- * never gets far enough to tell them anything — so a flag the shim gains can
- * reveal that a test in the manifest was never in scope. That is how two TLS
- * 1.2 tests sat in it until `-curves` was implemented.
+ * Re-run the inventory when the pin moves or the shim learns a flag: two scope rules classify a
+ * test by what the peer did, and a declined test never gets that far. See DECISIONS.md,
+ * "The BoGo gate".
  */
 
 import { execFileSync, spawnSync } from 'node:child_process';
@@ -50,12 +34,7 @@ const TRANSCRIPTS = `${WORK}/transcripts`;
 type Outcome = 'PASS' | 'FAIL' | 'SKIP';
 type Results = { readonly tests: Record<string, { actual: Outcome; error?: string }> };
 
-/**
- * How the runner disagreed with us, in its own words. The three read very
- * differently and lumping them together hides the only one that is dangerous:
- * `unexpected success` is the client accepting something the suite says must be
- * refused.
- */
+/** `unexpected success` is the dangerous one: the client accepted what the suite says to refuse. */
 const CATEGORIES = [
   ['unexpected success', 'we accepted it; the suite says refuse'],
   [
@@ -86,23 +65,12 @@ const buildRunner = (): void => {
   });
 };
 
-/**
- * `-transcript-dir` in BOTH modes, though nothing reads the transcripts: it is
- * the only way the runner tells the shim which test it is running, in the
- * `-write-settings` prefix. Without it a skip has no name.
- */
+/** `-transcript-dir` is the only way the runner names the test to the shim (the `-write-settings` prefix). */
 const runBogo = (extraArgs: readonly string[]): void => {
   rmSync(DECISIONS, { force: true });
   rmSync(TRANSCRIPTS, { force: true, recursive: true });
-  /**
-   * The results file goes FIRST, and its absence afterwards is fatal.
-   *
-   * `.bogo/` is cached whole in CI, results and all, and the runner exits
-   * non-zero for ordinary test failures — so a crash, a signal, or a runner too
-   * broken to write its JSON would otherwise leave `readResults()` reading the
-   * PREVIOUS run's file and reporting that nothing moved. An infrastructure
-   * failure has no business looking like a green security gate.
-   */
+  // The previous run's results file must go before the runner starts; `.bogo/` is cached
+  // whole in CI, and the runner exits non-zero for ordinary failures too.
   rmSync(RESULTS, { force: true });
   mkdirSync(TRANSCRIPTS, { recursive: true });
   const result = spawnSync(
@@ -160,18 +128,9 @@ const decisionsByTest = (): Map<string, Decision> =>
   );
 
 /**
- * What each in-scope test does TODAY, committed.
- *
- * The milestone is red until the backlog is built, so a build that demanded a
- * green milestone would be red for weeks — and a check that can never pass is a
- * check everyone learns to scroll past. This is the same shape
- * `expected-disagreements.txt` gives x509-limbo: the build asserts that nothing
- * MOVED, in either direction, and the milestone's own progress is a separate
- * line.
- *
- * `FAIL` is deliberately not a value it can hold. A failing test in scope is
- * never something to bless by editing a file — it is a defect, a mapping, or a
- * declared divergence in `scope.ts`.
+ * What each in-scope test does today, committed; the gate asserts nothing moved in either
+ * direction. `FAIL` is deliberately not a value: a failing in-scope test is a defect, a mapping,
+ * or a declared divergence in `scope.ts`.
  */
 type Expectation = 'PASS' | 'SKIP';
 
@@ -229,12 +188,7 @@ const inventory = (): void => {
     ];
   });
 
-  /**
-   * A short sweep writes a short manifest, and nothing downstream can tell the
-   * difference — every name in it still passes, so the gate goes green over
-   * fewer tests. The runner exiting non-zero is normal here (tests fail during
-   * an inventory by design), so its status cannot be the check; the count can.
-   */
+  // The runner exits non-zero during an inventory by design, so the count is the check.
   if (rows.length !== BORINGSSL_TEST_COUNT) {
     throw new Error(
       `the sweep saw ${rows.length} tests and pin.ts says the suite has ${BORINGSSL_TEST_COUNT}. ` +
@@ -270,13 +224,7 @@ const inventory = (): void => {
   console.log(`\nwrote ${names.length} in-scope test names -> harness/bogo/manifest.txt`);
 };
 
-/**
- * The manifest and the baseline have to name the same tests, or the comparison
- * below silently shrinks: it walks the MANIFEST, so a name deleted from it is
- * never looked at — one accidental line removal, or an empty file, and the gate
- * reports "nothing moved" while the whole recorded baseline goes unchecked. Additions
- * fail loudly and removals would not, which is exactly backwards.
- */
+// The comparison walks the manifest, so a name missing from it would go unchecked silently.
 const namesDisagree = (manifest: readonly string[], expected: ReadonlyMap<string, unknown>) => {
   const inManifest = new Set(manifest);
   const missingFromExpected = manifest.filter(name => !expected.has(name));

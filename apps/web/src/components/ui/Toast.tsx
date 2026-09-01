@@ -4,19 +4,8 @@ import { XIcon } from '@phosphor-icons/react';
 import { Button } from './Button';
 
 /**
- * The app's one transient report line. It exists because a send outlives the form that started
- * it: the composer closes the moment the bytes are frozen, and SMTP, the copy into Sent and the
- * mirror sweep settle after it is gone. A dialog cannot report that, and the status line is one
- * slot shared with sync — so what became of the send says so here and then leaves.
- *
- * The manager is created outside React so anything can queue a toast without being under the
- * provider or holding the hook.
- *
- * **It is a panel in miniature, not a card.** Same parts as every other surface here: a `2xs`
- * mono rule-label in a `1.75rem` bar, a hairline, then prose on the raised plate. No radius, no
- * shadow, and no `--signal` — a toast is none of that token's four jobs, so the words carry the
- * state. It is sized by its content rather than to a column, because "Sent" is one word and a
- * fixed plate around one word is mostly empty plate.
+ * The one transient report line, for a send that outlives the composer. The manager is created
+ * outside React so anything can queue one. A panel in miniature, sized by its content.
  */
 export const toast = Toast.createToastManager();
 
@@ -37,12 +26,7 @@ const ToastList = () => {
   const { toasts } = Toast.useToastManager();
   return toasts.map(item => {
     const hasBody = item.description !== undefined || item.actionProps !== undefined;
-    /**
-     * A toast that leaves on its own does not need a button to make it leave — and dropping it
-     * takes the whole control column out of the common case, which is what lets "Sent" be the
-     * width of the word "Sent". Only a toast that waits for you (`timeout: 0` — every state that
-     * reports a problem) offers the way out.
-     */
+    // Only a toast that waits for you (`timeout: 0`) offers the way out.
     const isSticky = item.timeout === 0;
     return (
       <Toast.Root
@@ -55,8 +39,7 @@ const ToastList = () => {
               bar so the label and the close button share a centre line whatever follows them. */}
           <div
             className={cn(
-              // `control-sm` on a pointer, the 44px touch floor on a phone — the same pair every
-              // icon button in the app wears, because the bar is sized by the button inside it.
+              // `control-sm` on a pointer, the 44px floor on a phone.
               'flex h-11 shrink-0 items-center gap-4 lg:h-7',
               isSticky ? 'pr-1 pl-3' : 'px-3',
               hasBody && 'border-b border-rule-soft',

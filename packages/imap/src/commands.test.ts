@@ -4,7 +4,7 @@ import { buildAppendCommand, buildUidExpungeCommand, formatImapDateTime } from '
 
 describe('formatImapDateTime', () => {
   it('space-pads the day and names the month, in the local zone', () => {
-    // Local time, so the zone is whatever the machine runs in — only its shape is asserted.
+    // Local zone, so only the shape is asserted.
     expect(formatImapDateTime(new Date(2026, 7, 8, 9, 48, 3))).toMatch(
       /^" 8-Aug-2026 09:48:03 [+-]\d{4}"$/,
     );

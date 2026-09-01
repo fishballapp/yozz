@@ -48,11 +48,7 @@ describe('Worker records CRUD and isolation routes', () => {
     await applyMigrations(env.DB);
   });
 
-  /**
-   * The precondition is what stops two devices editing one draft from silently overwriting each
-   * other: a refused write must change nothing at all, which is why every case asserts the stored
-   * ciphertext afterwards rather than only the status code.
-   */
+  /** A refused write must change nothing, so every case asserts the stored ciphertext afterwards. */
   describe('compare-and-swap', () => {
     const put = async (
       app: ReturnType<typeof createApp>,
@@ -99,7 +95,6 @@ describe('Worker records CRUD and isolation routes', () => {
         precondition: { expect: 'absent' },
       });
       expect(second.status).toBe(409);
-      // The loser wrote nothing: the first writer's content is intact.
       expect(await storedCiphertext(app, user.headers)).toMatchObject({ ciphertext: 'Zmlyc3Q=' });
     });
 
@@ -135,7 +130,6 @@ describe('Worker records CRUD and isolation routes', () => {
     it('fills a pre-CAS row on `revision: null`, and refuses that claim once it is set', async () => {
       const user = await loginWithMagicLink('cas3@example.com', 'CAS');
       const app = createApp();
-      // A row from before the column existed: written without a precondition, revision NULL.
       await env.DB.prepare(
         'INSERT INTO vault_record (user_id, id, type, ciphertext, updated_at) VALUES (?, ?, ?, ?, ?)',
       )
@@ -151,7 +145,6 @@ describe('Worker records CRUD and isolation routes', () => {
       expect(filled.status).toBe(200);
       expect(await storedCiphertext(app, user.headers)).toMatchObject({ revision: 5 });
 
-      // The same claim a second time is stale: the row is no longer pre-CAS.
       const again = await put(app, user.headers, {
         ciphertext: 'YWdhaW4=',
         revision: 6,
@@ -191,7 +184,6 @@ describe('Worker records CRUD and isolation routes', () => {
       const user = await loginWithMagicLink('cas5@example.com', 'CAS');
       const app = createApp();
       await put(app, user.headers, { ciphertext: 'Zmlyc3Q=', revision: 1 });
-      // No precondition: last write wins, as every pre-CAS caller relies on.
       const second = await put(app, user.headers, { ciphertext: 'c2Vjb25k', revision: 2 });
       expect(second.status).toBe(200);
       expect(await storedCiphertext(app, user.headers)).toMatchObject({
@@ -206,7 +198,6 @@ describe('Worker records CRUD and isolation routes', () => {
     const user2 = await loginWithMagicLink('user2@example.com', 'User Two');
     const app = createApp();
 
-    // User 1 puts a record
     const putRes = await app.request(
       'http://localhost/api/v1/vault/records/account/blind-acc-1',
       {
@@ -218,7 +209,6 @@ describe('Worker records CRUD and isolation routes', () => {
     );
     expect(putRes.status).toBe(200);
 
-    // User 1 can get the record
     const getRes1 = await app.request(
       'http://localhost/api/v1/vault/records/account/blind-acc-1',
       { method: 'GET', headers: user1.headers },
@@ -235,7 +225,6 @@ describe('Worker records CRUD and isolation routes', () => {
     expect(body1.type).toBe('account');
     expect(body1.ciphertext).toBe('Y2lwaGVyLWFjYy0x');
 
-    // User 2 CANNOT read User 1's record (returns 404)
     const getRes2 = await app.request(
       'http://localhost/api/v1/vault/records/account/blind-acc-1',
       { method: 'GET', headers: user2.headers },
@@ -243,14 +232,12 @@ describe('Worker records CRUD and isolation routes', () => {
     );
     expect(getRes2.status).toBe(404);
 
-    // User 2 cannot delete User 1's record
     await app.request(
       'http://localhost/api/v1/vault/records/account/blind-acc-1',
       { method: 'DELETE', headers: user2.headers },
       env,
     );
 
-    // Record should still exist for User 1
     const checkStillExists = await app.request(
       'http://localhost/api/v1/vault/records/account/blind-acc-1',
       { method: 'GET', headers: user1.headers },
@@ -258,7 +245,6 @@ describe('Worker records CRUD and isolation routes', () => {
     );
     expect(checkStillExists.status).toBe(200);
 
-    // User 1 deletes their record
     const delRes = await app.request(
       'http://localhost/api/v1/vault/records/account/blind-acc-1',
       { method: 'DELETE', headers: user1.headers },
@@ -266,7 +252,6 @@ describe('Worker records CRUD and isolation routes', () => {
     );
     expect(delRes.status).toBe(200);
 
-    // Record is now gone
     const checkGone = await app.request(
       'http://localhost/api/v1/vault/records/account/blind-acc-1',
       { method: 'GET', headers: user1.headers },
@@ -279,7 +264,6 @@ describe('Worker records CRUD and isolation routes', () => {
     const user1 = await loginWithMagicLink('conflict@example.com');
     const app = createApp();
 
-    // Put as account
     await app.request(
       'http://localhost/api/v1/vault/records/account/same-blind-id',
       {
@@ -290,7 +274,6 @@ describe('Worker records CRUD and isolation routes', () => {
       env,
     );
 
-    // Put same blind-id as identity must fail with 409
     const conflictRes = await app.request(
       'http://localhost/api/v1/vault/records/identity/same-blind-id',
       {
@@ -311,7 +294,6 @@ describe('Worker records CRUD and isolation routes', () => {
     const user2 = await loginWithMagicLink('page2@example.com');
     const app = createApp();
 
-    // Insert 3 account records for user 1
     await app.request(
       'http://localhost/api/v1/vault/records/account/id-a',
       {
@@ -340,7 +322,6 @@ describe('Worker records CRUD and isolation routes', () => {
       env,
     );
 
-    // Insert 1 identity record for user 1
     await app.request(
       'http://localhost/api/v1/vault/records/identity/id-d',
       {
@@ -351,7 +332,6 @@ describe('Worker records CRUD and isolation routes', () => {
       env,
     );
 
-    // Insert 1 account record for user 2
     await app.request(
       'http://localhost/api/v1/vault/records/account/id-e',
       {
@@ -362,7 +342,6 @@ describe('Worker records CRUD and isolation routes', () => {
       env,
     );
 
-    // User 1 listing account should see only id-a, id-b, id-c in order
     const listRes = await app.request(
       'http://localhost/api/v1/vault/records/account',
       { method: 'GET', headers: user1.headers },
@@ -376,7 +355,6 @@ describe('Worker records CRUD and isolation routes', () => {
 
     expect(listBody.records.map(r => r.id)).toEqual(['id-a', 'id-b', 'id-c']);
 
-    // Listing identity should see only id-d
     const listIdentityRes = await app.request(
       'http://localhost/api/v1/vault/records/identity',
       { method: 'GET', headers: user1.headers },

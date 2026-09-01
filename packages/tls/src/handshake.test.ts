@@ -126,8 +126,7 @@ const extractTraceInputs = (trace: Rfc8448Trace) => {
       if (iv !== undefined) serverHsWriteIv = iv;
     }
 
-    // Client HS write keys are published as the server's HS read keys
-    // ("same as server handshake data read traffic keys").
+    // Published as the server's HS read keys ("same as server handshake data read traffic keys").
     if (
       step.actor === 'server' &&
       step.title.includes('derive read traffic keys for handshake data')
@@ -305,13 +304,11 @@ describe('Stage 7: Handshake state machine & scripted peer', () => {
 
       const connection = clientResult.connection;
 
-      // ClientHello then Finished — byte-exact against the published records
       const chRec = await duplex.server.read();
       expect(chRec).toEqual(inputs.publishedClientHandshakeRecords[0]);
       const finRec = await duplex.server.read();
       expect(finRec).toEqual(inputs.publishedClientHandshakeRecords[1]);
 
-      // NST then app data from peer
       const readResult = await connection.read();
       expect(readResult).toEqual({
         ok: true,
@@ -334,7 +331,6 @@ describe('Stage 7: Handshake state machine & scripted peer', () => {
       await closePromise;
       expect(clientAlertRecord).toEqual(inputs.publishedClientAlertComplete);
 
-      // Peer close_notify must be consumed as a clean close
       const peerClose = await connection.read();
       expect(peerClose).toEqual({ ok: true, kind: 'closed' });
     });
@@ -372,7 +368,6 @@ describe('Stage 7: Handshake state machine & scripted peer', () => {
       ]);
 
       expect(clientResult.ok).toBe(true);
-      // Injected CH2 must be written byte-exact (cookie already inside)
       expect(writtenCh2).toEqual(inputs.publishedClientHandshakeRecords[1]);
       const finRec = await duplex.server.read();
       expect(finRec).toEqual(inputs.publishedClientHandshakeRecords[2]);
@@ -461,7 +456,7 @@ describe('Stage 7: Handshake state machine & scripted peer', () => {
       expect(inputs.clientHsWriteIv).toBeDefined();
       expect(inputs.certificateRequestContext).toBeDefined();
 
-      // Decline: empty Certificate (echo context) then Finished — NOT the published client cert/CV
+      // An empty Certificate echoing the context, not the published client cert/CV.
       const emptyCertRec = await duplex.server.read();
       const expectedEmptyCert = await sealAead(
         inputs.clientHsWriteKey!,
@@ -492,7 +487,6 @@ describe('Stage 7: Handshake state machine & scripted peer', () => {
       if (!finMsg.ok) return;
       expect(finMsg.value.kind).toBe('finished');
 
-      // Must not have sent the published client Certificate (which carries a cert entry)
       expect(emptyCertRec).not.toEqual(inputs.publishedClientHandshakeRecords[1]);
       expect(sealedTypes).not.toContain('application_data');
     });
@@ -509,10 +503,7 @@ describe('Stage 7: Handshake state machine & scripted peer', () => {
       const trace3 = RFC_8448_TRACES.find(t => t.section === '3')!;
       const inputs = extractTraceInputs(trace3);
 
-      // ROADMAP's M6 gate is not "it returned a failure" — it is that NO
-      // APPLICATION DATA WAS EVER SENT. A client that leaks a byte of mail
-      // before deciding the peer is untrustworthy passes every other assertion
-      // in this helper.
+      // The M6 gate: no application data was ever sent.
       const sealed: ContentType[] = [];
       setAeadObserver(event => {
         if (event.direction === 'seal') sealed.push(event.type);
@@ -553,7 +544,6 @@ describe('Stage 7: Handshake state machine & scripted peer', () => {
         expect(clientResult.reason.alert.description).toBe(expectedAlert);
       }
 
-      // Assert the expected fatal alert actually went out on the wire
       const writes = await drainClientWrites(duplex.server);
       const wireAlert = await findAlertDescriptionOnWire(
         writes,
@@ -733,7 +723,6 @@ describe('Stage 7: Handshake state machine & scripted peer', () => {
         };
         await duplex.server.write(sealPlain('handshake', encodeHandshakeMessage(hrr)));
         await duplex.server.read(); // read CH2
-        // Send a second HRR
         await duplex.server.write(sealPlain('handshake', encodeHandshakeMessage(hrr)));
       })();
 
@@ -750,12 +739,7 @@ describe('Stage 7: Handshake state machine & scripted peer', () => {
       }
     });
 
-    /**
-     * RFC 9846 §4.3.8 puts two conditions on a HelloRetryRequest's group, and
-     * both are `illegal_parameter`. BoGo covers neither against a TLS 1.3
-     * client — `curve_tests.go` carries a TODO for the first — so these are the
-     * only thing holding either check in place.
-     */
+    /** RFC 9846 §4.3.8; BoGo covers neither condition against a TLS 1.3 client. */
     describe('a HelloRetryRequest may only move us to a group we can go to', () => {
       const retryTo = async (
         selectedGroup: number,
@@ -804,8 +788,7 @@ describe('Stage 7: Handshake state machine & scripted peer', () => {
       };
 
       it('refuses a group that was not in our supported_groups', async () => {
-        // We implement P-384, so this is the offer check failing on its own and
-        // not "we cannot do that curve".
+        // P-384 is implemented, so this is the offer check alone.
         expect(await retryTo(NAMED_GROUPS.secp384r1, ['x25519', 'secp256r1'])).toBe(
           'illegal_parameter',
         );
@@ -819,10 +802,6 @@ describe('Stage 7: Handshake state machine & scripted peer', () => {
       });
 
       it('offers what the caller passed, even if the caller mutates it after', async () => {
-        // The list is read again for the ClientHello an HRR asks for, a round
-        // trip later, and §4.2.4 wants that one to offer what the first did. So
-        // the option is COPIED — aliasing it would also let a caller invalidate
-        // the checks above after they had already passed.
         const groups: NamedGroup[] = ['secp384r1', 'secp256r1'];
         const duplex = createMemoryDuplex();
         const clientPromise = startTls({
@@ -858,10 +837,7 @@ describe('Stage 7: Handshake state machine & scripted peer', () => {
       });
 
       it('refuses to build a ClientHello offering the same group twice', async () => {
-        // RFC 9846 §4.3.7: "The `named_group_list` MUST NOT contain any
-        // duplicate entries. A recipient MAY abort a connection with a fatal
-        // `illegal_parameter` alert if it detects a duplicate entry." Ours to
-        // catch, so it throws instead of reaching the wire.
+        // RFC 9846 §4.3.7: no duplicate entries. Ours to catch, so it throws.
         await expect(
           startTls({
             transport: createMemoryDuplex().client,
@@ -881,9 +857,7 @@ describe('Stage 7: Handshake state machine & scripted peer', () => {
       });
 
       it('refuses the group it already has our key share for', async () => {
-        // The retry would change nothing, which §4.2.4 forbids in as many
-        // words. Without this check a server can spend our key generation on a
-        // round trip that buys the handshake nothing.
+        // §4.2.4: a retry that changes nothing is forbidden.
         expect(await retryTo(NAMED_GROUPS.x25519, ['x25519', 'secp256r1'])).toBe(
           'illegal_parameter',
         );
@@ -897,7 +871,6 @@ describe('Stage 7: Handshake state machine & scripted peer', () => {
       await runFailClosedTest(async server => {
         await server.read(); // CH
         await server.write(inputs.serverRecords[0]!); // SH
-        // Mutate second record (encrypted EE+Cert+CV+Fin)
         const mutatedFlight = new Uint8Array(inputs.serverRecords[1]!);
         mutatedFlight[20]! ^= 0x01;
         await server.write(mutatedFlight);
@@ -917,10 +890,7 @@ describe('Stage 7: Handshake state machine & scripted peer', () => {
       const trace3 = RFC_8448_TRACES.find(t => t.section === '3')!;
       const inputs = extractTraceInputs(trace3);
 
-      // ROADMAP's M6 gate is not "it returned a failure" — it is that NO
-      // APPLICATION DATA WAS EVER SENT. A client that leaks a byte of mail
-      // before deciding the peer is untrustworthy passes every other assertion
-      // in this helper.
+      // The M6 gate: no application data was ever sent.
       const sealed: ContentType[] = [];
       setAeadObserver(event => {
         if (event.direction === 'seal') sealed.push(event.type);
@@ -975,16 +945,8 @@ describe('Stage 7: Handshake state machine & scripted peer', () => {
     });
 
     /**
-     * The sibling of the test above, and the reason both exist: a validator has
-     * two ways to say no and they are not the same alert. `no-path-to-trust-anchor`
-     * is a conclusion about the CHAIN; `rejected-by-policy` is a refusal that is
-     * not about the chain at all, which RFC 9846 §6.2 calls "some other
-     * (unspecified) issue ... rendering it unacceptable".
-     *
-     * Trust-on-first-use is what makes this worth pinning rather than a detail
-     * of the BoGo shim: a pin mismatch validates a chain perfectly and refuses
-     * it anyway, and reporting that as `unknown_ca` would tell the user their
-     * mail host has an untrusted CA when its key simply changed.
+     * `no-path-to-trust-anchor` is about the chain; `rejected-by-policy` is not, and a pin mismatch
+     * reported as `unknown_ca` would blame the CA. See DECISIONS.md, "Alerts".
      */
     it('validatePath rejected-by-policy -> certificate_unknown', async () => {
       const trace3 = RFC_8448_TRACES.find(t => t.section === '3')!;
@@ -1028,7 +990,6 @@ describe('Stage 7: Handshake state machine & scripted peer', () => {
         expect(openFlight.ok).toBe(true);
         if (!openFlight.ok) return;
 
-        // Split coalesced EE‖Cert‖CV‖Fin and flip the Finished verify_data
         const messages = splitHandshakeMessages(openFlight.payload);
         const finished = new Uint8Array(messages[messages.length - 1]!);
         finished[finished.length - 1]! ^= 0x01;
@@ -1063,7 +1024,7 @@ describe('Stage 7: Handshake state machine & scripted peer', () => {
         if (!openFlight.ok) return;
 
         const messages = splitHandshakeMessages(openFlight.payload);
-        // CertificateVerify is the third message (EE, Cert, CV, Fin)
+        // CertificateVerify is the third message.
         const cv = new Uint8Array(messages[2]!);
         cv[cv.length - 1]! ^= 0x01;
         messages[2] = cv;
@@ -1078,13 +1039,7 @@ describe('Stage 7: Handshake state machine & scripted peer', () => {
       }, 'decrypt_error');
     });
 
-    /**
-     * RFC 9846 §4.3: a server may only answer an extension the client offered,
-     * and only where that extension is defined. BoGo has thirteen tests on this
-     * one rule and the client passed every one of them by accepting — including
-     * an unsolicited OCSP response stapled to a certificate we never asked to be
-     * stapled.
-     */
+    /** RFC 9846 §4.3: only an offered extension, only where it is defined. */
     const unofferedExtension = {
       kind: 'unknown',
       typeCode: 0xabcd,
@@ -1111,12 +1066,7 @@ describe('Stage 7: Handshake state machine & scripted peer', () => {
       }, 'unsupported_extension');
     });
 
-    /**
-     * Both of these mutate §3's real encrypted flight, so everything up to the
-     * mutated message is the document's own bytes. The transcript moves and the
-     * signature and MAC after it stop verifying — which is fine, and is the
-     * point: the client must refuse at the extension, before it ever gets there.
-     */
+    /** Both mutate §3's real flight; the client must refuse at the extension, before the signature stops verifying. */
     const mutateServerFlight = async (
       mutate: (messages: Uint8Array[]) => void,
       expectedAlert: AlertDescription,
@@ -1182,25 +1132,9 @@ describe('Stage 7: Handshake state machine & scripted peer', () => {
     });
 
     /**
-     * RFC 9846 §4.5.2: a server's CertificateVerify "signature algorithm MUST be
-     * one offered in the client's `signature_algorithms` extension".
-     *
-     * BoGo holds this too — `VerifyPreferences-Enforced` narrows the client to
-     * RSA-PSS-SHA384, hands the runner a credential that signs only SHA-256 and
-     * SHA-512, sets `IgnorePeerSignatureAlgorithmPreferences` and demands
-     * `illegal_parameter`. Delete the check below and it turns into an
-     * `unexpected success`, the gate's most dangerous column.
-     *
-     * These two are here anyway because they run in `pnpm test`, which needs
-     * neither a Go toolchain nor the 337MB checkout, and because they isolate
-     * the rule from the scheme's implementation: `VerifyPreferences-Enforced`
-     * would also fail if `rsa_pss_rsae_sha384` were broken.
-     *
-     * §3's CertificateVerify is `rsa_pss_rsae_sha256`, and the replay's
-     * ClientHello is the document's own, so narrowing the option changes only
-     * what the client will ACCEPT. That is the half being tested: the scheme is
-     * one `verify.ts` implements, and the refusal has to come from it not having
-     * been offered.
+     * RFC 9846 §4.5.2: the CertificateVerify scheme must be one the client offered. BoGo's
+     * `VerifyPreferences-Enforced` holds this too; these run in `pnpm test` and isolate the rule
+     * from the scheme's implementation.
      */
     it('a CertificateVerify scheme we implement but did not offer -> illegal_parameter', async () => {
       await runFailClosedTest(
@@ -1218,8 +1152,7 @@ describe('Stage 7: Handshake state machine & scripted peer', () => {
     });
 
     it('the same flight is accepted when that scheme IS offered', async () => {
-      // The mutation test above proves a refusal; without this one it could be
-      // refusing §3's flight for any reason at all.
+      // Without this the mutation test could be refusing §3's flight for any reason.
       const trace3 = RFC_8448_TRACES.find(t => t.section === '3')!;
       const inputs = extractTraceInputs(trace3);
       const duplex = createMemoryDuplex();
@@ -1241,14 +1174,11 @@ describe('Stage 7: Handshake state machine & scripted peer', () => {
       const result = await clientPromise;
       expect(result.ok).toBe(true);
       if (!result.ok) return;
-      // And the scheme it verified under is what the caller is told.
       expect(result.peerSignatureScheme).toBe('rsa_pss_rsae_sha256');
     });
 
     it('bytes trailing the ServerHello inside its own record -> unexpected_message', async () => {
-      // RFC 9846 §5.1: a handshake message may not span a key change, and the
-      // keys change right here. Left alone, these bytes would be spliced onto
-      // the front of the decrypted flight.
+      // RFC 9846 §5.1: a handshake message may not span a key change.
       const trace3 = RFC_8448_TRACES.find(t => t.section === '3')!;
       const inputs = extractTraceInputs(trace3);
       await runFailClosedTest(async server => {
@@ -1268,10 +1198,7 @@ describe('Stage 7: Handshake state machine & scripted peer', () => {
     });
 
     it('a server refusing the ClientHello is reported in ITS words, not ours', async () => {
-      // A cleartext alert here is the only sentence in the exchange that says
-      // why. Answering it with our own unexpected_message threw that away, and
-      // left "unexpected message" as the whole diagnosis for a server that
-      // simply speaks no TLS 1.3.
+      // A cleartext alert here is the only sentence saying why.
       const duplex = createMemoryDuplex();
       const startPromise = startTls({
         transport: duplex.client,
@@ -1314,7 +1241,6 @@ describe('Stage 7: Handshake state machine & scripted peer', () => {
             { kind: 'key_share', selectedGroup: NAMED_GROUPS.secp256r1 },
           ],
         };
-        // The retry ends the flight; our ClientHello2 is what comes next.
         await server.write(
           sealPlain('handshake', concat(encodeHandshakeMessage(hrr), Uint8Array.of(0x02, 0x00))),
         );
@@ -1344,11 +1270,7 @@ describe('Stage 7: Handshake state machine & scripted peer', () => {
     });
 
     it('a key_share in EncryptedExtensions -> illegal_parameter', async () => {
-      // RFC 9846 §4.3 draws the line: an extension we never offered is
-      // unsupported_extension, but one we DID offer, in a message where it is
-      // not defined, "MUST abort the handshake with an illegal_parameter
-      // alert". Parsing a ClientHello-shaped key_share out of an
-      // EncryptedExtensions produced a decode_error and hid which fault it was.
+      // RFC 9846 §4.3: an offered extension in a message where it is not defined is illegal_parameter.
       await mutateServerFlight(messages => {
         const decoded = decodeHandshakeMessage(messages[0]!);
         if (!decoded.ok || decoded.value.kind !== 'encrypted_extensions') {
@@ -1368,8 +1290,7 @@ describe('Stage 7: Handshake state machine & scripted peer', () => {
     });
 
     it('an empty Certificate from the server -> decode_error', async () => {
-      // RFC 9846 §4.5.1 names this alert, and it is not a complaint about a
-      // certificate: there was none to complain about.
+      // RFC 9846 §4.5.1 names this alert.
       await mutateServerFlight(messages => {
         const decoded = decodeHandshakeMessage(messages[1]!);
         if (!decoded.ok || decoded.value.kind !== 'certificate') {
@@ -1395,10 +1316,7 @@ describe('Stage 7: Handshake state machine & scripted peer', () => {
           ],
         };
         await server.write(sealPlain('handshake', encodeHandshakeMessage(sh)));
-        // §4.2.3 names this alert: "A client which receives a TLS 1.3 Server
-        // Hello with a legacy_version value not equal to 0x0303 MUST abort the
-        // handshake with a protocol_version alert." This test asserted
-        // illegal_parameter, and pinned the wrong one.
+        // §4.2.3: a legacy_version other than 0x0303 is protocol_version.
       }, 'protocol_version');
     });
 
@@ -1586,8 +1504,7 @@ describe('Stage 7: Handshake state machine & scripted peer', () => {
     it('handshake message longer than 64 KiB -> decode_error without buffering it', async () => {
       await runFailClosedTest(async server => {
         await server.read();
-        // Declared length 65537, one byte over the cap, with almost no body sent:
-        // the point is that the DECLARED size is refused before anything is held.
+        // One byte over the cap; the declared size is refused before anything is held.
         const overflowMsg = Uint8Array.of(0x02, 0x01, 0x00, 0x01, 0x00, 0x00);
         await server.write(sealPlain('handshake', overflowMsg));
       }, 'decode_error');
@@ -1632,12 +1549,7 @@ describe('Stage 7: Handshake state machine & scripted peer', () => {
       expect(clientResult.ok).toBe(true);
     });
 
-    /**
-     * Named for what it checks. It does NOT show the state machine rebinding its
-     * transcript, only that `Transcript` is 48 bytes when constructed for
-     * SHA-384 and that a 0x1302 ServerHello is not refused. The rebind is pinned
-     * in `interop.test.ts`, where removing it fails the three AES-256 rows.
-     */
+    /** Pins only that `Transcript` is 48 bytes for SHA-384 and that 0x1302 is accepted; `interop.test.ts` pins the rebind. */
     it('accepts a 0x1302 ServerHello, and Transcript widens on request', async () => {
       const defaultTranscript = new Transcript();
       defaultTranscript.add(Uint8Array.of(1, 2, 3, 4));
@@ -1647,8 +1559,7 @@ describe('Stage 7: Handshake state machine & scripted peer', () => {
       sha384.add(Uint8Array.of(1, 2, 3, 4));
       expect((await sha384.hash()).length).toBe(48);
 
-      // SM accepts 0x1302 and proceeds into the encrypted epoch (AEAD), not reject the suite.
-      // (Wire-alert decrypt uses §3 AES-128 keys, so this case checks the returned reason only.)
+      // The wire alert uses §3's AES-128 keys, so this case checks the returned reason only.
       const peerShare = await generateKeyShare('x25519');
       const duplex = createMemoryDuplex();
       const sealed: ContentType[] = [];
@@ -1703,19 +1614,7 @@ describe('Stage 7: Handshake state machine & scripted peer', () => {
       }
     });
 
-    /**
-     * A real AES-256 epoch: the peer derives `s hs traffic` under SHA-384 and
-     * seals with it, and the client opens it. Nothing else in this suite drives
-     * an AEAD record under `TLS_AES_256_GCM_SHA384` through the state machine.
-     *
-     * It does NOT gate the transcript rebind, and cannot: the traffic secrets
-     * call `deriveSecret(negotiatedSuite, …, ...messages)`, which hashes with the
-     * negotiated suite whatever width the `Transcript` object carries. The rebind
-     * only changes `transcript.hash()`, which is read at CertificateVerify and at
-     * both Finisheds — so gating it needs a peer that can complete a whole flight
-     * under AES-256, including a CertificateVerify that actually verifies. That
-     * peer is the outstanding half of M6.
-     */
+    /** The only AEAD record under `TLS_AES_256_GCM_SHA384` driven through the state machine here; `interop.test.ts` gates the transcript rebind. */
     it('opens an AES-256 handshake record sealed under SHA-384 keys', async () => {
       const SUITE_384 = 'TLS_AES_256_GCM_SHA384';
       const trace3 = RFC_8448_TRACES.find(t => t.section === '3')!;
@@ -1778,9 +1677,7 @@ describe('Stage 7: Handshake state machine & scripted peer', () => {
 
       expect(clientResult.ok).toBe(false);
       if (clientResult.ok) return;
-      // The peer stopped after EncryptedExtensions, so the honest outcome is a
-      // truncated stream. `bad_record_mac` here means the client's transcript was
-      // the wrong width and it never opened the record at all.
+      // `bad_record_mac` here would mean the transcript was the wrong width.
       expect(clientResult.reason).not.toMatchObject({ alert: { description: 'bad_record_mac' } });
     });
   });
@@ -1845,14 +1742,7 @@ describe('Stage 7: Handshake state machine & scripted peer', () => {
   });
 
   describe('Gate C2 — a ClientHello too large for one record', () => {
-    /**
-     * A ticket comes back as the PSK identity, so the SERVER decides how big our
-     * next ClientHello is. 16384 octets is the largest one this client will keep
-     * — the ceiling `sessionFromTicket` enforces — and it already overruns a
-     * single 2^14 record, which sealing used to answer with a bare
-     * `Error: record_overflow`: a peer-chosen value poisoning the connection
-     * AFTER the one it arrived on, before a byte went out.
-     */
+    /** A ticket at `sessionFromTicket`'s ceiling (16384) overruns a single record. */
     it('fragments across records instead of throwing', async () => {
       const duplex = createMemoryDuplex();
       const ticket = crypto.getRandomValues(new Uint8Array(16_384));
@@ -1896,8 +1786,7 @@ describe('Stage 7: Handshake state machine & scripted peer', () => {
         return opened.payload;
       });
 
-      // Fragmenting is only correct if the pieces are the message. A decoder
-      // fed the first record alone would see a truncated ClientHello.
+      // A decoder fed the first record alone would see a truncated ClientHello.
       const decoded = decodeHandshakeMessage(concat(...payloads));
       expect(decoded.ok).toBe(true);
       if (!decoded.ok || decoded.value.kind !== 'client_hello') return;
@@ -1909,12 +1798,7 @@ describe('Stage 7: Handshake state machine & scripted peer', () => {
     });
   });
 
-  /**
-   * Both of these are MUST-level rules with NO BoGo coverage — the suite never
-   * puts a `pre_shared_key` in a HelloRetryRequest, and it maps a missing
-   * `key_share` to one internal error whichever alert we choose. So this file is
-   * the only thing holding them, which is exactly when a test is owed.
-   */
+  /** MUST-level rules with no BoGo coverage. */
   describe('Gate C3 — what a server may say back to a PSK offer', () => {
     const offeredSession: TlsSession = {
       serverName: 'mail.example.com',
@@ -1954,9 +1838,7 @@ describe('Stage 7: Handshake state machine & scripted peer', () => {
       const decoded = decodeHandshakeMessage(opened.payload);
       if (!decoded.ok || decoded.value.kind !== 'client_hello') throw new Error('no ClientHello');
 
-      // The reply is fragmented the way a real server would have to: a
-      // HelloRetryRequest carrying a large cookie does not fit one record
-      // either, and `sealPlain` throws rather than splitting.
+      // A HelloRetryRequest carrying a large cookie does not fit one record either.
       const replyBytes = encodeHandshakeMessage(reply(decoded.value.legacySessionId));
       for (let at = 0; at < replyBytes.length; at += MAX_RECORD_PLAINTEXT) {
         await duplex.server.write(
@@ -1970,12 +1852,7 @@ describe('Stage 7: Handshake state machine & scripted peer', () => {
         : undefined;
     };
 
-    /**
-     * RFC 9846's Table 1 gives `pre_shared_key` the messages `CH, SH` — HRR is a
-     * column of its own and it is not in it — and §4.3 makes an extension in a
-     * message where it is not defined an `illegal_parameter`. Offering a session
-     * is what made this reachable: before it, 41 was not in the offered set.
-     */
+    /** Table 1 gives `pre_shared_key` `CH, SH`; HRR is its own column, and §4.3 makes it illegal_parameter. */
     it('refuses a HelloRetryRequest carrying pre_shared_key', async () => {
       expect(
         await answerClientHello(
@@ -1997,15 +1874,7 @@ describe('Stage 7: Handshake state machine & scripted peer', () => {
       ).toBe('illegal_parameter');
     });
 
-    /**
-     * A cookie is `opaque cookie<1..2^16-1>` and a ClientHello's extensions are
-     * `Extension extensions<8..2^16-1>` — the whole BLOCK is a uint16. So a
-     * cookie near its own maximum makes a retried ClientHello that CANNOT be
-     * encoded by anyone, and fragmenting records does not help: the limit is the
-     * message's, not the record's. Unbounded, the encoder threw a bare
-     * `writeUint16 invalid value` out of `startTls`, which is an unhandled
-     * rejection where every other peer-caused failure is `{ ok: false }`.
-     */
+    /** Extensions are `<8..2^16-1>` as a block, so a cookie near its own maximum makes a ClientHello nobody can encode. */
     it('refuses a HelloRetryRequest cookie it could not echo', async () => {
       expect(
         await answerClientHello(
@@ -2028,16 +1897,8 @@ describe('Stage 7: Handshake state machine & scripted peer', () => {
     });
 
     /**
-     * §4.3.11 is one sentence with three clauses — `selected_identity` in range,
-     * a matching Hash, "and that a server `key_share` extension is present if
-     * required by the ClientHello `psk_key_exchange_modes` extension. If these
-     * values are not consistent, the client MUST abort the handshake with an
-     * `illegal_parameter` alert." We offer `psk_dhe_ke` alone, so a selected PSK
-     * always requires the share.
-     *
-     * The second half is the one that keeps the first honest: with no PSK there
-     * is no such sentence, and the missing mandatory extension of §9.2 earns
-     * `missing_extension`. One alert for both would pass either assertion alone.
+     * §4.3.11: a selected PSK requires the share when only `psk_dhe_ke` was offered
+     * (illegal_parameter). With no PSK it is §9.2's missing_extension.
      */
     it('tells the two missing key_shares apart', async () => {
       const serverHello = (extensions: Extension[]) => (legacySessionId: Uint8Array) =>
@@ -2067,10 +1928,7 @@ describe('Stage 7: Handshake state machine & scripted peer', () => {
 
   describe('Gate D — constructed P-384 HRR', () => {
     it('an aborted handshake sends the dummy ChangeCipherSpec before its protected alert', async () => {
-      // RFC 9846 D.4 owes one ChangeCipherSpec before the second flight, and an
-      // abort makes the fatal alert that flight. Without it the peer reads the
-      // protected alert as a malformed ChangeCipherSpec and never learns why we
-      // hung up — which is how sixteen BoGo tests were failing.
+      // RFC 9846 D.4: the ChangeCipherSpec precedes the second flight, here the fatal alert.
       const duplex = createMemoryDuplex();
       const serverShare = await generateKeyShare('x25519');
 
@@ -2151,10 +2009,7 @@ describe('Stage 7: Handshake state machine & scripted peer', () => {
       if (!ch1Decoded.ok || ch1Decoded.value.kind !== 'client_hello') return;
       const ch1Share = ch1Decoded.value.extensions.find(e => e.kind === 'key_share');
 
-      // A retry may ask for a cookie and nothing else. RFC 9846 §4.2.2: the
-      // second ClientHello then differs only by the cookie — the same share
-      // goes back out, because generating a fresh one answers a question the
-      // server never asked.
+      // RFC 9846 §4.2.2: a cookie-only retry sends the same share back.
       const cookie = new TextEncoder().encode('come back with this');
       const hrr: HandshakeMessage = {
         kind: 'server_hello',
@@ -2190,14 +2045,7 @@ describe('Stage 7: Handshake state machine & scripted peer', () => {
       await startPromise;
     });
 
-    /**
-     * RFC 9846 §4.2.2 lists what the second ClientHello may change, and
-     * `signature_algorithms` is not on it — so a narrowed offer has to survive
-     * the retry. Nothing else holds this: BoGo's `VerifyPreferences-Advertised`
-     * reads the extension off the FIRST ClientHello and never retries, so
-     * dropping `signatureSchemes` from the second encoding leaves both gates
-     * green while the client advertises six schemes and accepts one.
-     */
+    /** RFC 9846 §4.2.2 does not let the second ClientHello change `signature_algorithms`; BoGo reads only the first. */
     it('carries a narrowed signature_algorithms through the HelloRetryRequest', async () => {
       const duplex = createMemoryDuplex();
       const narrowed: readonly SignatureScheme[] = ['ed25519', 'ecdsa_secp384r1_sha384'];
@@ -2274,7 +2122,6 @@ describe('Stage 7: Handshake state machine & scripted peer', () => {
         },
       });
 
-      // Read CH1
       const ch1Record = await duplex.server.read();
       const ch1Plain = openPlain(ch1Record!);
       expect(ch1Plain.ok).toBe(true);
@@ -2284,7 +2131,6 @@ describe('Stage 7: Handshake state machine & scripted peer', () => {
       if (!ch1Decoded.ok || ch1Decoded.value.kind !== 'client_hello') return;
       const ch1 = ch1Decoded.value;
 
-      // Send HRR selecting secp384r1 (0x0018), echoing CH1's session id
       const hrr: HandshakeMessage = {
         kind: 'server_hello',
         legacyVersion: 0x0303,
@@ -2299,13 +2145,11 @@ describe('Stage 7: Handshake state machine & scripted peer', () => {
       };
       await duplex.server.write(sealPlain('handshake', encodeHandshakeMessage(hrr)));
 
-      // RFC 9846 D.4: the dummy ChangeCipherSpec goes out immediately before the
-      // second flight, which after a retry is ClientHello2 rather than Finished.
+      // RFC 9846 D.4: after a retry the second flight is ClientHello2.
       const ccsRecord = await duplex.server.read();
       expect(ccsRecord?.[0]).toBe(0x14);
       expect(ccsRecord?.subarray(5)).toEqual(Uint8Array.of(1));
 
-      // Read CH2
       const ch2Record = await duplex.server.read();
       expect(ch2Record).toBeDefined();
 
@@ -2342,7 +2186,6 @@ describe('Stage 7: Handshake state machine & scripted peer', () => {
       const duplex = createMemoryDuplex();
 
       const peerFeed = async () => {
-        // Feed SH, encrypted flight, NST, app data (omit close_notify)
         for (const rec of inputs.serverRecords.slice(0, 4)) {
           await duplex.server.write(rec);
         }
@@ -2367,16 +2210,14 @@ describe('Stage 7: Handshake state machine & scripted peer', () => {
       if (!clientResult.ok) return;
 
       const conn = clientResult.connection;
-      // Read published server app data
       await conn.read();
 
-      // Derive initial server and client app traffic secrets from trace 3
       const s_ap_step = trace3.steps.find(s => s.title === 'derive secret "tls13 s ap traffic"')!;
       const c_ap_step = trace3.steps.find(s => s.title === 'derive secret "tls13 c ap traffic"')!;
       const s_ap = bytesOf(s_ap_step, 'expanded')!;
       const c_ap = bytesOf(c_ap_step, 'expanded')!;
 
-      // Server sends KeyUpdate(update_requested) under current server write keys (seq = 2)
+      // seq = 2 under the current server write keys.
       const currentServerKeys = await trafficKeys('TLS_AES_128_GCM_SHA256', s_ap);
       const kuMsg = encodeHandshakeMessage({ kind: 'key_update', requestUpdate: true });
       const sealedKu = await sealAead(
@@ -2388,7 +2229,7 @@ describe('Stage 7: Handshake state machine & scripted peer', () => {
       );
       await duplex.server.write(sealedKu);
 
-      // Server sends new app data under ROTATED server write keys (seq = 0)
+      // seq = 0 under the rotated keys.
       const newServerSecret = await hkdfExpandLabel(
         'TLS_AES_128_GCM_SHA256',
         s_ap,
@@ -2407,13 +2248,11 @@ describe('Stage 7: Handshake state machine & scripted peer', () => {
       );
       await duplex.server.write(postKuRecord);
 
-      // Read client handshake records (ClientHello and Finished)
       const chRec = await duplex.server.read();
       expect(chRec).toBeDefined();
       const finRec = await duplex.server.read();
       expect(finRec).toBeDefined();
 
-      // Client reads: processes KeyUpdate, updates keys, reads app data
       const postKuRead = await conn.read();
       expect(postKuRead).toEqual({
         ok: true,
@@ -2421,9 +2260,7 @@ describe('Stage 7: Handshake state machine & scripted peer', () => {
         bytes: postKuPayload,
       });
 
-      // The response KeyUpdate is owed, not sent: it goes out with the next
-      // thing the client writes, which is what keeps a burst of requests from
-      // becoming a burst of replies.
+      // The response is owed to the next write.
       const newClientSecret = await hkdfExpandLabel(
         'TLS_AES_128_GCM_SHA256',
         c_ap,
@@ -2457,11 +2294,7 @@ describe('Stage 7: Handshake state machine & scripted peer', () => {
     });
   });
 
-  /**
-   * A ceiling is only a ceiling if something is measured against it. TLS 1.3
-   * lets a peer send padding-only records, `user_canceled` alerts and
-   * `KeyUpdate`s without limit, and each of these sends one more than we take.
-   */
+  /** Each sends one more than the ceiling takes. */
   describe('Gate F — ceilings on records that carry no progress', () => {
     const SUITE = 'TLS_AES_128_GCM_SHA256';
 
@@ -2494,9 +2327,7 @@ describe('Stage 7: Handshake state machine & scripted peer', () => {
 
       if (!clientResult.ok) throw new Error('the §3 replay did not connect');
 
-      // §3's ClientHello carries no session id, so the client owes no
-      // compatibility ChangeCipherSpec: ClientHello then Finished, and both have
-      // to come off the wire before a test can read what it sent afterwards.
+      // §3's ClientHello carries no session id, so no compatibility ChangeCipherSpec is owed.
       expect(((await duplex.server.read()) ?? [])[0]).toBe(0x16);
       expect(((await duplex.server.read()) ?? [])[0]).toBe(0x17);
 
@@ -2543,23 +2374,12 @@ describe('Stage 7: Handshake state machine & scripted peer', () => {
     });
 
     it('a byte of application data clears every ceiling', async () => {
-      /**
-       * BoringSSL's own rule, in as many words: "Only when at least one byte is
-       * returned, clear the counters for empty records and warnings"
-       * (`ssl/tls_record.cc`), with `key_update_count` cleared on delivered data
-       * in `ssl/ssl_lib.cc`. All three count CONSECUTIVE occurrences.
-       *
-       * Counted over a connection's lifetime instead, these limits kill an
-       * ordinary IMAP session on its 33rd rekey, hours in — the one connection
-       * this client exists to hold open.
-       */
+      // BoringSSL's rule: the counters clear when a byte is delivered (`ssl/tls_record.cc`, `ssl/ssl_lib.cc`).
       const { connection, server, serverSecret } = await establishedConnection();
       const payload = new TextEncoder().encode('progress');
       const keyUpdate = encodeHandshakeMessage({ kind: 'key_update', requestUpdate: false });
 
-      // The peer's write state: one secret, one sequence number, and a KeyUpdate
-      // moves both — which is the whole reason this needs a helper rather than
-      // arithmetic at each call site.
+      // A KeyUpdate moves both the secret and the sequence number.
       let secret = serverSecret;
       let seq = 0n;
       const send = async (type: ContentType, body: Uint8Array): Promise<void> => {
@@ -2573,10 +2393,7 @@ describe('Stage 7: Handshake state machine & scripted peer', () => {
         seq = 0n;
       };
 
-      // Four rounds of "almost too many of each, then a byte of real data".
-      // Counted over the connection's lifetime instead of consecutively, the
-      // 33rd empty record — or the 5th user_canceled, or the 33rd KeyUpdate —
-      // lands inside this loop and the connection dies.
+      // Counted over the lifetime instead, the 33rd empty record lands inside this loop.
       for (let round = 0; round < 4; round += 1) {
         for (let empties = 0; empties < 32; empties += 1) {
           await send('application_data', new Uint8Array(0));
@@ -2610,8 +2427,7 @@ describe('Stage 7: Handshake state machine & scripted peer', () => {
       const { connection, server, serverSecret } = await establishedConnection();
       const keyUpdate = encodeHandshakeMessage({ kind: 'key_update', requestUpdate: false });
 
-      // Each KeyUpdate rotates the server's write keys, so the next one has to
-      // go out under the rotated ones at sequence zero.
+      // Each KeyUpdate rotates the server's write keys; the next goes out at sequence zero.
       let secret = serverSecret;
       for (let sent = 0; sent < 33; sent += 1) {
         const keys = await trafficKeys(SUITE, secret);
@@ -2626,10 +2442,7 @@ describe('Stage 7: Handshake state machine & scripted peer', () => {
     });
 
     it('five KeyUpdate requests are answered once, on the next write', async () => {
-      // RFC 9846 §4.7.3 requires the response and sets no deadline, so a peer
-      // can have several requests in flight. Answering each one turns one cheap
-      // record into a reply stream — and a peer strict about unsolicited
-      // KeyUpdates drops the connection on the second.
+      // §4.7.3 sets no deadline, so several requests may be in flight.
       const { connection, server, serverSecret, clientSecret } = await establishedConnection();
       const request = encodeHandshakeMessage({ kind: 'key_update', requestUpdate: true });
 
@@ -2640,8 +2453,7 @@ describe('Stage 7: Handshake state machine & scripted peer', () => {
         secret = await hkdfExpandLabel(SUITE, secret, 'traffic upd', new Uint8Array(0), 32);
       }
 
-      // The client only processes them while reading, so the peer's own data
-      // comes last, under the keys five updates along.
+      // The peer's own data comes last, under the keys five updates along.
       const fromServer = new TextEncoder().encode('after five updates');
       const finalKeys = await trafficKeys(SUITE, secret);
       await server.write(
@@ -2674,9 +2486,7 @@ describe('Stage 7: Handshake state machine & scripted peer', () => {
     });
 
     it('an alert description TLS 1.3 does not define is reported, not answered', async () => {
-      // §6: "Unknown Alert types MUST be treated as error alerts." So the
-      // connection ends and what the peer said is carried back — answering with
-      // our own illegal_parameter threw away the only number in it.
+      // §6: unknown alert types are error alerts; the code is carried back.
       const { connection, server, serverSecret } = await establishedConnection();
       const keys = await trafficKeys(SUITE, serverSecret);
       // 30 is decompression_failure, which TLS 1.3 reserves and never sends.
@@ -2689,18 +2499,7 @@ describe('Stage 7: Handshake state machine & scripted peer', () => {
     });
 
     it("the peer's close_notify ends ITS write side, not ours", async () => {
-      /**
-       * RFC 9846 §6.1: "Each party MUST send a close_notify alert before closing
-       * its write side of the connection... This does not have any effect on its
-       * read side. Note that this is a change from versions of TLS prior to TLS
-       * 1.3 in which implementations were required to react to a close_notify by
-       * discarding pending writes and sending an immediate close_notify alert of
-       * their own."
-       *
-       * One flag stood for both directions, so the peer's goodbye closed our
-       * write side — and `close()` then returned early WITHOUT sending ours. A
-       * peer waiting for it waited until its own timeout.
-       */
+      // RFC 9846 §6.1: close_notify ends the sender's write side only.
       const { connection, server, serverSecret, clientSecret } = await establishedConnection();
       const serverKeys = await trafficKeys(SUITE, serverSecret);
       await server.write(
@@ -2708,8 +2507,7 @@ describe('Stage 7: Handshake state machine & scripted peer', () => {
       );
 
       expect(await connection.read()).toEqual({ ok: true, kind: 'closed' });
-      // "Any data received after a closure alert has been received MUST be
-      // ignored" — and a second read must not go looking for more.
+      // §6.1: data after a closure alert is ignored, and a second read must not look for more.
       expect(await connection.read()).toEqual({ ok: true, kind: 'closed' });
 
       const payload = new TextEncoder().encode('still writing');
@@ -2739,14 +2537,7 @@ describe('Stage 7: Handshake state machine & scripted peer', () => {
     });
   });
 
-  /**
-   * The shape a caller's STORE can hand back, which is not the shape the type
-   * promises. Two cross-model reviews found this check running a full flight
-   * too late — after `validatePath` had already been handed the corrupt value,
-   * and with `reverifyOnResume: false` after the handshake had completed on the
-   * wire. So what these pin is not the predicate (`session.test.ts` does that)
-   * but WHERE it runs: before a single byte goes out.
-   */
+  /** Pins where `assertUsableSession` runs: before a byte goes out. `session.test.ts` pins the predicate. */
   describe('Gate G — a rehydrated session is checked at the door', () => {
     const storedSession = (overrides: Partial<TlsSession>): TlsSession =>
       ({
@@ -2802,17 +2593,12 @@ describe('Stage 7: Handshake state machine & scripted peer', () => {
       );
 
       await expect(result).rejects.toThrow(/stored session/);
-      // The whole point of the placement: no ClientHello, so no peer is left
-      // holding a half-open handshake waiting for a Finished that never comes.
+      // No ClientHello, so no peer is left holding a half-open handshake.
       expect(written).toEqual([]);
       duplex.close();
     });
 
-    /**
-     * The positive control. The same session with both fields intact gets past
-     * the door and a ClientHello goes out — so the three above fail on the
-     * rehydration check and not on anything else about this setup.
-     */
+    /** Positive control: the intact session gets past the door. */
     it('offers a well-formed stored session', async () => {
       const { result, written, duplex } = await startWith(storedSession({}));
 
@@ -2944,7 +2730,6 @@ describe('Stage 7: Handshake state machine & scripted peer', () => {
         expect((await clientPromise).ok).toBe(true);
       }
 
-      // Silence unused
       expect(all3.length).toBeGreaterThan(0);
     }, 30_000);
 
@@ -2997,13 +2782,11 @@ describe('Stage 7: Handshake state machine & scripted peer', () => {
           await sealAead(currentServerKeys.key, currentServerKeys.iv, 2n, 'handshake', kuMsg),
         );
 
-        // Concurrent writes while KeyUpdate is processed
         const writePromises = [
           conn.write(new TextEncoder().encode('w0')),
           conn.write(new TextEncoder().encode('w1')),
           conn.write(new TextEncoder().encode('w2')),
         ];
-        // Drive the read loop so KeyUpdate is handled interleaved with writes
         const newServerSecret = await hkdfExpandLabel(
           'TLS_AES_128_GCM_SHA256',
           s_ap,

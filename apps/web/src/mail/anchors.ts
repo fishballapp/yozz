@@ -2,12 +2,7 @@ import { compileAnchors, ROOT_BUNDLE, type TrustAnchorSource } from '@yozz.app/x
 
 let cachedAnchors: TrustAnchorSource | null = null;
 
-/**
- * Compiles the root CA trust anchors lazily off the critical path.
- *
- * Memoised at module level so it runs once across connections. A failed compile
- * is not cached and will be retried on the next call.
- */
+/** Memoised at module level; a failed compile is not cached. */
 export const trustAnchors = async (): Promise<TrustAnchorSource> => {
   if (cachedAnchors !== null) {
     return cachedAnchors;

@@ -1,13 +1,7 @@
-/**
- * An RFC 5322 message as bytes, built from fields the composer owns. Everything non-ASCII is
- * encoded on the way out (RFC 2047 `=?utf-8?B?…?=` in headers, quoted-printable bodies), so the result is
- * 7-bit clean and needs nothing from the server. Line endings are CRLF throughout.
- */
-
 export type MessageInput = {
   readonly from: { readonly address: string; readonly name?: string };
   readonly to: readonly string[];
-  /** Carbon copies, named in a `Cc` header. Blind copies are the envelope's business, never a header. */
+  /** Named in a `Cc` header. Blind copies are the envelope's business, never a header. */
   readonly cc?: readonly string[];
   readonly subject: string;
   readonly date: Date;
@@ -17,24 +11,11 @@ export type MessageInput = {
   /** When present the message is `multipart/alternative`, text first. */
   readonly html?: string;
   readonly inReplyTo?: string;
-  /**
-   * The parent's `References` followed by its Message-ID, oldest first — the chain RFC 5322 §3.6.4
-   * asks a reply to carry. Without it a client that threads on References alone (and the base
-   * subject is a guess, not a rule) sees a reply to a reply as a new conversation. Defaults to
-   * `[inReplyTo]`, which is what a first reply's chain is anyway.
-   */
+  /** The parent's `References` then its Message-ID, oldest first (RFC 5322 §3.6.4). Defaults to `[inReplyTo]`. */
   readonly references?: readonly string[];
   /** When present the whole message becomes `multipart/mixed`: the body first, then each file. */
   readonly attachments?: readonly MessageAttachment[];
-  /**
-   * Headers this client owns, appended after the standard block.
-   *
-   * YOZZ no longer uses this. It stamped `X-Yozz-Draft` here to find its own copies again without
-   * trusting a Message-ID a provider may rewrite, and that failed on a more basic point: a server
-   * need only index the headers IMAP names, so `SEARCH HEADER` on a private one can answer the
-   * empty list for a message that carries it (docs/knowledge/forwardemail-api.md). The field stays
-   * because a message builder should be able to set a header; do not build a LOOKUP on one.
-   */
+  /** Appended after the standard block. */
   readonly extraHeaders?: readonly (readonly [string, string])[];
 };
 
@@ -62,11 +43,7 @@ const base64Lines = (bytes: Uint8Array): string => base64(bytes).replace(/.{76}/
 
 const toCrlf = (text: string) => text.replace(/\r?\n/g, '\r\n');
 
-/**
- * RFC 2045 §6.7 quoted-printable: bytes outside printable ASCII become `=XX`, trailing
- * whitespace is protected, and lines are soft-wrapped with `=` before 76 characters. Chosen over
- * base64 because filters treat a base64 text part as text that is hiding something.
- */
+/** RFC 2045 §6.7. */
 export const quotedPrintable = (text: string): string => {
   const lines = toCrlf(text).split('\r\n');
   return lines
@@ -82,7 +59,7 @@ export const quotedPrintable = (text: string): string => {
           ? String.fromCharCode(byte)
           : `=${byte.toString(16).toUpperCase().padStart(2, '0')}`;
       });
-      // Soft breaks: never split an `=XX` escape, never exceed 76 including the `=`.
+      // A soft break (`=` CRLF) may not split an `=XX` escape.
       const out: string[] = [];
       let rest = encoded;
       while (rest.length > 76) {
@@ -98,7 +75,6 @@ export const quotedPrintable = (text: string): string => {
     .join('\r\n');
 };
 
-/** 7bit when the text already is (ASCII, lines under 998), quoted-printable otherwise. */
 const encodeBody = (text: string): { readonly encoding: string; readonly body: string } => {
   const crlf = toCrlf(text);
   const is7bit =
@@ -122,15 +98,12 @@ const textPartOf = (contentType: string, text: string): string => {
   ].join('\r\n');
 };
 
-/**
- * RFC 2231 for a filename: plain ASCII is a quoted-string, anything else goes as
- * `filename*=utf-8''` with the bytes percent-encoded. Both forms name the same file.
- */
+/** RFC 2231. */
 const filenameParameter = (filename: string): string =>
   isAscii(filename)
     ? `filename="${filename.replace(/["\\]/g, '\\$&')}"`
     : `filename*=utf-8''${encodeURIComponent(filename).replace(
-        // attr-char excludes what encodeURIComponent leaves alone.
+        // RFC 2231 attr-char excludes these; encodeURIComponent leaves them alone.
         /[*'()]/g,
         ch => `%${ch.charCodeAt(0).toString(16).toUpperCase()}`,
       )}`;
@@ -156,11 +129,7 @@ const multipartOf = (subtype: string, parts: readonly string[]): string => {
   ].join('\r\n');
 };
 
-/**
- * RFC 2047 B-encoding. One encoded-word may be at most 75 characters: `=?utf-8?B?` + `?=` is 12,
- * so 63 of base64, which is 45 bytes of UTF-8. Split on code points so no character straddles
- * two words; the words are folded onto continuation lines, which a reader joins back together.
- */
+/** RFC 2047 §2: an encoded-word is at most 75 characters; minus `=?utf-8?B?` and `?=` that is 63 of base64, 45 bytes. */
 const ENCODED_WORD_BYTES = 45;
 const encodedWords = (value: string): string => {
   const words: string[] = [];
@@ -176,7 +145,7 @@ const encodedWords = (value: string): string => {
   return words.map(word => `=?utf-8?B?${base64(encoder.encode(word))}?=`).join('\r\n ');
 };
 
-/** RFC 5322 §2.2.3 folding for plain ASCII: break at spaces so no line passes 78 characters. */
+/** RFC 5322 §2.2.3: fold at spaces so no line passes 78 characters. */
 const foldAscii = (value: string): string => {
   const lines: string[] = [];
   let line = '';
@@ -195,7 +164,6 @@ const foldAscii = (value: string): string => {
 export const encodeHeaderText = (value: string): string =>
   isAscii(value) ? foldAscii(value) : encodedWords(value);
 
-/** `Name <addr>` with the name quoted or encoded as its characters require; a bare address otherwise. */
 export const formatMailbox = ({ address, name }: MessageInput['from']): string => {
   if (name === undefined || name.trim() === '') return address;
   if (!isAscii(name)) return `${encodedWords(name)} <${address}>`;
@@ -208,7 +176,7 @@ const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const two = (n: number) => String(n).padStart(2, '0');
 
-/** RFC 5322 §3.3, in the caller's local zone so the header says when the sender wrote it. */
+/** RFC 5322 §3.3, in the local zone. */
 export const formatDate = (date: Date): string => {
   const offset = -date.getTimezoneOffset();
   const sign = offset < 0 ? '-' : '+';
@@ -216,7 +184,6 @@ export const formatDate = (date: Date): string => {
   return `${DAYS[date.getDay()]}, ${date.getDate()} ${MONTHS[date.getMonth()]} ${date.getFullYear()} ${two(date.getHours())}:${two(date.getMinutes())}:${two(date.getSeconds())} ${zone}`;
 };
 
-/** A header value may not contain CR or LF: a field that could end the header block is refused. */
 const assertNoLineBreak = (field: string, value: string) => {
   if (/[\r\n]/.test(value)) throw new Error(`${field} contains a line break`);
 };
@@ -231,11 +198,9 @@ export const buildMessage = (input: MessageInput): Uint8Array => {
 
   const headers: [string, string][] = [
     ['From', formatMailbox(input.from)],
-    // A Cc-only or Bcc-only message has no To, and an empty `To:` is not an address list.
+    // An empty `To:` is not a valid address list, so a Cc-only message omits the header.
     ...(input.to.length === 0 ? [] : [['To', input.to.join(', ')] as [string, string]]),
   ];
-  // Bcc has no header by construction: a blind copy that names itself in the bytes is not blind,
-  // and every recipient would read it. The envelope is the only place it exists.
   const cc = input.cc ?? [];
   if (cc.length > 0) headers.push(['Cc', cc.join(', ')]);
   headers.push(
@@ -247,8 +212,7 @@ export const buildMessage = (input: MessageInput): Uint8Array => {
   if (input.inReplyTo !== undefined) {
     headers.push(['In-Reply-To', input.inReplyTo]);
   }
-  // A long chain folds: RFC 5322 caps a line at 998 octets, and a dozen ids pass that. Folding is
-  // the header's own rule (§2.2.3) — CRLF then one space, which unfolds back to the same list.
+  // Folded one id per line (RFC 5322 §2.2.3): a dozen ids would pass the 998-octet line cap.
   const references = input.references ?? (input.inReplyTo === undefined ? [] : [input.inReplyTo]);
   if (references.length > 0) {
     for (const id of references) assertNoLineBreak('References', id);

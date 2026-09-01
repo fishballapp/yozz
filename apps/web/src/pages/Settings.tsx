@@ -3,12 +3,7 @@ import { Link, Outlet, useLocation } from '@tanstack/react-router';
 import { PageColumn } from '../components/PageColumn';
 import { keepCompose } from '../lib/compose';
 
-/**
- * Settings is two places, not one page of knobs: the addresses you administer most days, and the
- * vault you touch when a device changes. Each is a route under this layout, so a section is
- * linkable and the tab strip is plain navigation — the same `.label-rule` + signal-underline
- * vocabulary the composer's write/preview tabs already use.
- */
+/** Two routes under one layout, so a section is linkable. */
 
 const TABS = [
   {

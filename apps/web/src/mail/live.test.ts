@@ -94,7 +94,6 @@ const createFakeClient = (capabilities: readonly string[] = ['IDLE']): FakeClien
     },
   };
 
-  // Expose hook used by connect mock.
   (
     client as FakeClient & { setOnUntagged: (fn: (u: ImapUntagged) => void) => void }
   ).setOnUntagged = fn => {
@@ -413,7 +412,7 @@ describe('createLiveManager', () => {
       retry: false,
       run: async client => {
         await gate;
-        // Still the first socket, still logged in: the LOGOUT must not have gone out yet.
+        // Still the first socket: the LOGOUT must not have gone out yet.
         await client.append('Sent', new Uint8Array(), []);
         commandsAfterChange.push(clients[0]?.logouts ?? -1);
         return { ok: true, value: 'appended' };
@@ -511,7 +510,7 @@ describe('createLiveManager', () => {
     await vi.waitFor(() => expect(clients).toHaveLength(2));
     await vi.waitFor(() => expect(states.at(-1)).toMatchObject({ status: 'live', idling: true }));
     expect(states.some(state => state.status === 'reconnecting')).toBe(true);
-    // A second drop straight away is not chased: the state is failed until something asks.
+    // A second drop straight away is not chased.
     clients[1]?.endIdle({ ok: false, reason: { kind: 'bye', text: 'Timeout' } });
     await vi.waitFor(() => expect(states.at(-1)).toMatchObject({ status: 'failed' }));
     expect(clients).toHaveLength(2);
@@ -554,7 +553,7 @@ describe('createLiveManager', () => {
       retry: true,
       run: async () => ({ ok: true, value: undefined }),
     });
-    // Hidden: no IDLE, and the grace close is armed by the open itself — no event will arrive.
+    // Hidden: no IDLE, and the grace close is armed by the open itself.
     expect(states.at(-1)).toMatchObject({ status: 'live', idling: false });
     await advance(2 * 60 * 1000);
     await vi.waitFor(() => expect(manager.state(ACCOUNT.address)).toEqual({ status: 'closed' }));

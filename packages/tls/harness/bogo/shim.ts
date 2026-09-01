@@ -1,22 +1,10 @@
 #!/usr/bin/env node
 /**
- * The BoGo shim: one process per test, wrapping `startTls` over a real socket.
+ * One process per BoGo test. The runner listens; the shim connects to loopback as a TCP client
+ * even for client tests, writes the shim id as a 64-bit little-endian integer, then speaks TLS.
  *
- * The runner launches this with `-port` and `-shim-id`, and the shim connects
- * back to loopback as a TCP *client* — the runner is the server end even when
- * the test is a client test. The first bytes on the wire are the shim id as a
- * 64-bit little-endian integer; everything after that is the TLS connection.
- *
- * Three exits, and the runner reads each differently:
- *
- * - **0** — the test passed. Anything on stderr fails a passing test, so this
- *   file is silent when it succeeds.
- * - **89** — "I can't do that". The runner records the test as skipped, which is
- *   the honest answer to a flag we do not implement. `run.ts` counts every one
- *   by the flag that caused it, because a skip nobody counts is how a green
- *   board comes to mean nothing.
- * - **anything else** — the test failed, and stderr carries the reason the
- *   runner matches against its expected error.
+ * Exit 0 passes (anything on stderr fails it), 89 is "skipped", anything else fails with
+ * stderr matched against the runner's expected error.
  */
 
 import { X509Certificate } from 'node:crypto';
@@ -46,11 +34,7 @@ import { LEGACY_SCHEMES, UNIMPLEMENTED_CURVES, UNIMPLEMENTED_SCHEMES } from './s
 
 const UNIMPLEMENTED_EXIT = 89;
 
-/**
- * BoGo's default leaf carries the single-label DNS SAN `test`, and our client
- * has no un-named mode: it validates the name it was asked for. Tests that care
- * about the name pass `-host-name`.
- */
+/** BoGo's default leaf carries the single-label SAN `test`; tests that care pass `-host-name`. */
 const DEFAULT_SERVER_NAME = 'test';
 
 type Options = {
@@ -59,39 +43,15 @@ type Options = {
   readonly ipv6: boolean;
   readonly serverName: string;
   readonly trustAnchors: TrustAnchorSource;
-  /**
-   * `-verify-peer`: a refused certificate is FATAL. It does not decide who
-   * verifies — see `verificationFor` for why this shim's answer is never
-   * `YOZZ_VALIDATOR`.
-   */
+  /** `-verify-peer`: a refused certificate is fatal. It never selects `YOZZ_VALIDATOR`; see `verificationFor`. */
   readonly verifiesPeer: boolean;
   /** `-verify-fail`: the application refuses whatever the peer sent. */
   readonly verifyFails: boolean;
-  /**
-   * `-reverify-on-resume`: validate the session's stored chain again on the
-   * resumed connection.
-   *
-   * BoGo pins BOTH answers, so this cannot be unconditional and cannot be
-   * absent. `CertificateVerificationDoesNotFailOnResume` requires that a
-   * default client does NOT re-check; `FailsOnResume` and `PassesOnResume`
-   * require that it does when asked. `startTls` defaults the other way — see
-   * `reverifyOnResume` there for why — so this is passed explicitly on every
-   * connection rather than left off.
-   */
+  /** `-reverify-on-resume`. BoGo pins both answers, so it is passed explicitly on every connection. */
   readonly reverifiesOnResume: boolean;
-  /**
-   * `-expect-verify-result`: assert the verification outcome after the
-   * handshake. A BOOL in BoGo, not a code — `bssl_shim.cc` compares
-   * `SSL_get_verify_result` to `X509_V_ERR_APPLICATION_VERIFICATION` when
-   * `-verify-fail` is set and to `X509_V_OK` otherwise, so the flag means
-   * "the outcome must be the one the other flags implied".
-   */
+  /** `-expect-verify-result`: a bool in BoGo; the outcome must be the one the other flags implied. */
   readonly expectVerifyResult: boolean;
-  /**
-   * `-export-keying-material <n>`: export n octets under `-export-label` and
-   * `-export-context` and write them to the peer, which recomputes them and
-   * compares. Zero means the test does not ask.
-   */
+  /** `-export-keying-material <n>`: octets to export and write to the peer; zero means not asked. */
   readonly exportKeyingMaterialLength: number;
   readonly exportLabel: string;
   readonly exportContext: string;
@@ -117,38 +77,14 @@ type Options = {
   readonly expectHelloRetryRequest: boolean | null;
   /** `-verify-prefs`: what `signature_algorithms` offers, in the runner's order. */
   readonly signatureSchemes: readonly SignatureScheme[];
-  /**
-   * `-expect-peer-signature-algorithm`: the scheme the server's CertificateVerify
-   * had to carry, asserted on EVERY connection of the run. The resumed ones send
-   * no CertificateVerify, and checking them is the whole point of the test
-   * setting `resumeSession` — BoringSSL reports the scheme there too, out of the
-   * session, and a client that forgot it would answer 0.
-   */
+  /** `-expect-peer-signature-algorithm`: asserted on every connection, resumed ones included, out of the session. */
   readonly expectPeerSignatureScheme: number | null;
 };
 
 /** The runner's own default for `-shim-initial-write`, which no test overrides. */
 const SHIM_INITIAL_WRITE = 'hello';
 
-/**
- * What this shim does instead of validating a path — on EVERY connection, which
- * is the part worth stating plainly: `YOZZ_VALIDATOR` is not reachable from
- * here at all, and `-verify-peer` does not summon it.
- *
- * This is not a convenience. BoGo's certificate factory
- * (`ssl/test/runner/certs.go`) hand-builds its leaves with an EMPTY subject and
- * a NON-CRITICAL `subjectAltName`, which RFC 5280 §4.2.1.6 forbids — the SAN
- * carries the whole identity there, so it has to be critical. `YOZZ_VALIDATOR`
- * is right to refuse them, and refuses EVERY certificate the runner offers, so
- * a validating shim cannot run a single BoGo test. Path validation is
- * x509-limbo's gate; this one is for the state machine. The two BoGo tests that
- * do turn on a path decision are excluded by name, under
- * `needs-path-validation` in `scope.ts`.
- *
- * The decode stays real, because BoGo sends deliberately corrupt certificates
- * and a shim that never parsed them would pass those tests by accident. So does
- * `CertificateVerify`: the SPKI handed back is the peer's own.
- */
+/** Decodes the chain (BoGo sends corrupt ones) but never validates it; see DECISIONS.md, "The BoGo shim never runs YOZZ_VALIDATOR". */
 const UNVERIFIED: Validator = {
   name: 'bogo-unverified',
   validatePath: async request => {
@@ -174,14 +110,7 @@ const UNVERIFIED: Validator = {
   },
 };
 
-/**
- * One line per invocation, for `run.ts` to aggregate.
- *
- * The runner's JSON records a skip with no reason attached, so a skip is only
- * attributable if the shim writes down why. The whole argv goes with it: that
- * is where the test's name, protocol and side live, in the `-write-settings`
- * path the runner hands us. Off unless the harness asks for it.
- */
+/** One line per invocation for `run.ts`: the runner's JSON records a skip without a reason. */
 const log = (decision: string, reason: string | null): void => {
   const path = process.env.YOZZ_BOGO_LOG;
   if (path === undefined) return;
@@ -195,26 +124,8 @@ const fail = (reason: string): number => {
 };
 
 /**
- * The validator for one connection, and a handle on what it decided.
- *
- * Two things are deliberately NOT `YOZZ_VALIDATOR`, and both would look like
- * bugs without this note.
- *
- * **`-verify-peer` does not select the real validator.** It cannot: BoGo's
- * leaves are refused by `YOZZ_VALIDATOR` for the reason `UNVERIFIED` gives
- * above, so wiring it here turns every test that must SUCCEED into a failure.
- * It was wired here, and never fired, because until `-expect-verify-result`
- * landed no in-scope test reached it without `-verify-fail` overriding it
- * first. What `-verify-peer` really selects is whether a refusal is fatal.
- *
- * **Soft fail is modelled in the shim, not in the client.** Without
- * `-verify-peer` BoringSSL still runs its verify callback and records the
- * failure without aborting (`SSL_VERIFY_NONE`), which is what
- * `CertificateVerificationSoftFail` tests. This client has no such mode and
- * must not grow one — a mail client that continues past a refused certificate
- * is the bug the whole package exists to prevent. So the refusal is recorded
- * here and the unverified path returned, which leaves the connection where
- * BoringSSL's ends up.
+ * `-verify-peer` decides whether a refusal is fatal, not who validates; soft fail lives here, not
+ * in the client. See DECISIONS.md, "The BoGo shim never runs YOZZ_VALIDATOR".
  */
 const verificationFor = (
   options: Options,
@@ -243,20 +154,10 @@ const verificationFor = (
 };
 
 /**
- * BoGo can scope a flag to ONE connection of a resumption run: `-on-initial-X`
- * and `-on-resume-X` set X on that connection's config only, and an unprefixed
- * flag sets it on both (`ParseConfig` in `ssl/test/test_config.cc`, which keeps
- * three configs — the third is the 0-RTT retry, declined below). So argv is
- * filtered once per role and parsed once per role, and the parser never learns
- * that connections differ.
- *
- * Splitting argv means deciding which tokens are values, and only the parser
- * really knows. This uses the rule `run.ts` uses — a token starting with `-` is
- * a flag, anything else belongs to the flag before it — which holds for every
- * value BoGo passes in scope: ports, curve ids, scheme ids, file paths, host
- * names. Should one ever start with `-`, the flag it belongs to arrives at the
- * parser as an unknown flag and the shim DECLINES, so it surfaces as a skip
- * rather than as a setting quietly dropped.
+ * `-on-initial-X` / `-on-resume-X` scope a flag to one connection; an unprefixed flag sets both
+ * (`ParseConfig`, `ssl/test/test_config.cc`). A token starting with `-` is a flag, anything else
+ * the previous flag's value; a value that ever starts with `-` reaches the parser as an unknown
+ * flag and declines.
  */
 type ConnectionRole = 'initial' | 'resume';
 
@@ -275,8 +176,7 @@ const argvForRole = (argv: readonly string[], role: ConnectionRole): readonly st
   return scoped;
 };
 
-// Explicitly typed rather than inferred, so a call to it NARROWS: `decline`
-// after an `undefined` check has to convince the compiler the check held.
+// Typed `never` explicitly so a call narrows.
 const decline: (reason: string) => never = reason => {
   log('declined', reason);
   process.stderr.write(`unimplemented: ${reason}\n`);
@@ -284,9 +184,7 @@ const decline: (reason: string) => never = reason => {
 };
 
 const anchorsFromPem = (path: string): TrustAnchorSource => {
-  // `-trust-cert ''` is what the runner passes for a credential with no root,
-  // which is how the garbage-certificate tests arrive. An empty store is the
-  // honest reading of it.
+  // `-trust-cert ''` is what the runner passes for a credential with no root.
   const pem = path === '' ? '' : readFileSync(path, 'utf8');
   const anchors = [
     ...pem.matchAll(/-----BEGIN CERTIFICATE-----[\s\S]*?-----END CERTIFICATE-----/g),
@@ -299,12 +197,7 @@ const anchorsFromPem = (path: string): TrustAnchorSource => {
   return { findCandidates: () => anchors };
 };
 
-/**
- * Flags this shim understands. Everything else — the whole of DTLS, QUIC, the
- * server side, client auth, 0-RTT and resumption included — exits 89 rather
- * than being silently ignored, because a flag ignored is a test that passes
- * without doing what it was asked.
- */
+/** Flags this shim understands. Anything else exits 89 rather than being ignored. */
 const parseArgs = (wholeArgv: readonly string[], role: ConnectionRole): Options => {
   const argv = argvForRole(wholeArgv, role);
   let port: number | null = null;
@@ -360,7 +253,6 @@ const parseArgs = (wholeArgv: readonly string[], role: ConnectionRole): Options 
       case '-verify-peer':
         verifiesPeer = true;
         break;
-      /** The runner asking for a refusal it can predict. */
       case '-verify-fail':
         verifyFails = true;
         break;
@@ -370,19 +262,7 @@ const parseArgs = (wholeArgv: readonly string[], role: ConnectionRole): Options 
       case '-expect-verify-result':
         expectVerifyResult = true;
         break;
-      /**
-       * BoringSSL's two verification APIs — `SSL_CTX_set_cert_verify_callback`
-       * and `SSL_set_custom_verify` — reaching the same decision by different
-       * routes. This shim has one route, a `Validator`, so the flag selects
-       * nothing here.
-       *
-       * It is NOT nothing to the runner, which expects a different alert from
-       * each: `handshake_failure` from the legacy callback and
-       * `certificate_unknown` from the custom one (`verifyFailLocalError` in
-       * `state_machine_tests.go`). We send `certificate_unknown` for both,
-       * which is what the custom half asks for and what RFC 9846 §4.5.1 asks
-       * of everyone — the legacy half is an entry in `RFC_DIVERGENCES`.
-       */
+      /** Both BoringSSL verify APIs reach the same decision; we send `certificate_unknown` for either (`RFC_DIVERGENCES`). */
       case '-use-custom-verify-callback':
         break;
       case '-export-keying-material':
@@ -394,14 +274,7 @@ const parseArgs = (wholeArgv: readonly string[], role: ConnectionRole): Options 
       case '-export-context':
         exportContext = value(++i, flag);
         break;
-      /**
-       * TLS 1.2's exporter distinguished "no context" from "an empty context";
-       * TLS 1.3's does not. RFC 9846 §7.5 takes a `context_value` and hashes
-       * it, so an absent one IS the empty one — and the runner agrees, since
-       * `exportKeyingMaterialTLS13` in `conn.go` never reads `useContext`.
-       * Accepted and ignored, which is why `ExportKeyingMaterial-NoContext` and
-       * `-EmptyContext` expect identical output.
-       */
+      /** RFC 9846 §7.5 hashes the context, so absent and empty are the same; the runner's `exportKeyingMaterialTLS13` never reads `useContext`. */
       case '-use-export-context':
         break;
       case '-shim-writes-first':
@@ -413,11 +286,7 @@ const parseArgs = (wholeArgv: readonly string[], role: ConnectionRole): Options 
       case '-check-close-notify':
         checkCloseNotify = true;
         break;
-      /**
-       * Repeated once per group, most preferred first. A group we do not
-       * implement declines by NAME, so `run.ts` attributes the test to the
-       * missing curve rather than to this flag.
-       */
+      /** Repeated once per group. An unimplemented group declines by name so `run.ts` attributes the skip to the curve. */
       case '-curves': {
         const id = Number(value(++i, flag));
         const group = namedGroupFromCode(id);
@@ -428,41 +297,11 @@ const parseArgs = (wholeArgv: readonly string[], role: ConnectionRole): Options 
       case '-expect-curve-id':
         expectCurveId = Number(value(++i, flag));
         break;
-      /**
-       * The client's verify preferences, repeated once per scheme, most
-       * preferred first — `-curves`' sibling, and declined the same way, by the
-       * ALGORITHM we cannot verify rather than by the flag.
-       */
+      /** Repeated once per scheme; declines by algorithm, like `-curves`. */
       case '-verify-prefs': {
         const id = Number(value(++i, flag));
-        /**
-         * A scheme TLS 1.3 does not define for CertificateVerify is DROPPED,
-         * not declined, and the difference is worth six tests.
-         *
-         * `-verify-prefs` configures what a CertificateVerify may be signed
-         * with, which is exactly what `signatureSchemes` holds — and RFC 9846
-         * §4.3.3 says the RSA-PKCS1 values "are not defined for use in signed
-         * TLS handshake messages", §4.5.2 the same for SHA-1. So the flag names
-         * a value this option can never hold, and "offer nothing for it" is not
-         * a shortcut, it is the only answer the RFC leaves.
-         *
-         * The tests that pass one AGREE: `shouldFail` is set for exactly these
-         * at TLS 1.3 (`signature_algorithm_tests.go`), the runner signs with the
-         * scheme anyway under `IgnorePeerSignatureAlgorithmPreferences`, and the
-         * client owes `illegal_parameter`. Declining made six tests SKIP and
-         * asserted that behaviour in prose; dropping MEASURES it. If the list
-         * ends up empty the default six are offered, which is what a client with
-         * no expressible preference sends.
-         *
-         * **Which rule they measure was checked, not assumed.** It is the
-         * unimplemented-scheme arm of the §4.5.2 check in `handshake.ts` — a
-         * CertificateVerify naming a scheme this client cannot verify at all —
-         * and NOT the unoffered-but-implementable arm beside it. Deleting the
-         * second leaves all six green (`VerifyPreferences-Enforced` is what
-         * catches that one); waving the first through fails all six, plus
-         * eleven more. Two arms, two gates, and the first draft of this note
-         * credited them to the wrong one.
-         */
+        // RFC 9846 §4.3.3 / §4.5.2: RSA-PKCS1 and SHA-1 are not CertificateVerify schemes, so they are
+        // dropped rather than declined. See DECISIONS.md, "An undefined `-verify-prefs` scheme is dropped".
         if (LEGACY_SCHEMES[id] !== undefined) break;
         const scheme = signatureSchemeFromCode(id);
         if (scheme === undefined) decline(`signature scheme ${UNIMPLEMENTED_SCHEMES[id] ?? id}`);
@@ -472,11 +311,7 @@ const parseArgs = (wholeArgv: readonly string[], role: ConnectionRole): Options 
       case '-expect-peer-signature-algorithm':
         expectPeerSignatureScheme = Number(value(++i, flag));
         break;
-      /**
-       * How many connections FOLLOW the first. Each is a fresh TCP connection to
-       * the same port with the same shim id, offering the ticket the previous
-       * one left behind (`doExchanges` in `ssl/test/runner/runner.go`).
-       */
+      /** Connections after the first, each a fresh TCP connection offering the last ticket. */
       case '-resume-count':
         resumeCount = Number(value(++i, flag));
         break;
@@ -495,39 +330,19 @@ const parseArgs = (wholeArgv: readonly string[], role: ConnectionRole): Options 
       case '-expect-no-hrr':
         expectHelloRetryRequest = false;
         break;
-      /**
-       * In TLS 1.2 this asks whether the server minted a SECOND ticket on the
-       * resumed connection. TLS 1.3 mints one every time — BoringSSL's own shim
-       * gates the check on `GetProtocolVersion(ssl) < TLS1_3_VERSION` and skips
-       * it — so the ticket-arrived assertion below already covers what it asks.
-       */
+      /** A TLS 1.2 question; BoringSSL's shim skips it at 1.3, where the ticket assertion below covers it. */
       case '-expect-ticket-renewal':
         break;
 
-      /**
-       * Both describe how BoringSSL's own shim drives its API — non-blocking
-       * callbacks, and a handshake left to the first read or write instead of
-       * being asked for. Neither is visible on the wire, and this client has no
-       * other mode: every call here is already async, and `startTls` is the
-       * handshake. Accepted and ignored is the honest answer; declining would
-       * skip 21 tests over a difference that does not exist for us.
-       */
+      /** How BoringSSL's shim drives its API; invisible on the wire, and every call here is async already. */
       case '-async':
       case '-implicit-handshake':
         break;
-      // A transcript-run artifact for BoringSSL's own fuzzers. `run.ts` reads
-      // the test's name, protocol and side out of the prefix; the shim has no
-      // settings file to write.
+      // A fuzzer artifact; `run.ts` reads the test name, protocol and side from the prefix.
       case '-write-settings':
         i++;
         break;
-      /**
-       * `-on-initial-` and `-on-resume-` are gone by now, stripped by
-       * `argvForRole`. `-on-retry-` is not: it configures the 0-RTT retry
-       * handshake, and a client that never offers early data never performs
-       * one, so there is no connection here for it to configure. Declining
-       * says that; ignoring it would be a setting silently dropped.
-       */
+      /** `-on-retry-` configures the 0-RTT retry handshake, which a client that never offers early data never performs. */
       default:
         if (/^-on-retry-/.test(flag)) {
           decline('per-connection flag scoping (-on-retry, the 0-RTT retry handshake)');
@@ -576,12 +391,7 @@ const openSocket = ({ port, ipv6, shimId }: Options): Promise<Socket> =>
     socket.on('error', reject);
   });
 
-/**
- * The failure the runner reads off stderr, and the whole of our error
- * vocabulary. `ErrorMap` in `shim-config.json` maps BoGo's canonical error
- * names onto these strings, so the wording is a contract: change it and the map
- * has to move with it.
- */
+/** `ErrorMap` in `shim-config.json` matches these strings, so the wording is a contract. */
 const describe = (failure: TlsFailure): string => {
   switch (failure.kind) {
     case 'alert-sent':
@@ -593,14 +403,8 @@ const describe = (failure: TlsFailure): string => {
     case 'truncated':
       return 'yozz: truncated';
     case 'certificate':
-      /**
-       * `chain` goes LAST on purpose. The runner matches `ErrorMap` entries as
-       * SUBSTRINGS (`translateExpectedError` in `runner.go`), and the two
-       * certificate entries in `shim-config.json` name a code and an alert —
-       * which is right, because `:CERTIFICATE_VERIFY_FAILED:` is BoringSSL's
-       * answer for BOTH chains. Putting the field in the middle broke 20 tests
-       * at once; on the end it is diagnosis the map is deliberately blind to.
-       */
+      // `chain` goes last: the runner matches `ErrorMap` entries as substrings, and BoringSSL's
+      // `:CERTIFICATE_VERIFY_FAILED:` covers both chains.
       return `yozz: certificate ${failure.reason.code} ${failure.alert.description} chain=${failure.chain}`;
   }
 };
@@ -608,13 +412,7 @@ const describe = (failure: TlsFailure): string => {
 /** The runner sends a message and expects every byte back inverted. */
 const invert = (bytes: Uint8Array): Uint8Array => bytes.map(byte => byte ^ 0xff);
 
-/**
- * One connection, from the socket to the close_notify.
- *
- * A resumption run is several of these in one process — the runner accepts a
- * fresh TCP connection per exchange, each one prefixed with the same shim id —
- * so the session is threaded through by the caller rather than kept here.
- */
+/** One connection. A resumption run is several per process, so the caller threads the session through. */
 const runConnection = async (
   options: Options,
   {
@@ -629,13 +427,7 @@ const runConnection = async (
     readonly now: Date;
     readonly session: TlsSession | undefined;
     readonly onSession: (session: TlsSession) => void;
-    /**
-     * What the connection that minted this session concluded about the peer.
-     * A resumed handshake carries no Certificate, so nothing verifies and the
-     * result is the earlier one — which is what `SSL_get_verify_result` answers
-     * on a resumed BoringSSL connection, and why `-reverify-on-resume` has to
-     * be asked for.
-     */
+    /** The minting connection's verdict; a resumed handshake carries no Certificate. */
     readonly inheritedRefusal: boolean;
     readonly onVerification: (refused: boolean) => void;
   },
@@ -649,11 +441,7 @@ const runConnection = async (
       serverName: options.serverName,
       trustAnchors: options.trustAnchors,
       validationTime: now,
-      /**
-       * Frozen for the whole connection, and advanced only between connections.
-       * BoGo compares the ticket age we report to `-resumption-delay` for EXACT
-       * equality, so any real time passing inside the exchange fails the test.
-       */
+      /** Frozen for the connection: BoGo compares the reported ticket age to `-resumption-delay` exactly. */
       now: () => now,
       validator: verification.validator,
       supportedGroups: options.supportedGroups,
@@ -669,29 +457,13 @@ const runConnection = async (
 
     const { connection, negotiatedGroup, isResumed, isHelloRetryRequested, peerSignatureScheme } =
       handshake;
-    /**
-     * A resumed connection inherits the earlier verdict only when nothing
-     * re-checked. With `-reverify-on-resume` the validator ran on THIS
-     * connection, so its answer is the current one — and since a refusal there
-     * aborts the handshake, reaching this line at all means it said yes.
-     */
+    // With `-reverify-on-resume` the validator ran on this connection, and reaching here means it said yes.
     const refused =
       isResumed && !options.reverifiesOnResume ? inheritedRefusal : verification.refused();
     onVerification(refused);
     /**
-     * `SSL_get_verify_result` answers because verification HAPPENED, so the
-     * flag asserts both halves: that something verified the peer, and that it
-     * concluded what the other flags implied.
-     *
-     * The second half alone is tautological here — the validator below sets
-     * `refused` exactly when `-verify-fail` asked it to, so the two cannot
-     * disagree — and deleting it moved nothing on the board. The first half is
-     * the one with teeth: a full handshake where `validatePath` was never
-     * reached means the client took the peer's certificate on trust, and
-     * nothing else in this suite would notice. It is skipped on a resumed
-     * handshake, which carries no Certificate and inherits the earlier verdict
-     * — unless `-reverify-on-resume` asked for the stored chain to be checked
-     * again, and no test in scope pairs that flag with this one.
+     * A full handshake where `validatePath` never ran took the certificate on trust, and nothing else
+     * here would notice. Skipped on resumption, which carries no Certificate.
      */
     if (options.expectVerifyResult) {
       if (!isResumed && !verification.ran()) {
@@ -715,12 +487,7 @@ const runConnection = async (
         `yozz: peer signature algorithm ${peerSignatureCode}, wanted ${options.expectPeerSignatureScheme}`,
       );
     }
-    /**
-     * `expect_resume = is_resume && !config->expect_session_miss` — BoringSSL's
-     * own shim, and the assertion that makes a resumption run mean anything. A
-     * client that quietly did a full handshake every time would otherwise pass
-     * every one of these tests.
-     */
+    /** BoringSSL's `expect_resume = is_resume && !expect_session_miss`. */
     if (isResumed !== (isResume && !options.expectsSessionMiss)) {
       return fail(`yozz: session was${isResumed ? '' : ' not'} resumed`);
     }
@@ -730,11 +497,7 @@ const runConnection = async (
     ) {
       return fail(`yozz: HelloRetryRequest was${isHelloRetryRequested ? '' : ' not'} sent`);
     }
-    /**
-     * Written to the peer, which derived the same octets from its own schedule
-     * and compares them byte for byte — so this is the runner checking our
-     * exporter, not us checking ourselves.
-     */
+    /** The peer derived the same octets and compares. */
     if (options.exportKeyingMaterialLength > 0) {
       const exported = await connection.exportKeyingMaterial(
         options.exportLabel,
@@ -752,9 +515,7 @@ const runConnection = async (
     while (!options.shutsDown) {
       const read = await connection.read();
       if (!read.ok) {
-        // "Stop on either clean or unclean shutdown" — a peer that simply goes
-        // away ends the conversation, and only `-check-close-notify` makes the
-        // missing close_notify itself the complaint.
+        // A peer that simply goes away ends the conversation; only `-check-close-notify` makes that a complaint.
         if (read.reason.kind === 'truncated' && !options.checkCloseNotify) break;
         return fail(describe(read.reason));
       }
@@ -764,12 +525,7 @@ const runConnection = async (
       if (!written.ok) return fail(describe(written.reason));
     }
 
-    /**
-     * Our close_notify goes out either way. Whether the PEER owes one back is
-     * `-check-close-notify`'s question, and only then does a connection that
-     * simply ends become a complaint — a peer that drops the socket as we write
-     * is the ordinary unclean shutdown every mail server eventually does.
-     */
+    // Our close_notify goes out either way; `-check-close-notify` decides whether the peer owes one back.
     const closed = await connection.close();
     if (!closed.ok && options.checkCloseNotify) return fail(describe(closed.reason));
 
@@ -779,12 +535,7 @@ const runConnection = async (
       if (shutdown.kind !== 'closed') return fail('yozz: data after our close_notify');
     }
 
-    /**
-     * A TLS 1.3 client must come away with a ticket unless the test says
-     * otherwise — the same assertion BoringSSL's shim makes, and the only thing
-     * proving `psk_key_exchange_modes` went out and the ticket that answered it
-     * was understood. `-shim-shuts-down` never reads, so nothing arrives.
-     */
+    /** BoringSSL's shim asserts the same: a ticket must arrive unless the test says otherwise. `-shim-shuts-down` never reads. */
     if (!options.shutsDown && hasNewSession === options.expectsNoSession) {
       return fail(`yozz: a session was${hasNewSession ? '' : ' not'} established`);
     }
@@ -798,31 +549,17 @@ const runConnection = async (
 const main = async (): Promise<number> => {
   const argv = process.argv.slice(2);
   if (argv.includes('-is-handshaker-supported')) {
-    // Asked once, before any test, to decide whether to generate the split
-    // handshaker variants. They are all server tests.
+    // Asked once before any test; the split-handshake variants are all server tests.
     process.stdout.write('No\n');
     return 0;
   }
 
-  /**
-   * One config per connection role, because BoGo scopes flags to one connection
-   * of a resumption run. Everything the RUN needs rather than a connection —
-   * the port, `-resume-count`, the delay — is unprefixed, so both configs carry
-   * the same value and `initial` is the one read for it.
-   */
+  /** One config per connection role. Run-level flags are unprefixed, so `initial` is read for them. */
   const initial = parseArgs(argv, 'initial');
   const onResume = parseArgs(argv, 'resume');
   let session: TlsSession | undefined;
   let refusal = false;
-  /**
-   * A mock clock, which is what makes `-resumption-delay` testable: BoGo checks
-   * the reported ticket age for EXACT equality with the delay it asked for
-   * (`ExpectTicketAge` in `handshake_server.go`), so real time elapsing between
-   * two connections would fail it by however long the exchange took. BoringSSL's
-   * own shim freezes at `{1234, 1234}` and advances only here; ours starts from
-   * the real clock instead, because the same value dates our certificate
-   * validation and 1970 expires every chain BoGo issues.
-   */
+  /** Mock clock: BoGo checks the ticket age against `-resumption-delay` exactly. Starts from real time because 1970 expires every chain BoGo issues. */
   let now = new Date();
 
   for (let exchange = 0; exchange <= initial.resumeCount; exchange += 1) {
@@ -847,11 +584,7 @@ const main = async (): Promise<number> => {
   return 0;
 };
 
-/**
- * A thrown error is not a TLS failure, and reporting it as one would let a bug
- * in this file read as a finding. It gets its own signature so the report can
- * count it apart from anything the client decided.
- */
+/** A thrown error is a shim bug, not a TLS failure, and is reported apart. */
 process.exit(
   await main().catch((error: unknown) => {
     const message = error instanceof Error ? error.message : String(error);

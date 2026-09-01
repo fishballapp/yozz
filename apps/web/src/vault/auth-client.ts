@@ -12,20 +12,12 @@ const authClient = createAuthClient({
 });
 
 /**
- * Absolute, because Better Auth resolves a relative `callbackURL` against ITS
- * base URL — the API — and a verified link would land on the Worker's 404.
- *
- * Both links land on `/enrol`, and the query is the difference: a recovery link
- * is allowed to reset a live vault, a signup link is not. `/enrol` bounces an
- * already-enrolled account to `/login` unless `?reset=1` says otherwise.
+ * Absolute: Better Auth resolves a relative `callbackURL` against its own base URL, the API.
+ * Both links land on `/enrol`; `?reset=1` is what lets a recovery link reset a live vault.
  */
 const callbackURL = (path: string) => `${window.location.origin}${path}`;
 
-/**
- * `name` is the email on purpose: Better Auth's passkey plugin uses `user.name` as the WebAuthn
- * `user.name`, which is the label a password manager shows for the passkey. An address is the
- * one label a reader recognises.
- */
+/** The email on purpose: the passkey plugin uses `user.name` as the WebAuthn `user.name`, the label a password manager shows. */
 export const requestSignupLink = async (email: string) => {
   return authClient.signIn.magicLink({
     email,
@@ -55,10 +47,7 @@ export const signInWithPasskey = async (extensions?: AuthenticationExtensionsCli
   });
 };
 
-/**
- * No `name`: the plugin would send it as the WebAuthn `user.name` and every password manager
- * would file the passkey under it instead of under the address.
- */
+/** No `name`, or every password manager files the passkey under it. */
 export const addPasskeyAuthenticator = async (
   extensions?: AuthenticationExtensionsClientInputs,
 ) => {

@@ -7,10 +7,7 @@ import {
   WS_CLOSE_UNSUPPORTED,
 } from '../src/relay/pipe.ts';
 
-/**
- * A `cloudflare:sockets` Socket stand-in: what the relay writes lands in `received`, what the
- * "mail server" says goes in through `peer`.
- */
+/** What the relay writes lands in `received`; what the "mail server" says goes in through `peer`. */
 const fakeSocket = () => {
   const toTcp = new TransformStream<Uint8Array, Uint8Array>();
   const fromTcp = new TransformStream<Uint8Array, Uint8Array>();
@@ -51,7 +48,7 @@ const pipe = () => {
 describe('pipeSocket', () => {
   it('forwards a binary frame to TCP and TCP bytes back to the client', async () => {
     const { client, peer, received } = pipe();
-    // Inside the Worker both halves of the pair deliver binary frames as a Blob.
+    // Inside the Worker a binary frame arrives as a Blob.
     const fromClient = new Promise<Uint8Array>(resolve =>
       client.addEventListener('message', event => {
         void (event.data as Blob).arrayBuffer().then(buffer => resolve(new Uint8Array(buffer)));

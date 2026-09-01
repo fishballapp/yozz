@@ -1,17 +1,15 @@
 /**
- * HACKATHON ONLY — delete with the rest of `src/judge/` after 2026-09-03.
+ * HACKATHON ONLY: delete with the rest of `src/judge/` after 2026-09-03.
  *
- * Mints a judge a whole working YOZZ account: a Forward Email alias with its own mailbox, a vault
- * enrolled on `yozz.app`, that alias connected inside it, and the fifteen demo messages seeded.
- * One address each, so no judge can spoil another's inbox.
+ * Mints a judge a working account: a Forward Email alias with its own mailbox, a vault on
+ * `yozz.app`, the alias connected, the fifteen demo messages seeded.
  *
  *   pnpm with-secrets -- pnpm -F @yozz.app/web judge:accounts --count 1
- *   … --count 50            # the rest; already-finished accounts are skipped
- *   … --delete              # removes every alias in the ledger, after judging
+ *   … --count 50            # already-finished accounts are skipped
+ *   … --delete              # removes every alias in the ledger
  *
- * The ledger (`judge-accounts.local.json`, untracked) is the resume point AND the credential list:
- * every address, mailbox password and vault passphrase lands there and nowhere else. Re-running is
- * safe — each step checks whether it already happened.
+ * The ledger (`judge-accounts.local.json`, untracked) is the resume point and the credential
+ * list. Each step checks whether it already happened.
  */
 import { randomBytes } from 'node:crypto';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
@@ -23,19 +21,14 @@ import { socketTransport } from '@yozz.app/tls/harness';
 import { compileAnchors, ROOT_BUNDLE, YOZZ_VALIDATOR } from '@yozz.app/x509';
 import { JUDGE_DOMAIN } from '../src/judge/domain';
 
-/**
- * Wanted only by the alias half. The vault half runs off the ledger, so a run that is finishing
- * accounts already minted must not need 1Password open — which is the run most likely to happen
- * hours later, unattended.
- */
+/** Wanted only by the alias half, so finishing minted accounts needs no 1Password open. */
 const apiKey = () => {
   const key = process.env.FORWARD_EMAIL_API_KEY;
   if (key === undefined) throw new Error('need FORWARD_EMAIL_API_KEY (pnpm with-secrets -- …)');
   return key;
 };
 
-// Not an env override: the app decides which addresses get the banner (and so the Reset the last
-// step clicks), so a second opinion here would mint mailboxes the SPA never offers to seed.
+// Not an env override: the app decides which addresses get the banner.
 const DOMAIN = JUDGE_DOMAIN;
 const WEB = process.env.YOZZ_WEB ?? 'https://yozz.app';
 const API = process.env.YOZZ_API ?? 'https://api.yozz.app';
@@ -44,11 +37,11 @@ const LEDGER = new URL('../../../judge-accounts.local.json', import.meta.url).pa
 
 type Account = {
   address: string;
-  /** Forward Email's own id for the alias. The address is NOT a usable key on its endpoints. */
+  /** Forward Email's own id for the alias; the address is not a usable key on its endpoints. */
   aliasId: string;
   mailboxPassword: string;
   passphrase: string;
-  /** How far this account got, so a re-run picks up where it stopped. */
+  /** How far this account got. */
   stage: 'alias' | 'vault' | 'ready';
 };
 
@@ -57,10 +50,7 @@ const readLedger = (): Account[] =>
 const writeLedger = (accounts: readonly Account[]) =>
   writeFileSync(LEDGER, `${JSON.stringify(accounts, null, 2)}\n`);
 
-/**
- * Forward Email answers a rate limit by severing the connection rather than saying 429, and a bare
- * network blip looks identical. Both are worth another go; a 4xx that actually arrived is not.
- */
+/** Forward Email answers a rate limit by severing the connection rather than saying 429. */
 const forwardEmail = async (
   path: string,
   init: RequestInit = {},
@@ -86,7 +76,7 @@ const forwardEmail = async (
   return body;
 };
 
-/** Readable, and long enough that it is a passphrase rather than a password. */
+/** Readable, and long enough to be a passphrase. */
 const passphrase = () => `judge-${randomBytes(9).toString('base64url')}-vault`;
 
 const imapConnection = async (address: string, password: string) => {
@@ -121,7 +111,7 @@ const imapConnection = async (address: string, password: string) => {
   return { client, close: () => socket.destroy() };
 };
 
-/** How many messages the mailbox holds right now — the mark a new sign-in link has to beat. */
+/** The mark a new sign-in link has to beat. */
 const messageCount = async (account: Account): Promise<number> => {
   const { client, close } = await imapConnection(account.address, account.mailboxPassword);
   try {
@@ -133,13 +123,7 @@ const messageCount = async (account: Account): Promise<number> => {
   }
 };
 
-/**
- * Ask for a sign-in link and read the one that arrives, never an earlier one.
- *
- * The mark matters: every previous run left its own link in this mailbox, and those tokens are
- * spent. Taking the newest message without checking it is newer than the request answers
- * `INVALID_TOKEN` on the second run and looks like a broken vault.
- */
+/** Every previous run left a spent link in this mailbox; the newest message must postdate the request. */
 const requestAndReadMagicLink = async (account: Account): Promise<string> => {
   const before = await messageCount(account);
   const requested = await fetch(`${API}/api/auth/sign-in/magic-link`, {
@@ -154,8 +138,7 @@ const requestAndReadMagicLink = async (account: Account): Promise<string> => {
   });
   if (!requested.ok) throw new Error(`sign-in link refused: ${requested.status}`);
 
-  // Three minutes: a fresh alias's first delivery is slower than a warm mailbox's, and a judge
-  // account half-made costs more than the wait.
+  // A fresh alias's first delivery is slower than a warm mailbox's.
   for (let attempt = 0; attempt < 60; attempt += 1) {
     await new Promise(resolve => setTimeout(resolve, 3_000));
     const { client, close } = await imapConnection(account.address, account.mailboxPassword);
@@ -167,9 +150,7 @@ const requestAndReadMagicLink = async (account: Account): Promise<string> => {
         if (uid !== undefined) {
           const body = await client.fetchRaw(uid);
           if (body.ok) {
-            // Quoted-printable, decoded properly: soft line breaks first, then the `=XX` escapes.
-            // Dropping only the line breaks leaves every `=` in the URL as a literal `3D`, which
-            // makes a token that looks right and is not.
+            // Soft line breaks first, then the `=XX` escapes; dropping only the breaks leaves `3D` in the URL.
             const text = new TextDecoder()
               .decode(body.value)
               .replace(/=\r?\n/g, '')
@@ -178,13 +159,10 @@ const requestAndReadMagicLink = async (account: Account): Promise<string> => {
               );
             const link = /https:\/\/[^\s"'<>]*magic-link\/verify[^\s"'<>]*/.exec(text)?.[0];
             if (link !== undefined) {
-              // Delete it now. The token is spent the moment the browser follows it, and the app's
-              // Reset never deletes, so a link left here is a message the judge sees on their
-              // first sign-in and cannot clear. Fifty-one of them had to be swept by hand once.
+              // The token is spent once followed, and the app's Reset never deletes it.
               const flagged = await client.storeFlags(String(uid), 'add', ['\\Deleted']);
               const expunged = flagged.ok ? await client.uidExpunge(String(uid)) : flagged;
-              // Enrolment does not depend on the sweep, so a refusal must not fail the account.
-              // It must be SAID, though: silence here is how fifty-one strays went unnoticed.
+              // A refused sweep must not fail the account, and must be said.
               if (!expunged.ok) console.log(`  WARNING: the sign-in link could not be deleted`);
               return link.replaceAll('&amp;', '&');
             }
@@ -199,11 +177,7 @@ const requestAndReadMagicLink = async (account: Account): Promise<string> => {
   throw new Error(`no new sign-in link reached ${account.address} in three minutes`);
 };
 
-/**
- * Enrol the vault, or unlock one a previous run already made. The magic link decides which: a
- * fresh account lands on `/enrol`, and one that has a vault lands on `/login` instead. A re-run
- * after any later step failed therefore takes the second path, and must not be a dead end.
- */
+/** A fresh account lands on `/enrol`; one that has a vault lands on `/login`. */
 const openVault = async (page: Page, account: Account) => {
   await page.goto(await requestAndReadMagicLink(account));
   await page.waitForLoadState('networkidle');
@@ -216,24 +190,20 @@ const openVault = async (page: Page, account: Account) => {
   } else if (/\/login/.test(page.url())) {
     await page.fill('#login-email', account.address);
     await page.fill('#login-password', account.passphrase);
-    // Two buttons say "Log in": the passkey panel's, then the password panel's. The password one
-    // is second because the page offers passkeys first.
+    // Two buttons say "Log in": the passkey panel's, then the password panel's.
     await page.getByRole('button', { name: 'Log in' }).last().click();
   } else {
     await page.screenshot({ path: '/tmp/judge-landing.png' });
     throw new Error(`magic link went to ${page.url()} (screenshot in /tmp/judge-landing.png)`);
   }
-  // Deriving the key is deliberately slow, and the redirect only happens once it is done.
+  // Deriving the key is slow, and the redirect only happens once it is done.
   await page.waitForURL(/\/(settings|m\/|connect)/, { timeout: 120_000 });
 };
 
 const connectAddress = async (page: Page, account: Account) => {
-  // Navigated to from inside the app, never by loading the URL: an unlock lives in memory unless
-  // the person asked to keep it, so a full page load lands on /login with the vault shut again.
+  // Navigated to from inside the app: a full page load lands on /login with the vault shut.
   await page.getByRole('link', { name: 'Settings' }).click();
-  // Already there, because a previous run added it and died before writing the ledger. Adding it
-  // again is refused as a duplicate, and the wait for a navigation that never comes cost two
-  // minutes per account.
+  // Already there from a run that died before writing the ledger; adding again is refused as a duplicate.
   if (await page.getByText(account.address, { exact: true }).first().isVisible()) {
     console.log(`  ${account.address} is already connected`);
     return;
@@ -254,32 +224,25 @@ const seed = async (page: Page) => {
   await page.getByText(/Inbox reset/).waitFor({ timeout: 180_000 });
 };
 
-/**
- * The alias half: the only part that needs the Forward Email key, so it can be run for every judge
- * up front and the slow browser half finished later without a secret in reach.
- */
+/** The alias half: the only part that needs the Forward Email key. */
 const mint = async (index: number, accounts: Account[], aliasesOnly = false) => {
   const name = `judge-${String(index).padStart(2, '0')}`;
   const address = `${name}@${DOMAIN}`;
   let account = accounts.find(candidate => candidate.address === address);
 
   if (account === undefined) {
-    // `has_imap` is what gives the alias a mailbox at all; without it mail is forwarded and lost.
+    // `has_imap` is what gives the alias a mailbox; without it mail is forwarded and lost.
     const created = (await forwardEmail(`/v1/domains/${DOMAIN}/aliases`, {
       method: 'POST',
-      // 5 MB is far more than fifteen fixtures and a judge's test sends, and it caps what a
-      // stranger with the credentials could park in the 10 GB the account pools across every domain.
+      // Caps what a stranger with the credentials could park in the account's pooled 10 GB.
       body: JSON.stringify({
         name,
         has_imap: true,
         is_enabled: true,
-        // Asked for here and then set again below, because CREATE ignores an empty recipients
-        // list and the alias comes up inheriting the account's sink — which would copy every
-        // judge's mail into Jason's mailbox. Naming itself instead is refused as recursive.
+        // CREATE ignores an empty recipients list and the alias inherits the account's sink; naming
+        // itself is refused as recursive, so it is set again below.
         recipients: [],
-        // The ALIAS's own cap. Never set the domain's `max_quota_per_alias` to this: that field is
-        // the domain's TOTAL quota, and an empty mailbox already costs ~480 KB, so fifty of them
-        // silently stop receiving mail the moment their floors add up past it.
+        // The alias's own cap. The domain's `max_quota_per_alias` is the domain's total quota.
         max_quota: '5MB',
         description: 'WebMCP judge',
       }),
@@ -359,8 +322,7 @@ if (args.includes('--delete')) {
         return false;
       });
     if (gone) console.log(`✓ deleted ${account.address}`);
-    // Kept in the ledger, because the ledger is the only record that this mailbox exists: emptying
-    // it after a failed DELETE strands a live judge mailbox with credentials nobody holds.
+    // Kept: the ledger is the only record this mailbox exists.
     else left.push(account);
   }
   writeLedger(left);
@@ -370,11 +332,9 @@ if (args.includes('--delete')) {
   const start = countOf('--start', 1);
   const count = countOf('--count', 1);
   for (let index = start; index < start + count; index += 1) {
-    // One at a time: Forward Email answers a rate limit by severing the connection, and a judge
-    // account half-made is worse than a slow script.
+    // One at a time: Forward Email severs the connection on a rate limit.
     await mint(index, accounts, args.includes('--aliases-only'));
-    // Paced, for the same reason the retry exists: fifty creations back to back is what their rate
-    // limiter is there to stop.
+    // Paced, for the same reason.
     await new Promise(resolve => setTimeout(resolve, 1_500));
   }
   console.log(`\n${accounts.filter(a => a.stage === 'ready').length} accounts ready in ${LEDGER}`);

@@ -1,13 +1,6 @@
 /**
- * Dev-only fixture inbox. Loaded only when `isDemo()` is true (`import.meta.env.DEV` and
- * `localStorage yozz:demo=1`); the production bundle never reaches this data.
- *
- * Every address, message and SMTP host below is invented. It is authored rather than generated
- * because the list IS the product: column behaviour, unread density, subject length and the mix of
- * human/machine senders are what the design is judged on.
- *
- * Times are offsets from module load, so the inbox always reads as "now" however long this demo
- * sits open.
+ * Dev-only fixture inbox, loaded only when `isDemo()` is true. Every address, message and host is
+ * invented; times are offsets from module load.
  */
 
 import type { AddressRecord } from '../lib/addresses';
@@ -22,7 +15,7 @@ const DEMO_PASSWORD = 'demo-app-password';
 
 import type { Thread } from '../lib/thread';
 
-/** Fixture addresses for demo mode — same content as the old accounts + identities, new shape. */
+/** Fixture addresses for demo mode. */
 export const DEMO_ADDRESSES: readonly AddressRecord[] = [
   {
     address: 'jason@jyu.example',
@@ -158,8 +151,7 @@ export const THREADS: readonly Thread[] = [
         fromAddress: 'hello@duneanddown.example',
         toAddress: 'jason@jyu.example',
         at: ago(4 * HOUR),
-        // The one fixture with an HTML body: what the sandboxed frame, the HTML / plain-text
-        // switch, and the "Load remote images" control are judged on without a real mailbox.
+        // The one fixture with an HTML body.
         hasTextPart: true,
         body: [
           'Our summer savings end tonight. Save up to 30% on sleep favourites, and spend over £49 for a free pack of tealights.',

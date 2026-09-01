@@ -1,10 +1,8 @@
 /**
- * THROWAWAY — delete with the rest of the judge machinery after 2026-09-03.
+ * THROWAWAY: delete with the rest of the judge machinery after 2026-09-03.
  *
- * Wipes every folder of a judge mailbox and appends the fifteen fixtures fresh — the server-side
- * twin of the app's Reset (`src/judge/reset.ts`), which since 2026-09-01 does the same wipe over
- * the browser's own connection. This one runs from the ledger without signing in, for accounts
- * nobody has been given yet.
+ * Wipes every folder of a judge mailbox and appends the fifteen fixtures fresh, from the ledger
+ * without signing in. The app's Reset (`src/judge/reset.ts`) does the same over the browser.
  *
  *   node harness/judge-reseed.ts judge-01 judge-02   # named accounts
  *   node harness/judge-reseed.ts all                 # every account in the ledger
@@ -63,9 +61,7 @@ const reseed = async (account: Account) => {
     const sent = boxes.find(b => b.attributes.includes('\\Sent'))?.name;
     if (sent === undefined) throw new Error(`no \\Sent folder among ${boxes.map(b => b.name)}`);
 
-    // Every refusal aborts the account BEFORE a single fixture is appended. Appending onto a wipe
-    // that only half happened is the one outcome worse than not running: it leaves the strays this
-    // exists to remove AND duplicates the fifteen on top of them.
+    // Every refusal aborts before a fixture is appended; appending onto a half-done wipe duplicates the fifteen on top of the strays.
     let wiped = 0;
     for (const box of boxes.map(b => b.name)) {
       const selected = await client.select(box);
@@ -128,9 +124,7 @@ for (const account of picked) {
   }
 }
 
-// An account that threw is left holding whatever the wipe got through, and these mailboxes go to
-// judges. The per-account line says so, but a long run is read through `tail` and the exit code is
-// the only part that cannot scroll off.
+// A long run is read through `tail`, and the exit code is the only part that cannot scroll off.
 if (failures > 0) {
   console.log(`\n${failures} of ${picked.length} account(s) FAILED — rerun them by name.`);
   process.exit(1);

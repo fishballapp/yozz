@@ -14,48 +14,34 @@ export type AccountSyncState =
   | {
       readonly status: 'synced';
       readonly at: number;
-      /** The folders whose oldest message is cached: there is nothing left to page back to. */
+      /** Folders whose oldest message is cached. */
       readonly complete: readonly Folder[];
     }
   | {
       readonly status: 'failed';
       readonly failure: MailConnectionFailure;
       readonly at: number;
-      /**
-       * The account's cache was dropped (a `UIDVALIDITY` change) before this sync then failed, so
-       * the in-memory threads are stale — their uids are invalid, and a reused one would open the
-       * wrong body. The caller empties the account rather than leaving them on screen.
-       */
+      /** The cache was dropped (a `UIDVALIDITY` change) before this sync failed, so the in-memory threads name invalid uids. */
       readonly invalidated?: boolean;
     };
 
-/**
- * How many messages a window is, whether it is the FIRST sync of a folder or a later page back.
- * Counted in message SEQUENCE numbers, which are dense — uids are not, so a 200-wide uid range
- * holds 200 messages only in a mailbox nothing was ever deleted from. Syncs between the two are
- * incremental: new uids above the last seen one, plus a flags-only refresh of what is cached.
- */
+/** A window in message sequence numbers, which are dense; uids are not. See DECISIONS.md, "A sync window is 200 sequence numbers". */
 const WINDOW = 200;
 
 type FolderOutcome =
   | {
       readonly ok: true;
       readonly summaries: readonly ImapMessageSummary[];
-      /** The folder's oldest message is cached — this first sync reached the whole of it. */
+      /** The first sync reached the whole folder. */
       readonly complete: boolean;
-      /** What the uids in `summaries` are only meaningful under. */
+      /** What the uids in `summaries` are meaningful under. */
       readonly uidValidity: number;
     }
   | { readonly ok: false; readonly failure: MailConnectionFailure; readonly invalidated: boolean };
 
 type Run = <T>(task: LiveTask<T>) => Promise<Result<T, MailConnectionFailure>>;
 
-/**
- * One folder on an open connection: SELECT, then either the initial window or the incremental
- * pair (flags of the known range, summaries above it). A changed `UIDVALIDITY` drops the whole
- * account's cache first — one folder's renumbering is rare enough that re-reading both is the
- * simpler truth. What comes back is every summary the folder's cache now holds.
- */
+/** SELECT, then the initial window or the incremental pair. A changed `UIDVALIDITY` drops the whole account's cache. */
 const syncFolder = async (
   client: ImapClient,
   folderCache: FolderCache,
@@ -72,8 +58,7 @@ const syncFolder = async (
   const selectRes = await client.select(name);
   if (!selectRes.ok) return failed({ kind: 'imap', reason: selectRes.reason });
   const { uidNext, exists } = selectRes.value;
-  // A server that omits UIDVALIDITY gives nothing to detect a renumbering with; 0 stands in,
-  // and every sync then trusts the cache.
+  // A server that omits UIDVALIDITY gives nothing to detect a renumbering with; 0 stands in.
   const uidValidity = selectRes.value.uidValidity ?? 0;
 
   let mark = await folderCache.getSync();
@@ -86,8 +71,7 @@ const syncFolder = async (
   const kept: ImapMessageSummary[] = [];
   let fetched: readonly ImapMessageSummary[] = [];
   if (mark === null) {
-    // The newest WINDOW messages of the folder, by sequence number: an empty mailbox has none,
-    // and a mailbox no bigger than the window is read whole.
+    // The newest WINDOW messages by sequence number; a mailbox no bigger than the window is read whole.
     if (exists > 0) {
       const res = await client.fetchSummariesBySeq(`${Math.max(1, exists - WINDOW + 1)}:*`);
       if (!res.ok) return failed({ kind: 'imap', reason: res.reason });
@@ -118,11 +102,9 @@ const syncFolder = async (
   }
 
   const all = [...kept, ...fetched];
-  // The account may have been removed, or the vault locked, while IMAP was answering. Writing
-  // now would repopulate a cache another path just cleared.
+  // Writing now would repopulate a cache another path just cleared.
   if (isStale()) return failed({ kind: 'error', detail: 'sync superseded' });
-  // A first sync reaches the folder's start when the whole of it fitted in one window; a later
-  // one changes nothing about how far back the cache goes, so it keeps what `loadOlder` earned.
+  // A later sync keeps what `loadOlder` earned.
   const complete = mark === null ? exists <= WINDOW : mark.complete;
   await folderCache.putSummaries(all);
   await folderCache.putSync({
@@ -134,11 +116,7 @@ const syncFolder = async (
   return { ok: true, summaries: all, complete, uidValidity };
 };
 
-/**
- * One live-connection task per account: LIST to find the folders, then each folder in turn,
- * inbox first. What comes back is every summary the cache now holds, threaded across the four
- * folders — which is how your own replies sit in the conversation they answer.
- */
+/** LIST, then each folder in turn, inbox first. */
 export const syncAccount = async (
   run: Run,
   cache: MailCache,
@@ -183,8 +161,7 @@ export const syncAccount = async (
         byFolder[folder] = { uidValidity: outcome.uidValidity, summaries: outcome.summaries };
         if (outcome.complete) complete.push(folder);
       }
-      // Summaries, not threads: grouping is one global pass over every account, which only the
-      // store can run because only it holds the other accounts.
+      // Summaries, not threads: grouping is one global pass only the store can run.
       return { ok: true, value: { byFolder, complete } };
     },
   });
@@ -201,13 +178,8 @@ export const syncAccount = async (
 };
 
 /**
- * One page further back in a folder, on the live connection: the WINDOW messages that sit just
- * below the oldest one already cached.
- *
- * The lowest cached uid is turned into a sequence number by fetching that one message — its `seq`
- * is what the window is measured from, since sequence numbers are dense and uids are not. A uid
- * that answers nothing was expunged since the last sync, which the next plain sync will notice;
- * nothing is loaded and nothing is claimed complete, so the control stays and works after it.
+ * The WINDOW messages just below the oldest cached uid, measured from that message's `seq`. A uid
+ * that answers nothing was expunged; nothing is loaded and nothing claimed complete.
  */
 export const loadOlder = async (
   run: Run,
@@ -236,8 +208,7 @@ export const loadOlder = async (
       const anchor = anchorRes.value[0];
       if (anchor === undefined) return { ok: true, value: { loaded: 0, complete: false } };
 
-      // Re-read rather than write back the mark this started from: a sync may have landed new
-      // mail meanwhile, and its `lastUid` is what keeps the next sync incremental.
+      // Re-read: a sync may have landed new mail meanwhile, and its `lastUid` keeps the next sync incremental.
       const markComplete = async () => {
         if (isStale()) return;
         const current = await folderCache.getSync();
@@ -262,15 +233,14 @@ export const loadOlder = async (
   });
 };
 
-/** What the cache already holds — the list before the first sync of this unlock lands. */
+/** The list before the first sync of this unlock lands. */
 export const cachedSummaries = async (cache: MailCache): Promise<FolderSummaries> => {
   const byFolder: FolderSummaries = {};
   for (const folder of FOLDERS) {
     const folderCache = cache.folder(folder);
     const mark = await folderCache.getSync();
     byFolder[folder] = {
-      // No sync mark means nothing has been read from this folder yet, so its summaries are none
-      // and the UIDVALIDITY stands in as the same 0 a server that omits it gets.
+      // No sync mark means nothing read yet; UIDVALIDITY stands in as 0.
       uidValidity: mark?.uidValidity ?? 0,
       summaries: await folderCache.listSummaries(),
     };
@@ -288,15 +258,11 @@ export const testImap = async (
   return { ok: true, value: undefined };
 };
 
-/** One folder's worth of a flag write: the uids and the mailbox `SELECT` names, off the sync mark. */
+/** One folder's worth of a flag write, off the sync mark. */
 export type FlagTarget = {
   readonly mailbox: string;
   readonly uids: readonly number[];
-  /**
-   * The UIDVALIDITY these uids were read under. Checked against what the SELECT answers, because
-   * a uid means nothing across a renumbering: the same number then names different mail, and a
-   * write aimed at one message would land on a stranger.
-   */
+  /** Checked against what the SELECT answers: across a renumbering the same uid names different mail. */
   readonly uidValidity: number;
 };
 
@@ -305,7 +271,7 @@ const RENUMBERED: MailConnectionFailure = {
   detail: 'that mailbox was renumbered; it will sync again before this can be written',
 };
 
-/** True when the mailbox the server just selected is not the one these uids came from. */
+/** The mailbox the server just selected is not the one these uids came from. */
 const renumbered = (target: FlagTarget, selected: { readonly uidValidity: number | null }) =>
   selected.uidValidity !== null && selected.uidValidity !== target.uidValidity;
 
@@ -332,11 +298,7 @@ export const setFlag = async (
     },
   });
 
-/**
- * Move a thread: `UID MOVE` every source mailbox's uids into `to` — `INBOX`, else the mailbox
- * `ensureMailbox` resolves or creates. One task, so a thread spread over folders arrives whole.
- * Not retried — a MOVE that half-happened must not re-run on a fresh connection.
- */
+/** `UID MOVE` every source mailbox's uids into `to`. Not retried: a half-done MOVE must not re-run. */
 export const moveThread = async (
   run: Run,
   sources: readonly FlagTarget[],
@@ -362,10 +324,7 @@ export const moveThread = async (
     },
   });
 
-/**
- * After a sync: fetch the newest small bodies that are not yet cached, at background priority.
- * Failures are swallowed — a body that did not prefetch is fetched on open.
- */
+/** After a sync: the newest small bodies not yet cached, at background priority. Failures are swallowed. */
 export const prefetchBodies = (
   run: Run,
   cache: MailCache,
@@ -382,8 +341,7 @@ export const prefetchBodies = (
     void (async () => {
       const mark = await folderCache.getSync();
       if (mark === null) return;
-      // Newest first, counting only what is actually eligible: a run of already-cached
-      // messages at the top must not use up the budget.
+      // Newest first, counting only what is eligible.
       let queued = 0;
       for (const summary of summaries.toSorted((a, b) => b.uid - a.uid)) {
         if (queued >= perFolder || isStale()) return;
@@ -404,7 +362,7 @@ export const prefetchBodies = (
             try {
               await folderCache.putBody(summary.uid, await parseBody(raw.value));
             } catch {
-              // Prefetch is best-effort.
+              // Best effort.
             }
             return { ok: true, value: undefined };
           },

@@ -47,19 +47,7 @@ export const unlockRoute = new Hono<AppEnv>()
     const now = Date.now();
     const { isNewVault, wrappedDek } = body.data;
     if (body.data.mode === 'password') {
-      /**
-       * The credential is created HERE, server-side, and that is what makes
-       * ownership structural rather than checked. Better Auth's `setPassword`
-       * is `createAuthEndpoint.serverOnly` — no HTTP path — so the browser
-       * cannot call it and an earlier version's `$fetch('/api/auth/set-password')`
-       * was a 404 whose result was never inspected, finalising a vault whose
-       * password credential did not exist.
-       *
-       * Calling it from inside the finalisation means the account whose mode is
-       * being set and the account whose credential is being created are the
-       * same session user by construction. There is no separate ownership
-       * lookup to forget, which is the shape `@yozz.app/vault` uses for record ids.
-       */
+      // `setPassword` is server-only in Better Auth, so the credential is created here for the session's own user.
       try {
         await createAuth(c.env).api.setPassword({
           body: { newPassword: body.data.authValue },

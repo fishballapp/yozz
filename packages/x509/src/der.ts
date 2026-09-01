@@ -1,90 +1,19 @@
-/**
- * The DER TLV layer: bytes in, a tree of tag-length-value nodes out.
- *
- * This layer knows nothing about certificates. Recursion is decided by the
- * identifier octet's constructed bit ALONE, never by a schema — so a BIT STRING
- * holding an SPKI, or an OCTET STRING holding an extension value, stops here and
- * M3 re-enters it deliberately with `decodeDer(node.content)`. That is not a
- * limitation: from the outside you cannot tell DER from a JPEG, and a decoder
- * that guesses is a decoder an attacker steers.
- *
- * Two properties are structural rather than checked, which is the point:
- *
- *  - **Nodes hold `subarray` VIEWS, never copies.** M3's requirement to retain
- *    `tbsCertificate` verbatim falls out for free, and the reject-list's "refuse
- *    a declared length before allocating" becomes impossible to get wrong —
- *    nothing is ever allocated on a declared length, it is only compared against
- *    the bytes remaining.
- *  - **Failure throws `DerError` and nothing else.** M4 catches it once and maps
- *    it to `malformed-certificate`, so `tls` never grows a second failure path.
- *    The fuzz gate asserts every throw is one of these: a `TypeError`, a
- *    `RangeError` from stack exhaustion, or an OOM is a FAILURE, not an outcome.
- *
- * The trap this replaces, from the encoder this package is seeded from
- * (`@fishballpkg/acme`): `Uint8Array.prototype.slice` CLAMPS. A TLV declaring
- * 900 bytes with 9 present yields a 9-byte value and no error at all. Every
- * length-driven read here compares against the enclosing bound first.
- *
- * NOT here, deliberately: `decodeNull`, and the string types decoded to JS
- * strings. Both need policy this layer has no business holding — M3 owns
- * `AlgorithmIdentifier`'s absent-vs-NULL parameters, and charset handling
- * (embedded nulls, UTF-8 validity) belongs with name comparison at M4.
- */
-
-/**
- * Certificates nest about ten deep; `otherName` inside a GeneralName is the
- * deepest real shape. 32 is generous, and low enough that this check fires long
- * before V8's own stack does — a RangeError is not our failure type.
- */
+/** Certificates nest about ten deep; this fires long before V8's own stack does. */
 const MAXIMUM_DEPTH = 32;
 
-/**
- * Four octets is 4GiB, which no input approaches, and it keeps every length sum
- * inside a safe integer. Leading zeros are rejected separately, so a fifth octet
- * can only ever mean a length no buffer could satisfy.
- */
+/** Keeps every length sum inside a safe integer. */
 const MAXIMUM_LENGTH_OCTETS = 4;
 
-/**
- * Same bound on the base-128 digits of a high-form tag number. Nothing in X.509
- * exceeds 30, so this only stops an unbounded run of continuation octets from
- * inflating `tagNumber` to `Infinity` and letting a nonsense value reach M3.
- */
+/** Nothing in X.509 exceeds tag 30. */
 const MAXIMUM_TAG_OCTETS = 4;
 
-/**
- * Total nodes one input may produce. Depth is bounded separately and does not
- * bound this: a SHALLOW constructed value holding a million two-byte empty TLVs
- * allocates a million node objects before any schema can reject the first
- * unexpected field, and a TLS certificate message is large enough to carry it.
- *
- * Real certificates run to a few thousand nodes, so this is far above use and
- * still refuses the amplification.
- */
+/** Depth does not bound this: a shallow value of a million empty TLVs allocates a million nodes before any schema rejects it. */
 const MAXIMUM_NODES = 50_000;
 
-/**
- * Octets in ONE base-128 OID subidentifier. Arcs are accumulated into a bigint
- * that grows with every continuation octet, so an unbounded arc buys superlinear
- * work from a single attacker-supplied OID. No real arc exceeds five octets.
- */
+/** No real arc exceeds five octets; an unbounded one grows a bigint. */
 const MAXIMUM_SUBIDENTIFIER_OCTETS = 16;
 
-/**
- * The universal types a certificate can contain, each with the form DER REQUIRES
- * of it (X.690 s10.2). One table rather than two: the tag number and the rule
- * about it belong in the same row.
- *
- * A universal tag absent from this table is rejected. That is a deliberate
- * fail-closed call — the X.509 type universe is fixed, and the smallest
- * accepting surface for attacker-chosen bytes is the right one.
- *
- * TELETEX_STRING, UNIVERSAL_STRING and BMP_STRING are UNTESTED BY EITHER CORPUS:
- * 706 sampled x509-limbo certificates and all 59 harvested ones use only
- * PrintableString, UTF8String, IA5String, UTCTime and GeneralizedTime. They stay
- * because they are legal `DirectoryString` choices (RFC 5280 s4.1.2.4) and
- * rejecting a legal encoding is a bug, not a fail-closed posture.
- */
+/** X.690 §10.2: the form DER requires of each universal type. A tag absent here is rejected. */
 const UNIVERSAL_TYPES = {
   BOOLEAN: { tag: 1, form: 'primitive' },
   INTEGER: { tag: 2, form: 'primitive' },
@@ -104,18 +33,12 @@ const UNIVERSAL_TYPES = {
   BMP_STRING: { tag: 30, form: 'primitive' },
 } as const satisfies Record<string, { tag: number; form: 'primitive' | 'constructed' }>;
 
-/** The same table, keyed the way the decoder meets it: by number, off the wire. */
 const REQUIRED_FORM_BY_UNIVERSAL_TAG = new Map<number, 'primitive' | 'constructed'>(
   Object.values(UNIVERSAL_TYPES).map(({ tag, form }) => [tag, form]),
 );
 
-/**
- * Which rule the bytes broke. Tests assert THIS, never just that something threw
- * — otherwise a vector for "non-minimal length" passes because of an unrelated
- * bounds failure, and the reject-list proves nothing.
- */
 export type DerFailureCode =
-  /** A header or a declared length runs past its enclosing bound — the input, or a parent's content. */
+  /** A header or a declared length runs past its enclosing bound. */
   | 'truncated'
   /** Length octet `0x80`. BER's indefinite form, which DER forbids outright. */
   | 'indefinite-length'
@@ -133,9 +56,9 @@ export type DerFailureCode =
   | 'wrong-form'
   /** A universal tag number outside the X.509 type universe. */
   | 'unsupported-universal-tag'
-  /** Nesting past `MAXIMUM_DEPTH`. Bounded here so V8's stack never decides it. */
+  /** Nesting past `MAXIMUM_DEPTH`, or more than `MAXIMUM_NODES`. */
   | 'depth-exceeded'
-  /** Bytes after the one top-level TLV. A certificate is exactly one. */
+  /** Bytes after the one top-level TLV. */
   | 'trailing-data'
   /** A value decoder was handed a node of the wrong type. */
   | 'unexpected-tag'
@@ -144,10 +67,7 @@ export type DerFailureCode =
   /** The tag is right and the content breaks the type's own DER rules. */
   | 'malformed-value';
 
-/**
- * The only thing this module throws. `instanceof` is what the M2 fuzz gate
- * asserts, so anything else escaping is the bug the gate exists to find.
- */
+/** The only thing this module throws. */
 export class DerError extends Error {
   readonly code: DerFailureCode;
   /** Offset into the input the node was decoded from. */
@@ -168,32 +88,23 @@ type DerNodeBase = {
   readonly tagNumber: number;
   /** Offset of the identifier octet, relative to the input `decodeDer` was given. */
   readonly offset: number;
-  /** Identifier + length + content, verbatim. A view. This is what M3 hashes over. */
+  /** Identifier + length + content, verbatim. A view. */
   readonly bytes: Uint8Array;
   /** Content only. A view. */
   readonly content: Uint8Array;
 };
 
-/**
- * A union rather than a nullable `children`, so a primitive node has no field to
- * assert past — the repo bans `!`, and this shape means nobody needs one.
- */
 export type DerNode =
   | (DerNodeBase & { readonly isConstructed: false })
   | (DerNodeBase & { readonly isConstructed: true; readonly children: readonly DerNode[] });
 
-/**
- * Reads one octet, or throws. `end` is the enclosing bound — the input's length
- * at the top level, a parent's content end inside one — which is what makes
- * "a child overshoots its parent" and "the input is short" the same rule.
- */
+/** `end` is the enclosing bound: the input's length at the top level, a parent's content end inside one. */
 const byteAt = (input: Uint8Array, index: number, end: number, expected: string): number => {
   const byte = index < end ? input[index] : undefined;
   if (byte === undefined) throw new DerError('truncated', index, `expected ${expected}`);
   return byte;
 };
 
-/** Two bits, four classes, no index that can miss. */
 const tagClassOf = (identifier: number): TagClass => {
   switch (identifier >> 6) {
     case 0:
@@ -251,8 +162,6 @@ const decodeLength = (
   end: number,
 ): { length: number; nextOffset: number } => {
   const first = byteAt(input, offset, end, 'a length octet');
-  // Both of these are checked before anything is read, so a two-byte `30 FF`
-  // reports the reserved octet rather than the missing content.
   if (first === 0x80) throw new DerError('indefinite-length', offset, "BER's indefinite form");
   if (first === 0xff) throw new DerError('reserved-length', offset, 'X.690 s8.1.3.5(c)');
   if (first < 0x80) return { length: first, nextOffset: offset + 1 };
@@ -323,9 +232,6 @@ const decodeNode = (
   };
   if (!isConstructed) return { ...base, isConstructed: false };
 
-  // A cursor is the honest shape here: the child count is not known up front,
-  // it falls out of how many bytes each child consumes. Every TLV is at least
-  // two octets, so this always advances.
   const children: DerNode[] = [];
   let childOffset = contentStart;
   while (childOffset < contentEnd) {
@@ -336,11 +242,7 @@ const decodeNode = (
   return { ...base, isConstructed: true, children };
 };
 
-/**
- * Decodes exactly ONE TLV and rejects anything after it. A certificate is one
- * SEQUENCE; an extension's `extnValue` is one TLV inside an OCTET STRING. Both
- * want the trailing-data check, so re-entry is just `decodeDer(node.content)`.
- */
+/** Exactly one TLV; re-enter a nested value with `decodeDer(node.content)`. */
 export const decodeDer = (input: Uint8Array): DerNode => {
   const node = decodeNode(input, 0, input.length, 0, { remaining: MAXIMUM_NODES });
   if (node.bytes.length !== input.length) {
@@ -353,7 +255,6 @@ export const decodeDer = (input: Uint8Array): DerNode => {
   return node;
 };
 
-/** The tag check every value decoder owes, with `UNIVERSAL_TYPES` as the one source of truth. */
 const contentOf = (node: DerNode, type: keyof typeof UNIVERSAL_TYPES): Uint8Array => {
   if (node.tagClass !== 'universal' || node.tagNumber !== UNIVERSAL_TYPES[type].tag) {
     throw new DerError(
@@ -365,7 +266,7 @@ const contentOf = (node: DerNode, type: keyof typeof UNIVERSAL_TYPES): Uint8Arra
   return node.content;
 };
 
-/** DER admits exactly two encodings: `0x00` and `0xFF`. `0x01` is BER's truthy. */
+/** DER admits `0x00` and `0xFF` only; `0x01` is BER. */
 export const decodeBoolean = (node: DerNode): boolean => {
   const content = contentOf(node, 'BOOLEAN');
   const [octet] = content;
@@ -385,7 +286,7 @@ export const decodeBoolean = (node: DerNode): boolean => {
   );
 };
 
-/** Two's complement, minimally encoded. `bigint` because serial numbers are 20 octets. */
+/** `bigint` because serial numbers are 20 octets. */
 export const decodeInteger = (node: DerNode): bigint => {
   const content = contentOf(node, 'INTEGER');
   const [first, second] = content;
@@ -406,24 +307,13 @@ export const decodeInteger = (node: DerNode): bigint => {
   return first < 0x80 ? magnitude : magnitude - (1n << BigInt(8 * content.length));
 };
 
-/**
- * Dotted-decimal. The first octet packs two arcs as `40 * arc1 + arc2`, but arc1
- * is only ever 0, 1 or 2 — so `Math.floor(byte / 40)` is WRONG above 119 and
- * yields a nonexistent arc 3. subtls has this bug (m0 notes, `asn1bytes.ts:32`).
- *
- * Arcs after the first are base-128, most significant digit first, with the high
- * bit set on every octet but the last. DER wants them minimal and terminated.
- */
 export const decodeOid = (node: DerNode): string => {
   const content = contentOf(node, 'OID');
   const malformed = (detail: string): DerError =>
     new DerError('malformed-value', node.offset, detail);
   if (content.length === 0) throw malformed('an OID has at least one subidentifier');
 
-  // bigint, not number: ten continuation octets encode a 70-bit arc, which a
-  // double starts silently rounding. No real OID comes close, and a subidentifier
-  // an attacker rounded into a DIFFERENT OID is the whole class of bug worth
-  // spending a few bigint ops to make impossible.
+  // bigint: ten continuation octets encode a 70-bit arc, which a double would round into a different OID.
   const subidentifiers: bigint[] = [];
   let value = 0n;
   let isStartOfSubidentifier = true;
@@ -449,13 +339,12 @@ export const decodeOid = (node: DerNode): string => {
 
   const [first, ...rest] = subidentifiers;
   if (first === undefined) throw malformed('an OID has at least one subidentifier');
-  // Arc 1 is 0, 1 or 2 and nothing else, so above 119 the SECOND arc simply keeps
-  // growing. `first / 40n` would report arc 3 here, which does not exist.
+  // The first octet packs `40 * arc1 + arc2`, but arc1 is only ever 0, 1 or 2: above 119 the second arc keeps growing.
   const firstArc = first < 40n ? 0n : first < 80n ? 1n : 2n;
   return [firstArc, first - firstArc * 40n, ...rest].join('.');
 };
 
-/** DER requires the unused trailing bits to be zero, not merely declared. */
+/** DER requires the unused trailing bits to be zero. */
 export const decodeBitString = (
   node: DerNode,
 ): { readonly bytes: Uint8Array; readonly unusedBits: number } => {
@@ -478,7 +367,7 @@ export const decodeBitString = (
   return { bytes, unusedBits };
 };
 
-/** Both RFC 5280 time types are fixed-width, seconds-mandatory and Z-only. */
+/** RFC 5280 §4.1.2.5: fixed-width, seconds mandatory, Z only. */
 const UTC_TIME_SHAPE = /^\d{12}Z$/;
 const GENERALIZED_TIME_SHAPE = /^\d{14}Z$/;
 
@@ -490,16 +379,7 @@ const daysInMonth = (year: number, month: number): number => {
   return month === 4 || month === 6 || month === 9 || month === 11 ? 30 : 31;
 };
 
-/**
- * UTCTime or GeneralizedTime. Calendar fields are range-checked BEFORE a `Date`
- * is built, because `new Date('2024-02-30T00:00:00Z')` silently returns March
- * 1st — measured, not assumed. Left to the Date constructor, a malformed
- * `notAfter` buys a day of validity and disagrees with OpenSSL, which is a
- * verdict flip under x509-limbo.
- *
- * `Date`, not `Temporal.Instant`, to match the frozen `validationTime` in the
- * validator contract — this and that meet in one comparison at M4.
- */
+/** Calendar fields are range-checked before a `Date` is built: `new Date('2024-02-30T00:00:00Z')` silently returns March 1st. */
 export const decodeTime = (node: DerNode): Date => {
   const isUtcTime = node.tagNumber === UNIVERSAL_TYPES.UTC_TIME.tag;
   if (
@@ -518,10 +398,9 @@ export const decodeTime = (node: DerNode): Date => {
     );
   }
 
-  // The shape is now proven fixed-width, so slicing by offset cannot miss.
   const digitsAt = (start: number): number => Number(text.slice(start, start + 2));
   const twoDigitYear = digitsAt(0);
-  // RFC 5280 s4.1.2.5.1 pivots at 50: 49 is 2049, 50 is 1950.
+  // RFC 5280 §4.1.2.5.1: 49 is 2049, 50 is 1950.
   const year = isUtcTime
     ? (twoDigitYear < 50 ? 2000 : 1900) + twoDigitYear
     : Number(text.slice(0, 4));
@@ -536,7 +415,7 @@ export const decodeTime = (node: DerNode): Date => {
     new DerError('malformed-value', node.offset, `${detail} in ${JSON.stringify(text)}`);
   if (month < 1 || month > 12) throw malformed(`month ${month}`);
   if (day < 1 || day > daysInMonth(year, month)) throw malformed(`day ${day} of month ${month}`);
-  // 60 is a leap second, which RFC 5280 does not admit.
+  // RFC 5280 admits no leap second.
   if (hour > 23 || minute > 59 || second > 59) throw malformed('time of day');
 
   return new Date(Date.UTC(year, month - 1, day, hour, minute, second));

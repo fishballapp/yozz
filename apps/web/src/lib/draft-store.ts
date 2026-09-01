@@ -3,14 +3,9 @@ import type { ComposeDraft } from '../state/mail';
 import type { ComposeIntent } from './compose';
 
 /**
- * The open draft, kept on the device so a reload does not eat it. A deploy retires the old
- * chunk files, so the first lazy import after one fails and the app reloads itself
- * (`main.tsx`); without this the message you were writing would be the price of the upgrade.
- *
- * Keyed by user and remembered with the `?compose=` intent it belongs to: on reload the intent is
- * still in the URL, and only a draft for THAT intent is restored — a stored reply never lands in a
- * fresh blank message. Attachment bytes are not stored; files are re-picked. Cleared on lock, on
- * discard and on a send that went out, like the rest of the user's plaintext.
+ * The open draft, on the device, so the reload a stale build triggers (`main.tsx`) does not eat
+ * it. Keyed by user and the `?compose=` intent, so only a draft for that intent is restored.
+ * Attachment bytes are not stored. Cleared on lock, discard and a send that went out.
  */
 const storedDraftSchema = z.object({
   intent: z.string(),
@@ -24,14 +19,7 @@ const storedDraftSchema = z.object({
     body: z.string(),
     inReplyTo: z.string().optional(),
     references: z.array(z.string()).optional(),
-    /**
-     * Which vault record this text already IS, when it has reached one.
-     *
-     * Without them a reload restored the words and lost the identity, so the autosave read a
-     * draft with no `draftId`, took its create branch, and minted a SECOND record holding the
-     * same message — once per reload, for as long as you kept reloading. The key is the stable
-     * one; the version is a hint the restore re-checks against the live records.
-     */
+    /** Which vault record this text already is; without it a reload minted a second record (DECISIONS.md). The version is a hint the restore re-checks. */
     draftKey: z.string().optional(),
     draftId: z.string().optional(),
   }),
@@ -61,7 +49,7 @@ export const loadDraft = (
   try {
     json = JSON.parse(raw);
   } catch {
-    // A record that does not even parse would otherwise break every attempt to compose.
+    // A record that does not parse must not break every attempt to compose.
     storage.removeItem(keyOf(userId));
     return null;
   }

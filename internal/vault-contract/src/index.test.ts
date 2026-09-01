@@ -45,8 +45,6 @@ describe('vault-contract invariants', () => {
           precondition: { expect: 'revision', revision: 1 },
         }),
       ).toMatchObject({ precondition: { expect: 'revision', revision: 1 } });
-      // `absent` carries no revision, and `revision` may not omit one: the discriminator is the
-      // whole point, so a shape that means two things at once is refused.
       expect(() =>
         PutRecordRequestSchema.parse({ ...body, precondition: { expect: 'absent', revision: 1 } }),
       ).toThrow();
@@ -171,9 +169,6 @@ describe('vault-contract invariants', () => {
     });
 
     it('requires isNewVault to be stated, never defaulted', () => {
-      // Defaulting it to false would make every create a silent upsert — the
-      // race the flag exists to close. Defaulting to true would make every
-      // rewrap a 409. So the client says which, every time.
       expect(() =>
         FinalizeUnlockRequestSchema.parse({
           mode: 'password',
@@ -184,10 +179,6 @@ describe('vault-contract invariants', () => {
     });
 
     it('refuses password finalisation without authValue', () => {
-      // Not a formality. Better Auth's `setPassword` is serverOnly, so the
-      // Worker creates the credential inside this request — a finalisation
-      // missing the authValue would set a mode whose credential never exists,
-      // which is exactly the shape that shipped and had to be fixed.
       expect(() =>
         FinalizeUnlockRequestSchema.parse({ mode: 'password', wrappedDek: 'd3JhcHBlZERlaw==' }),
       ).toThrow();

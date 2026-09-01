@@ -1,7 +1,3 @@
-/**
- * TLS 1.3 Record Layer (RFC 9846 §5): plaintext and AEAD framing, sealing, and opening.
- */
-
 import { concat, writeUint8, writeUint16 } from './bytes.ts';
 import {
   type AlertDescription,
@@ -31,11 +27,7 @@ export type AeadRecordEvent = {
   readonly key: Uint8Array;
   readonly nonce: Uint8Array;
   readonly seq: bigint;
-  /**
-   * The INNER content type. Carried so a fail-closed test can assert what the
-   * requirement actually says — that no application data was ever sent — rather
-   * than only that the handshake returned a failure.
-   */
+  /** The inner content type, so a test can assert no application data was ever sent. */
   readonly type: ContentType;
 };
 
@@ -43,16 +35,12 @@ type AeadObserver = (event: AeadRecordEvent) => void;
 
 let aeadObserver: AeadObserver | null = null;
 
-/** Test-only hook to record all (key, nonce) invocations for invariant checks. */
+/** Test-only. */
 export const setAeadObserver = (observer: AeadObserver | null): void => {
   aeadObserver = observer;
 };
 
-/**
- * `TLSPlaintext.length` is `uint16` but RFC 9846 §5.1 caps it at 2^14 — the
- * ceiling every check below and the fragmenting writer in `handshake.ts` share,
- * so a message larger than one record is split rather than refused.
- */
+/** RFC 9846 §5.1. */
 export const MAX_RECORD_PLAINTEXT = 16384;
 
 export const sealPlain = (
@@ -93,10 +81,7 @@ export const openPlain = (record: Uint8Array): OpenRecordResult => {
   ) {
     return { ok: false, description: 'decode_error' };
   }
-  // RFC 9846 §5.1 on legacy_record_version: "This field is deprecated and MUST
-  // be ignored for all purposes." Refusing a plaintext record over it is a
-  // stricter rule than the one the RFC wrote, and stricter than the peers we
-  // have to talk to.
+  // RFC 9846 §5.1: legacy_record_version "MUST be ignored for all purposes".
   const length = (l0 << 8) | l1;
   if (length > MAX_RECORD_PLAINTEXT) {
     return { ok: false, description: 'record_overflow' };
@@ -217,14 +202,7 @@ export const openAead = async (
     return { ok: false, description: 'decode_error' };
   }
 
-  /**
-   * The one place the version is NOT ignored, and §5.2 is why: on a
-   * TLSCiphertext "the legacy_record_version field is always 0x0303... there
-   * are no historical compatibility concerns where other values might be
-   * received". A ciphertext is never the initial ClientHello, so 0x0301 is not
-   * a case either — §5.1's "MUST be ignored" governs the PLAINTEXT field, which
-   * `openPlain` and `RecordReader` duly ignore.
-   */
+  // §5.2: on a TLSCiphertext the version "is always 0x0303", unlike the plaintext field §5.1 ignores.
   if (((v0 << 8) | v1) !== LEGACY_RECORD_VERSION.STANDARD) {
     return { ok: false, description: 'decode_error' };
   }
@@ -238,10 +216,7 @@ export const openAead = async (
     return { ok: false, description: 'decode_error' };
   }
 
-  // Too short to hold even an empty plaintext and its tag, so the AEAD cannot
-  // open it — and RFC 9846 §5.2 has one answer for that: "If the decryption
-  // fails, the receiver MUST terminate the connection with a bad_record_mac
-  // alert." Whether we declined to try or tried and failed is our business.
+  // Too short for a tag; §5.2 names bad_record_mac for a decryption that fails.
   if (length < 17) {
     return { ok: false, description: 'bad_record_mac' };
   }
@@ -271,12 +246,7 @@ export const openAead = async (
     return { ok: false, description: 'bad_record_mac' };
   }
 
-  /**
-   * RFC 9846 §5.2: content is capped at 2^14, and the inner plaintext is that
-   * plus the one content-type byte. Padding does NOT buy room — checking the
-   * content alone lets 2^14 of it through with padding stacked on top, which is
-   * the record BoGo's `LargePlaintext-TLS13-Padded-16384-1` sends.
-   */
+  // §5.2: 2^14 of content plus the type byte, padding included.
   if (innerPlaintext.length > MAX_INNER_PLAINTEXT) {
     return { ok: false, description: 'record_overflow' };
   }
@@ -285,8 +255,7 @@ export const openAead = async (
   while (i >= 0 && innerPlaintext[i] === 0) {
     i -= 1;
   }
-  // §5.4: no non-zero octet anywhere means the record has no content type at
-  // all, and the RFC names the alert for it.
+  // §5.4: no non-zero octet means no content type.
   if (i < 0) {
     return { ok: false, description: 'unexpected_message' };
   }
@@ -348,10 +317,7 @@ export class RecordReader {
       return { ok: false, kind: 'alert', description: 'decode_error' };
     }
 
-    // legacy_record_version again (§5.1: "deprecated and MUST be ignored for all
-    // purposes"). The reader refused an SSL 3.0-framed alert over it, so a
-    // server saying "no cipher suite in common" was answered with decode_error
-    // instead of being reported as the refusal it is.
+    // §5.1: legacy_record_version is ignored, so an SSL 3.0-framed alert is still read.
     const length = (l0 << 8) | l1;
     if (length > MAX_RECORD_PLAINTEXT + 256) {
       return { ok: false, kind: 'alert', description: 'record_overflow' };

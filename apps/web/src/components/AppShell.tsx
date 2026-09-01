@@ -14,22 +14,9 @@ import { StatusBar } from './StatusBar';
 import { Button, buttonClass } from './ui/Button';
 
 /**
- * Everything that is true on every screen: the rail, its resizer, the mobile top bar and sheet, and
- * the status line across the foot. Routes fill the space between the rail and the status line.
- *
- * It is a pathless LAYOUT ROUTE (`routes/_app.tsx`), not a component pages opt into, and that is
- * the whole point: the rail is mounted once and stays mounted across every navigation. When two
- * pages each rendered their own copy of this, the rail unmounted and remounted on the way to
- * Settings, and the only thing keeping its dragged width was that both copies happened to read the
- * same `localStorage` key. Now it is one object, so it keeps its width because it never went away.
- *
- * Being a position in the route tree also decides what is NOT here: anything that should render
- * without the app around it — a message opened on its own in a new tab — is a sibling of this
- * route rather than a child, and gets the bare page for free.
- *
- * The vault gate sits here rather than in a route loader: `beforeLoad` cannot read React context.
- * While the provider is resuming a persisted unlock it renders nothing, so a reload does not
- * flash `/login` on its way back to the mailbox.
+ * A pathless layout route (`routes/_app.tsx`), so the rail mounts once; anything that renders
+ * without the app is a sibling route. The vault gate sits here because `beforeLoad` cannot read
+ * React context; while a persisted unlock resumes it renders nothing.
  */
 export const AppShell = () => {
   const { session, isResuming } = useVault();
@@ -50,9 +37,8 @@ const AppShellBody = () => {
     RAIL_WIDTH.max,
   );
 
-  // The sheet is only rendered below `lg`, but Base UI's modal dialog aria-hides the rest of the
-  // app and traps focus for as long as it is OPEN. Crossing the breakpoint with it open (a
-  // rotation, a window drag) left the whole app hidden behind a display:none popup.
+  // Base UI's modal aria-hides the rest of the app while open; crossing `lg` with the sheet open
+  // left the whole app hidden behind a display:none popup.
   useEffect(() => {
     const wide = matchMedia('(min-width: 64rem)');
     const close = () => {
@@ -63,24 +49,21 @@ const AppShellBody = () => {
     return () => wide.removeEventListener('change', close);
   }, []);
 
-  // `strict: false` because this route has neither: it sits above every page and reads whichever of
-  // them is currently matched. A mailbox names itself from the URL; a page states its name up front.
+  // `strict: false`: this sits above every page and reads whichever is matched.
   const { mailbox } = useParams({ strict: false });
   const { q } = useSearch({ strict: false });
   const pageTitle = useMatches({
     select: matches => matches.findLast(match => match.staticData.title !== undefined)?.staticData,
   })?.title;
 
-  // The status line counts what the list is SHOWING, search included — the same derivation the list
-  // itself runs, from one function, so the two can never disagree about how many messages are there.
+  // The same derivation the list runs, from one function.
   const visible = mailbox === undefined ? undefined : visibleThreads(threads, mailbox, q);
   const counts =
     visible === undefined
       ? undefined
       : { unread: visible.filter(thread => thread.isUnread).length, total: visible.length };
 
-  // Page titles are lowercased at this seam so the slot reads the same whatever fills it — mailbox
-  // labels are already lowercase (`inbox`, an address), and `Settings` beside them was the odd one.
+  // Lowercased at this seam: mailbox labels already are.
   const title = mailbox === undefined ? (pageTitle?.toLowerCase() ?? '') : mailboxLabel(mailbox);
 
   return (

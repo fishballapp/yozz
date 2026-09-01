@@ -1,12 +1,11 @@
 import type { Attachment, Message } from './thread';
 import { fullTime } from './time';
 
-/** Attachment sizes are machine values: short, unpadded, and never more than one decimal. */
+/** Short, unpadded, never more than one decimal. */
 export const formatBytes = (bytes: number) => {
   if (bytes < 1024) return `${bytes} B`;
   const units = ['KB', 'MB', 'GB'];
-  // The exponent is chosen before the mantissa is rounded, so 1_048_575 lands at 1023.999 KB and
-  // prints "1024 KB". Carry into the next unit when rounding pushes it back to the boundary.
+  // The exponent is chosen before rounding, so 1_048_575 would print "1024 KB"; carry into the next unit.
   const raw = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length);
   const rounded = bytes / 1024 ** raw;
   const carries = Math.round(rounded) >= 1024 && raw < units.length;
@@ -33,22 +32,14 @@ export const ATTACHMENT_LABEL: Record<Attachment['kind'], string> = {
   other: 'FILE',
 };
 
-/**
- * Build the quoted original for a reply.
- *
- * Markdown's blockquote is `>`, which is the same character mail has used for quoting since before
- * markdown existed — so the draft reads correctly as plain text, renders correctly in the preview,
- * and survives to a recipient whose client only takes text. The attribution line above it is the
- * convention every mail client already writes.
- */
+/** `>` is both mail's quoting convention and markdown's blockquote, so it survives either reading. */
 export const quoteForReply = (message: Message) =>
   [
     '',
     '',
     `On ${fullTime(message.at)}, ${message.fromName} <${message.fromAddress}> wrote:`,
     '',
-    // `>` separates paragraphs, so it belongs BETWEEN them — appending one per paragraph and
-    // trying to strip the last leaves a bare `>` on the final line of every draft.
+    // `>` separates paragraphs, so it belongs between them, or every draft ends in a bare `>`.
     ...message.body.flatMap((paragraph, index) =>
       index === 0 ? [`> ${paragraph}`] : ['>', `> ${paragraph}`],
     ),

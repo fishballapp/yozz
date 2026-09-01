@@ -1,14 +1,3 @@
-/**
- * RFC 2047 MIME Part Three: Message Header Extensions for Non-ASCII Text.
- *
- * Decodes encoded-words in header fields (Q and B encodings).
- * Crucial invariants:
- * 1. Adjacent encoded-words separated only by linear-white-space (LWS) are joined by their
- *    raw decoded bytes before charset decoding.
- * 2. The output is NEVER re-scanned.
- * 3. Unknown charsets leave the raw word intact.
- */
-
 import { concatByteArrays } from './bytes.ts';
 
 type EncodedWordMatch = {
@@ -63,7 +52,6 @@ const decodeBytesWithCharset = (bytes: Uint8Array, charset: string): string | nu
     const decoder = new TextDecoder(charset);
     return decoder.decode(bytes);
   } catch {
-    // Unsupported charset in TextDecoder
     return null;
   }
 };
@@ -106,12 +94,10 @@ export const decodeRfc2047 = (header: string): string => {
     const current = matches[i];
     if (current === undefined) break;
 
-    // Emit any plain text between cursor and current match
     if (current.start > cursor) {
       result += header.slice(cursor, current.start);
     }
 
-    // Collect all adjacent encoded words
     const adjacentWords: EncodedWordMatch[] = [current];
     let nextIndex = i + 1;
 
@@ -121,7 +107,8 @@ export const decodeRfc2047 = (header: string): string => {
       if (prev === undefined || next === undefined) break;
 
       const between = header.slice(prev.end, next.start);
-      // Adjacent words are separated ONLY by linear white space (spaces, tabs, CRLF)
+      // RFC 2047 §6.2: encoded-words separated only by linear white space are one text, so their
+      // bytes are joined before charset decoding.
       if (/^[ \t\r\n]+$/.test(between)) {
         adjacentWords.push(next);
         nextIndex++;
@@ -130,8 +117,6 @@ export const decodeRfc2047 = (header: string): string => {
       }
     }
 
-    // Process the group of adjacent encoded-words
-    // Sub-group them by charset for byte-level concatenation
     let j = 0;
     while (j < adjacentWords.length) {
       const firstInCharset = adjacentWords[j];
@@ -152,7 +137,6 @@ export const decodeRfc2047 = (header: string): string => {
         }
       }
 
-      // Check if charset is supported
       let isCharsetSupported = true;
       try {
         new TextDecoder(firstInCharset.charset);
@@ -161,7 +145,6 @@ export const decodeRfc2047 = (header: string): string => {
       }
 
       if (!isCharsetSupported) {
-        // Unknown charset leaves the raw words intact
         for (const w of sameCharsetWords) {
           result += w.raw;
         }
@@ -180,7 +163,6 @@ export const decodeRfc2047 = (header: string): string => {
         }
 
         if (hasDecodeError) {
-          // If decoding bytes failed (e.g. invalid base64), emit raw
           for (const w of sameCharsetWords) {
             result += w.raw;
           }

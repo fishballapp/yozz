@@ -1,7 +1,3 @@
-/**
- * TLS 1.3 Running Transcript and Transcript Hash (RFC 9846 §4.1).
- */
-
 import { concat, writeUint8, writeUint24 } from './bytes.ts';
 import { type CipherSuite, transcriptHash } from './key-schedule.ts';
 import { HANDSHAKE_TYPES } from './wire.ts';
@@ -19,11 +15,7 @@ export class Transcript {
     this.messages.push(message);
   }
 
-  /**
-   * RFC 9846 §4.1:
-   * When a HelloRetryRequest is sent or received, the transcript is reconstructed as:
-   * message_hash (type 254) || uint24(Hash.length) || Hash(ClientHello1)
-   */
+  /** RFC 9846 §4.1: after a HelloRetryRequest, ClientHello1 becomes `message_hash || uint24(Hash.length) || Hash(ClientHello1)`. */
   async replaceClientHello1WithMessageHash(): Promise<void> {
     if (this.hasReplacedClientHello1) {
       throw new Error('replaceClientHello1WithMessageHash may be called only once');

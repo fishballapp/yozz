@@ -1,12 +1,3 @@
-/**
- * The byte pipe between an accepted server WebSocket and a `cloudflare:sockets` TCP socket.
- *
- * Three things this must get right, each of which surfaces as a TLS failure far from its cause
- * (ARCHITECTURE.md, "The relay"): half-open close, a bounded queue in the one direction the
- * runtime gives us no backpressure signal, and never a byte in band that did not come from the
- * peer. The only `server.send` in this file forwards TCP bytes.
- */
-
 export const WS_CLOSE_NORMAL = 1000;
 export const WS_CLOSE_UNSUPPORTED = 1003;
 export const WS_CLOSE_TOO_LARGE = 1009;
@@ -16,11 +7,7 @@ export const MAX_QUEUED_BYTES = 1024 * 1024;
 
 type RelayTargetInfo = { readonly hostname: string; readonly port: number };
 
-/**
- * On the server half of a `WebSocketPair` a binary frame arrives as a `Blob`
- * (docs/knowledge/cloudflare-workers-platform.md); `new Uint8Array(blob)` is ZERO bytes without
- * a throw, so every shape is named here and anything else is refused.
- */
+/** A binary frame arrives as a `Blob` on the server half, and `new Uint8Array(blob)` is silently zero bytes. */
 const toBytes = async (data: unknown): Promise<Uint8Array | null> => {
   if (data instanceof Blob) return new Uint8Array(await data.arrayBuffer());
   if (data instanceof ArrayBuffer) return new Uint8Array(data);
@@ -45,7 +32,7 @@ export const pipeSocket = (
   let writeChain: Promise<void> = Promise.resolve();
 
   const log = (reason: string, error?: unknown) => {
-    // biome-ignore lint/suspicious/noConsole: the relay's only diagnostics channel; never in band
+    // biome-ignore lint/suspicious/noConsole: the relay's only diagnostics channel
     console.error(
       JSON.stringify({
         event: 'relay',
@@ -69,7 +56,7 @@ export const pipeSocket = (
     }
   };
 
-  /** FIN on our TCP write side, once everything queued has been written. Never an abort. */
+  /** FIN, once everything queued has been written. */
   const endWriter = () => {
     if (isWriterEnded) return;
     isWriterEnded = true;
@@ -80,7 +67,6 @@ export const pipeSocket = (
       });
   };
 
-  /** A protocol violation from the WebSocket side: drop both sides, a RST here is fine. */
   const abort = (code: number, reason: string) => {
     log(reason);
     closeWs(code, reason);
@@ -95,7 +81,6 @@ export const pipeSocket = (
       abort(WS_CLOSE_UNSUPPORTED, 'string frame on a binary relay');
       return;
     }
-    // The size is known before the Blob is read, so the bound applies before the copy.
     const size =
       event.data instanceof Blob ? event.data.size : (event.data as ArrayBufferLike).byteLength;
     if (typeof size !== 'number') {
@@ -124,9 +109,7 @@ export const pipeSocket = (
       });
   });
 
-  // The browser went away: flush what it already sent, FIN our write side, and let the read
-  // loop drain whatever the mail server still says before the socket is closed. Closing with
-  // bytes unread is what sends a RST instead of a FIN.
+  // FIN our write side and let the read loop drain: closing with bytes unread sends a RST.
   const onWsEnd = () => {
     isWsClosed = true;
     endWriter();
@@ -139,12 +122,9 @@ export const pipeSocket = (
       for (;;) {
         const { done, value } = await reader.read();
         if (done) break;
-        // ponytail: no backpressure signal exists for server.send; the ceiling is the runtime's
-        // own outbound buffer. Upgrade path: a Durable Object with hibernation, or
-        // acknowledgements in the client protocol.
+        // `server.send` has no backpressure signal; the ceiling is the runtime's outbound buffer.
         if (!isWsClosed) server.send(value);
       }
-      // The peer sent FIN. Everything it said has been forwarded; finish our side and close.
       endWriter();
       await writeChain;
       closeWs(WS_CLOSE_NORMAL, 'peer closed');

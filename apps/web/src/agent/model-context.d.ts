@@ -1,12 +1,7 @@
 /**
- * The slice of WebMCP the app uses: `document.modelContext.registerTool()` and the tool it takes.
- * Written here rather than taken from `webmcp-types`, which lags a spec that moved monthly through
- * 2026 (docs/knowledge/webmcp.md). Only what `AgentTools` calls is declared; the testing surface
- * (`getTools`, `executeTool`) is faked in tests and not typed.
- *
- * `execute`'s second argument is absent before Chrome 153 and `{}` in ChatGPT's browser (both
- * measured), so it is optional and nothing in it is required. The input is whatever the agent sent;
- * the browser validates nothing against `inputSchema`.
+ * The slice of WebMCP the app uses, written here because `webmcp-types` lags the spec
+ * (docs/knowledge/webmcp.md). `execute`'s second argument is absent before Chrome 153 and `{}`
+ * in ChatGPT's browser; the browser validates nothing against `inputSchema`.
  */
 type ModelContextToolAnnotations = {
   readonly readOnlyHint?: boolean;

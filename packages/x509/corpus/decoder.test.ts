@@ -1,17 +1,4 @@
-/**
- * The decoder against REAL bytes — the half of the M2 gate that `src/der.test.ts`
- * cannot cover.
- *
- * The reject-list is authored, so it proves strictness and nothing about
- * compatibility. These three do the opposite:
- *
- *  - the 59 harvested certificates decode, field shapes intact;
- *  - every certificate in the pinned x509-limbo corpus decodes, which is the
- *    canary on the fail-closed universal-tag table — a table that over-rejects
- *    shows up here as thousands of failures rather than as one dead mail server
- *    at M8;
- *  - mutants of real certificates throw `DerError` or nothing else, ever.
- */
+/** The decoder against real bytes: the harvested corpus, the pinned limbo corpus, and mutants of both. */
 import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { describe, expect, it } from 'vitest';
@@ -44,10 +31,6 @@ describe('the harvested corpus', () => {
     expect(certificate.children).toHaveLength(3);
   });
 
-  /**
-   * The property M3's signature verification rests on. Not "we can rebuild the
-   * bytes" — the bytes are never rebuilt, they are the input's own memory.
-   */
   it.each(corpus)('retains $file tbsCertificate verbatim, as a view', ({ der }) => {
     const certificate = decodeDer(der);
     if (!certificate.isConstructed) throw new Error('a Certificate is a SEQUENCE');
@@ -62,10 +45,7 @@ describe('the harvested corpus', () => {
   });
 });
 
-/**
- * Gitignored and 39MB, so absent on a fresh checkout and in CI. Skipped rather
- * than failed: `pnpm -F @yozz.app/x509 limbo:fetch` is what turns it on.
- */
+/** Gitignored and 39 MB; `pnpm -F @yozz.app/x509 limbo:fetch` turns it on. */
 describe.skipIf(!existsSync(LIMBO_CACHE))('every certificate x509-limbo ships', () => {
   it('decodes, or names every certificate that did not', async () => {
     const { testcases } = z
@@ -88,9 +68,7 @@ describe.skipIf(!existsSync(LIMBO_CACHE))('every certificate x509-limbo ships', 
       ]),
     );
     const certificates = [...pems].flatMap(derFromPem);
-    // A floor, not the exact count: the pin can move, and a canary that fails on
-    // a bumped pin teaches nothing. It only has to prove the set is the whole
-    // corpus rather than a handful.
+    // A floor, not the exact count, so a bumped pin does not fail it.
     expect(certificates.length).toBeGreaterThan(9_000);
 
     const failures = certificates.flatMap(der => {
@@ -105,16 +83,7 @@ describe.skipIf(!existsSync(LIMBO_CACHE))('every certificate x509-limbo ships', 
   }, 120_000);
 });
 
-/**
- * Mutation fuzzing, seeded from the corpus. NOT coverage-guided — V8 exposes
- * block coverage through the inspector, but a parser this small has a state
- * space random mutation of real certificates already saturates, and the
- * feedback loop would be more machinery than the thing it tests.
- *
- * ponytail: mutations are untargeted, so length octets are hit by chance rather
- * than by construction. If a length bug ever escapes to M8, weight the operator
- * table toward header offsets before reaching for coverage feedback.
- */
+/** Mutation fuzzing seeded from the corpus, not coverage-guided: random mutation already saturates a parser this small. */
 describe('fuzzing', () => {
   const ITERATIONS = 5_000;
   const TIME_BUDGET_MS = 20_000;
@@ -152,11 +121,7 @@ describe('fuzzing', () => {
     }
   };
 
-  /**
-   * Every decoder against every node. A wrong tag throws `DerError`, which is
-   * the outcome under test — so this fuzzes the value decoders for free, on
-   * bytes that already survived the TLV layer.
-   */
+  /** Every value decoder against every node: a wrong tag throws `DerError`, which is the outcome under test. */
   const exerciseValueDecoders = (node: DerNode): void => {
     for (const decode of [decodeBoolean, decodeInteger, decodeOid, decodeBitString, decodeTime]) {
       try {
@@ -188,9 +153,7 @@ describe('fuzzing', () => {
     }
 
     expect(performance.now() - startedAt).toBeLessThan(TIME_BUDGET_MS);
-    // Crude, and the real defence is structural: nothing is ever allocated on a
-    // declared length, so the only allocations are nodes bounded by input size.
-    // This only has to catch a runaway.
+    // Crude; the real defence is that nothing is allocated on a declared length.
     expect(process.memoryUsage().heapUsed - heapBefore).toBeLessThan(HEAP_BUDGET_BYTES);
   }, 60_000);
 });

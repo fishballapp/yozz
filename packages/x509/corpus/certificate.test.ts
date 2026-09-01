@@ -1,18 +1,6 @@
 /**
- * M3's gate: the harvested corpus decodes FIELD-FOR-FIELD against OpenSSL.
- *
- * `openssl x509 -text` is lossy — it normalises, and shows neither string type
- * nor tagging — so the comparison leans on the sub-commands that emit something
- * exact instead. `-pubkey` returns the SubjectPublicKeyInfo as bytes, which is a
- * byte-for-byte check on the field `tls` will hand to `importKey`; `-serial`,
- * `-startdate` and `-enddate` are unambiguous; and `-nameopt RFC2253,oid` prints
- * attribute types as dotted OIDs, so comparing names needs no name table that
- * could itself be wrong.
- *
- * Extension VALUES are compared through `-ext`, which is text and therefore the
- * weak half. The strong half is that these run over the same 59 certificates the
- * unit tests cannot reach: real string types, real time types, a v1 root, and
- * Entrust's private extension holding a GeneralString.
+ * Field-for-field against OpenSSL, through the sub-commands that emit something exact: `-pubkey`,
+ * `-serial`, `-startdate`, `-enddate`, `-nameopt RFC2253,oid`. `-ext` is text and the weak half.
  */
 import { execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
@@ -100,8 +88,6 @@ describe.skipIf(!hasOpenssl)('field-for-field against OpenSSL', () => {
       openssl(file, '-subject', '-nameopt', 'RFC2253,oid,-esc_msb').trim().replace('subject=', ''),
     );
 
-    // The strongest single assertion here: not "we can rebuild the SPKI" but
-    // "the bytes we hand `tls` are the bytes OpenSSL reads out of the same file".
     expect([...certificate.subjectPublicKeyInfo.der]).toEqual([
       ...spkiFromPem(openssl(file, '-pubkey')),
     ]);
@@ -147,15 +133,7 @@ describe.skipIf(!hasOpenssl)('field-for-field against OpenSSL', () => {
   });
 });
 
-/**
- * Over-rejection is the failure mode a decoder cannot self-detect: every unit
- * test asserts that malformed input is refused, and none of them would notice if
- * valid input were refused too. This is the check that would.
- *
- * The rule is one-directional on purpose. A certificate we reject must belong to
- * a testcase x509-limbo expects to FAIL — decoding is allowed to be the reason a
- * case fails. Nothing here says a case expecting failure must fail at decode.
- */
+/** Over-rejection is what no unit test can see. A certificate we reject must belong to a case limbo expects to fail. */
 describe.skipIf(!existsSync(LIMBO_CACHE))('over-rejection across x509-limbo', () => {
   it('refuses no certificate belonging to a testcase that expects SUCCESS', async () => {
     const { testcases } = z

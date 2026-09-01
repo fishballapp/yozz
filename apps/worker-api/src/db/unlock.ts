@@ -63,13 +63,7 @@ export const getUnlockStatus = async (
   };
 };
 
-/**
- * Two ids name a passkey and they are NOT interchangeable. `passkey.id` is
- * Better Auth's row id, which `vault_passkey_wrap.passkey_id` and passkey
- * deletion use. `passkey.credentialID` is the WebAuthn credential id, which is
- * the only thing an authenticator response carries. Every lookup here takes
- * exactly the one its caller can have, so a mix-up fails instead of matching.
- */
+/** By the WebAuthn credential id, which is all an authenticator response carries; `passkey.id` is Better Auth's row id. */
 export const getPasskeyWrap = async (
   db: D1Database,
   userId: string,
@@ -87,16 +81,10 @@ export const getPasskeyWrap = async (
   return wrap?.wrapped_dek ?? null;
 };
 
-/**
- * The account row is the ONE place "does a vault exist" is decided, inside the
- * same batch that writes the wrap. A new vault INSERTs and lets the primary key
- * refuse a second creator; a rewrap upserts. `db.batch` is one transaction, so
- * a refused INSERT writes nothing else either. The client's own pre-check
- * (`refuseIfAlreadyEnrolled`) is for the error message, not the guarantee.
- */
 const isUniqueViolation = (err: unknown): boolean =>
   err instanceof Error && /UNIQUE constraint failed/.test(err.message);
 
+/** One transaction: a new vault INSERTs and lets the primary key refuse a second creator; a rewrap upserts. */
 const finalize = async (db: D1Database, statements: D1PreparedStatement[]): Promise<void> => {
   try {
     await db.batch(statements);
@@ -187,7 +175,7 @@ export const resetVault = async (db: D1Database, userId: string): Promise<void> 
   ]);
 };
 
-/** `passkeyId` is the ROW id, because that is what the delete endpoint addresses. */
+/** By the ROW id, which is what the delete endpoint addresses. */
 export const isPasskeyWrapped = async (
   db: D1Database,
   userId: string,

@@ -2,15 +2,9 @@ import type { TlsSession } from '@yozz.app/tls';
 import { getIdbFactory, openDeviceDb, runTransaction, STORES } from '../vault/device-db.ts';
 
 /**
- * The two stores `@yozz.app/tls` deliberately leaves to its caller: the SPKI pin
- * learned from the first completed handshake to a host, and the resumption
- * session its last connection handed back. Both survive a reload, both are
- * keyed by `host:port` (IMAP and SMTP on one hostname may be keyed apart), and
- * both are per DEVICE rather than per vault user — a host's key is a fact about
- * the host, not about who asked (DECISIONS.md, "Pins and sessions are per device").
- *
- * IndexedDB structured-clones a session as it is, `Date`s and `Uint8Array`s
- * included, so nothing here revives anything.
+ * The pin and the resumption session `@yozz.app/tls` leaves to its caller, keyed by `host:port`
+ * and per device (DECISIONS.md, "Pins and sessions are per device"). IndexedDB structured-clones
+ * a session as it is, so nothing here revives anything.
  */
 
 export type PinnedPeer = { readonly peer: string; readonly pin: string };
@@ -66,13 +60,8 @@ const deleteSession = (peer: string, idbFactory?: IDBFactory): Promise<void> =>
   );
 
 /**
- * Forgetting is how a new key is accepted: the next handshake runs unpinned
- * and learns whatever key the host proves it holds. Nothing here ever writes a
- * pin the user typed, because a pin must come from a completed handshake.
- *
- * The session goes with it. A resumption re-validates the STORED chain and
- * reports the stored leaf's key, so a session kept past the pin would hand the
- * forgotten key straight back as the new first-use pin.
+ * Forgetting is how a new key is accepted; nothing writes a pin the user typed. The session goes
+ * with it, or a resumption would hand the forgotten key straight back as the new pin.
  */
 export const forgetPin = async (peer: string, idbFactory?: IDBFactory): Promise<void> => {
   await withDb<void>(
@@ -98,11 +87,7 @@ export const listPins = (idbFactory?: IDBFactory): Promise<readonly PinnedPeer[]
     idbFactory,
   );
 
-/**
- * Read AND delete in one transaction: a ticket travels in the clear, so a
- * session is offered exactly once (RFC 9846 App. C.4) and the eviction cannot be
- * forgotten by a handshake that fails before it gets the chance.
- */
+/** Read and delete in one transaction: a session is offered exactly once (RFC 9846 App. C.4). */
 export const takeSession = (peer: string, idbFactory?: IDBFactory): Promise<TlsSession | null> =>
   withDb<TlsSession | null>(
     STORES.tlsSessions.name,
@@ -118,7 +103,7 @@ export const takeSession = (peer: string, idbFactory?: IDBFactory): Promise<TlsS
     idbFactory,
   );
 
-/** The newest ticket wins; a server that sends several has given several names for one secret. */
+/** The newest ticket wins. */
 export const saveSession = (
   peer: string,
   session: TlsSession,

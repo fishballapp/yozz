@@ -8,21 +8,14 @@ import { useMail } from '../state/mail';
 import { type AgentPort, buildAgentTools } from './tools';
 
 /**
- * Registers the agent tools on `document.modelContext` for as long as it is mounted, and it is
- * mounted inside `AppShellBody`: behind the vault gate, so there are no tools on `/login`, and
- * unmounted by sign-out or lock, so no tool outlives the session that could read the mail.
- *
- * Registered ONCE, under one `AbortController` the cleanup aborts. The tools read the live store
- * through a ref rather than being re-registered on every sync: re-registering would fire
- * `toolchange` on every change and race abort-then-register under StrictMode's double mount.
- *
- * Renders nothing. A browser without WebMCP mounts it silently.
+ * Registers the tools on `document.modelContext` behind the vault gate, once, under one
+ * `AbortController`. The tools read the store through a ref: re-registering on every sync would
+ * fire `toolchange` and race abort-then-register under StrictMode. Renders nothing.
  */
 export const AgentTools = () => {
   const mail = useMail();
   const navigate = useNavigate();
-  // `strict: false`: this sits above every page. A thread is opened in the mailbox on screen when
-  // there is one, so the list beside it stays put; otherwise in the inbox.
+  // `strict: false`: this sits above every page.
   const { mailbox } = useParams({ strict: false });
 
   const mailRef = useRef(mail);
@@ -36,8 +29,7 @@ export const AgentTools = () => {
     threads: mail.threads,
     drafts: mail.drafts,
     loadBody: mail.loadBody,
-    // Every write is flushed: a tool's result, and the next tool's view, describe the state AFTER
-    // the write, not the render React would otherwise get to later.
+    // Flushed, so a tool's result describes the state after the write.
     markRead: threadId => flushSync(() => mail.markRead(threadId)),
     markUnread: threadId => flushSync(() => mail.markUnread(threadId)),
     archive: threadId => {
@@ -69,21 +61,15 @@ export const AgentTools = () => {
         search: previous => previous,
       });
     },
-    /**
-     * The composer opens on a draft the vault ALREADY holds: `save_draft` wrote it and the URL
-     * names it. Nothing is staged in memory for the composer to pick up, so there is no claim to
-     * win and nothing to read back — what the user sees is the record.
-     */
+    // The composer opens on a draft the vault already holds; nothing is staged in memory.
     openDraft: async draftKey => {
       await navigate({ to: '.', search: withCompose(`draft:${draftKey}`) });
     },
   };
-  // Assigned in render, not in an effect: after `flushSync` the re-render has happened but passive
-  // effects have not, and the tool that just wrote reads the port next.
+  // Assigned in render: after `flushSync` passive effects have not run, and the tool reads the port next.
   const portRef = useRef(port);
   portRef.current = port;
-  // The store itself: a draft write is awaited across the renders it causes, and the `mail` in a
-  // closure from before one of them is the one that has not seen it.
+  // A draft write is awaited across the renders it causes.
   mailRef.current = mail;
 
   useEffect(() => {

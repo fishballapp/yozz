@@ -6,49 +6,29 @@ import type { LiveClient, LiveTask } from './live';
 import { resolveFolders } from './mailboxes';
 
 /**
- * The IMAP copy of a vault draft, in the account's own Drafts folder.
- *
- * The vault record is the draft; this copy is a courtesy to every OTHER client you own — a draft
- * you started here shows up in Thunderbird or the provider's web mail, and one you abandon does
- * not linger there. It is never read back as authority.
- *
- * Bookkeeping lives in its own `draft-mirror` record, so writing it never bumps the content's
- * version and a mirror finishing late cannot turn the person's next save into a conflict.
+ * The IMAP copy of a vault draft, a courtesy to the user's other clients and never read back as
+ * authority. Bookkeeping is its own record so a late mirror cannot conflict with a save.
  */
 
 type Run = <T>(task: LiveTask<T>) => Promise<Result<T, MailConnectionFailure>>;
 
 /**
- * The Message-ID every copy of one draft carries, so a later mirror finds ALL of them and not just
- * the newest. Derived from the draft key rather than minted per copy, which is the whole point.
- *
- * It is a Message-ID and NOT a custom `X-Yozz-Draft` header because a server only has to index the
- * headers IMAP names. Forward Email indexes none of ours: `SEARCH HEADER X-Yozz-Draft <key>`
- * answers an empty list for a message that demonstrably carries it, while the same search on
- * Message-ID or Subject finds it. That empty list read as "no copies to erase, we are done", so
- * every discard reported success and left the copy on the server for ever.
+ * Derived from the draft key so a later mirror finds every copy. A Message-ID rather than an
+ * `X-Yozz-Draft` header because Forward Email indexes only the headers IMAP names: `SEARCH
+ * HEADER X-Yozz-Draft` answered empty for a message that carried it.
  */
 export const draftMirrorMessageId = (draftKey: string, account: string): string =>
   `<yozz-draft-${draftKey}@${account.slice(account.indexOf('@') + 1)}>`;
 
-/**
- * Which account holds the copy: the sending address when it has a mailbox of its own, else the
- * account whose thread the draft replies to. A new message from a send-only address belongs to no
- * account, and gets no mirror — `null` says so.
- */
+/** The sending address when it has a mailbox, else the account whose thread the draft replies to; `null` for a new message from a send-only address. */
 export const mirrorAccountOf = (
   record: DraftRecord,
   isInbound: (address: string) => boolean,
 ): string | null => (isInbound(record.from) ? record.from : (record.ownerAccount ?? null));
 
 /**
- * Erases every copy of this draft in the SELECTED mailbox except `keep`.
- *
- * A search rather than the locator we wrote down, because the locator names one copy and a failed
- * erase leaves another: asking the server which messages carry this draft's Message-ID finds them
- * all, so each mirror cleans up after the last one. Answers `false` when the server refused
- * something, and the caller then keeps the bookkeeping it already had rather than claiming the
- * copy is gone.
+ * A search rather than the stored locator, so each mirror cleans up after the last one. `false`
+ * means the server refused something and the caller keeps its bookkeeping.
  */
 const eraseOthers = async (
   client: LiveClient,
@@ -66,12 +46,8 @@ const eraseOthers = async (
 };
 
 /**
- * Replaces the account's copy with one holding this version, then erases the copies it replaces.
- *
- * APPEND-then-erase rather than erase-then-APPEND: a crash between the two leaves a duplicate that
- * the next run tidies, where the other order would leave the person with no draft at all.
- * `UID EXPUNGE` needs UIDPLUS — without it there is no way to erase only our own copy, so the
- * account simply gets no mirror rather than a Drafts folder that fills up with every keystroke.
+ * APPEND-then-erase: a crash between the two leaves a duplicate, where the other order leaves no
+ * draft. `UID EXPUNGE` needs UIDPLUS; without it the account gets no mirror.
  */
 export const mirrorDraft = async (
   run: Run,
@@ -99,8 +75,7 @@ export const mirrorDraft = async (
       if (!appended.ok) return { ok: false, error: { kind: 'imap', reason: appended.reason } };
       const landed = appended.value;
       if (landed === null) return { ok: true, value: null };
-      // Best effort: a copy left behind is a stray draft in the person's own Drafts folder, which
-      // the next mirror finds by the same search. It must not stop the new copy being recorded.
+      // Best effort: a copy left behind is found by the next mirror's search.
       await eraseOthers(client, draftMirrorMessageId(handle.draftKey, account), landed.uid);
       return { ok: true, value: { account, folder: drafts, ...landed } };
     },
@@ -117,12 +92,7 @@ export const mirrorDraft = async (
   );
 };
 
-/**
- * Erases the account's copies: what a discard and the end of a send both owe the other clients.
- *
- * The mirror record keeps its locator until the server has confirmed the erase, so a failure here
- * is retried by the next run rather than forgotten.
- */
+/** The mirror record keeps its locator until the server confirms the erase. */
 export const expungeMirror = async (
   run: Run,
   store: RecordStore,
@@ -138,8 +108,7 @@ export const expungeMirror = async (
       if (!client.hasCapability('UIDPLUS')) return { ok: true, value: false };
       const selected = await client.select(locator.folder);
       if (!selected.ok) return { ok: false, error: { kind: 'imap', reason: selected.reason } };
-      // A renumbered mailbox hands the same uid to different mail, so the search — not the stored
-      // uid — is what says which messages are ours. `-1` keeps nothing: they all go.
+      // A renumbered mailbox hands the same uid to different mail, so the search says which are ours. `-1` keeps nothing.
       if (selected.value.uidValidity !== locator.uidValidity) return { ok: true, value: false };
       return {
         ok: true,

@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { createApp } from '../src/app.ts';
 import { applyMigrations } from './apply-migrations.ts';
 
-/** base64 of 32 bytes, the shape `@yozz.app/vault` produces for `authValue`. */
+/** base64 of 32 bytes, the shape of `authValue`. */
 const AUTH_VALUE = 'q0dGZ0Z0RGZnZGZnZGZnZGZnZGZnZGZnZGZnZGZnZGY=';
 
 describe('Worker unlock and finalisation routes', () => {
@@ -69,7 +69,6 @@ describe('Worker unlock and finalisation routes', () => {
     const { userId, headers } = await loginWithMagicLink('unlock2@example.com');
     const app = createApp();
 
-    // Pre-populate a passkey and passkey wrap to verify cleanup
     await env.DB.prepare(
       'INSERT INTO passkey (id, name, publicKey, userId, credentialID, counter, deviceType, backedUp, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
     )
@@ -98,14 +97,7 @@ describe('Worker unlock and finalisation routes', () => {
 
     expect(res.status).toBe(200);
 
-    /**
-     * The credential must actually EXIST now. This is the assertion whose
-     * absence let the original defect ship green: finalisation used to call a
-     * Better Auth route that does not exist (`setPassword` is `serverOnly`),
-     * ignore the 404, and set password mode for an account with no password —
-     * after deleting every passkey. Checking the mode and the wrap alone cannot
-     * see that; checking for the credential row can.
-     */
+    // The credential row must exist: mode and wrap alone cannot see a finalisation that never created it.
     const credential = await env.DB.prepare(
       "SELECT id FROM account WHERE userId = ? AND providerId = 'credential'",
     )
@@ -113,7 +105,6 @@ describe('Worker unlock and finalisation routes', () => {
       .first<{ id: string }>();
     expect(credential).not.toBeNull();
 
-    // Verify vault_account table
     const account = await env.DB.prepare(
       'SELECT unlock_mode, password_wrapped_dek FROM vault_account WHERE user_id = ?',
     )
@@ -123,7 +114,6 @@ describe('Worker unlock and finalisation routes', () => {
     expect(account?.unlock_mode).toBe('password');
     expect(account?.password_wrapped_dek).toBe('pw-wrapped-dek-123');
 
-    // Verify passkeys and wraps were purged
     const wraps = await env.DB.prepare('SELECT * FROM vault_passkey_wrap WHERE user_id = ?')
       .bind(userId)
       .all();
@@ -139,14 +129,12 @@ describe('Worker unlock and finalisation routes', () => {
     const { userId, headers } = await loginWithMagicLink('unlock3@example.com');
     const app = createApp();
 
-    // Pre-populate credential account and password mode
     await env.DB.prepare(
       "INSERT INTO account (id, issuer, accountId, providerId, userId, password, createdAt, updatedAt) VALUES (?, 'local:credential', ?, ?, ?, ?, ?, ?)",
     )
       .bind('acc-cred', userId, 'credential', userId, 'hash', 1000, 1000)
       .run();
 
-    // Register passkey in Better Auth passkey table
     await env.DB.prepare(
       'INSERT INTO passkey (id, name, publicKey, userId, credentialID, counter, deviceType, backedUp, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
     )
@@ -170,7 +158,6 @@ describe('Worker unlock and finalisation routes', () => {
 
     expect(res1.status).toBe(200);
 
-    // Verify vault_account mode is passkey and password_wrapped_dek is NULL
     const account1 = await env.DB.prepare(
       'SELECT unlock_mode, password_wrapped_dek FROM vault_account WHERE user_id = ?',
     )
@@ -179,7 +166,6 @@ describe('Worker unlock and finalisation routes', () => {
     expect(account1?.unlock_mode).toBe('passkey');
     expect(account1?.password_wrapped_dek).toBeNull();
 
-    // Verify credential account row was deleted
     const credAccount = await env.DB.prepare(
       "SELECT * FROM account WHERE userId = ? AND providerId = 'credential'",
     )
@@ -187,7 +173,6 @@ describe('Worker unlock and finalisation routes', () => {
       .all();
     expect(credAccount.results).toHaveLength(0);
 
-    // Register and enrol second passkey
     await env.DB.prepare(
       'INSERT INTO passkey (id, name, publicKey, userId, credentialID, counter, deviceType, backedUp, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
     )
@@ -210,7 +195,6 @@ describe('Worker unlock and finalisation routes', () => {
     );
     expect(res2.status).toBe(200);
 
-    // Both passkey wraps should exist
     const wraps = await env.DB.prepare(
       'SELECT passkey_id, wrapped_dek FROM vault_passkey_wrap WHERE user_id = ? ORDER BY passkey_id ASC',
     )
@@ -247,7 +231,6 @@ describe('Worker unlock and finalisation routes', () => {
     const body = await res.json<{ wrappedDek: string }>();
     expect(body.wrappedDek).toBe('wrapped-dek-target');
 
-    // Unknown credential returns 404
     const resNotFound = await app.request(
       'http://localhost/api/v1/vault/unlock/passkey/unknown-cred',
       { method: 'GET', headers },
@@ -260,7 +243,6 @@ describe('Worker unlock and finalisation routes', () => {
     const { userId, headers } = await loginWithMagicLink('unlock5@example.com');
     const app = createApp();
 
-    // Seed records, account, wraps, passkeys
     await env.DB.prepare(
       'INSERT INTO vault_account (user_id, unlock_mode, password_wrapped_dek, created_at, updated_at) VALUES (?, ?, ?, ?, ?)',
     )
@@ -280,7 +262,6 @@ describe('Worker unlock and finalisation routes', () => {
 
     expect(res.status).toBe(200);
 
-    // Verify vault rows are deleted
     const account = await env.DB.prepare('SELECT * FROM vault_account WHERE user_id = ?')
       .bind(userId)
       .all();
@@ -291,7 +272,6 @@ describe('Worker unlock and finalisation routes', () => {
       .all();
     expect(records.results).toHaveLength(0);
 
-    // User and session remain
     const user = await env.DB.prepare('SELECT id FROM "user" WHERE id = ?')
       .bind(userId)
       .first<{ id: string }>();
@@ -304,12 +284,7 @@ describe('Worker unlock and finalisation routes', () => {
   });
 
   it('PUT /api/v1/vault/unlock with isNewVault refuses a second creator, atomically', async () => {
-    /**
-     * Two tabs can both read `mode: null` and both mint a DEK. The client's
-     * pre-check cannot order them; the INSERT can. Exactly one commits, and the
-     * loser's wrap never lands — a second wrap under a different DEK would be
-     * a second vault over the same record namespace.
-     */
+    // Two tabs can both read `mode: null` and both mint a DEK; exactly one INSERT commits.
     const { userId, headers } = await loginWithMagicLink('race@example.com');
     const app = createApp();
     for (const [id, cred] of [
@@ -351,7 +326,6 @@ describe('Worker unlock and finalisation routes', () => {
       .all<{ passkey_id: string }>();
     expect(wraps.results.map(r => r.passkey_id)).toEqual(['pk-a']);
 
-    // The same second authenticator is welcome as a REWRAP of the existing DEK.
     expect((await finalise('cred-b', false)).status).toBe(200);
   });
 });

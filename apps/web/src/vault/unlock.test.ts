@@ -60,9 +60,7 @@ const createMockVaultApi = (): VaultApiClient => {
       return { mode: null };
     }),
     getPasskeyWrap: vi.fn().mockImplementation(async (credId: string) => {
-      // No fallback. The wrap is stored under the WebAuthn CREDENTIAL id, so
-      // looking it up with Better Auth's internal row id must fail rather than
-      // quietly returning the current wrap and hiding the mix-up.
+      // The wrap is stored under the WebAuthn credential id, so Better Auth's row id must fail.
       const wrap = passkeyWraps.get(credId);
       if (!wrap) throw new Error(`no wrap for credential ${credId}`);
       return wrap;
@@ -92,13 +90,7 @@ const createMockVaultApi = (): VaultApiClient => {
   };
 };
 
-/**
- * Enrolment is TWO ceremonies now: `create()` associates the PRF key and
- * reports `enabled`, then a scoped local `get()` produces the bytes. The mock
- * asserts the assertion is pinned to the credential just registered — an
- * unscoped one would let a different passkey answer, and the DEK would be
- * wrapped under the wrong authenticator.
- */
+/** Two ceremonies: `create()` reports `enabled`, then a `get()` pinned to that credential produces the bytes. */
 const mockPrfAssertion = (expectedCredentialId: string, prfBytes: Uint8Array) => {
   const get = vi.fn(async (options: CredentialRequestOptions) => {
     const allow = options.publicKey?.allowCredentials ?? [];
@@ -143,23 +135,15 @@ describe('Vault unlock and session orchestration', () => {
     expect(session.email).toBe('alice@example.com');
     expect(session.mode).toBe('password');
     expect(session.wrappedDek).toBeTypeOf('string');
-    /**
-     * The credential and the mode are finalised in ONE server call, carrying
-     * `authValue`. An earlier version called a separate `setAccountPassword`
-     * that hit `/api/auth/set-password` — a route Better Auth does not mount,
-     * because `setPassword` is `serverOnly` — ignored the 404, and finalised a
-     * vault whose password credential did not exist. Mocking that call is what
-     * made the broken path green, so asserting the payload here is the point.
-     */
+    // Credential and mode are finalised in one call carrying `authValue`; `/api/auth/set-password` is not mounted.
     expect(api.finalizePasswordUnlock).toHaveBeenCalledTimes(1);
     const [sent] = vi.mocked(api.finalizePasswordUnlock).mock.calls[0] ?? [];
     expect(sent?.isNewVault).toBe(true);
     expect(sent?.wrappedDek).toBe(session.wrappedDek);
     expect(sent?.authValue).toMatch(/^[A-Za-z0-9+/]{43}=$/);
-    // The password itself never leaves the browser — only its derived authValue.
+    // Only the derived authValue leaves the browser.
     expect(sent?.authValue).not.toBe('password123456');
 
-    // Logging in on the same device with existing storage succeeds
     const loginSession = await loginWithPassword({
       email: 'alice@example.com',
       password: 'password123456',
@@ -176,14 +160,8 @@ describe('Vault unlock and session orchestration', () => {
 
   it('creates and unlocks passkey vault with PRF extension', async () => {
     const dummyPrfBytes = new Uint8Array(32).fill(99);
-    /**
-     * The REAL Better Auth shape: `data` is the persisted passkey row, and the
-     * WebAuthn half — credential id and extension results — is under `webauthn`.
-     * Registration reports `enabled` and NO results, which is what `create()`
-     * actually returns. Mocking `clientExtensionResults` under `data`, as an
-     * earlier version did, reproduced the code's assumption instead of the
-     * plugin's contract and hid the fact that PRF never ran at all.
-     */
+    // The real Better Auth shape: `data` is the passkey row, the WebAuthn half is under `webauthn`,
+    // and registration reports `enabled` with no results.
     mocks.addPasskey.mockResolvedValue({
       data: { id: 'pk-row-id' },
       webauthn: {
@@ -206,7 +184,6 @@ describe('Vault unlock and session orchestration', () => {
       wrappedDek: session.wrappedDek,
     });
 
-    // Login with passkey
     mocks.signInPasskey.mockResolvedValue({
       data: { session: {}, user: { id: 'user-123' } },
       webauthn: {
@@ -232,10 +209,7 @@ describe('Vault unlock and session orchestration', () => {
   });
 
   it('reports a provisional passkey it could not clean up, rather than only the cause', async () => {
-    // The authenticator cannot do PRF, so enrolment must fail AND remove the
-    // credential it just made. When the removal also fails, an orphan stays in
-    // the user's chooser and will be refused at sign-in for having no wrap —
-    // which reads as "my passkey stopped working". The caller has to be told.
+    // Enrolment must fail and remove the credential; if that also fails, the caller has to be told.
     mocks.addPasskey.mockResolvedValue({
       data: { id: 'pk-row' },
       webauthn: {
@@ -246,17 +220,12 @@ describe('Vault unlock and session orchestration', () => {
     mocks.deletePasskey.mockResolvedValue({ error: { message: 'network down' } });
 
     await expect(createPasskeyVault({ api, idbFactory })).rejects.toThrow(/could not be removed/);
-    // The ROW id, not the credential id. `/passkey/delete-passkey` resolves
-    // `where: [{ field: 'id' }]`, so addressing it with `pk-orphan` would delete
-    // nothing and then report a failure that never happened.
+    // The row id: `/passkey/delete-passkey` resolves `where: [{ field: 'id' }]`.
     expect(mocks.deletePasskey).toHaveBeenCalledWith('pk-row');
   });
 
   it('refuses to create a second vault over an enrolled account, which would strand every record', async () => {
-    // `createVault()` mints a FRESH DEK and finalisation upserts the wrap, so
-    // running a create against an enrolled account silently rebinds the account
-    // to a key that opens none of its ciphertext. The server cannot tell a new
-    // DEK from a rewrap — both are opaque wrapped bytes — so the guard is here.
+    // `createVault()` mints a fresh DEK, and the server cannot tell a new DEK from a rewrap.
     const pw = await createPasswordVault({
       email: 'alice@example.com',
       password: 'password123456',
@@ -276,15 +245,12 @@ describe('Vault unlock and session orchestration', () => {
     await expect(createPasskeyVault({ api, idbFactory })).rejects.toThrow(
       /already has a password vault/,
     );
-    // It must refuse BEFORE registering anything.
+    // Before registering anything.
     expect(mocks.addPasskey).not.toHaveBeenCalled();
   });
 
   it('refuses addPasskeyToSession from a password session — that is a mode switch', async () => {
-    // The finalisation it calls nulls the password wrap and deletes the
-    // credential row. From a password session that is a silent mode change the
-    // in-memory session would keep reporting as `password`, and the next reload
-    // could not unlock.
+    // The finalisation nulls the password wrap; from a password session the next reload could not unlock.
     const pw = await createPasswordVault({
       email: 'alice@example.com',
       password: 'password123456',
@@ -310,7 +276,6 @@ describe('Vault unlock and session orchestration', () => {
     });
     mockPrfAssertion('pk-switch-id', dummyPrfBytes);
 
-    // Start in password mode
     const pwSession = await createPasswordVault({
       email: 'alice@example.com',
       password: 'password123456',
@@ -318,14 +283,12 @@ describe('Vault unlock and session orchestration', () => {
       idbFactory,
     });
 
-    // Write a secret record
     await pwSession.store.put({
       type: 'account',
       naturalKey: 'bank-acc',
       plaintext: 'Bank Details',
     });
 
-    // Switch to passkey mode
     const pkSession = await switchModeToPasskey({
       currentSession: pwSession,
       api,
@@ -334,7 +297,6 @@ describe('Vault unlock and session orchestration', () => {
     expect(pkSession.mode).toBe('passkey');
     expect(api.finalizePasskeyUnlock).toHaveBeenCalled();
 
-    // Switch back to password mode
     const pwSession2 = await switchModeToPassword({
       currentSession: pkSession,
       password: 'newpassword456789',

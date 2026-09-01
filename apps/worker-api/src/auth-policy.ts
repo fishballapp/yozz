@@ -1,22 +1,10 @@
-/**
- * What the vault requires of Better Auth's endpoints, as data keyed by path.
- *
- * Every rule fails CLOSED: a body shape the rule does not recognise, or a
- * session it cannot find, throws rather than falling through into Better Auth.
- * A guard that abstains when it cannot tell is not a guard — an earlier shape
- * of the delete rule did exactly that and deleted a wrapped passkey.
- */
+/** Every rule fails closed: a body shape it does not recognise throws rather than falling through. */
 import { APIError } from 'better-auth/api';
 import { type CreateAuthOverrides, createAuth } from './auth.ts';
 import { isPasskeyWrapped } from './db/unlock.ts';
 import type { RuntimeEnv } from './env.ts';
 
-/**
- * Each of these would change a live unlock credential without re-wrapping the
- * DEK, which strands the vault. They are the paths Better Auth 1.6.20 actually
- * mounts — `/forget-password` is not one, and `/request-password-reset` is the
- * one that really starts a reset.
- */
+/** Each would change a live unlock credential without re-wrapping the DEK, stranding the vault. */
 export const DISABLED_ENDPOINTS: ReadonlySet<string> = new Set([
   '/change-password',
   '/request-password-reset',
@@ -40,7 +28,6 @@ const invalidMode = (message: string): never => {
   throw new APIError('FORBIDDEN', { message, code: 'INVALID_MODE' });
 };
 
-/** Password sign-in is only for an account whose vault is in password mode. */
 const requireActivePasswordMode = async ({ env, body }: PolicyContext): Promise<void> => {
   const email = (body as { email?: string } | undefined)?.email;
   if (!email) return badRequest('Password sign-in requires an email');
@@ -48,8 +35,7 @@ const requireActivePasswordMode = async ({ env, body }: PolicyContext): Promise<
   const user = await env.DB.prepare('SELECT id FROM user WHERE lower(email) = lower(?)')
     .bind(email.trim())
     .first<{ id: string }>();
-  // An unknown user falls through to Better Auth's own "invalid credentials",
-  // so this hook is not an account-enumeration oracle.
+  // An unknown user falls through to Better Auth's own refusal: no enumeration oracle here.
   if (!user) return;
 
   const account = await env.DB.prepare('SELECT unlock_mode FROM vault_account WHERE user_id = ?')
@@ -60,10 +46,7 @@ const requireActivePasswordMode = async ({ env, body }: PolicyContext): Promise<
   }
 };
 
-/**
- * Passkey sign-in is only for a credential that holds a wrap. `response` is the
- * WebAuthn AuthenticationResponseJSON; its `id` is the credential id.
- */
+/** `response` is the WebAuthn AuthenticationResponseJSON; its `id` is the credential id. */
 const requireActivePasskeyMode = async ({ env, body }: PolicyContext): Promise<void> => {
   const credentialId = (body as { response?: { id?: string } } | undefined)?.response?.id;
   if (!credentialId) return badRequest('Passkey authentication requires a credential id');
@@ -77,7 +60,6 @@ const requireActivePasskeyMode = async ({ env, body }: PolicyContext): Promise<v
   )
     .bind(credentialId)
     .first<{ unlock_mode: string | null; wrapped_dek: string | null }>();
-  // Same reasoning as above: an unknown credential is Better Auth's refusal.
   if (!passkey) return;
 
   if (passkey.unlock_mode !== 'passkey' || !passkey.wrapped_dek) {
@@ -85,14 +67,13 @@ const requireActivePasskeyMode = async ({ env, body }: PolicyContext): Promise<v
   }
 };
 
-/** A passkey that wraps the DEK is the vault's key; deleting it strands the vault. */
 const refuseWrappedPasskeyDeletion = async ({
   env,
   overrides,
   body,
   headers,
 }: PolicyContext): Promise<void> => {
-  // `/passkey/delete-passkey` addresses the passkey ROW id.
+  // The passkey ROW id, not the credential id.
   const passkeyId = (body as { id?: string } | undefined)?.id;
   if (!passkeyId) return badRequest('Passkey deletion requires a passkey id');
 
@@ -114,12 +95,7 @@ const refuseWrappedPasskeyDeletion = async ({
   }
 };
 
-/**
- * One magic-link endpoint serves signup and recovery, and `disableSignUp` is global, so a
- * recovery link for an unknown address would quietly create an account. Recovery is told apart
- * by its callback (`/enrol?reset=1`); for that shape an unknown email is a 404, by design — the
- * signup path already answers whether an address exists, so this is no new oracle.
- */
+/** One magic-link endpoint serves signup and recovery; a recovery link (`?reset=1`) for an unknown address would otherwise create an account. */
 const refuseRecoveryOfUnknownEmail = async ({ env, body }: PolicyContext): Promise<void> => {
   const { email, callbackURL } =
     (body as { email?: string; callbackURL?: string } | undefined) ?? {};
@@ -136,7 +112,7 @@ const refuseRecoveryOfUnknownEmail = async ({ env, body }: PolicyContext): Promi
   }
 };
 
-/** Keyed by the Better Auth path the rule guards; anything unlisted passes. */
+/** Anything unlisted passes. */
 export const ENDPOINT_POLICIES: Readonly<
   Record<string, (context: PolicyContext) => Promise<void>>
 > = {

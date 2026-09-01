@@ -4,14 +4,7 @@ import type { ComposeDraft } from '../state/mail';
 import { composeIntentSchema, isUntouched, replyAllCc, seedFor } from './compose';
 import type { Thread } from './thread';
 
-/**
- * `seedFor` encodes the one rule in this app that is easy to break and impossible to see break:
- * **what gets quoted is per-message, but who it reaches is per-thread.** A regression here sends a
- * reply to yourself, or forwards someone else's attachments, and nothing fails loudly.
- *
- * Run against the real fixtures rather than invented ones, because the fixture inbox deliberately
- * contains the awkward case — threads whose newest message is outbound.
- */
+/** What gets quoted is per-message; who it reaches is per-thread. The fixtures contain threads whose newest message is outbound. */
 const ownedAddresses = DEMO_ADDRESSES.map(address => address.address);
 
 const seed = (intent: string) =>
@@ -28,7 +21,7 @@ describe('seedFor — reply', () => {
   });
 
   it('addresses the other party whichever message you pressed — never yourself', () => {
-    // The whole point: a reply under your own last message is a FOLLOW-UP to them.
+    // A reply under your own last message is a follow-up to them.
     expect(seed(`reply:${DAD_OWN_REPLY}`).to).toBe('dad@jyu.example');
     expect(seed(`reply:${DAD_INBOUND}`).to).toBe('dad@jyu.example');
     expect(ownedAddresses).not.toContain(seed(`reply:${DAD_OWN_REPLY}`).to);
@@ -49,7 +42,7 @@ describe('seedFor — reply', () => {
 describe('seedFor — forward', () => {
   it('carries only the attachments of the message you pressed', () => {
     expect(seed(`forward:${DAD_INBOUND}`).attachments).toHaveLength(3);
-    // Jason's reply has none. Before this was per-message, forwarding it grabbed Dad's three.
+    // Jason's reply has none.
     expect(seed(`forward:${DAD_OWN_REPLY}`).attachments).toHaveLength(0);
   });
 
@@ -63,11 +56,7 @@ describe('seedFor — forward', () => {
   });
 });
 
-/**
- * A group thread, built here rather than taken from the fixtures: `recipients` comes off a real
- * IMAP envelope, and the demo inbox has none. Kate wrote to Jason with two others copied, one of
- * them a second address Jason owns.
- */
+/** A group thread: `recipients` comes off a real envelope, and the demo inbox has none. */
 const GROUP: Thread = {
   id: 't-group',
   accounts: ['jason@jyu.example'],
@@ -90,11 +79,7 @@ const GROUP: Thread = {
 
 const GROUP_OWNED = ['jason@jyu.example', 'me@jyu.example'];
 
-/**
- * A chain, built here because the demo fixtures carry no Message-IDs: what a reply announces is
- * the parent's own References plus the parent, and getting it wrong is invisible until someone
- * else's client shows the reply as a new conversation.
- */
+/** A chain; the demo fixtures carry no Message-IDs. */
 const CHAIN: Thread = {
   id: 't-chain',
   accounts: ['jason@jyu.example'],
@@ -166,7 +151,7 @@ describe('replyAllCc', () => {
     const message = GROUP.messages[0];
     if (message === undefined) throw new Error('the group fixture lost its message');
     expect(replyAllCc(message, GROUP_OWNED)).toEqual(['sam@example.com']);
-    // Case is not a difference between addresses, and a server may send either.
+    // Case is not a difference between addresses.
     expect(
       replyAllCc({ ...message, recipients: ['SAM@Example.com', 'Jason@JYu.example'] }, GROUP_OWNED),
     ).toEqual(['SAM@Example.com']);
@@ -176,7 +161,7 @@ describe('replyAllCc', () => {
     const message = GROUP.messages[0];
     if (message === undefined) throw new Error('the group fixture lost its message');
     expect(replyAllCc({ ...message, recipients: ['jason@jyu.example'] }, GROUP_OWNED)).toEqual([]);
-    // Fixture mail carries no envelope to read recipients from; that is not a group.
+    // Fixture mail carries no envelope to read recipients from.
     expect(replyAllCc({ ...message, recipients: undefined }, GROUP_OWNED)).toEqual([]);
   });
 });
@@ -204,8 +189,7 @@ describe('seedFor — degenerate intents', () => {
   });
 
   it('degrades a stale message reference to a blank draft rather than erroring', () => {
-    // Deliberate: the intent was "write something" and only the reference went stale. Reachable
-    // only from a pasted or bookmarked URL.
+    // Reachable only from a pasted or bookmarked URL.
     expect(seed('reply:m-does-not-exist')).toEqual({});
   });
 });
@@ -215,7 +199,7 @@ describe('composeIntentSchema', () => {
     for (const ok of ['new', 'reply:m-1', 'reply-all:m-1', 'forward:m-1', 'draft:k-1']) {
       expect(composeIntentSchema.safeParse(ok).success).toBe(true);
     }
-    // A junk `?compose=` must read as "closed", never throw or open something empty.
+    // A junk `?compose=` reads as closed.
     for (const bad of [
       'reply:',
       'reply-all:',
@@ -232,10 +216,7 @@ describe('composeIntentSchema', () => {
   });
 });
 
-/**
- * Closing the composer keeps the draft, so this is the one thing standing between a mistaken
- * Reply and a record in Drafts every time one is closed again.
- */
+/** What stands between a mistaken Reply and a record in Drafts. */
 describe('isUntouched', () => {
   const opened: ComposeDraft = {
     startedAsReply: true,

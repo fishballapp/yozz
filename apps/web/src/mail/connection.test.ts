@@ -3,10 +3,7 @@ import type { StartTlsOptions, TlsFailure, TlsSession } from '@yozz.app/tls';
 import { IDBFactory } from 'fake-indexeddb';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-/**
- * The trust-on-first-use wiring, with the relay and the handshake replaced by fakes: what
- * `openTlsDuplex` offers, which validator it hands over, and what it stores afterwards.
- */
+/** Trust-on-first-use wiring with the relay and handshake faked. */
 
 const startTls = vi.fn();
 vi.mock('@yozz.app/tls', async importOriginal => ({
@@ -39,7 +36,7 @@ const refused = (
   chain: 'peer-sent' | 'session-stored',
 ) => ({
   ok: false,
-  // A fake refusal: `certificate-expired` also names a certificate, which nothing here reads.
+  // `certificate-expired` also names a certificate, which nothing here reads.
   reason: {
     kind: 'certificate',
     reason: { code },
@@ -126,7 +123,7 @@ describe('openTlsDuplex', () => {
 
   it('a pinned host is never re-pinned from a handshake', async () => {
     await savePin(PEER, 'KEY1');
-    // pinnedValidator makes this impossible for real; the guard is what keeps it so.
+    // pinnedValidator makes this impossible for real; the guard keeps it so.
     startTls.mockImplementationOnce(async (o: StartTlsOptions) => completed('KEY2', o));
     await openTlsDuplex(HOST, 993, 'IMAPS');
     expect(await loadPin(PEER)).toBe('KEY1');

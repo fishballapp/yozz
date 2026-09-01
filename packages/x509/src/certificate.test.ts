@@ -1,13 +1,3 @@
-/**
- * The structural rules M3 enforces, each stated as one malformation of an
- * otherwise valid certificate.
- *
- * Built rather than harvested, for the same reason M2's reject-list is authored:
- * every real certificate is well-formed by construction, so a corpus proves that
- * valid input decodes and nothing about what invalid input does. The builder
- * below is the smallest thing that can express "this certificate, but with two
- * BasicConstraints".
- */
 import { describe, expect, it } from 'vitest';
 import { decodeCertificate } from './certificate.ts';
 import { DerError, type DerFailureCode } from './der.ts';
@@ -143,11 +133,7 @@ describe('version', () => {
 });
 
 describe('the signature algorithm appears twice and must agree', () => {
-  /**
-   * RFC 5280 s4.1.1.2. The outer copy is unsigned, so an implementation that
-   * picks its verification algorithm from it, on a certificate where the two
-   * differ, is taking direction from an attacker.
-   */
+  /** RFC 5280 §4.1.1.2: the outer copy is unsigned. */
   it('rejects a mismatch between tbsCertificate.signature and signatureAlgorithm', () => {
     rejects(
       certificate({ signatureAlgorithm: sequence(oid('1.2.840.113549.1.1.13'), tlv(0x05)) }),
@@ -194,11 +180,7 @@ describe('extensions', () => {
     rejects(der, 'malformed-structure');
   });
 
-  /**
-   * Entrust's private extension holds a GeneralString, which RFC 5280 admits
-   * nowhere. Decoding every extension eagerly rejects a root that Node and every
-   * browser trust — so an extension we do not interpret is not parsed at all.
-   */
+  /** Entrust's private extension holds a GeneralString, which RFC 5280 admits nowhere. */
   it('does not parse the contents of an extension it does not recognise', () => {
     const generalString = tlv(0x1b, new TextEncoder().encode('V7.1:4.0'));
     const decoded = decodeCertificate(
@@ -259,14 +241,9 @@ describe('KeyUsage', () => {
 });
 
 describe('names', () => {
-  /** Built from a char code, so the byte under test is visible rather than invisible. */
   const POISONED = ['evil.com', '.good.example'].join(String.fromCharCode(0));
 
-  /**
-   * Truncated at the NUL this reads as `evil.com` — a name no CA ever issued,
-   * and how a name check gets fooled. The NUL survives decoding; rejecting it is
-   * the matcher's job at M4, which it can only do if the bytes arrive intact.
-   */
+  /** Truncated at the NUL this reads as `evil.com`; the NUL must survive decoding for the matcher to refuse it. */
   it('keeps an embedded NUL in a dNSName rather than truncating there', () => {
     const san = sequence(chars(0x82, POISONED));
     const decoded = decodeCertificate(certificate({ extensions: [extension('2.5.29.17', san)] }));
@@ -306,11 +283,7 @@ describe('NameConstraints', () => {
     });
   });
 
-  /**
-   * RFC 5280 s4.2.1.10 forbids minimum/maximum in this profile. Rejected rather
-   * than ignored: a constraint carrying a range we skipped is one that silently
-   * constrains less than it claims.
-   */
+  /** RFC 5280 §4.2.1.10 forbids minimum/maximum. */
   it('rejects a GeneralSubtree carrying minimum or maximum', () => {
     const constraints = sequence(
       explicit(0, sequence(chars(0x82, 'permitted.example'), tlv(0x80, bytes(1)))),

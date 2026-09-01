@@ -1,9 +1,7 @@
 export type RuntimeEnv = Env & {
   BETTER_AUTH_SECRET: string;
   FORWARD_EMAIL_ALIAS_PASSWORD: string;
-  // Optional: absent under `wrangler dev` (localhost fallbacks); set to "production" by
-  // `scripts/deploy-worker.ts` via `--var MODE:production`. Not declared in wrangler.jsonc
-  // vars so local dev cannot accidentally inherit production origins.
+  /** Absent under `wrangler dev`; the deploy script sets it with `--var MODE:production`. */
   MODE?: string;
   BASE_URL?: string;
   WEB_ORIGIN?: string;

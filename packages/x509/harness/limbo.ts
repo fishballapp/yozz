@@ -1,9 +1,4 @@
-/**
- * Runs x509-limbo against a Validator and reports the two rates apart.
- *
- * 926 of the relevant cases expect SUCCESS, so a validator that rejects
- * everything scores 8850 and is worthless. One number here would hide that.
- */
+/** Runs x509-limbo against a Validator, reporting accept and reject rates apart: a validator that rejects everything scores 8850. */
 import { createHash } from 'node:crypto';
 import { readFile, writeFile } from 'node:fs/promises';
 import { z } from 'zod';
@@ -26,11 +21,7 @@ const TestcaseSchema = z.object({
   validation_time: z.string().nullable(),
   key_usage: z.array(z.string()),
   extended_key_usage: z.array(z.string()),
-  /**
-   * The schema's `PeerKind` is DNS | IP | RFC822. Enumerated rather than left as a
-   * string so a pin bump that introduces RFC822 fails loudly here, instead of being
-   * silently mapped to a DNS name check.
-   */
+  /** Enumerated so a pin bump introducing RFC822 fails loudly rather than being mapped to a DNS check. */
   expected_peer_name: z
     .object({ kind: z.enum(['DNS', 'IP', 'RFC822']), value: z.string() })
     .nullable(),
@@ -51,8 +42,6 @@ const peerNameFrom = (name: Testcase['expected_peer_name']): PeerName | null => 
   if (name === null) return null;
   if (name.kind === 'IP') return { kind: 'ip', value: name.value };
   if (name.kind === 'DNS') return { kind: 'dns', value: name.value };
-  // Today's corpus is DNS and IP only. Falling through to a DNS check would quietly
-  // test the wrong thing, so a new kind stops the run instead.
   throw new Error(`unsupported peer name kind: ${name.kind}`);
 };
 
@@ -61,15 +50,7 @@ const anchorsOf = (testcase: Testcase): { id: string; der: Uint8Array }[] =>
     .flatMap(derFromPem)
     .map((der, index) => ({ id: `${testcase.id}#${index}`, der }));
 
-/**
- * Unindexed, and it MUST stay that way for the control.
- *
- * `indexAnchors` reads a subject out of every certificate with OUR decoder and
- * drops the ones it cannot read. Feeding that to OpenSSL would mean the control
- * only ever sees roots we already approved of — a control that shares our code
- * is not a control, it is a mirror. It also hard-fails, because a case whose
- * roots we dropped hands `openssl verify` an empty roots.pem.
- */
+/** Unindexed, and it must stay so for the control: `indexAnchors` drops roots our decoder cannot read, and a control sharing our code is a mirror. */
 const unindexedAnchorsFor = (testcase: Testcase): TrustAnchorSource => {
   // x509-limbo supplies its own roots per case and carries no distrust metadata.
   const anchors = anchorsOf(testcase).map(({ id, der }) => ({
@@ -80,12 +61,7 @@ const unindexedAnchorsFor = (testcase: Testcase): TrustAnchorSource => {
   return { findCandidates: () => anchors };
 };
 
-/**
- * The COMPILED provider from M5, for our validator only. The M5 gate is that it
- * changes no verdict: run `--anchors=unindexed` and the numbers must be
- * identical, which is what makes an index that silently loses a candidate
- * visible as a chain that stopped building.
- */
+/** The compiled provider, for our validator only. `--anchors=unindexed` must give identical numbers. */
 const compiledAnchorsFor = (testcase: Testcase): TrustAnchorSource =>
   compileAnchors(indexAnchors(anchorsOf(testcase))).source;
 
@@ -118,9 +94,7 @@ const mapWithConcurrency = async <T, R>(
   return results;
 };
 
-// Verify the corpus here, not only at fetch time. A truncated or swapped
-// .limbo/limbo.json otherwise reports `0/0 (0.0%)` and `0 disagreements` without
-// throwing — a perfect score over nothing at all.
+// Verified here too: a truncated `.limbo/limbo.json` otherwise reports a perfect score over nothing.
 const cached = await readFile(LIMBO_CACHE);
 const actualHash = createHash('sha256').update(cached).digest('hex');
 if (actualHash !== LIMBO_SHA256) {
@@ -150,19 +124,11 @@ for (const [reason, count] of [...skips].sort((a, b) => b[1] - a[1])) {
   console.log(`    ${String(count).padStart(4)}  ${reason}`);
 }
 
-/**
- * Which implementation is under test. The control and the real thing run through
- * the SAME runner, because a suite that scores them differently is comparing two
- * harnesses rather than two validators.
- */
+/** The control and the real thing run through the same runner. */
 const VALIDATORS = { openssl: OPENSSL_VALIDATOR, yozz: YOZZ_VALIDATOR } as const;
 const selected = process.argv.find(argument => argument.startsWith('--validator='))?.split('=')[1];
 const VALIDATOR = VALIDATORS[selected === 'yozz' ? 'yozz' : 'openssl'];
 
-/**
- * The control never gets the compiled provider; `--anchors=unindexed` forces our
- * validator onto the same plain source so the two can be compared directly.
- */
 const isUnindexedForced = process.argv.includes('--anchors=unindexed');
 const anchorSourceFor =
   VALIDATOR === OPENSSL_VALIDATOR || isUnindexedForced ? unindexedAnchorsFor : compiledAnchorsFor;
@@ -215,8 +181,7 @@ for (const [label, group] of [
   }
 }
 
-// Written so the set can be diffed against x509-limbo's own published results for
-// the same implementation — the check that says whether the harness is right.
+// Diffable against x509-limbo's own published results for the same implementation.
 const REPORT = new URL('../.limbo/disagreements.txt', import.meta.url).pathname;
 await writeFile(
   REPORT,
@@ -227,14 +192,7 @@ await writeFile(
 );
 console.log(`\nwrote ${mismatches.length} disagreement ids -> ${REPORT}`);
 
-/**
- * The gate. Printing a disagreement count and exiting 0 is not one: both
- * `pnpm check` and `pnpm test` passed while this run accepted certificates that
- * should have been rejected, including two authentication bypasses.
- *
- * Only our own validator is gated — the control is a measurement, and OpenSSL's
- * disagreements are not ours to fix.
- */
+/** The gate. Only our own validator is gated; OpenSSL's disagreements are a measurement. */
 if (VALIDATOR !== OPENSSL_VALIDATOR) {
   const expectedPath = new URL('expected-disagreements.txt', import.meta.url).pathname;
   const expected = new Set(

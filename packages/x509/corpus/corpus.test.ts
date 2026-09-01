@@ -1,10 +1,4 @@
-/**
- * Guards the corpus itself, because everything M2 and M3 assert is only as good
- * as these bytes. A corpus that silently shrinks to three near-identical Let's
- * Encrypt leaves still passes a decoder gate — and proves nothing.
- *
- * No network and no openssl: this runs in `pnpm test`, the harvest does not.
- */
+/** Guards the corpus itself: a corpus that silently shrinks still passes a decoder gate. No network, no openssl. */
 import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import {
@@ -19,19 +13,12 @@ const corpus = await loadCorpus();
 
 const distinct = (values: readonly string[]): number => new Set(values).size;
 
-/**
- * Describes the defect, or null when the file is exactly one DER SEQUENCE.
- * Enough of a header read to catch a truncated or hand-edited file; the real
- * decoder is M2, and this only asserts the corpus is not already broken.
- */
+/** Enough of a header read to catch a truncated or hand-edited file. */
 const derDefect = (entry: CorpusCertificate): string | null => {
   const [tag, first] = entry.der;
   if (tag !== 0x30) return `${entry.file}: not a SEQUENCE`;
   if (first === undefined) return `${entry.file}: truncated`;
-  // 0x80 is BER's indefinite length, which DER forbids outright. Named here
-  // because otherwise it falls into the long-form branch as "0 length bytes"
-  // and gets reported as a length mismatch — the wrong defect, in the one file
-  // whose job is saying precisely what is wrong with a hand-edited certificate.
+  // 0x80 is BER's indefinite length, named so it is not reported as a length mismatch.
   if (first === 0x80) return `${entry.file}: BER indefinite length, forbidden in DER`;
   const lengthBytes = first < 0x80 ? 0 : first & 0x7f;
   const declared =
@@ -50,8 +37,7 @@ describe('the harvested certificate corpus', () => {
   });
 
   it('stores each certificate once', () => {
-    // Distinct fingerprints can still be the same bytes if the dedup key ever
-    // regains a chain-position field — the mistake this asserts against.
+    // Distinct fingerprints could be the same bytes if the dedup key regained a chain-position field.
     expect(distinct(corpus.map(entry => entry.sha256))).toBe(corpus.length);
   });
 
@@ -72,9 +58,7 @@ describe('the harvested certificate corpus', () => {
   });
 
   it('spans the axes that make a certificate interesting', () => {
-    // Floors, not targets, and set just under what the live mail web actually
-    // yields. They fail when a re-harvest quietly narrows the corpus, which is
-    // the only way this file can rot. Raising one means widening TARGETS first.
+    // Floors just under what the live mail web yields, so a re-harvest that narrows the corpus fails.
     expect(distinct(corpus.map(e => e.fingerprint.signatureAlgorithm))).toBeGreaterThanOrEqual(6);
     expect(distinct(corpus.map(e => e.fingerprint.key))).toBeGreaterThanOrEqual(5);
     expect(distinct(corpus.map(e => e.fingerprint.extensions.join()))).toBeGreaterThanOrEqual(15);
@@ -84,37 +68,26 @@ describe('the harvested certificate corpus', () => {
   });
 
   it('keeps the two encodings a naive decoder gets wrong', () => {
-    // Named rather than counted, because these are the whole reason the root
-    // store is harvested: every mail host on the internet dates itself in
-    // UTCTime and spells its DN in PrintableString or UTF8String. One root
-    // uses GeneralizedTime and one an IA5String, and losing either to a
-    // re-harvest would go unnoticed behind a diversity count.
+    // Named, not counted: one root uses GeneralizedTime and one an IA5String, and a diversity count would not miss them.
     const encodings = new Set(corpus.flatMap(entry => entry.fingerprint.asn1Types));
     expect([...encodings].sort()).toContain('GENERALIZEDTIME');
     expect([...encodings].sort()).toContain('IA5STRING');
   });
 
   it('covers every chain position, and more than one chain shape', () => {
-    // provenanceOf, NOT every sighting: a sighting whose hash differs belongs to
-    // a certificate that was deduplicated away, and counting its position would
-    // claim coverage from bytes this corpus does not hold.
+    // `provenanceOf`, not every sighting: a sighting whose hash differs belongs to a deduplicated certificate.
     const provenance = corpus.flatMap(provenanceOf);
     for (const position of POSITIONS) expect(provenance.map(s => s.position)).toContain(position);
     expect(distinct(provenance.map(s => String(s.chainLength)))).toBeGreaterThanOrEqual(3);
   });
 
   it('can say where each stored certificate actually came from', () => {
-    // Every entry must have at least one sighting that IS these bytes. An entry
-    // built only from absorbed sightings would have no traceable origin at all.
+    // Every entry needs a sighting that IS these bytes.
     const orphaned = corpus.filter(entry => provenanceOf(entry).length === 0).map(e => e.file);
     expect(orphaned).toEqual([]);
   });
 
   it('never claims a host served bytes it did not', () => {
-    // The defect this replaced: `sources` listed every target that shared a
-    // fingerprint, so the manifest asserted rambler.ru served DigiCert Global
-    // Root G2. It serves GlobalSign Root CA R3. A sighting is now only ever
-    // read as provenance when its own hash matches.
     for (const entry of corpus) {
       for (const sighting of provenanceOf(entry)) expect(sighting.sha256).toBe(entry.sha256);
     }

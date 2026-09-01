@@ -71,18 +71,14 @@ describe('RecordStore with freshVault and IndexedDB marks', () => {
       idbFactory,
     });
 
-    // Put record rev 1
     await store.put({
       type: 'account',
       naturalKey: 'acc-work',
       plaintext: JSON.stringify({ email: 'work@example.com', name: 'Work Account' }),
     });
 
-    // Get record
     const record1 = await store.get('account', 'acc-work');
-    // Narrowed with a throw rather than `!` — the repo forbids non-null
-    // assertions, and this way the runtime check and the type check are the
-    // same line instead of two that can drift.
+    // A throw, not `!`: the runtime check and the type check are one line.
     if (record1 === null) throw new Error('the record was not stored');
     expect(record1.revision).toBe(1);
     expect(JSON.parse(record1.plaintext)).toEqual({
@@ -90,13 +86,11 @@ describe('RecordStore with freshVault and IndexedDB marks', () => {
       name: 'Work Account',
     });
 
-    // List records
     const listed = await store.list('account');
     expect(listed).toHaveLength(1);
     expect(listed[0]?.naturalKey).toBe('acc-work');
     expect(listed[0]?.revision).toBe(1);
 
-    // Remove record
     await store.remove('account', 'acc-work');
     expect(await store.get('account', 'acc-work')).toBeNull();
 
@@ -118,7 +112,6 @@ describe('RecordStore with freshVault and IndexedDB marks', () => {
       idbFactory,
     });
 
-    // Put revision 1 and save its ciphertext
     await store1.put({
       type: 'identity',
       naturalKey: 'id-1',
@@ -128,7 +121,6 @@ describe('RecordStore with freshVault and IndexedDB marks', () => {
     const envelopeRev1 = await api.get('identity', id);
     expect(envelopeRev1).not.toBeNull();
 
-    // Put revision 2
     await store1.put({
       type: 'identity',
       naturalKey: 'id-1',
@@ -136,11 +128,10 @@ describe('RecordStore with freshVault and IndexedDB marks', () => {
     });
     store1.close();
 
-    // Attacker resets server database to ciphertext of revision 1
+    // The server database is reset to revision 1's ciphertext.
     if (!envelopeRev1) throw new Error('revision 1 was never stored');
     api.setRaw('identity', id, envelopeRev1.ciphertext);
 
-    // Open store on the same device with existing IndexedDB marks
     const store2 = await createRecordStore({
       userId: 'user-1',
       rawVault: vault,
@@ -148,13 +139,11 @@ describe('RecordStore with freshVault and IndexedDB marks', () => {
       idbFactory,
     });
 
-    // Fetching the replayed revision 1 MUST throw VaultError with code 'stale'
     await expect(store2.get('identity', 'id-1')).rejects.toMatchObject({
       name: 'VaultError',
       code: 'stale',
     });
 
-    // Listing that includes replayed revision 1 MUST reject the whole list
     await expect(store2.list('identity')).rejects.toMatchObject({
       name: 'VaultError',
       code: 'stale',
@@ -164,11 +153,7 @@ describe('RecordStore with freshVault and IndexedDB marks', () => {
   });
 
   it('lets the loser of a CAS race still read the winner', async () => {
-    /**
-     * Marks are per device. Allocating from this device's mark instead of from the row would
-     * seal a number the winner never wrote, leaving the loser's mark above the authoritative
-     * record and every later read of it refused as a replay — locked out of its own draft.
-     */
+    // Marks are per device; allocating from the mark would lock the loser out of its own draft.
     const keys = await deriveAccountKeys({
       email: 'user@example.com',
       password: 'password123456',
@@ -177,14 +162,14 @@ describe('RecordStore with freshVault and IndexedDB marks', () => {
     const api = new InMemoryVaultApi();
     const store = await createRecordStore({ userId: 'user-1', rawVault: vault, api, idbFactory });
 
-    // This device gets a head start, so its mark runs well above the shared row.
+    // This device's mark runs well above the shared row.
     for (let i = 0; i < 4; i += 1) {
       await store.put({ type: 'draft', naturalKey: 'k', plaintext: `v${i}` });
     }
     const [row] = await Array.fromAsync(api.list('draft'));
     if (row === undefined) throw new Error('the record was not stored');
 
-    // The other device wins from revision 1: it read the row at 1 and wrote 2.
+    // The other device read the row at 1 and wrote 2.
     await store.put({
       type: 'draft',
       naturalKey: 'k',
@@ -206,8 +191,7 @@ describe('RecordStore with freshVault and IndexedDB marks', () => {
     const store = await createRecordStore({ userId: 'user-1', rawVault: vault, api, idbFactory });
 
     await store.put({ type: 'account', naturalKey: 'acc', plaintext: 'hello' });
-    // The ciphertext is genuine and seals revision 1; only the column is changed. Nothing
-    // legitimate produces this, because the client writes both from the same number.
+    // The ciphertext is genuine and seals revision 1; only the column is changed.
     const [stored] = await Array.fromAsync(api.list('account'));
     if (stored === undefined) throw new Error('the record was not stored');
     api.setRaw('account', stored.id, stored.ciphertext, 2);
@@ -253,10 +237,7 @@ describe('RecordStore with freshVault and IndexedDB marks', () => {
     await store.put({ type: 'account', naturalKey: 'a@b.c', plaintext: 'second' });
     await store.remove('account', 'a@b.c');
 
-    // The mark survives the delete on purpose — clearing it would let a store
-    // that withholds a row reset this device to TOFU and replay. So a recreate
-    // has to land ABOVE a number `get` can no longer report, which is exactly
-    // why `put` allocates from the mark instead of taking one.
+    // The mark survives the delete, so a recreate has to land above a number `get` can no longer report.
     await store.put({ type: 'account', naturalKey: 'a@b.c', plaintext: 'recreated' });
 
     expect(await store.get('account', 'a@b.c')).toMatchObject({ plaintext: 'recreated' });

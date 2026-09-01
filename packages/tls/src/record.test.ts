@@ -256,10 +256,7 @@ describe('Stage 2: Record layer against RFC 8448', () => {
       });
     });
 
-    /**
-     * `sealAead` will not build these: the inner plaintext is the thing under
-     * test, so it has to be encrypted directly.
-     */
+    // `sealAead` will not build these, so the inner plaintext is encrypted directly.
     const sealRawInner = async (
       key: Uint8Array,
       iv: Uint8Array,
@@ -294,8 +291,7 @@ describe('Stage 2: Record layer against RFC 8448', () => {
     const iv = new Uint8Array(12);
 
     it('2^14 of content plus one byte of padding -> record_overflow', async () => {
-      // 2^14 content and the type byte is the whole allowance (RFC 9846 §5.2).
-      // Padding does not buy more room, and checking the content alone missed it.
+      // 2^14 content plus the type byte is the whole allowance (RFC 9846 §5.2); padding does not buy more.
       const atTheCap = concat(new Uint8Array(16384), Uint8Array.of(23));
       expect(await openAead(key, iv, 0n, await sealRawInner(key, iv, 0n, atTheCap))).toMatchObject({
         ok: true,
@@ -310,10 +306,7 @@ describe('Stage 2: Record layer against RFC 8448', () => {
     });
 
     it('a ciphertext too short to hold a tag -> bad_record_mac', async () => {
-      // §5.2 has one answer for a record the AEAD cannot open: "If the
-      // decryption fails, the receiver MUST terminate the connection with a
-      // bad_record_mac alert." Whether we declined to try or tried and failed
-      // is our business, not the peer's.
+      // §5.2: any record the AEAD cannot open is `bad_record_mac`.
       const tooShort = Uint8Array.of(0x17, 0x03, 0x03, 0x00, 0x10, ...new Uint8Array(16));
       expect(await openAead(key, iv, 0n, tooShort)).toEqual({
         ok: false,
@@ -322,9 +315,7 @@ describe('Stage 2: Record layer against RFC 8448', () => {
     });
 
     it('legacy_record_version is ignored, as §5.1 requires', async () => {
-      // "This field is deprecated and MUST be ignored for all purposes."
-      // Refusing a record over it made an SSL 3.0-framed alert — which is how a
-      // server too old for us says so — read as a decode error.
+      // §5.1: "This field is deprecated and MUST be ignored for all purposes."
       const record = sealPlain('alert', Uint8Array.of(2, 40));
       const ssl3Framed = new Uint8Array(record);
       ssl3Framed[1] = 0x03;
@@ -342,7 +333,7 @@ describe('Stage 2: Record layer against RFC 8448', () => {
     });
 
     it('a record that is padding all the way down -> unexpected_message', async () => {
-      // §5.4: no non-zero octet means no content type, and the RFC names the alert.
+      // §5.4: no non-zero octet means no content type.
       const record = await sealRawInner(key, iv, 0n, new Uint8Array(32));
       expect(await openAead(key, iv, 0n, record)).toEqual({
         ok: false,

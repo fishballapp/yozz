@@ -1,24 +1,16 @@
 /**
- * Drive the vault's unlock flows through a REAL browser against `wrangler dev`
- * and its local D1 — the check the unit tests cannot be, because every WebAuthn
- * call in them is a mock.
- *
- * Needs both dev servers up (AGENTS.md, "Running the vault locally"). Chromium
- * only: its CDP virtual authenticator is the one that can do PRF headlessly.
- * Exits non-zero on the first failed step.
+ * The vault's unlock flows in a real browser against `wrangler dev` and its local D1. Needs
+ * both dev servers up (AGENTS.md, "Running the vault locally"). Chromium only: its CDP virtual
+ * authenticator can do PRF headlessly.
  *
  *   pnpm -F @yozz.app/web vault:drive
- *   YOZZ_API=http://localhost:8792 pnpm -F @yozz.app/web vault:drive   # wrangler landed on another port
- *   YOZZ_WEB=http://localhost:5178 pnpm -F @yozz.app/web vault:drive   # vite landed on another port
+ *   YOZZ_API=http://localhost:8792 pnpm -F @yozz.app/web vault:drive   # wrangler on another port
+ *   YOZZ_WEB=http://localhost:5178 pnpm -F @yozz.app/web vault:drive   # vite on another port
  */
 import { execFileSync } from 'node:child_process';
 import { chromium, type Page } from '@playwright/test';
 
-/**
- * The page imports its modules by the paths Vite serves, which TypeScript cannot
- * resolve from here — so the specifier is widened to `string` and the result
- * cast to the module type the source actually has.
- */
+/** The page imports by the paths Vite serves, which TypeScript cannot resolve from here. */
 type UnlockModule = typeof import('../src/vault/unlock.ts');
 type AuthModule = typeof import('../src/vault/auth-client.ts');
 type KeysModule = typeof import('../src/vault/unlock-keys.ts');
@@ -41,7 +33,7 @@ const assertEqual = (label: string, actual: unknown, expected: unknown) => {
   console.log(`✓ ${label}`);
 };
 
-/** The magic link token lands in Better Auth's `verification` table; read the newest. */
+/** The magic link token lands in Better Auth's `verification` table. */
 const latestMagicLink = (): string => {
   const out = execFileSync(
     'pnpm',
@@ -83,10 +75,7 @@ const signUp = async (page: Page, email: string) => {
 
 const RECORD = { type: 'account', naturalKey: 'imap.example.com', plaintext: '{"user":"x"}' };
 
-/**
- * What `VaultProvider` does around an unlock, driven by hand: persist the keys, reload, resume
- * without a password or a prompt, reset the vault, and find the reload locked with the keys gone.
- */
+/** `VaultProvider`'s persisted unlock, driven by hand. */
 const persistedUnlock = async (page: Page, label: string, userId: string) => {
   const resumed = await page.evaluate(
     async ({ record, UNLOCK }) => {
@@ -103,8 +92,7 @@ const persistedUnlock = async (page: Page, label: string, userId: string) => {
     plaintext: RECORD.plaintext,
   });
 
-  // A reset elsewhere must not be resumable here: the stored keys still open the old wrap, and
-  // only the server's stamp can say the vault they belong to is gone.
+  // A reset elsewhere must not be resumable here; only the server's stamp can say so.
   await page.evaluate(
     async ({ UNLOCK }) => {
       const u = (await import(UNLOCK)) as UnlockModule;
@@ -195,11 +183,7 @@ const passwordMode = async (page: Page) => {
   );
   assertEqual('password: wrong password refused', wrong, 'refused');
 
-  /**
-   * The point of the mode: a browser that has never seen this account, with its own storage,
-   * signs in and reads the record from the address and passphrase alone. Nothing is carried
-   * over from the enrolled page, which is what the device secret used to require.
-   */
+  // A browser that has never seen this account reads the record from address and passphrase alone.
   const stranger = await openPage();
   await stranger.goto(`${WEB}/`);
   const fromStranger = await stranger.evaluate(
@@ -294,7 +278,7 @@ const passkeyMode = async (page: Page) => {
 
 const browser = await chromium.launch();
 
-/** `newPage` gives each call its own context, so a page opened here shares no storage with any other. */
+/** `newPage` gives each call its own context. */
 const openPage = async (): Promise<Page> => {
   const page = await browser.newPage();
   page.on('pageerror', err => fail(`page error: ${err.message}`));

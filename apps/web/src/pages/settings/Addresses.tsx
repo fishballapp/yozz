@@ -7,16 +7,12 @@ import { type AddressRecord, isInbound, markOf } from '../../lib/addresses';
 import { keepCompose } from '../../lib/compose';
 import { useMail } from '../../state/mail';
 
-/**
- * One row per address, whatever it does. The old page listed every reading address twice — once
- * as an account, once as a sending address — which is the mechanism showing through: to the
- * person, an address is one thing they own, and what it does is a property of the row.
- */
+/** One row per address; what it does is a property of the row. */
 
 const hostsOf = (record: AddressRecord): string =>
   isInbound(record) ? `${record.imap.host} · ${record.smtp.host}` : record.smtp.host;
 
-/** Reading addresses first, in the rail's order, then the send-only ones in theirs. */
+/** Reading addresses first, in the rail's order, then the send-only ones. */
 const byRole = (a: AddressRecord, b: AddressRecord): number =>
   Number(isInbound(b)) - Number(isInbound(a));
 

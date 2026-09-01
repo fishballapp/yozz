@@ -68,7 +68,7 @@ describe('Stage 5: Transcript and RFC 9846 §4.1 HRR against RFC 8448', () => {
       if (/^construct an? .+ handshake message/.test(step.title)) {
         for (const field of step.fields) {
           if (field.label === 'ServerHello' && !hasSeenHrr) {
-            // First ServerHello in §5 is HRR: replace ClientHello1 with message_hash
+            // §5's first ServerHello is the HRR: ClientHello1 is replaced by message_hash.
             await transcript.replaceClientHello1WithMessageHash();
             hasSeenHrr = true;
           }
@@ -111,7 +111,6 @@ describe('Stage 5: Transcript and RFC 9846 §4.1 HRR against RFC 8448', () => {
     let hashes = 0;
 
     for (const step of trace7!.steps) {
-      // If a step is CCS, skip it
       if (step.title.includes('ChangeCipherSpec') || step.title.includes('change_cipher_spec')) {
         continue;
       }

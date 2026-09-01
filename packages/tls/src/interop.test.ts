@@ -1,16 +1,8 @@
 /**
- * The client against a real TLS 1.3 server, on a real socket, across every group
- * and suite it offers.
- *
- * Everything else in this package replays RFC 8448, which is a SHA-256 / X25519
- * document. So `TLS_AES_256_GCM_SHA384` and P-384, the pair `posteo.de`
- * requires, have no published bytes to check against and are proven only here.
- *
- * Two things close with this file that no scripted peer could close. The client
- * offers a key share for X25519 only, so the P-256 and P-384 rows force a real
- * HelloRetryRequest from a peer that did not come out of the traces. And the
- * chain is issued at test time, so `YOZZ_VALIDATOR` does the validating instead
- * of a test double.
+ * The client against a real TLS 1.3 server across every group and suite it offers. RFC 8448
+ * is a SHA-256 / X25519 document, so `TLS_AES_256_GCM_SHA384` and P-384 are proven only here;
+ * the P-256 and P-384 rows force a real HelloRetryRequest, and `YOZZ_VALIDATOR` validates a
+ * chain issued at test time.
  */
 
 import { connect } from 'node:net';
@@ -43,14 +35,7 @@ const openSocket = (port: number) =>
     socket.on('error', reject);
   });
 
-/**
- * The client's own alerts, read by something that is not the client.
- *
- * After ServerHello a TLS 1.3 alert has to travel as an inner alert inside an
- * AEAD record. Nothing in the scripted-peer tests notices when it goes out in
- * cleartext instead, because none of them decrypt what the client wrote. OpenSSL
- * does, and says which alert it got.
- */
+/** After ServerHello an alert must travel inside an AEAD record; only a peer that decrypts can tell. */
 describe('a fatal alert reaches a real peer', () => {
   it('sends unknown_ca, protected, when it trusts no root', async () => {
     const server = await startLocalServer({
@@ -77,17 +62,14 @@ describe('a fatal alert reaches a real peer', () => {
 
       expect(result).toMatchObject({
         ok: false,
-        // `peer-sent`, and it is the control for the `session-stored` assertion
-        // below: the same failure kind, the other chain.
+        // The control for the `session-stored` assertion below: the same failure kind, the other chain.
         reason: { kind: 'certificate', chain: 'peer-sent', alert: { description: 'unknown_ca' } },
       });
 
       await vi.waitFor(() => expect(server.alertsReceived.length).toBeGreaterThan(0));
       expect(server.alertsReceived.join(' ')).toContain('alert number 48');
 
-      // OpenSSL accepts a cleartext alert here, so what the peer reports cannot
-      // tell the two apart. What the client WROTE can: after ServerHello the
-      // alert must leave as an AEAD record, outer type 0x17, never a bare 0x15.
+      // OpenSSL accepts a cleartext alert here, so what the client wrote is checked: outer type 0x17, never 0x15.
       const last = written.at(-1);
       if (last === undefined) throw new Error('the client wrote nothing');
       expect(last[0]).toBe(0x17);
@@ -115,15 +97,12 @@ describe('a real TLS 1.3 server, every group and suite', () => {
         expect(result).toMatchObject({ ok: true });
         if (!result.ok) return;
 
-        // The server echoes, so a round trip proves the application keys on both
-        // sides agree. A handshake that "completed" with mismatched keys would
-        // pass every assertion above this one.
+        // The echo proves the application keys agree on both sides.
         const sent = new TextEncoder().encode('a1 CAPABILITY\r\n');
         expect(await result.connection.write(sent)).toEqual({ ok: true });
         expect(await result.connection.read()).toEqual({ ok: true, kind: 'data', bytes: sent });
 
-        // A write above one record's 2^14 plaintext (a mail body) goes out as several records;
-        // the echo comes back in whatever pieces the server chose, so it is reassembled.
+        // A write above 2^14 goes out as several records; the echo comes back in the server's pieces.
         const big = new Uint8Array(40_000).map((_, index) => index % 251);
         expect(await result.connection.write(big)).toEqual({ ok: true });
         const echoed: number[] = [];
@@ -144,17 +123,8 @@ describe('a real TLS 1.3 server, every group and suite', () => {
 });
 
 /**
- * Resumption against OpenSSL, which is the only peer that can prove it.
- *
- * RFC 8448 §4 proves the binder against the document's own bytes and BoGo proves
- * the state machine against BoringSSL's Go server — both worth having, and
- * neither is OpenSSL. This one hands a ticket OpenSSL minted back to OpenSSL and
- * asks it to accept our binder over it.
- *
- * Both suites run, because the binder is a MAC under the ticket's own hash and
- * every other source of truth here is SHA-256: RFC 8448 is a SHA-256 document
- * end to end, and BoGo's resumption tests negotiate `TLS_AES_128_GCM_SHA256`.
- * SHA-384 resumption has no other evidence anywhere.
+ * A ticket OpenSSL minted, handed back to OpenSSL. Both suites run because the binder is a MAC
+ * under the ticket's own hash and every other source of truth here is SHA-256.
  */
 describe('resumption against a real TLS 1.3 server', () => {
   for (const suite of ['TLS_AES_128_GCM_SHA256', 'TLS_AES_256_GCM_SHA384'] as const) {
@@ -179,9 +149,7 @@ describe('resumption against a real TLS 1.3 server', () => {
           expect(result).toMatchObject({ ok: true });
           if (!result.ok) throw new Error('handshake failed');
 
-          // The echo is what proves the two sides agree on keys derived through
-          // the PSK. A resumption that "succeeded" with a mismatched schedule
-          // would satisfy `isResumed` and nothing else.
+          // The echo proves the keys derived through the PSK agree.
           const sent = new TextEncoder().encode('a1 CAPABILITY\r\n');
           expect(await result.connection.write(sent)).toEqual({ ok: true });
           expect(await result.connection.read()).toEqual({ ok: true, kind: 'data', bytes: sent });
@@ -196,8 +164,7 @@ describe('resumption against a real TLS 1.3 server', () => {
         const first = await connectOnce(undefined);
         expect(first.isResumed).toBe(false);
 
-        // The ticket arrives after the handshake, so it is `read()` that
-        // produced this, not `startTls`.
+        // The ticket arrives after the handshake, so `read()` produced this.
         const offered = sessions[0];
         if (offered === undefined) throw new Error('the server issued no ticket');
         expect(offered.suite).toBe(suite);
@@ -207,19 +174,9 @@ describe('resumption against a real TLS 1.3 server', () => {
         expect(second.isResumed).toBe(true);
 
         /**
-         * A resumed handshake verifies no signature, so the scheme it reports
-         * came out of the session it offered. Pinned to what the server's key
-         * can actually sign — `issueCertificate` mints an ECDSA P-256 leaf — so
-         * a report that agreed only with itself would fail here.
-         *
-         * **What this does NOT reach: the ticket minted ON the resumed
-         * connection.** Node's OpenSSL issues two tickets on the full handshake
-         * and none on the resumption (measured, and an extra round trip does not
-         * shake one loose), BoGo runs every resumption test at `-resume-count 1`
-         * so there is never a third connection to offer one back on, and RFC
-         * 8448 §4 publishes no NewSessionTicket. So nothing anywhere observes
-         * what `sessionFromTicket` carries forward on a renewal — see the note
-         * at that call site.
+         * A resumed handshake verifies no signature, so the scheme came out of the session; pinned to
+         * what the server's key can sign. Nothing here reaches the ticket minted on the resumed
+         * connection: OpenSSL issues none there (measured).
          */
         expect(first.peerSignatureScheme).toBe('ecdsa_secp256r1_sha256');
         expect(second.peerSignatureScheme).toBe(first.peerSignatureScheme);
@@ -231,21 +188,9 @@ describe('resumption against a real TLS 1.3 server', () => {
 });
 
 /**
- * The certificate check a resumed handshake would otherwise skip.
- *
- * A resumption carries no Certificate and no CertificateVerify, so the only
- * chain there is to check is the one the session stored — and the only thing
- * that has moved since is the clock. That is what makes this pair worth
- * running against a real server rather than a scripted one: the chain is
- * issued at test time and validated by `YOZZ_VALIDATOR`, so the refusal comes
- * from a certificate genuinely expiring rather than from a test double
- * deciding to say no.
- *
- * It also pins the separation `startTls` draws between its two clocks. Only
- * `validationTime` moves; `now` stays put, so the ticket is still well inside
- * its lifetime and the session is offered. A client that validated against the
- * running clock, or aged tickets against the validation time, fails one of
- * these two.
+ * Only `validationTime` moves; `now` stays put, so the ticket is still inside its lifetime and
+ * the session is offered. The chain is issued at test time, so the refusal comes from a real
+ * expiry.
  */
 describe('a resumed handshake re-checks the stored chain', () => {
   const YEAR = 365 * 24 * 3600 * 1000;
@@ -263,8 +208,7 @@ describe('a resumed handshake re-checks the stored chain', () => {
           serverName: LOCAL_SERVER_NAME,
           trustAnchors: server.trustAnchors,
           validationTime,
-          // Frozen at the real instant, so moving `validationTime` below does
-          // not also age the ticket out from under the test.
+          // Frozen so moving `validationTime` does not age the ticket out.
           now: () => issuedAt,
           validator: YOZZ_VALIDATOR,
           session,
@@ -274,8 +218,7 @@ describe('a resumed handshake re-checks the stored chain', () => {
           },
         });
         if (result.ok) {
-          // The echo, for the same reason the resumption test above wants one:
-          // `isResumed` alone does not prove the two sides agree on keys.
+          // `isResumed` alone does not prove the keys agree.
           const sent = new TextEncoder().encode('a1 NOOP\r\n');
           expect(await result.connection.write(sent)).toEqual({ ok: true });
           expect(await result.connection.read()).toEqual({ ok: true, kind: 'data', bytes: sent });
@@ -293,8 +236,7 @@ describe('a resumed handshake re-checks the stored chain', () => {
       const offered = sessions[0];
       if (offered === undefined) throw new Error('the server issued no ticket');
 
-      // `issueCertificate` gives its leaves a year either side, so two years on
-      // the stored chain has expired and nothing else about it has changed.
+      // `issueCertificate` gives its leaves a year either side.
       return await connectOnce(offered, new Date(issuedAt.getTime() + 2 * YEAR));
     } finally {
       await server.stop();
@@ -308,34 +250,15 @@ describe('a resumed handshake re-checks the stored chain', () => {
         kind: 'certificate',
         reason: { code: 'certificate-expired' },
         alert: { description: 'certificate_expired' },
-        /**
-         * The field the caller acts on, and the reason it exists: this exact
-         * `ValidationFailure` on a peer-sent chain means the host is presenting
-         * something we refuse, and here it means the host has almost certainly
-         * ROTATED and the session is stale. Evict and reconnect works for one
-         * and not the other, so a caller that could not tell them apart could
-         * not do either.
-         */
+        // `chain: 'session-stored'` means evict and reconnect; `peer-sent` means the host is refused.
         chain: 'session-stored',
       },
     });
   });
 
-  /**
-   * The positive control, and it earns its place twice over: it proves the
-   * refusal above comes from the re-check rather than from anything else this
-   * setup does, and it is the behaviour BoGo pins as BoringSSL's default —
-   * `CertificateVerificationDoesNotFailOnResume`, 24 tests of it.
-   */
+  /** Positive control, and BoringSSL's default (`CertificateVerificationDoesNotFailOnResume`). */
   it('resumes the same expired chain when the re-check is off', async () => {
-    /**
-     * `peerPublicKeyPin` is `null` here, and it is the ONLY configuration that
-     * produces one: this connection validated no chain, so the stored leaf's key
-     * is something it never established. Reporting it anyway would hand a caller
-     * a pin to store from a connection that proved nothing about the key —
-     * which is the same lie the learn/check split exists to prevent, arriving
-     * through the resumption path instead of through the validator.
-     */
+    // The only configuration that produces a `null` pin: this connection validated no chain.
     expect(await resumeAfterTheLeafExpires(false)).toMatchObject({
       ok: true,
       isResumed: true,
@@ -383,9 +306,7 @@ describe('a resumed handshake re-checks the stored chain', () => {
 
       const resumed = await connectOnce(offered);
       expect(resumed).toMatchObject({ ok: true, isResumed: true });
-      // The stored leaf IS the leaf the first connection authenticated, so the
-      // two pins must agree — and a `null` here would be the field going quiet
-      // on the path that does re-check.
+      // The stored leaf is the leaf the first connection authenticated.
       if (resumed.ok) expect(resumed.peerPublicKeyPin).toBe(first.peerPublicKeyPin);
     } finally {
       await server.stop();
@@ -394,18 +315,8 @@ describe('a resumed handshake re-checks the stored chain', () => {
 });
 
 /**
- * M9's gate, and it is deliberately two halves of one test rig.
- *
- * A pin that alarms on everything passes a rotation test perfectly and protects
- * nothing, because a user who sees it every eight weeks stops reading it. A pin
- * that alarms on nothing passes a renewal test perfectly and protects nothing
- * either. So the same server is stood up three times over one root — the
- * original leaf, a REISSUE of it under the same key, and a fresh key — and only
- * the third may be refused.
- *
- * The client is `YOZZ_VALIDATOR` under `pinnedValidator` throughout, so all
- * three chains validate on their own merits and the pin is the only thing that
- * can separate them.
+ * Three servers over one root: the original leaf, a reissue under the same key, and a fresh key.
+ * All three chains validate, so the pin is the only thing that can separate them.
  */
 describe('trust on first use, pinned to the leaf public key', () => {
   const SUITE = 'TLS_AES_128_GCM_SHA256' as const;
@@ -426,8 +337,7 @@ describe('trust on first use, pinned to the leaf public key', () => {
           pin === undefined ? YOZZ_VALIDATOR : pinnedValidator({ validator: YOZZ_VALIDATOR, pin }),
       });
       if (result.ok) {
-        // The echo again: a pin decision is only meaningful on a connection that
-        // then works, and this is what proves the keys agree either side of it.
+        // A pin decision is only meaningful on a connection that then works.
         const sent = new TextEncoder().encode('a1 NOOP\r\n');
         expect(await result.connection.write(sent)).toEqual({ ok: true });
         expect(await result.connection.read()).toEqual({ ok: true, kind: 'data', bytes: sent });
@@ -439,12 +349,7 @@ describe('trust on first use, pinned to the leaf public key', () => {
     }
   };
 
-  /**
-   * First use, on a server with no pin configured, is where a pin comes from —
-   * and it comes from the RESULT, which only exists because the handshake
-   * completed. A validator cannot hand one back: at the moment it runs, all the
-   * peer has proven is that it can send certificates, which are public.
-   */
+  /** The pin comes from the result, not the validator; see DECISIONS.md, "The pin is learned after CertificateVerify". */
   it('learns a pin only from a completed handshake', async () => {
     const server = await startLocalServer({ suite: SUITE, curve: CURVE });
     try {
@@ -466,8 +371,7 @@ describe('trust on first use, pinned to the leaf public key', () => {
     if (pin === null) throw new Error('a full handshake reported no pin');
     await first.stop();
 
-    // A renewal: same root, same key, a new certificate. Everything a CA changes
-    // on a reissue changes here — serial, validity, signature — and the key does not.
+    // A renewal: serial, validity and signature change, the key does not.
     const renewed = await issueLocalLeaf(first.chain.root, first.chain.leaf.keyPair);
     expect(Buffer.from(renewed.der).equals(Buffer.from(first.chain.leaf.der))).toBe(false);
 
@@ -479,8 +383,7 @@ describe('trust on first use, pinned to the leaf public key', () => {
     try {
       const result = await connect(second, pin);
       expect(result).toMatchObject({ ok: true });
-      // Not merely accepted — the pin the caller would store back is the same
-      // one, so a renewal never rewrites the store either.
+      // The pin the caller would store back is the same one.
       if (result.ok) expect(result.peerPublicKeyPin).toBe(pin);
     } finally {
       await second.stop();
@@ -496,8 +399,7 @@ describe('trust on first use, pinned to the leaf public key', () => {
     if (pin === null) throw new Error('a full handshake reported no pin');
     await first.stop();
 
-    // The rogue-CA shape, reduced to what the client can actually see: a chain
-    // to a root it trusts, for a host it has met, carrying a key it has not.
+    // The rogue-CA shape: a trusted root, a known host, an unknown key.
     const rotated = await issueLocalLeaf(first.chain.root);
     const second = await startLocalServer({
       suite: SUITE,
@@ -510,18 +412,13 @@ describe('trust on first use, pinned to the leaf public key', () => {
         reason: {
           kind: 'certificate',
           reason: { code: 'rejected-by-policy' },
-          /**
-           * NOT `unknown_ca`, which is what a refusal borrowing a chain code
-           * would have sent. The CA is one we ship and the chain is sound; §6.2's
-           * "some other (unspecified) issue ... rendering it unacceptable" is the
-           * only honest thing to tell this peer.
-           */
+          // Not `unknown_ca`: the CA is one we ship and the chain is sound (§6.2).
           alert: { description: 'certificate_unknown' },
           chain: 'peer-sent',
         },
       });
 
-      // And the peer really received it, read by something that is not the client.
+      // Read by something that is not the client.
       await vi.waitFor(() => expect(second.alertsReceived.length).toBeGreaterThan(0));
       expect(second.alertsReceived.join(' ')).toContain('alert number 46');
     } finally {
@@ -529,11 +426,7 @@ describe('trust on first use, pinned to the leaf public key', () => {
     }
   });
 
-  /**
-   * The resumed path reaches the pin through the same `validatePeerChain` the
-   * full handshake does, so a pin that only guarded the peer-sent chain would
-   * leave a stored one unchecked for as long as its tickets keep renewing.
-   */
+  /** The resumed path reaches the pin through the same `validatePeerChain`. */
   it('checks the stored chain on a resumption too', async () => {
     const server = await startLocalServer({ suite: SUITE, curve: CURVE });
     const sessions: TlsSession[] = [];
@@ -556,9 +449,7 @@ describe('trust on first use, pinned to the leaf public key', () => {
           },
         });
         if (result.ok) {
-          // A ticket arrives AFTER the handshake, so `onSession` fires from
-          // `read()` and never from `startTls`. Without this round trip there is
-          // no session to resume with and this test proves nothing.
+          // A ticket arrives after the handshake, so `onSession` fires from `read()`.
           const sent = new TextEncoder().encode('a1 NOOP\r\n');
           expect(await result.connection.write(sent)).toEqual({ ok: true });
           expect(await result.connection.read()).toEqual({ ok: true, kind: 'data', bytes: sent });
@@ -580,19 +471,13 @@ describe('trust on first use, pinned to the leaf public key', () => {
       const offered = sessions[0];
       if (offered === undefined) throw new Error('the server issued no ticket');
 
-      // Resuming under the pin it was issued under: accepted, and the pin the
-      // re-check reports is the stored leaf's, which is the same key.
+      // Accepted, and the re-check reports the stored leaf's pin.
       const resumed = await connectWith(offered, pin);
       expect(resumed).toMatchObject({ ok: true, isResumed: true });
       if (resumed.ok) expect(resumed.peerPublicKeyPin).toBe(pin);
 
-      // The same session under a pin the stored leaf cannot satisfy. Nothing on
-      // the wire differs; the refusal comes from the chain the session carries.
-      // An UNUSED ticket, because a ticket offered twice is a tracking cookie and
-      // the rule against it is not one a test gets to bend. It is the SIBLING of
-      // the one above — Node's OpenSSL issues two tickets on the full handshake
-      // and none on the resumption — so this is a second resumption of the first
-      // connection, not a resumption of a resumption.
+      // A pin the stored leaf cannot satisfy; nothing on the wire differs. An unused ticket, because
+      // a ticket offered twice is a tracking cookie: OpenSSL issues two on the full handshake.
       const unusedTicket = sessions[1];
       if (unusedTicket === undefined) throw new Error('the full handshake issued only one ticket');
       expect(
