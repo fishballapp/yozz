@@ -9,7 +9,30 @@
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <meta
       name="description"
-      content="One calm client over the mail accounts you already have. Read every address in one stream, and send from any address you own."
+      content="Zero-knowledge webmail for the email accounts you already own. YOZZ's servers cannot read your mail or credentials; your existing mail provider remains unchanged."
+    />
+    <meta property="og:title" content="YOZZ — Zero-knowledge webmail" />
+    <meta
+      property="og:description"
+      content="Your browser does the mail. YOZZ's servers cannot read your mail or credentials; your existing mail provider remains unchanged."
+    />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://yozz.app/" />
+    <!-- Rendered from assets/og-card.html; that file carries the render command and the reasons
+         for its layout. Absolute URL because a crawler resolves og:image against nothing, and the
+         declared dimensions because several platforms lay out the unfurl before the bytes land. -->
+    <meta property="og:image" content="https://yozz.app/og.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta
+      property="og:image:alt"
+      content="An opened envelope with a YOZZ inbox sliding out of it, over the wordmark and the words: Zero-knowledge webmail, for the email accounts you already own."
+    />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="YOZZ — Zero-knowledge webmail" />
+    <meta
+      name="twitter:description"
+      content="Your browser does the mail. YOZZ's servers cannot read your mail or credentials; your existing mail provider remains unchanged."
     />
     <!-- YOZZ ships one surface: dark. There is deliberately no system-scheme detection and no
          stored preference here — see src/styles/global.css. `color-scheme` is declared up front so

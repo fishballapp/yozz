@@ -1,10 +1,10 @@
 /**
  * THROWAWAY — delete with the rest of the judge machinery after 2026-09-03.
  *
- * Wipes every folder of a judge mailbox and appends the fifteen fixtures fresh. Unlike the app's
- * Reset (`src/judge/reset.ts`), which never deletes so a judge's own mail survives, this DOES
- * delete: it is for accounts nobody has been given yet, and it is the only thing that clears the
- * minting artefacts a reset leaves behind (the spent sign-in link, the SMTP live-test mail).
+ * Wipes every folder of a judge mailbox and appends the fifteen fixtures fresh — the server-side
+ * twin of the app's Reset (`src/judge/reset.ts`), which since 2026-09-01 does the same wipe over
+ * the browser's own connection. This one runs from the ledger without signing in, for accounts
+ * nobody has been given yet.
  *
  *   node harness/judge-reseed.ts judge-01 judge-02   # named accounts
  *   node harness/judge-reseed.ts all                 # every account in the ledger

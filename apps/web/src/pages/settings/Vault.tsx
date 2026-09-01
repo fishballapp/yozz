@@ -78,7 +78,7 @@ export const Vault = () => {
       <>
         <PageSection
           label="Vault"
-          note="Your addresses and their passwords live in an encrypted store that only you can open. This device stays unlocked until you sign out."
+          note="Zero-knowledge applies to YOZZ: your addresses and passwords live in an encrypted store only you can open. Your existing mail provider remains unchanged. This device stays unlocked until you sign out."
         >
           <div className="flex flex-wrap items-center gap-2">
             <Link

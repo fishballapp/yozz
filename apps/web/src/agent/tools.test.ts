@@ -174,6 +174,42 @@ describe('get_threads', () => {
     });
   });
 
+  it('says which mailboxes hold each message, so a mixed thread is legible', async () => {
+    const location = (folder: Folder) => ({
+      account: 'me@yozz.app',
+      folder,
+      uidValidity: 1,
+      uid: 7,
+    });
+    // A thread holding a draft always lists 'drafts' too (withDrafts appends it), so the
+    // fixture matches what real threading produces.
+    const mixed = thread('m', ['inbox', 'sent', 'drafts'], {
+      messages: [
+        message('m/1', { locations: [location('inbox')] }),
+        message('m/2', { locations: [location('sent')] }),
+        message('m/3', { isDraft: true, draftKey: 'k1', draftId: 'k1@2' }),
+      ],
+    });
+    const { tools } = fakePort([mixed, inbox]);
+    const result = await call(tools, 'get_threads', { ids: ['m'], body: 'full' });
+    expect(result).toMatchObject({
+      threads: [
+        {
+          mailboxes: ['inbox', 'sent', 'drafts'],
+          messages: [
+            { id: 'm/3', mailboxes: ['drafts'] },
+            { id: 'm/2', mailboxes: ['sent'] },
+            { id: 'm/1', mailboxes: ['inbox'] },
+          ],
+        },
+      ],
+    });
+    // Fixture messages have no locations and claim no mailbox rather than guessing one.
+    const fixture = await call(tools, 'get_threads', { ids: ['a'], body: 'latest' });
+    const [only] = (fixture as { threads: { messages: Record<string, unknown>[] }[] }).threads;
+    expect(only?.messages[0]).not.toHaveProperty('mailboxes');
+  });
+
   it('reads bodies only when asked, and only as deep as asked', async () => {
     const { tools, port } = fakePort([inbox]);
     const latest = await call(tools, 'get_threads', { ids: ['a'], body: 'latest' });

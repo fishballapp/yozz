@@ -1376,34 +1376,49 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
   );
 
   /**
-   * HACKATHON ONLY (see `judge/`). The cache is dropped rather than reconciled: a reset moves
-   * messages between folders, and a moved copy has a new uid, so every cached row for this
-   * account is about to be wrong. The sync that follows rebuilds it from the server.
+   * HACKATHON ONLY (see `judge/`). The cache is dropped rather than reconciled: the wipe deletes
+   * every message and the fixtures come back with new uids, so every cached row for this account
+   * is about to be wrong. The sync that follows rebuilds it from the server.
+   *
+   * The vault's drafts go with the wipe — the IMAP Drafts folder is emptied by the same pass, and
+   * a draft record surviving it would show a ghost row over an empty folder.
    */
   const resetDemoInbox = useCallback(async () => {
     const userId = userIdRef.current;
+    const session = sessionRef.current;
     // The judge mailbox by name, never `accounts[0]`: a vault holding a judge alias beside another
     // address would otherwise have the fifteen fixtures appended to whichever happened to list
     // first, and the wrong account's cache cleared.
     const account = accounts.find(candidate => isJudgeAddress(candidate.address));
-    if (userId === null || account === undefined) {
+    if (userId === null || session === null || account === undefined) {
       return 'No demo mailbox is connected to this vault.';
     }
-    const [{ resetJudgeInbox }, { createMailCache }] = await Promise.all([
-      import('../judge/reset'),
-      import('../mail/cache'),
-    ]);
+    const [{ resetJudgeInbox }, { createMailCache }, { listDrafts, deleteDraft }] =
+      await Promise.all([
+        import('../judge/reset'),
+        import('../mail/cache'),
+        import('../mail/draft-records'),
+      ]);
     const outcome = await runOn(account)(resetJudgeInbox(account.address));
     if (!outcome.ok) return 'The mailbox could not be reached; try again in a moment.';
+    // Only the judge account's drafts — a vault holding the judge alias beside a real address
+    // must not have the real account's drafts wiped. Best effort per draft: one mid-send
+    // (refused as 'sending') should not stop the rest.
+    const drafts = await listDrafts(session.store);
+    for (const draft of drafts) {
+      if ((draft.record.ownerAccount ?? draft.record.from) !== account.address) continue;
+      await deleteDraft(session.store, draft.draftId, Date.now());
+    }
+    setDrafts(await listDrafts(session.store));
     await createMailCache(userId, account.address).clear();
     await syncRef.current(account.address);
-    const { moved, reflagged, appended, missing } = outcome.value;
+    const { wiped, appended, missing } = outcome.value;
     if (missing.length > 0) {
       // "We tried" is not "the mailbox is the demo again": a fixture that never landed takes a
       // beat of the judge's script with it, and the Sent copy takes the cross-folder thread.
       return `Reset incomplete — ${missing.length} message(s) did not land (${missing.join(', ')}). Try again.`;
     }
-    return `Inbox reset: ${moved} put back, ${reflagged} marked as they started, ${appended} restored.`;
+    return `Inbox reset: ${wiped} message(s) cleared, ${appended} demo messages restored.`;
   }, [accounts, runOn]);
 
   /**

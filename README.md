@@ -4,8 +4,8 @@
 
 # YOZZ
 
-**An email client for the addresses you already own.** Reads over IMAP, sends over SMTP, and
-never keeps a copy of your mail.
+**Zero-knowledge webmail for the addresses you already own.** Reads over IMAP, sends over SMTP,
+and never gives YOZZ's servers readable access to your mail.
 
 [![CI](https://github.com/fishballapp/yozz/actions/workflows/ci.yml/badge.svg)](https://github.com/fishballapp/yozz/actions/workflows/ci.yml)
 [![AGPL-3.0](https://img.shields.io/badge/licence-AGPL--3.0-8bf274?labelColor=0e0c09)](./LICENSE)
@@ -36,11 +36,13 @@ The browser does the mail. It opens TLS 1.3 to your IMAP and SMTP servers itself
 and X.509 implementation in TypeScript, and reaches them through a relay on our side that
 forwards bytes it cannot read. Your mail passwords never leave your device: YOZZ stores them
 encrypted with a key only you hold, and our servers keep ciphertext they cannot open. If we were
-breached or subpoenaed, there is nothing to hand over.
+breached or subpoenaed, there is no readable mailbox or credential store to hand over.
 
-Your mail itself is not encrypted; it is wherever it already lives. So this is not a
-"zero-knowledge email client", and we don't call it one. It adds nothing to your attack surface,
-which is the smaller and true claim.
+That is the scope of **zero-knowledge** here: YOZZ's infrastructure cannot read your credentials,
+vault records or mail crossing the relay. YOZZ does not add end-to-end encryption to email, and
+your existing mail provider retains whatever access it already has. We also retain the operational
+metadata needed to run the vault and relay; [the architecture](./ARCHITECTURE.md#what-is-on-yozzs-servers)
+spells out that boundary.
 
 Two things do get stored with us, sealed: the drafts you write, so one started on a laptop is on
 your phone, and mail sent from an address that has no mailbox to keep a copy in. Both are

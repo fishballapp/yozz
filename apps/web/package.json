@@ -4,7 +4,7 @@
   "private": true,
   "license": "AGPL-3.0-only",
   "type": "module",
-  "description": "yozz.app SPA \u2014 Vite + React + Tailwind v4 (Ink & Rule, dark only). Multi-account mail client over accounts you already own; fixture-backed (no mail backend). Builds to dist/.",
+  "description": "YOZZ zero-knowledge webmail SPA \u2014 a multi-account client for addresses users already own. YOZZ's servers cannot read mail or credentials; existing mail providers remain unchanged.",
   "scripts": {
     "dev": "vite --port 5177",
     "build": "vite build",

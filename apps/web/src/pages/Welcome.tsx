@@ -47,7 +47,7 @@ export const Welcome = () => {
   return (
     <AuthColumn
       title="Create your YOZZ account"
-      description="YOZZ reads mail from accounts you already own. First it needs an account of its own: that is what holds your settings, encrypted with a key that never leaves your devices."
+      description="YOZZ is zero-knowledge webmail for accounts you already own. Its servers cannot open your settings or mail; your existing mail provider remains unchanged. First, create the account that holds your encrypted settings."
       footer={
         <p className="text-base text-paper-dim">
           Already have an account?{' '}

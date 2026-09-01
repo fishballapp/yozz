@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Button } from '../components/ui/Button';
+import { ConfirmDialog } from '../components/ui/ConfirmDialog';
 import { useMail } from '../state/mail';
 import { isJudgeAddress } from './domain';
 
@@ -8,8 +9,8 @@ import { isJudgeAddress } from './domain';
  * Tracked as item 0 of HANDOFF.md's Next.
  *
  * A judge's mailbox is real mail on a real server, so what they do to it stays done — and the next
- * judge inherits an inbox somebody already tidied. Rather than resetting it on a timer behind their
- * back, the banner says what the mailbox is and hands them the button.
+ * run of the prompt inherits an inbox somebody already tidied. Rather than resetting it on a timer
+ * behind their back, the banner says what the mailbox is and hands them the button.
  *
  * It is LOUD on purpose, and it is the one place --signal-well is spent outside the send-only chip.
  * The restraint the token system asks for is about the product; this bar has to be read by someone
@@ -17,14 +18,13 @@ import { isJudgeAddress } from './domain';
  * status-strip treatment every other bar in this app gets.
  *
  * The copy answers three questions in the order a judge asks them: what this is, whether it is
- * real, and what Reset does to their mail. An earlier draft spent its first two sentences
- * explaining the BANNER, which is the one thing nobody signed in to read.
+ * real, and what Reset does to their mail. Reset wipes everything, so it goes through the confirm
+ * sheet like every other destructive act in the app.
  */
 
 export const JudgeBanner = () => {
   const { ownedAddresses, resetDemoInbox } = useMail();
   const [message, setMessage] = useState<string | null>(null);
-  const [isResetting, setIsResetting] = useState(false);
 
   if (!ownedAddresses.some(isJudgeAddress)) return null;
 
@@ -39,29 +39,29 @@ export const JudgeBanner = () => {
           receives real email. We'll delete it after judging.
         </p>
         <p>
-          Reset inbox restores the 15 demo messages to their original folders and read states. Your
-          own mail stays put.
+          Reset inbox wipes everything and restores the 15 demo messages, so a second run starts
+          exactly where the first did.
         </p>
       </div>
       <span aria-live="polite">{message}</span>
-      <Button
-        variant="secondary"
-        disabled={isResetting}
-        onClick={() => {
-          setIsResetting(true);
-          // The button's own label is the in-progress state. The live region carries the OUTCOME
-          // only: when both said "Resetting…" the word was on screen twice, side by side.
+      <ConfirmDialog
+        title="Reset this mailbox?"
+        description="Everything in it — including mail you sent or received yourself, and any drafts — is deleted, and the 15 demo messages come back in their original folders and read states."
+        confirmLabel="Reset inbox"
+        busyLabel="Resetting…"
+        trigger={<Button variant="secondary" />}
+        triggerLabel="Reset inbox"
+        onConfirm={async () => {
+          // The live region carries the OUTCOME only; the sheet's own busy label is the
+          // in-progress state.
           setMessage(null);
-          void resetDemoInbox()
+          await resetDemoInbox()
             .then(setMessage)
             // Without this a throw leaves the run with nothing to show for it, which is the one
             // thing worse than an error after a three-minute wait.
-            .catch(() => setMessage('The mailbox could not be reached; try again in a moment.'))
-            .finally(() => setIsResetting(false));
+            .catch(() => setMessage('The mailbox could not be reached; try again in a moment.'));
         }}
-      >
-        {isResetting ? 'Resetting…' : 'Reset inbox'}
-      </Button>
+      />
     </div>
   );
 };
