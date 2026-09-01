@@ -38,6 +38,8 @@ forwards bytes it cannot read. Your mail passwords never leave your device: YOZZ
 encrypted with a key only you hold, and our servers keep ciphertext they cannot open. If we were
 breached or subpoenaed, there is no readable mailbox or credential store to hand over.
 
+![The browser and mail provider terminate TLS while YOZZ's relay only forwards the encrypted traffic](assets/tls-relay.png)
+
 That is the scope of **zero-knowledge** here: YOZZ's infrastructure cannot read your credentials,
 vault records or mail crossing the relay. YOZZ does not add end-to-end encryption to email, and
 your existing mail provider retains whatever access it already has. We also retain the operational

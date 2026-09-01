@@ -9,8 +9,13 @@
   than the same mark at 56px. The line stays proportional at ~7% of the icon, matching the
   wordmark's 7-of-100 cut. Rasterised and checked at 96 / 48 / 32 / 24 / 16.
 
-  The fill is the signal token, oklch(0.87 0.19 140), written as a literal hex because a linked
-  favicon gets no stylesheet. Keep it in step with global.css.
+  OPAQUE, not transparent. The mark used to sit on nothing, so any host that drops a favicon on a
+  white plate (some app switchers, some bookmark bars) rendered signal-green on white, which is
+  glare and off-brand. The ink ground travels with the file instead.
+
+  Both fills are tokens written as literal hex, because a linked favicon gets no stylesheet: the
+  ground is ink, oklch(0.155 0.006 75), and the letter is signal, oklch(0.87 0.19 140). Keep them
+  in step with global.css.
 
   Note for editors: XML forbids a double hyphen inside a comment, so token names cannot be written
   here with their CSS custom-property prefix. An invalid comment silently breaks the whole file.
@@ -23,5 +28,6 @@
     </g>
     <rect y="59.52" width="128" height="8.96" fill="#fff" />
   </mask>
+  <rect width="128" height="128" fill="#0e0c09" />
   <rect width="128" height="128" fill="#8bf274" mask="url(#z)" />
 </svg>
