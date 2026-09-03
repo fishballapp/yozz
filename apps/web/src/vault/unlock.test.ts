@@ -2,7 +2,7 @@ import 'fake-indexeddb/auto';
 import type { UnlockStatusResponse } from '@yozz.app/vault-contract';
 import { IDBFactory } from 'fake-indexeddb';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { VaultApiClient } from './api.ts';
+import type { VaultApiClient } from './api';
 import {
   addPasskeyToSession,
   createPasskeyVault,
@@ -11,7 +11,7 @@ import {
   loginWithPassword,
   switchModeToPasskey,
   switchModeToPassword,
-} from './unlock.ts';
+} from './unlock';
 
 const mocks = vi.hoisted(() => ({
   signInEmail: vi.fn(),
@@ -21,7 +21,7 @@ const mocks = vi.hoisted(() => ({
   getSession: vi.fn(),
 }));
 
-vi.mock('./auth-client.ts', () => ({
+vi.mock('./auth-client', () => ({
   signInWithPassword: mocks.signInEmail,
   signInWithPasskey: mocks.signInPasskey,
   addPasskeyAuthenticator: mocks.addPasskey,
@@ -29,8 +29,8 @@ vi.mock('./auth-client.ts', () => ({
   getSession: mocks.getSession,
 }));
 
-vi.mock('./passkey-prf.ts', async importOriginal => {
-  const actual = await importOriginal<typeof import('./passkey-prf.ts')>();
+vi.mock('./passkey-prf', async importOriginal => {
+  const actual = await importOriginal<typeof import('./passkey-prf')>();
   return {
     ...actual,
     checkPasskeyPrfCapability: vi.fn().mockResolvedValue('supported'),

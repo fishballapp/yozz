@@ -3,8 +3,8 @@ import { createVault, deriveAccountKeys, type EncryptedRecord } from '@yozz.app/
 import type { VaultRecordEnvelope } from '@yozz.app/vault-contract';
 import { IDBFactory } from 'fake-indexeddb';
 import { beforeEach, describe, expect, it } from 'vitest';
-import type { VaultApi } from './api.ts';
-import { createRecordStore } from './record-store.ts';
+import type { VaultApi } from './api';
+import { createRecordStore } from './record-store';
 
 class InMemoryVaultApi implements VaultApi {
   private records = new Map<string, VaultRecordEnvelope>();

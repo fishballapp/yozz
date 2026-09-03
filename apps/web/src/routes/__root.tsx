@@ -1,10 +1,10 @@
 import { createRootRoute, Outlet } from '@tanstack/react-router';
 import { z } from 'zod';
-import { Compose } from '../components/Compose';
-import { Toasts } from '../components/ui/Toast';
-import { composeIntentSchema } from '../lib/compose';
-import { NotFound } from '../pages/NotFound';
-import { MailProvider } from '../state/mail';
+import { NotFound } from '../app/NotFound';
+import { Compose } from '../compose/Compose';
+import { composeIntentSchema } from '../compose/intent';
+import { MailProvider } from '../store/MailProvider';
+import { Toasts } from '../ui/Toast';
 import { VaultProvider } from '../vault/session';
 
 /**

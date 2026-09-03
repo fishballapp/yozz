@@ -1,5 +1,5 @@
 import { createFileRoute } from '@tanstack/react-router';
-import { Settings } from '../pages/Settings';
+import { Settings } from '../app/Settings';
 
 /**
  * The Settings layout: title and section tabs, with each section a child route beneath it. The

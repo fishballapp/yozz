@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { createVaultApiClient } from './api.ts';
+import { createVaultApiClient } from './api';
 
 describe('Vault API client', () => {
   it('gets a record by type and id and validates response schema', async () => {

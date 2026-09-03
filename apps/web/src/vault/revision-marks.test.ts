@@ -1,8 +1,8 @@
 import 'fake-indexeddb/auto';
 import { IDBFactory } from 'fake-indexeddb';
 import { beforeEach, describe, expect, it } from 'vitest';
-import { DeviceDbError } from './device-db.ts';
-import { createIndexedDbRevisionMarks } from './revision-marks.ts';
+import { DeviceDbError } from './device-db';
+import { createIndexedDbRevisionMarks } from './revision-marks';
 
 describe('IndexedDB RevisionMarks implementation', () => {
   let idbFactory: IDBFactory;

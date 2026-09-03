@@ -7,14 +7,14 @@ import {
   type Vault,
 } from '@yozz.app/vault';
 import type { UnlockStatusResponse } from '@yozz.app/vault-contract';
-import { type VaultApiClient, vaultApi } from './api.ts';
+import { type VaultApiClient, vaultApi } from './api';
 import {
   addPasskeyAuthenticator as authAddPasskey,
   signInWithPasskey as authSignInPasskey,
   signInWithPassword as authSignInPassword,
   deletePasskeyAuthenticator,
   getSession,
-} from './auth-client.ts';
+} from './auth-client';
 import {
   checkPasskeyPrfCapability,
   evaluatePrfForCredential,
@@ -23,9 +23,9 @@ import {
   getPrfEvalInput,
   isPrfEnabled,
   PasskeyPrfError,
-} from './passkey-prf.ts';
-import { createRecordStore, type RecordStore } from './record-store.ts';
-import { forgetUnlockKeys, loadUnlockKeys, type UnlockKeys } from './unlock-keys.ts';
+} from './passkey-prf';
+import { createRecordStore, type RecordStore } from './record-store';
+import { forgetUnlockKeys, loadUnlockKeys, type UnlockKeys } from './unlock-keys';
 
 /**
  * The password is the only entropy in password mode, so this floor plus PBKDF2's 650,000

@@ -16,7 +16,10 @@ import { compileAnchors, ROOT_BUNDLE, YOZZ_VALIDATOR } from '@yozz.app/x509';
 
 const wanted = process.argv[2] ?? 'judge-02@webmcp-judge.yozz.app';
 const ledger = JSON.parse(
-  readFileSync(new URL('../../../judge-accounts.local.json', import.meta.url).pathname, 'utf8'),
+  readFileSync(
+    new URL('../../../devpost.local/judge-accounts.json', import.meta.url).pathname,
+    'utf8',
+  ),
 ) as { address: string; mailboxPassword: string }[];
 const account = ledger.find(a => a.address === wanted);
 if (account === undefined) throw new Error(`no ${wanted} in the ledger`);

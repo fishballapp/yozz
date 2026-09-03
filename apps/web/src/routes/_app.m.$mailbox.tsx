@@ -1,7 +1,7 @@
 import { createFileRoute } from '@tanstack/react-router';
 import { z } from 'zod';
-import { Mailbox } from '../pages/Mailbox';
-import { mailboxIdSchema } from '../state/mail';
+import { Mailbox } from '../threads/Mailbox';
+import { mailboxIdSchema } from '../threads/views';
 
 /**
  * `parse` accepts a view id or any email address; anything else is a 404, while an unconnected

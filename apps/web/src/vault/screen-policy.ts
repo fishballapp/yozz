@@ -1,8 +1,8 @@
 import { VaultError, type VaultFailureCode } from '@yozz.app/vault';
 import type { ApiErrorCode } from '@yozz.app/vault-contract';
-import { VaultApiError } from './api.ts';
-import { PasskeyPrfError, type PrfCapability } from './passkey-prf.ts';
-import { UnlockError } from './unlock.ts';
+import { VaultApiError } from './api';
+import { PasskeyPrfError, type PrfCapability } from './passkey-prf';
+import { UnlockError } from './unlock';
 
 /** What a PRF probe permits a screen to OFFER. `unknown` still offers passkey. */
 export const PASSKEY_OFFER: Record<

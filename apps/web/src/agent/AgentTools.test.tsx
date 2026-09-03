@@ -9,8 +9,8 @@ vi.mock('@tanstack/react-router', () => ({
   useParams: () => ({ mailbox: 'unified' }),
 }));
 
-vi.mock('../state/mail', async importOriginal => ({
-  ...(await importOriginal<typeof import('../state/mail')>()),
+vi.mock('../store/MailProvider', async importOriginal => ({
+  ...(await importOriginal<typeof import('../store/MailProvider')>()),
   useMail: () => ({
     identities: [{ address: 'me@yozz.app', imap: { host: 'imap', port: 993 } }],
     threads: [],

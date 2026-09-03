@@ -17,7 +17,7 @@ const octalOf = (text: string): string =>
 const ISSUER = '\\060\\015\\061\\013';
 const bytesOf = (escaped: string): Uint8Array =>
   Uint8Array.from(
-    [...escaped.matchAll(/\\([0-7]{3})/g)].map(([, digits]) => Number.parseInt(digits, 8)),
+    [...escaped.matchAll(/\\([0-7]{3})/g)].map(match => Number.parseInt(match[1] ?? '', 8)),
   );
 
 const object = (

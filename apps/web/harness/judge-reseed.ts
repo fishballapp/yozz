@@ -2,7 +2,7 @@
  * THROWAWAY: delete with the rest of the judge machinery after 2026-09-03.
  *
  * Wipes every folder of a judge mailbox and appends the fifteen fixtures fresh, from the ledger
- * without signing in. The app's Reset (`src/judge/reset.ts`) does the same over the browser.
+ * without signing in. The app's Reset (`src/dev/judge/reset.ts`) does the same over the browser.
  *
  *   node harness/judge-reseed.ts judge-01 judge-02   # named accounts
  *   node harness/judge-reseed.ts all                 # every account in the ledger
@@ -14,10 +14,10 @@ import { buildMessage } from '@yozz.app/smtp';
 import { type ByteDuplex, startTls, type TlsConnection } from '@yozz.app/tls';
 import { socketTransport } from '@yozz.app/tls/harness';
 import { compileAnchors, ROOT_BUNDLE, YOZZ_VALIDATOR } from '@yozz.app/x509';
-import { MINUTES_APART, seedFixtures, seedMessageId } from '../src/judge/fixtures.ts';
+import { MINUTES_APART, seedFixtures, seedMessageId } from '../src/dev/judge/fixtures';
 
 const IMAP_HOST = 'imap.forwardemail.net';
-const LEDGER = new URL('../../../judge-accounts.local.json', import.meta.url).pathname;
+const LEDGER = new URL('../../../devpost.local/judge-accounts.json', import.meta.url).pathname;
 
 type Account = { address: string; mailboxPassword: string; passphrase: string };
 

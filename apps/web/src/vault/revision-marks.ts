@@ -1,5 +1,5 @@
 import type { RevisionMarks } from '@yozz.app/vault';
-import { DeviceDbError, getIdbFactory, openDeviceDb, runTransaction, STORES } from './device-db.ts';
+import { DeviceDbError, getIdbFactory, openDeviceDb, runTransaction, STORES } from './device-db';
 
 type StoredMark = {
   readonly userId: string;

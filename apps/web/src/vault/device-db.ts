@@ -11,7 +11,7 @@ export class DeviceDbError extends Error {
 }
 
 const DB_NAME = 'yozz-device-state';
-const DB_VERSION = 5;
+const DB_VERSION = 6;
 
 type StoreSpec = { readonly name: string; readonly keyPath: string | string[] };
 
@@ -23,11 +23,15 @@ export const STORES = {
   mailSync: { name: 'mail-sync', keyPath: ['userId', 'account', 'folder'] },
   mailSummaries: { name: 'mail-summaries', keyPath: ['userId', 'account', 'folder', 'uid'] },
   mailBodies: { name: 'mail-bodies', keyPath: ['userId', 'account', 'folder', 'uid'] },
+  /** A body's text alone, written beside every body: the list reads these without the bytes. */
+  mailPreviews: { name: 'mail-previews', keyPath: ['userId', 'account', 'folder', 'uid'] },
 } as const satisfies Record<string, StoreSpec>;
 
-/** Stores whose key path changed in a version: dropped and recreated on upgrade. Only the derived cache has ever changed shape. */
+/** Stores whose shape changed in a version: dropped and recreated on upgrade. Only the derived cache has ever changed shape. */
 const REKEYED: readonly { readonly since: number; readonly names: readonly string[] }[] = [
   { since: 5, names: [STORES.mailSync.name, STORES.mailSummaries.name, STORES.mailBodies.name] },
+  // A body written before previews existed has no preview row; refetching keeps the two in step.
+  { since: 6, names: [STORES.mailBodies.name] },
 ];
 
 type StoreName = (typeof STORES)[keyof typeof STORES]['name'];

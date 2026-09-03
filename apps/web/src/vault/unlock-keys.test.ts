@@ -1,8 +1,8 @@
 import 'fake-indexeddb/auto';
 import { IDBFactory } from 'fake-indexeddb';
 import { describe, expect, it } from 'vitest';
-import { createIndexedDbRevisionMarks } from './revision-marks.ts';
-import { forgetUnlockKeys, loadUnlockKeys, saveUnlockKeys } from './unlock-keys.ts';
+import { createIndexedDbRevisionMarks } from './revision-marks';
+import { forgetUnlockKeys, loadUnlockKeys, saveUnlockKeys } from './unlock-keys';
 
 const aesKey = () =>
   crypto.subtle.generateKey({ name: 'AES-GCM', length: 256 }, false, ['wrapKey', 'unwrapKey']);

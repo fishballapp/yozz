@@ -1,7 +1,7 @@
 import { freshVault, type OpenedRecord, type Vault } from '@yozz.app/vault';
 import type { PutPrecondition, VaultRecordEnvelope } from '@yozz.app/vault-contract';
-import type { VaultApi } from './api.ts';
-import { createIndexedDbRevisionMarks } from './revision-marks.ts';
+import type { VaultApi } from './api';
+import { createIndexedDbRevisionMarks } from './revision-marks';
 
 /** The clear-text revision is not the one sealed inside the ciphertext; the client writes both from one number. */
 export class VaultStoreDisagreementError extends Error {

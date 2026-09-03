@@ -11,9 +11,9 @@ import { execFileSync } from 'node:child_process';
 import { chromium, type Page } from '@playwright/test';
 
 /** The page imports by the paths Vite serves, which TypeScript cannot resolve from here. */
-type UnlockModule = typeof import('../src/vault/unlock.ts');
-type AuthModule = typeof import('../src/vault/auth-client.ts');
-type KeysModule = typeof import('../src/vault/unlock-keys.ts');
+type UnlockModule = typeof import('../src/vault/unlock');
+type AuthModule = typeof import('../src/vault/auth-client');
+type KeysModule = typeof import('../src/vault/unlock-keys');
 const UNLOCK = '/src/vault/unlock.ts' as string;
 const AUTH = '/src/vault/auth-client.ts' as string;
 const KEYS = '/src/vault/unlock-keys.ts' as string;

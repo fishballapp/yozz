@@ -4,7 +4,7 @@
  *     YOZZ_IMAP_HOST=… YOZZ_IMAP_USER=… YOZZ_IMAP_PASSWORD=… node harness/seed-inbox.ts [slug…]
  *
  * Every sender is a disabled alias on `webmcp-judge.yozz.app` (accepts and drops replies), so a reply
- * never bounces a DSN into the demoed mailbox. Keep in step with `apps/web/src/judge/fixtures.ts`.
+ * never bounces a DSN into the demoed mailbox. Keep in step with `apps/web/src/dev/judge/fixtures.ts`.
  */
 import { connect, type Socket } from 'node:net';
 import { buildMessage, type MessageInput } from '@yozz.app/smtp';

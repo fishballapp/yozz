@@ -1,4 +1,4 @@
-import { getIdbFactory, openDeviceDb, runTransaction, STORES } from './device-db.ts';
+import { getIdbFactory, openDeviceDb, runTransaction, STORES } from './device-db';
 
 /** `encKey` is a non-extractable `CryptoKey`, and structured clone keeps it that way after a reload. */
 export type UnlockKeys = {

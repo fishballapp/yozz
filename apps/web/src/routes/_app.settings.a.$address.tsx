@@ -1,6 +1,6 @@
 import { createFileRoute } from '@tanstack/react-router';
 import { z } from 'zod';
-import { Address } from '../pages/settings/Address';
+import { Address } from '../app/settings/Address';
 
 /**
  * One address's page. Anything that is not an email address does not match and is a 404; an

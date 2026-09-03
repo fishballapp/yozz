@@ -6,7 +6,7 @@ import {
   getPrfEvalInput,
   isPrfEnabled,
   PasskeyPrfError,
-} from './passkey-prf.ts';
+} from './passkey-prf';
 
 describe('Web passkey PRF extension and derivation', () => {
   it('provides PRF extension inputs with standard label', () => {

@@ -39,7 +39,7 @@
     "corpus:harvest": "node corpus/harvest.ts",
     "limbo:fetch": "node harness/fetch.ts",
     "limbo": "node harness/limbo.ts",
-    "test": "vitest run --passWithNoTests",
+    "test": "vitest run",
     "limbo:ours": "node harness/limbo.ts --validator=yozz",
     "anchors:fetch": "node anchors/fetch.ts",
     "anchors:build": "node anchors/build.ts",

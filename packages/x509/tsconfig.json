@@ -6,5 +6,5 @@
     "types": ["node"],
     "allowImportingTsExtensions": true
   },
-  "include": ["src/**/*.ts", "harness/**/*.ts", "corpus/**/*.ts"]
+  "include": ["src/**/*.ts", "harness/**/*.ts", "corpus/**/*.ts", "anchors/**/*.ts"]
 }

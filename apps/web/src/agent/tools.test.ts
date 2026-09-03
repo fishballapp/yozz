@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { DraftRecord } from '../lib/drafts';
-import type { Folder, Message } from '../lib/thread';
-import type { DraftHandle } from '../mail/draft-records';
-import type { BodyOutcome, ThreadState } from '../state/mail';
+import type { DraftRecord } from '../compose/draft-record';
+import type { DraftHandle } from '../compose/draft-vault';
+import type { BodyOutcome } from '../threads/body-state';
+import type { Folder, Message, ThreadState } from '../threads/thread';
 import { type AgentPort, BODY_CHARS, buildAgentTools } from './tools';
 
 const message = (id: string, overrides: Partial<Message> = {}): Message => ({
@@ -380,7 +380,7 @@ describe('save_draft and delete_draft', () => {
     });
     expect(result).toMatchObject({
       draftKey: 'k1',
-      status: expect.stringContaining('Nothing has been sent'),
+      status: expect.stringContaining('not sent'),
     });
     expect(state.written).toEqual([
       {

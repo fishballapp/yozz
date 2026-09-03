@@ -1,5 +1,5 @@
 /**
- * HACKATHON ONLY: delete with the rest of `src/judge/` after 2026-09-03.
+ * HACKATHON ONLY: delete with the rest of `src/dev/judge/` after 2026-09-03.
  *
  * Mints a judge a working account: a Forward Email alias with its own mailbox, a vault on
  * `yozz.app`, the alias connected, the fifteen demo messages seeded.
@@ -8,7 +8,7 @@
  *   … --count 50            # already-finished accounts are skipped
  *   … --delete              # removes every alias in the ledger
  *
- * The ledger (`judge-accounts.local.json`, untracked) is the resume point and the credential
+ * The ledger (`devpost.local/judge-accounts.json`, untracked) is the resume point and the credential
  * list. Each step checks whether it already happened.
  */
 import { randomBytes } from 'node:crypto';
@@ -19,7 +19,7 @@ import { createImapClient } from '@yozz.app/imap';
 import { type ByteDuplex, startTls, type TlsConnection } from '@yozz.app/tls';
 import { socketTransport } from '@yozz.app/tls/harness';
 import { compileAnchors, ROOT_BUNDLE, YOZZ_VALIDATOR } from '@yozz.app/x509';
-import { JUDGE_DOMAIN } from '../src/judge/domain';
+import { JUDGE_DOMAIN } from '../src/dev/judge/domain';
 
 /** Wanted only by the alias half, so finishing minted accounts needs no 1Password open. */
 const apiKey = () => {
@@ -33,7 +33,7 @@ const DOMAIN = JUDGE_DOMAIN;
 const WEB = process.env.YOZZ_WEB ?? 'https://yozz.app';
 const API = process.env.YOZZ_API ?? 'https://api.yozz.app';
 const IMAP_HOST = 'imap.forwardemail.net';
-const LEDGER = new URL('../../../judge-accounts.local.json', import.meta.url).pathname;
+const LEDGER = new URL('../../../devpost.local/judge-accounts.json', import.meta.url).pathname;
 
 type Account = {
   address: string;

@@ -17,7 +17,7 @@ import {
 } from '@playwright/test';
 import { createServer } from 'vite';
 
-type HtmlModule = typeof import('../src/mail/html.ts');
+type HtmlModule = typeof import('../src/threads/html');
 type MountResult = {
   readonly hasRemoteImages: boolean;
   readonly measuredHeight: number;

@@ -1,6 +1,6 @@
 import { createFileRoute } from '@tanstack/react-router';
 import { z } from 'zod';
-import { Enrol } from '../pages/Enrol';
+import { Enrol } from '../vault/Enrol';
 
 export const Route = createFileRoute('/enrol')({
   // `?reset=1` is how a RECOVERY link is told apart from a signup link: the same

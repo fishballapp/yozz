@@ -1,16 +1,12 @@
 import { z } from 'zod';
-import type { AddressRecord } from '../lib/addresses';
-import { seedFor } from '../lib/compose';
-import { quoteForReply } from '../lib/mail-format';
-import { isArchived, isTrashed, threadByHandle } from '../lib/thread';
-import type { DeleteOutcome, DraftHandle, SaveOutcome } from '../mail/draft-records';
-import {
-  type BodyOutcome,
-  type DraftContent,
-  previewOf,
-  type ThreadState,
-  visibleThreads,
-} from '../state/mail';
+import type { AddressRecord } from '../addresses/record';
+import type { DraftContent } from '../compose/draft';
+import type { DeleteOutcome, DraftHandle, SaveOutcome } from '../compose/draft-vault';
+import { quoteForReply, seedFor } from '../compose/intent';
+import type { BodyOutcome } from '../threads/body-state';
+import type { ThreadState } from '../threads/thread';
+import { isArchived, isTrashed, threadByHandle } from '../threads/thread';
+import { previewOf, visibleThreads } from '../threads/views';
 
 /**
  * The tools an agent can call, as pure functions over a port; `AgentTools` registers them and
@@ -269,7 +265,7 @@ const saved = (outcome: Awaited<ReturnType<AgentPort['writeDraft']>>, threadId?:
       draftId: outcome.handle.draftId,
       ...(threadId === undefined ? {} : { threadId }),
       status:
-        'Saved to Drafts. Nothing has been sent: only the user can press Send. navigate to it to put it on their screen.',
+        'Saved to Drafts, not sent. navigate to it so the user can review and press Send. Press Send yourself only if the user explicitly asked you to send this draft.',
     };
   }
   const error =
@@ -317,7 +313,7 @@ export const buildAgentTools = (port: () => AgentPort): readonly AgentTool[] => 
         .min(1)
         .optional()
         .describe(
-          'Case-insensitive text over subjects, senders and recipients, plus the bodies of messages already opened.',
+          'Case-insensitive text over subjects, senders and recipients, plus every body already loaded or cached on this device.',
         ),
       unread: z.boolean().optional(),
       starred: z.boolean().optional(),
@@ -448,7 +444,7 @@ export const buildAgentTools = (port: () => AgentPort): readonly AgentTool[] => 
   tool({
     name: 'save_draft',
     description:
-      "Writes a draft into the user's Drafts — a new message, a reply to a conversation, or a full replacement of a draft that is already there. NOTHING IS SENT: only the user can press Send, and this tool cannot. Give `draftId` to replace an existing draft (the whole draft, not a patch: send every field you want kept). Give `threadId` to reply, which fills in the recipients, the subject and the quote for you. `from` must be one of the user's addresses.",
+      "Writes a draft into the user's Drafts — a new message, a reply to a conversation, or a full replacement of a draft that is already there. Nothing is sent. The user reviews and presses Send; press it yourself only on their explicit request for this draft. Give `draftId` to replace an existing draft (the whole draft, not a patch: send every field you want kept). Give `threadId` to reply, which fills in the recipients, the subject and the quote for you. `from` must be one of the user's addresses.",
     input: z.object({
       draftId: z
         .string()

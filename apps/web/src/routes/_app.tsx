@@ -1,5 +1,5 @@
 import { createFileRoute } from '@tanstack/react-router';
-import { AppShell } from '../components/AppShell';
+import { AppShell } from '../app/AppShell';
 
 // Pathless: it adds no segment to any URL, it only says "these routes are inside the app". What
 // sits outside it is a page with no rail, no status line and no mailbox around it.

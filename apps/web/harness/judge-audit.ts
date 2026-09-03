@@ -7,7 +7,7 @@ import { socketTransport } from '@yozz.app/tls/harness';
 import { compileAnchors, ROOT_BUNDLE, YOZZ_VALIDATOR } from '@yozz.app/x509';
 
 const IMAP_HOST = 'imap.forwardemail.net';
-const LEDGER = new URL('../../../judge-accounts.local.json', import.meta.url).pathname;
+const LEDGER = new URL('../../../devpost.local/judge-accounts.json', import.meta.url).pathname;
 
 const open = async (address: string, password: string) => {
   const socket = await new Promise<Socket>((resolve, reject) => {

@@ -1,10 +1,10 @@
 import { useNavigate, useParams } from '@tanstack/react-router';
 import { useEffect, useRef } from 'react';
 import { flushSync } from 'react-dom';
-import { isInbound } from '../lib/addresses';
-import { withCompose } from '../lib/compose';
-import { isArchived, isTrashed } from '../lib/thread';
-import { useMail } from '../state/mail';
+import { isInbound } from '../addresses/record';
+import { withCompose } from '../compose/intent';
+import { useMail } from '../store/MailProvider';
+import { isArchived, isTrashed } from '../threads/thread';
 import { type AgentPort, buildAgentTools } from './tools';
 
 /**

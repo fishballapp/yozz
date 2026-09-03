@@ -1,17 +1,41 @@
 {
   "files": [],
   "references": [
-    { "path": "./packages/x509" },
-    { "path": "./internal/vault-contract" },
-    { "path": "./internal/vault" },
-    { "path": "./packages/tls" },
-    { "path": "./packages/smtp" },
-    { "path": "./packages/imap" },
-    { "path": "./apps/worker-api" },
-    { "path": "./apps/worker-api/scripts" },
-    { "path": "./apps/web" },
-    { "path": "./internal/cn" },
-    { "path": "./internal/email" },
-    { "path": "./internal/vite-plugins" }
+    {
+      "path": "./packages/x509"
+    },
+    {
+      "path": "./internal/vault-contract"
+    },
+    {
+      "path": "./internal/vault"
+    },
+    {
+      "path": "./packages/tls"
+    },
+    {
+      "path": "./packages/smtp"
+    },
+    {
+      "path": "./packages/imap"
+    },
+    {
+      "path": "./apps/worker-api"
+    },
+    {
+      "path": "./apps/worker-api/scripts"
+    },
+    {
+      "path": "./apps/web"
+    },
+    {
+      "path": "./internal/cn"
+    },
+    {
+      "path": "./internal/email"
+    },
+    {
+      "path": "./internal/vite-plugins"
+    }
   ]
 }

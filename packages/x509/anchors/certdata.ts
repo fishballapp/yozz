@@ -3,7 +3,7 @@
 /** `\ooo` per byte, how NSS writes every binary attribute. */
 const decodeOctal = (body: string): Uint8Array =>
   Uint8Array.from(
-    [...body.matchAll(/\\([0-7]{3})/g)].map(([, digits]) => Number.parseInt(digits, 8)),
+    [...body.matchAll(/\\([0-7]{3})/g)].map(match => Number.parseInt(match[1] ?? '', 8)),
   );
 
 type Attributes = Readonly<Record<string, string | Uint8Array>>;

@@ -10,7 +10,7 @@ import {
   type VaultRecordEnvelope,
   VaultRecordEnvelopeSchema,
 } from '@yozz.app/vault-contract';
-import { getApiBaseUrl } from './api-base-url.ts';
+import { getApiBaseUrl } from './api-base-url';
 
 export class VaultApiError extends Error {
   readonly code: ApiErrorCode | 'NETWORK_ERROR';
