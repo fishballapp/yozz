@@ -26,7 +26,6 @@
           "globalErrorInEffectFailure": "error",
           "globalFetchInEffect": "error",
           "globalTimersInEffect": "error",
-          "importFromBarrel": "error",
           "layerMergeAllWithDependencies": "error",
           "lazyPromiseInEffectSync": "error",
           "leakingRequirements": "error",
