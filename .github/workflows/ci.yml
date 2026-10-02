@@ -111,7 +111,7 @@ jobs:
           key: bogo-${{ hashFiles('packages/tls/harness/bogo/pin.ts') }}
       - run: pnpm -F @yozz.app/tls bogo:fetch
       # Fails when any in-scope test moves from what expected.txt records: a regression and a fix
-      # both land there, and both want a look. A test that moves on one run and not the next is
-      # timing between the runner and the shim; the levers are the runner's own -num-workers and
-      # -idle-timeout flags (passed from harness/bogo/run.ts, which sets neither today), not a retry.
+      # both land there, and both want a look. A test that moves on one run and not the next is a
+      # race between the runner and the shim, not a result: the runner's own `local:` error says
+      # which side broke (the last one was the shim's close, harness/socket-transport.ts).
       - run: pnpm -F @yozz.app/tls bogo

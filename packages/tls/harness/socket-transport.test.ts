@@ -1,7 +1,9 @@
 /**
  * A peer still writing when we close must not have its write fail. Under `destroy()` the peer
  * still received our parting bytes; what a RST breaks is the peer's write, which is BoGo's
- * `write: broken pipe` where `bad record MAC` was expected. The `destroy` case is the control.
+ * `write: broken pipe` where `bad record MAC` was expected. The shim exits the moment the close
+ * resolves, and exiting closes the socket outright, so a close that returns before the peer has
+ * stopped writing breaks it just the same. The `destroy` case is the control.
  */
 import { type AddressInfo, connect, createServer, type Server, type Socket } from 'node:net';
 import { afterEach, expect, test } from 'vitest';
@@ -35,8 +37,11 @@ type Aftermath = {
   readonly heardLastWord: boolean;
 };
 
-/** The client never reads, so `UNREAD` sits in its receive buffer when it closes. */
-const peerWriteAfterClose = async (
+/**
+ * The client never reads, so `UNREAD` sits in its receive buffer when it closes, and the peer
+ * goes on writing while the close is under way, as the runner's flight does.
+ */
+const peerWriteDuringClose = async (
   close: (socket: Socket) => Promise<void>,
 ): Promise<Aftermath> => {
   // Node auto-ends its side on a FIN by default; BoGo's peer is Go, and Go keeps writing.
@@ -57,7 +62,7 @@ const peerWriteAfterClose = async (
   const heard: number[] = [];
   peer.on('data', chunk => heard.push(...chunk));
   client.write(LAST_WORD);
-  await close(client);
+  const closed = close(client);
   await settle();
 
   // The first write after a reset can still land in the send buffer and report success.
@@ -67,6 +72,7 @@ const peerWriteAfterClose = async (
   await settle();
   peer.write(UNREAD);
   await settle();
+  await closed;
   const failure = errors[0] ?? 'landed';
   const heardLastWord = heard.length >= LAST_WORD.length;
 
@@ -75,14 +81,18 @@ const peerWriteAfterClose = async (
   return { write: failure, heardLastWord };
 };
 
-test('ending gracefully leaves the peer able to write, and to read our last word', async () => {
-  const after = await peerWriteAfterClose(endGracefully);
+test('ending gracefully, then exiting, leaves the peer able to write and to read our last word', async () => {
+  const after = await peerWriteDuringClose(async socket => {
+    await endGracefully(socket);
+    // What process.exit does to the shim's socket.
+    socket.destroy();
+  });
   expect(after.write).toBe('landed');
   expect(after.heardLastWord).toBe(true);
 });
 
 test("destroy() is what breaks the peer's write — the behaviour endGracefully replaced", async () => {
-  const after = await peerWriteAfterClose(async socket => {
+  const after = await peerWriteDuringClose(async socket => {
     socket.destroy();
   });
   expect(after.write).not.toBe('landed');

@@ -56,14 +56,39 @@ export const socketTransport = (socket: Socket): ByteDuplex => {
   };
 };
 
+/** How long the peer has to stop writing before we take it as done. */
+const LINGER_QUIET_MS = 250;
+/** The longest a close waits for that, whatever the peer does. */
+const LINGER_MAX_MS = 2_000;
+
 /**
- * Drain, flush, half-close. `destroy()` with unread bytes in the receive buffer sends a RST, which
- * fails the peer's next write before it reports the alert it was about to read. Does not wait
- * for the peer to close back (BoGo's runner waits for the shim to exit first) and does not time
- * out the flush (only an alert or close_notify is buffered here).
+ * Drain, flush, half-close, then linger. A socket closed with unread bytes in its receive buffer
+ * answers the peer with a RST, and so does one closed while the peer is still writing, which is
+ * what exiting the process does: either fails the peer's next write before it reads the alert we
+ * sent (BoGo: `write: broken pipe` where `remote error: bad record MAC` was expected). So after
+ * our FIN the socket goes on draining until the peer closes back or has been quiet for
+ * LINGER_QUIET_MS, the lingering close web servers do. It cannot simply wait for the peer's close:
+ * BoGo's runner waits for the shim to exit before it closes. The flush is not timed out, since
+ * only an alert or close_notify is buffered here.
  */
-export const endGracefully = (socket: Socket): Promise<void> =>
-  new Promise(resolve => {
-    socket.resume();
-    socket.end(() => resolve());
-  });
+export const endGracefully = async (socket: Socket): Promise<void> => {
+  if (socket.destroyed) return;
+  const { promise: isDone, resolve } = Promise.withResolvers<void>();
+  const cap = setTimeout(resolve, LINGER_MAX_MS);
+  let quiet: ReturnType<typeof setTimeout> | undefined;
+  const restartQuiet = () => {
+    clearTimeout(quiet);
+    quiet = setTimeout(resolve, LINGER_QUIET_MS);
+  };
+  socket.on('data', restartQuiet);
+  for (const event of ['end', 'close', 'error'] as const) socket.once(event, () => resolve());
+  socket.resume();
+  socket.end(restartQuiet);
+  try {
+    await isDone;
+  } finally {
+    clearTimeout(cap);
+    clearTimeout(quiet);
+    socket.off('data', restartQuiet);
+  }
+};
