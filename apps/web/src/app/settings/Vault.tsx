@@ -12,7 +12,9 @@ import { PASSKEY_OFFER, vaultErrorMessage } from '../../vault/screen-policy';
 import { useVault } from '../../vault/session';
 import {
   addPasskeyToSession,
+  confirmIdentity,
   MIN_PASSWORD_LENGTH,
+  needsFreshSession,
   resetVaultAccount,
   switchModeToPasskey,
   switchModeToPassword,
@@ -31,6 +33,11 @@ export const Vault = () => {
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [addedPasskeyNote, setAddedPasskeyNote] = useState(false);
+  /** A change the server refused for want of a fresh session, run again once the person confirms. */
+  const [awaitingConfirmation, setAwaitingConfirmation] = useState<(() => Promise<void>) | null>(
+    null,
+  );
+  const [currentPassword, setCurrentPassword] = useState('');
 
   useEffect(() => {
     if (session === null) return;
@@ -49,7 +56,9 @@ export const Vault = () => {
     try {
       await action();
     } catch (err) {
-      setError(vaultErrorMessage(err));
+      // Wrapped: a bare function handed to a setter is called as an updater.
+      if (needsFreshSession(err)) setAwaitingConfirmation(() => action);
+      else setError(vaultErrorMessage(err));
     } finally {
       setIsBusy(false);
     }
@@ -100,12 +109,83 @@ export const Vault = () => {
 
   const canOfferPasskey = prf !== null && PASSKEY_OFFER[prf].canOffer;
 
+  const confirmAndRetry = (retry: () => Promise<void>) =>
+    run(async () => {
+      await confirmIdentity({ currentSession: session, password: currentPassword });
+      setAwaitingConfirmation(null);
+      setCurrentPassword('');
+      await retry();
+    });
+
   return (
     <>
       {error !== null && (
         <p role="alert" className="mb-6 text-base text-danger">
           {error}
         </p>
+      )}
+
+      {awaitingConfirmation !== null && (
+        <section
+          aria-labelledby="vault-confirm-heading"
+          className="mb-8 border-y border-rule bg-ink-raised px-4 py-3.5"
+        >
+          <h2 id="vault-confirm-heading" className="label-rule">
+            Confirm it’s you
+          </h2>
+          <p className="mt-2 max-w-xl text-base leading-relaxed text-paper-dim">
+            You signed in more than a day ago.{' '}
+            <span className="text-paper">Changing how this vault opens needs a fresh sign-in</span>,
+            so a session someone else got hold of cannot do it. Your change goes through right
+            after.
+          </p>
+          <form
+            className="mt-4 flex flex-wrap items-end gap-2"
+            onSubmit={event => {
+              event.preventDefault();
+              void confirmAndRetry(awaitingConfirmation);
+            }}
+          >
+            {session.mode === 'password' && (
+              <FieldRow label="Current password" htmlFor="vault-confirm-password">
+                <Input
+                  id="vault-confirm-password"
+                  type="password"
+                  autoComplete="current-password"
+                  // Moves focus, and with it the scroll, to the question the page is now asking.
+                  autoFocus
+                  value={currentPassword}
+                  onChange={event => setCurrentPassword(event.target.value)}
+                  disabled={isBusy}
+                />
+              </FieldRow>
+            )}
+            <Button
+              type="submit"
+              variant="secondary"
+              disabled={isBusy}
+              autoFocus={session.mode === 'passkey'}
+            >
+              {isBusy
+                ? session.mode === 'passkey'
+                  ? 'Waiting for your authenticator…'
+                  : 'Deriving keys…'
+                : session.mode === 'passkey'
+                  ? 'Confirm with your passkey'
+                  : 'Confirm'}
+            </Button>
+            <Button
+              variant="ghost"
+              disabled={isBusy}
+              onClick={() => {
+                setAwaitingConfirmation(null);
+                setCurrentPassword('');
+              }}
+            >
+              Cancel
+            </Button>
+          </form>
+        </section>
       )}
 
       <PageSection

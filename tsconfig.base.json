@@ -11,6 +11,35 @@
     "resolveJsonModule": true,
     "isolatedModules": true,
     "jsx": "react-jsx",
-    "noEmit": true
+    "noEmit": true,
+    "plugins": [
+      {
+        "name": "@effect/language-service",
+        "namespaceImportPackages": ["effect", "@effect/*"],
+        "diagnosticSeverity": {
+          "anyUnknownInErrorContext": "error",
+          "catchUnfailableEffect": "warning",
+          "effectInVoidSuccess": "error",
+          "globalConsoleInEffect": "error",
+          "globalDateInEffect": "error",
+          "globalErrorInEffectCatch": "error",
+          "globalErrorInEffectFailure": "error",
+          "globalFetchInEffect": "error",
+          "globalTimersInEffect": "error",
+          "importFromBarrel": "error",
+          "layerMergeAllWithDependencies": "error",
+          "lazyPromiseInEffectSync": "error",
+          "leakingRequirements": "error",
+          "multipleEffectProvide": "error",
+          "outdatedApi": "error",
+          "processEnvInEffect": "error",
+          "returnEffectInGen": "error",
+          "runEffectInsideEffect": "error",
+          "schemaSyncInEffect": "warning",
+          "tryCatchInEffectGen": "error",
+          "unknownInEffectCatch": "error"
+        }
+      }
+    ]
   }
 }

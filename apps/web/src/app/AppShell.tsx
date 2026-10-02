@@ -5,7 +5,6 @@ import { useEffect, useState } from 'react';
 import { AddressRail } from '../addresses/AddressRail';
 import { AgentTools } from '../agent/AgentTools';
 import { withCompose } from '../compose/intent';
-import { JudgeBanner } from '../dev/judge/JudgeBanner';
 import { useMail } from '../store/MailProvider';
 import { mailboxLabel, visibleThreads } from '../threads/views';
 import { Button, buttonClass } from '../ui/Button';
@@ -94,8 +93,6 @@ const AppShellBody = () => {
           Compose
         </Link>
       </div>
-
-      <JudgeBanner />
 
       <div className="flex min-h-0 flex-1">
         <aside className="hidden shrink-0 lg:block" style={{ width: railWidth }}>

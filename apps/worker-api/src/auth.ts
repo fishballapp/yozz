@@ -1,4 +1,5 @@
 import { passkey } from '@better-auth/passkey';
+import { WEBAUTHN_TIMEOUT_MS } from '@yozz.app/vault-contract';
 import { betterAuth } from 'better-auth';
 import { APIError, createAuthMiddleware } from 'better-auth/api';
 import { magicLink } from 'better-auth/plugins';
@@ -7,6 +8,19 @@ import { DISABLED_ENDPOINTS, ENDPOINT_POLICIES } from './auth-policy.ts';
 import { consoleEmailSender, createProductionEmailSender, type EmailSender } from './email.ts';
 
 import { getBaseUrl, getWebOrigin, type RuntimeEnv } from './env.ts';
+
+/**
+ * Changing how a vault opens needs a session this young: Better Auth's own passkey registration,
+ * and our `PUT /unlock` and vault reset (`requireFreshSession`). A stolen older cookie can read
+ * ciphertext but cannot plant a credential that outlives it. Better Auth's default, stated.
+ */
+export const SESSION_FRESH_AGE_SECONDS = 60 * 60 * 24;
+
+/** The plugin hard-codes SimpleWebAuthn's 60 s and exposes no option for it. */
+const PASSKEY_OPTIONS_PATHS: ReadonlySet<string> = new Set([
+  '/passkey/generate-register-options',
+  '/passkey/generate-authenticate-options',
+]);
 
 export type CreateAuthOverrides = {
   readonly emailSender?: EmailSender;
@@ -36,6 +50,9 @@ export const createAuth = (
         baseURL: getBaseUrl(env),
         trustedOrigins: [webOrigin],
         secret: env.BETTER_AUTH_SECRET,
+        // This factory is per-request; committed migrations and db:check-auth own schema validation
+        // so auth requests do not introspect D1 every time.
+        advanced: { database: { validateSchema: false } },
         emailAndPassword: {
           enabled: true,
           disableSignUp: true,
@@ -45,6 +62,7 @@ export const createAuth = (
             enabled: false,
           },
         },
+        session: { freshAge: SESSION_FRESH_AGE_SECONDS },
         hooks: {
           before: createAuthMiddleware(async ctx => {
             if (DISABLED_ENDPOINTS.has(ctx.path)) {
@@ -59,6 +77,11 @@ export const createAuth = (
               body: ctx.body,
               headers: ctx.headers,
             });
+          }),
+          after: createAuthMiddleware(async ctx => {
+            const options = ctx.context.returned;
+            if (!PASSKEY_OPTIONS_PATHS.has(ctx.path) || options instanceof APIError) return;
+            return ctx.json({ ...(options as object), timeout: WEBAUTHN_TIMEOUT_MS });
           }),
         },
         plugins: [

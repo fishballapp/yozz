@@ -11,6 +11,9 @@ export type Attachment = {
   content?: Uint8Array<ArrayBuffer>;
 };
 
+/** Someone on a `To` or `Cc` line, as the sender wrote them. */
+export type Recipient = { readonly name?: string; readonly address: string };
+
 /** A received body is fetched when the message is opened. Absent means loaded. */
 export type BodyStatus = 'pending' | 'loading' | 'failed';
 
@@ -20,8 +23,11 @@ export type Message = {
   fromAddress: string;
   /** The first recipient: one of your addresses when the message arrived here. `newestInbound` tells the two apart. */
   toAddress: string;
-  /** Every address in `To` and `Cc`, lowercased and distinct, in header order. Absent on fixture data. */
-  recipients?: readonly string[];
+  /** `To` and `Cc` as the sender wrote them, in header order. Absent on a draft. */
+  to?: readonly Recipient[];
+  cc?: readonly Recipient[];
+  /** Where the sender wants replies to go, present only when it names someone other than From. */
+  replyTo?: readonly Recipient[];
   at: number;
   body: string[];
   /** The sender's HTML body, unsanitized; nothing renders it outside `HtmlBody`'s sandboxed frame. */
@@ -113,6 +119,47 @@ export const isTrashed = ({ folders }: Foldered) =>
 /** A thread has an attachment when any of its messages does. */
 export const attachmentsOf = (thread: Thread) =>
   thread.messages.flatMap(message => message.attachments ?? []);
+
+/**
+ * RFC 9051's UIDVALIDITY is a non-zero number, so 0 marks a copy no server holds: sent mail kept
+ * in the vault because its address has no mailbox to keep it in.
+ */
+export const VAULT_UID_VALIDITY = 0;
+
+/**
+ * The accounts a message arrived at, once each: where it landed, whether it has since been archived
+ * or binned there. Empty for mail you sent, unless another of your addresses received it too. The
+ * account that sent it is never an arrival, which is what keeps a deleted Sent copy, now in Trash,
+ * from reading as received.
+ */
+export const inboxesOf = (message: Message): readonly string[] => [
+  ...new Set(
+    (message.locations ?? [])
+      .filter(
+        ({ account, folder }) =>
+          folder !== 'sent' && account.toLowerCase() !== message.fromAddress.toLowerCase(),
+      )
+      .map(({ account }) => account),
+  ),
+];
+
+/**
+ * Gmail's "to me, Alice": To then Cc as one list, once per address, with every address you own
+ * read as a single "me". Empty when nobody is named, which is the Bcc's `undisclosed-recipients:;`.
+ */
+export const addresseesOf = (
+  message: Message,
+  ownedAddresses: readonly string[],
+): readonly (Recipient | 'me')[] => {
+  const owned = new Set(ownedAddresses.map(address => address.toLowerCase()));
+  const byKey = new Map<string, Recipient | 'me'>();
+  for (const recipient of [...(message.to ?? []), ...(message.cc ?? [])]) {
+    const address = recipient.address.toLowerCase();
+    const key = owned.has(address) ? 'me' : address;
+    if (!byKey.has(key)) byKey.set(key, key === 'me' ? 'me' : recipient);
+  }
+  return [...byKey.values()];
+};
 
 /** The newest message that arrived at one of your addresses; `messages.at(-1)` may be yours. Falls back to the newest. */
 export const newestInbound = (thread: Thread, ownedAddresses: readonly string[]) =>

@@ -1,0 +1,51 @@
+name: Trust store vs upstream
+
+# YOZZ ships its own root store, because a browser has no `node:tls` one to borrow. It is compiled
+# from two files pinned by SHA-256, which is what stops the set of CAs we trust changing without a
+# diff someone read. The cost of pinning is that it also stops the set changing when it SHOULD: a
+# CA distrusted this morning stays trusted by a client shipping last month's pin, and nothing in
+# `pnpm test` or ci.yml would ever say so.
+#
+# This is the other half. It fetches what curl and NSS publish TODAY, diffs it against the
+# committed artifact, and fails when anything moved, including the change no bundle diff can see:
+# a root that gained a distrust-after cutoff while its certificate stayed byte-for-byte identical.
+#
+# It reports; it does not update. Bumping the pins automatically would hand whoever controls
+# curl.se or the NSS mirror the ability to change what YOZZ trusts unattended, which is precisely
+# what the pins exist to prevent. The failure prints the two hashes ready to paste and the two
+# commands that ship the change: packages/x509/anchors/upstream-check.ts.
+#
+# The check itself is gated by `pnpm test`: anchors/upstream.test.ts feeds the same diff a
+# simulated distrust, so a checker that quietly stopped working fails there rather than looking
+# like a quiet upstream here.
+#
+# GitHub disables a public repo's schedules after 60 days without activity; every eject is
+# activity, so this lapses only if YOZZ stops changing for two months.
+on:
+  schedule:
+    # 07:00 UTC daily. A distrust event is news within a day; a tighter loop only adds noise,
+    # because the human step after it is measured in minutes and happens once every few years.
+    - cron: '0 7 * * *'
+  # So a change to the checker can be exercised without waiting for tomorrow.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  upstream:
+    name: curl cacert.pem · NSS certdata.txt
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 26
+      # No `pnpm install`: the checker imports relative paths and Node's own `fetch` and nothing
+      # else, so installing the workspace would only add a registry round trip and a lockfile
+      # failure mode to a job whose whole purpose is to be reliable about one narrow question.
+      # `pnpm -F @yozz.app/x509 anchors:check` is the same script, and what to run locally.
+      #
+      # Non-zero on any movement. Read the log before pasting a hash: a root added, a root removed
+      # and a root retired are three different decisions, and only the last one is urgent.
+      - run: node packages/x509/anchors/upstream-check.ts

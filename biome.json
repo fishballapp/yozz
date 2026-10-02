@@ -8,7 +8,7 @@
   "linter": {
     "enabled": true,
     "rules": {
-      "recommended": true,
+      "preset": "recommended",
       "correctness": {
         "noUnusedImports": { "level": "error", "fix": "safe" },
         "useExhaustiveDependencies": {
@@ -28,6 +28,34 @@
         "noDuplicateCustomProperties": "off"
       },
       "style": {
+        "noRestrictedImports": {
+          "level": "error",
+          "options": {
+            "paths": {
+              "effect": "Deep-import one Effect module (e.g. effect/Effect, effect/http/HttpClient): barrels defeat tree-shaking under esbuild (Wrangler) and Metro. See docs/conventions/effect.md.",
+              "effect/testing": "Deep-import one Effect module (e.g. effect/Effect, effect/http/HttpClient): barrels defeat tree-shaking under esbuild (Wrangler) and Metro. See docs/conventions/effect.md.",
+              "effect/ai": "Deep-import one Effect module (e.g. effect/Effect, effect/http/HttpClient): barrels defeat tree-shaking under esbuild (Wrangler) and Metro. See docs/conventions/effect.md.",
+              "effect/cli": "Deep-import one Effect module (e.g. effect/Effect, effect/http/HttpClient): barrels defeat tree-shaking under esbuild (Wrangler) and Metro. See docs/conventions/effect.md.",
+              "effect/cluster": "Deep-import one Effect module (e.g. effect/Effect, effect/http/HttpClient): barrels defeat tree-shaking under esbuild (Wrangler) and Metro. See docs/conventions/effect.md.",
+              "effect/devtools": "Deep-import one Effect module (e.g. effect/Effect, effect/http/HttpClient): barrels defeat tree-shaking under esbuild (Wrangler) and Metro. See docs/conventions/effect.md.",
+              "effect/encoding": "Deep-import one Effect module (e.g. effect/Effect, effect/http/HttpClient): barrels defeat tree-shaking under esbuild (Wrangler) and Metro. See docs/conventions/effect.md.",
+              "effect/eventlog": "Deep-import one Effect module (e.g. effect/Effect, effect/http/HttpClient): barrels defeat tree-shaking under esbuild (Wrangler) and Metro. See docs/conventions/effect.md.",
+              "effect/http": "Deep-import one Effect module (e.g. effect/Effect, effect/http/HttpClient): barrels defeat tree-shaking under esbuild (Wrangler) and Metro. See docs/conventions/effect.md.",
+              "effect/http-api": "Deep-import one Effect module (e.g. effect/Effect, effect/http/HttpClient): barrels defeat tree-shaking under esbuild (Wrangler) and Metro. See docs/conventions/effect.md.",
+              "effect/net": "Deep-import one Effect module (e.g. effect/Effect, effect/http/HttpClient): barrels defeat tree-shaking under esbuild (Wrangler) and Metro. See docs/conventions/effect.md.",
+              "effect/observability": "Deep-import one Effect module (e.g. effect/Effect, effect/http/HttpClient): barrels defeat tree-shaking under esbuild (Wrangler) and Metro. See docs/conventions/effect.md.",
+              "effect/persistence": "Deep-import one Effect module (e.g. effect/Effect, effect/http/HttpClient): barrels defeat tree-shaking under esbuild (Wrangler) and Metro. See docs/conventions/effect.md.",
+              "effect/process": "Deep-import one Effect module (e.g. effect/Effect, effect/http/HttpClient): barrels defeat tree-shaking under esbuild (Wrangler) and Metro. See docs/conventions/effect.md.",
+              "effect/reactivity": "Deep-import one Effect module (e.g. effect/Effect, effect/http/HttpClient): barrels defeat tree-shaking under esbuild (Wrangler) and Metro. See docs/conventions/effect.md.",
+              "effect/rpc": "Deep-import one Effect module (e.g. effect/Effect, effect/http/HttpClient): barrels defeat tree-shaking under esbuild (Wrangler) and Metro. See docs/conventions/effect.md.",
+              "effect/schema": "Deep-import one Effect module (e.g. effect/Effect, effect/http/HttpClient): barrels defeat tree-shaking under esbuild (Wrangler) and Metro. See docs/conventions/effect.md.",
+              "effect/socket": "Deep-import one Effect module (e.g. effect/Effect, effect/http/HttpClient): barrels defeat tree-shaking under esbuild (Wrangler) and Metro. See docs/conventions/effect.md.",
+              "effect/sql": "Deep-import one Effect module (e.g. effect/Effect, effect/http/HttpClient): barrels defeat tree-shaking under esbuild (Wrangler) and Metro. See docs/conventions/effect.md.",
+              "effect/workflow": "Deep-import one Effect module (e.g. effect/Effect, effect/http/HttpClient): barrels defeat tree-shaking under esbuild (Wrangler) and Metro. See docs/conventions/effect.md.",
+              "effect/workers": "Deep-import one Effect module (e.g. effect/Effect, effect/http/HttpClient): barrels defeat tree-shaking under esbuild (Wrangler) and Metro. See docs/conventions/effect.md."
+            }
+          }
+        },
         "noParameterAssign": "off",
         "noNonNullAssertion": "error",
         "noUnusedTemplateLiteral": "off",

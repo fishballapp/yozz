@@ -3,7 +3,7 @@ import type { Context } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { createMiddleware } from 'hono/factory';
 import type { z } from 'zod';
-import { createAuth } from './auth.ts';
+import { createAuth, SESSION_FRESH_AGE_SECONDS } from './auth.ts';
 import type { RuntimeEnv } from './env.ts';
 
 export type AuthSession = NonNullable<
@@ -46,6 +46,15 @@ export const requireSession = createMiddleware<AppEnv>(async (c, next) => {
 
   c.set('user', session.user);
   c.set('session', session.session);
+  return next();
+});
+
+/** After `requireSession`: the same age rule Better Auth applies to passkey registration. */
+export const requireFreshSession = createMiddleware<AppEnv>(async (c, next) => {
+  const age = Date.now() - new Date(c.get('session').createdAt).getTime();
+  if (age >= SESSION_FRESH_AGE_SECONDS * 1000) {
+    return apiError(c, 403, 'SESSION_NOT_FRESH', 'Sign in again to change how this vault opens');
+  }
   return next();
 });
 

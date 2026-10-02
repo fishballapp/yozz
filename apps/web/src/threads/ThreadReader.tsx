@@ -1,3 +1,4 @@
+import { Popover } from '@base-ui/react/popover';
 import { cn } from '@fishballapps/cn';
 import {
   ArchiveIcon,
@@ -5,6 +6,7 @@ import {
   ArrowUUpLeftIcon,
   ArrowUUpRightIcon,
   BrowserIcon,
+  CaretDownIcon,
   DownloadSimpleIcon,
   EnvelopeSimpleIcon,
   type Icon,
@@ -15,6 +17,7 @@ import {
   XIcon,
 } from '@phosphor-icons/react';
 import { Link, useParams } from '@tanstack/react-router';
+import { Fragment, type ReactNode } from 'react';
 import { marksOf } from '../addresses/record';
 import { replyAllCc, withCompose } from '../compose/intent';
 import { useMail } from '../store/MailProvider';
@@ -26,13 +29,167 @@ import { ATTACHMENT_LABEL, formatBytes } from './attachments';
 import { HtmlBody } from './HtmlBody';
 import { linkify } from './linkify';
 import type { ThreadState } from './thread';
-import { type Attachment, isArchived, type Message, newestInbound } from './thread';
+import {
+  type Attachment,
+  addresseesOf,
+  inboxesOf,
+  isArchived,
+  type Message,
+  newestInbound,
+  type Recipient,
+} from './thread';
 
 /**
- * The delivered-to address sits under the subject: it decides which identity Reply sends from.
- * Reply and Forward sit under every message; which one you press decides what is quoted, never
- * who the mail goes to (`seedFor`).
+ * Every message says who it was written to under its From line, the way Gmail does: one "to me,
+ * Alice" line whose caret opens the envelope. Reply and Forward sit under every message; which one
+ * you press decides what is quoted, never who the mail goes to (`seedFor`).
  */
+
+/** Name in sans, address in mono; your own addresses at full ink, so you find yourself on a long list. */
+const RecipientList = ({
+  recipients,
+  ownedAddresses,
+}: {
+  recipients: readonly Recipient[];
+  ownedAddresses: readonly string[];
+}) =>
+  recipients.map((recipient, index) => {
+    const isYou = ownedAddresses.some(
+      owned => owned.toLowerCase() === recipient.address.toLowerCase(),
+    );
+    return (
+      <span key={`${index}-${recipient.address}`}>
+        {/* One unit per person: it moves to the next line whole, and breaks inside only when it is
+            wider than the line. `dir="auto"` keeps a right-to-left name from reordering its
+            neighbours. */}
+        <span dir="auto" className="inline-block max-w-full align-top [overflow-wrap:anywhere]">
+          {recipient.name !== undefined && (
+            <span className={isYou ? 'text-paper' : 'text-paper-dim'}>{recipient.name} </span>
+          )}
+          <span
+            className={cn(
+              'font-mono',
+              isYou ? 'text-paper' : recipient.name === undefined && 'text-paper-dim',
+            )}
+          >
+            {recipient.address}
+          </span>
+          {index < recipients.length - 1 ? ',' : ''}
+        </span>{' '}
+      </span>
+    );
+  });
+
+const Detail = ({ term, children }: { term: string; children: ReactNode }) => (
+  <div className="contents">
+    <dt className="label-rule">{term}</dt>
+    <dd className="min-w-0 text-paper-faint">{children}</dd>
+  </div>
+);
+
+/**
+ * "to me, Alice ▾": To and Cc on one line, the whole line the trigger. The panel answers who and
+ * where — the inbox it landed in, then from, reply-to, to and cc; the date and subject are already
+ * on screen in full.
+ */
+const MessageDetails = ({
+  message,
+  ownedAddresses,
+}: {
+  message: Message;
+  ownedAddresses: readonly string[];
+}) => {
+  const addressees = addresseesOf(message, ownedAddresses);
+  const inboxes = inboxesOf(message);
+  const summary =
+    addressees.length === 0
+      ? 'undisclosed recipients'
+      : addressees.map(entry => (entry === 'me' ? 'me' : (entry.name ?? entry.address))).join(', ');
+
+  return (
+    <Popover.Root>
+      <Popover.Trigger
+        // 44px tall on touch; the negative margin keeps the line box at the text's height.
+        className="group -my-3.5 flex max-w-full items-center gap-1 py-3.5 text-left text-2xs text-paper-faint lg:my-0 lg:py-0"
+        aria-label={`To ${summary}. Show details`}
+      >
+        <span className="truncate">
+          to{' '}
+          {addressees.length === 0
+            ? summary
+            : addressees.map((entry, index) => (
+                <Fragment key={entry === 'me' ? 'me' : entry.address}>
+                  {index > 0 && ', '}
+                  {entry === 'me' ? (
+                    <span className="text-paper-dim">me</span>
+                  ) : entry.name !== undefined ? (
+                    <bdi className="text-paper-dim">{entry.name}</bdi>
+                  ) : (
+                    <span className="font-mono text-paper-dim">{entry.address}</span>
+                  )}
+                </Fragment>
+              ))}
+        </span>
+        <CaretDownIcon
+          size={11}
+          aria-hidden
+          className="shrink-0 transition-colors group-hover:text-paper group-data-[popup-open]:text-paper"
+        />
+      </Popover.Trigger>
+      <Popover.Portal>
+        <Popover.Positioner
+          side="bottom"
+          align="start"
+          sideOffset={4}
+          collisionPadding={12}
+          // Portalled, so it would ride over the reader header once its trigger scrolls away.
+          className="z-30 data-[anchor-hidden]:invisible"
+        >
+          <Popover.Popup
+            aria-label="Message details"
+            className="max-h-[var(--available-height)] w-[min(36rem,var(--available-width))] overflow-y-auto border border-rule bg-ink-raised px-4 py-3 outline-none"
+          >
+            <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-1.5 text-2xs">
+              {/* First: across several addresses, which one this landed in is the first question. */}
+              {inboxes.length > 0 && (
+                <Detail term="inbox">
+                  <span className="font-mono text-paper-dim [overflow-wrap:anywhere]">
+                    {inboxes.join(', ')}
+                  </span>
+                </Detail>
+              )}
+              <Detail term="from">
+                <RecipientList
+                  recipients={[
+                    message.fromName.toLowerCase() === message.fromAddress.toLowerCase()
+                      ? { address: message.fromAddress }
+                      : { name: message.fromName, address: message.fromAddress },
+                  ]}
+                  ownedAddresses={ownedAddresses}
+                />
+              </Detail>
+              {message.replyTo !== undefined && (
+                <Detail term="reply-to">
+                  <RecipientList recipients={message.replyTo} ownedAddresses={ownedAddresses} />
+                </Detail>
+              )}
+              {message.to !== undefined && message.to.length > 0 && (
+                <Detail term="to">
+                  <RecipientList recipients={message.to} ownedAddresses={ownedAddresses} />
+                </Detail>
+              )}
+              {message.cc !== undefined && message.cc.length > 0 && (
+                <Detail term="cc">
+                  <RecipientList recipients={message.cc} ownedAddresses={ownedAddresses} />
+                </Detail>
+              )}
+            </dl>
+          </Popover.Popup>
+        </Popover.Positioner>
+      </Popover.Portal>
+    </Popover.Root>
+  );
+};
 
 /**
  * `sm` on a pointer, full 44px on touch. The accessible name says what each quotes, not who it
@@ -197,7 +354,7 @@ export const ThreadReader = ({
 }: {
   thread: ThreadState;
   onClose: () => void;
-  /** After a move the next thread in the list is up. */
+  /** After a move the store accepted, the next thread in the list is up. */
   onTriaged: () => void;
 }) => {
   const {
@@ -224,7 +381,10 @@ export const ThreadReader = ({
   return (
     <article className="flex h-full flex-col bg-ink-sunken">
       <header className="shrink-0 border-b border-rule-soft px-5 pt-4 pb-3">
-        <div className="flex items-start gap-2">
+        {/* Below `lg` the toolbar takes its own row under the subject: its six 44px targets left
+            the subject a few characters on a phone. Wrapping rather than reordering keeps the
+            focus order the same as the reading order. */}
+        <div className="flex flex-wrap items-start gap-x-2 gap-y-1 lg:flex-nowrap">
           <Button
             variant="ghost"
             size="icon"
@@ -239,13 +399,28 @@ export const ThreadReader = ({
           >
             <StarIcon size={15} weight={thread.isStarred ? 'fill' : 'regular'} />
           </Button>
-          <h1
-            dir="auto"
-            className="min-w-0 flex-1 pt-1 text-[17px] leading-snug font-medium tracking-[-0.01em] text-paper lg:pt-0"
-          >
-            {thread.subject}
-          </h1>
-          <div className="flex shrink-0 items-center gap-0.5">
+          {/* The first line centres on the star's 44px touch target, and on its 28px one above `lg`. */}
+          <div className="min-w-0 flex-1 pt-2.5 lg:pt-0.5">
+            <h1
+              dir="auto"
+              className="text-[17px] leading-snug font-medium tracking-[-0.01em] text-paper"
+            >
+              {thread.subject}
+            </h1>
+            {/* The same count the list row carries, on the same rule: only above one, because "1
+                message" on a single message is a label for nothing. It says how far down the
+                stack goes before you start, beside the marks of every account the conversation
+                spans; each message's own IN line says where that one landed. */}
+            {thread.messages.length > 1 && (
+              <p className="mt-1.5 flex items-center gap-1.5 font-mono text-2xs text-paper-faint">
+                <span aria-hidden className="text-paper-dim">
+                  {marksOf(thread.accounts)}
+                </span>
+                <span>{thread.messages.length} messages</span>
+              </p>
+            )}
+          </div>
+          <div className="-mr-1.5 flex w-full shrink-0 items-center justify-end gap-0.5 lg:mr-0 lg:w-auto">
             <IconSwitch
               label="Reading mode"
               options={READING_MODES}
@@ -276,8 +451,7 @@ export const ThreadReader = ({
                 size="icon"
                 className="size-11 lg:size-7"
                 onClick={() => {
-                  restoreThread(thread.id);
-                  onTriaged();
+                  if (restoreThread(thread.id)) onTriaged();
                 }}
                 aria-label="Restore thread"
               >
@@ -290,8 +464,7 @@ export const ThreadReader = ({
                   size="icon"
                   className="size-11 lg:size-7"
                   onClick={() => {
-                    toggleArchive(thread.id);
-                    onTriaged();
+                    if (toggleArchive(thread.id)) onTriaged();
                   }}
                   aria-label={isArchived(thread) ? 'Move to inbox' : 'Archive thread'}
                 >
@@ -302,8 +475,7 @@ export const ThreadReader = ({
                   size="icon"
                   className="size-11 lg:size-7"
                   onClick={() => {
-                    trashThread(thread.id);
-                    onTriaged();
+                    if (trashThread(thread.id)) onTriaged();
                   }}
                   aria-label="Delete thread"
                 >
@@ -322,23 +494,6 @@ export const ThreadReader = ({
             </Button>
           </div>
         </div>
-
-        <p className="mt-1.5 flex items-center gap-1.5 pl-8 font-mono text-2xs text-paper-faint lg:pl-7">
-          <span aria-hidden className="text-paper-dim">
-            {marksOf(thread.accounts)}
-          </span>
-          <span>delivered to {inbound.toAddress}</span>
-          {/* The same count the list row carries, on the same rule: only above one, because "1
-              message" on a single message is a label for nothing. It earns its place here now that
-              the reader is a stack of messages you scroll rather than one body — it says how far
-              down this goes before you start. */}
-          {thread.messages.length > 1 && (
-            <>
-              <span aria-hidden>·</span>
-              <span>{thread.messages.length} messages</span>
-            </>
-          )}
-        </p>
       </header>
 
       <div className="min-h-0 flex-1 overflow-y-auto">
@@ -356,6 +511,10 @@ export const ThreadReader = ({
               </p>
               <p className="font-mono text-2xs text-paper-faint">{fullTime(message.at)}</p>
             </div>
+            {/* A draft has no envelope yet. */}
+            {message.to !== undefined && (
+              <MessageDetails message={message} ownedAddresses={ownedAddresses} />
+            )}
 
             {/* Body copy is the one place in this app that is READ rather than scanned, so it
                 gets full-strength ink and a measure capped near 68 characters. An HTML body is

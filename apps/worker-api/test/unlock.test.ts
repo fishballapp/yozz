@@ -130,7 +130,7 @@ describe('Worker unlock and finalisation routes', () => {
     const app = createApp();
 
     await env.DB.prepare(
-      "INSERT INTO account (id, issuer, accountId, providerId, userId, password, createdAt, updatedAt) VALUES (?, 'local:credential', ?, ?, ?, ?, ?, ?)",
+      'INSERT INTO account (id, accountId, providerId, userId, password, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?)',
     )
       .bind('acc-cred', userId, 'credential', userId, 'hash', 1000, 1000)
       .run();

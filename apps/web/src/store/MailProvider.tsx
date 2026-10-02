@@ -14,7 +14,6 @@ import {
   isInbound,
   parseAddressRecord,
 } from '../addresses/record';
-import { isJudgeAddress } from '../dev/judge/domain';
 import type { MailConnectionFailure, Result } from '../relay/connection';
 import { describeMailFailure } from '../relay/describe-failure';
 import type { LiveManager, LiveState, LiveTask } from '../relay/live';
@@ -83,8 +82,6 @@ type MailContextValue = Composer & {
   trashThread: (threadId: string) => boolean;
   /** Brings a thread back to the inbox from Trash or Archive. */
   restoreThread: (threadId: string) => boolean;
-  /** HACKATHON ONLY (see `judge/`): resets a demo mailbox, then re-syncs. Delete with `judge/` after 2026-09-03. */
-  resetDemoInbox: () => Promise<string>;
   putAddress: (record: AddressRecord) => Promise<void>;
   removeAddress: (address: string) => Promise<void>;
   /** Sets or clears the From display name; an empty string clears it. */
@@ -334,7 +331,7 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
 
   /** Read by the draft writes, which run outside a render. */
   const threadsRef = useRef<readonly ThreadState[]>([]);
-  const { slice, load, reset, setDrafts, drafts, vaultSent } = useComposer({
+  const { slice, load, reset, drafts, vaultSent } = useComposer({
     session,
     identities,
     accounts,
@@ -854,44 +851,6 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
     [moveThreadTo],
   );
 
-  /**
-   * HACKATHON ONLY (see `judge/`). The cache is dropped, not reconciled: the fixtures come back
-   * with new uids. The vault's drafts go with the wipe, since the IMAP Drafts folder is emptied
-   * by the same pass.
-   */
-  const resetDemoInbox = useCallback(async () => {
-    const userId = userIdRef.current;
-    const session = sessionRef.current;
-    // By name, never `accounts[0]`: a vault may hold a judge alias beside another address.
-    const account = accounts.find(candidate => isJudgeAddress(candidate.address));
-    if (userId === null || session === null || account === undefined) {
-      return 'No demo mailbox is connected to this vault.';
-    }
-    const [{ resetJudgeInbox }, { createMailCache }, { listDrafts, deleteDraft }] =
-      await Promise.all([
-        import('../dev/judge/reset'),
-        import('../threads/cache'),
-        import('../compose/draft-vault'),
-      ]);
-    const outcome = await runOn(account)(resetJudgeInbox(account.address));
-    if (!outcome.ok) return 'The mailbox could not be reached; try again in a moment.';
-    // Only the judge account's drafts; best effort per draft.
-    const drafts = await listDrafts(session.store);
-    for (const draft of drafts) {
-      if ((draft.record.ownerAccount ?? draft.record.from) !== account.address) continue;
-      await deleteDraft(session.store, draft.draftId, Date.now());
-    }
-    setDrafts(await listDrafts(session.store));
-    await createMailCache(userId, account.address).clear();
-    await syncRef.current(account.address);
-    const { wiped, appended, missing } = outcome.value;
-    if (missing.length > 0) {
-      // A fixture that never landed takes a beat of the judge's script with it.
-      return `Reset incomplete — ${missing.length} message(s) did not land (${missing.join(', ')}). Try again.`;
-    }
-    return `Inbox reset: ${wiped} message(s) cleared, ${appended} demo messages restored.`;
-  }, [accounts, runOn, setDrafts]);
-
   const value = useMemo<MailContextValue>(
     () => ({
       accounts,
@@ -917,7 +876,6 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
       toggleArchive,
       trashThread,
       restoreThread,
-      resetDemoInbox,
     }),
     [
       slice,
@@ -943,7 +901,6 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
       toggleArchive,
       trashThread,
       restoreThread,
-      resetDemoInbox,
     ],
   );
 

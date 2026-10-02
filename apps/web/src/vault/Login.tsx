@@ -1,6 +1,5 @@
 import { Link, Navigate, useNavigate } from '@tanstack/react-router';
 import { useState } from 'react';
-import { agentLabel } from '../ui/agent-label';
 import { Button } from '../ui/Button';
 import { FieldRow, Input } from '../ui/Field';
 import { AuthColumn } from './AuthColumn';
@@ -111,7 +110,6 @@ export const Login = () => {
           <FieldRow label="Email address" htmlFor="recover-email">
             <Input
               id="recover-email"
-              aria-label={agentLabel('Email address', recoveryEmail)}
               type="email"
               required
               autoComplete="email"
@@ -187,7 +185,6 @@ export const Login = () => {
         <FieldRow label="Email address" htmlFor="login-email">
           <Input
             id="login-email"
-            aria-label={agentLabel('Email address', email)}
             type="email"
             autoComplete="email"
             value={email}

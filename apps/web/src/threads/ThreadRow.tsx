@@ -16,6 +16,7 @@ import { toast } from '../ui/Toast';
 import { listTime, stackTime } from '../ui/time';
 import type { ThreadState } from './thread';
 import { attachmentsOf, isArchived, newestInbound } from './thread';
+import { useAdvancePast } from './use-advance';
 import { latestOf, type MailboxId, previewOf } from './views';
 
 /**
@@ -146,6 +147,12 @@ const RowTriage = ({
   className,
 }: RowProps & { className: string }) => {
   const { toggleArchive, trashThread, restoreThread, removeDraft } = useMail();
+  const advancePast = useAdvancePast();
+  // Filing the open thread from its row moves the reader on, as the reader's own buttons do; a
+  // move the store refused (nothing there to move, or one still being confirmed) moves nothing.
+  const file = (move: (threadId: string) => boolean) => () => {
+    if (move(thread.id) && isSelected) advancePast(thread.id);
+  };
   // A draft has no IMAP copy, so archive and delete can do nothing to it.
   const draftId = thread.messages.find(message => message.isDraft === true)?.draftId;
   const actions: readonly RowAction[] =
@@ -178,7 +185,7 @@ const RowTriage = ({
             {
               icon: ArrowCounterClockwiseIcon,
               label: `Restore ${thread.subject}`,
-              act: () => restoreThread(thread.id),
+              act: file(restoreThread),
             },
           ]
         : [
@@ -187,12 +194,12 @@ const RowTriage = ({
               label: isArchived(thread)
                 ? `Move ${thread.subject} to inbox`
                 : `Archive ${thread.subject}`,
-              act: () => toggleArchive(thread.id),
+              act: file(toggleArchive),
             },
             {
               icon: TrashIcon,
               label: `Delete ${thread.subject}`,
-              act: () => trashThread(thread.id),
+              act: file(trashThread),
             },
           ];
 

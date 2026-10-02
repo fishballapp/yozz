@@ -278,6 +278,76 @@ const passkeyMode = async (page: Page) => {
 
 const browser = await chromium.launch();
 
+/**
+ * Through the real Settings screen: a session older than a day may not change how the vault
+ * opens, so the switch asks for the current password and then goes through.
+ */
+const staleSession = async (page: Page) => {
+  const email = `drive-stale-${Date.now()}@example.com`;
+  await signUp(page, email);
+  await page.evaluate(
+    async ({ e, UNLOCK }) => {
+      const u = (await import(UNLOCK)) as UnlockModule;
+      await u.createPasswordVault({ email: e, password: 'correct horse' });
+    },
+    { e: email, UNLOCK },
+  );
+
+  await page.goto(`${WEB}/login`);
+  await page.getByLabel('Email address').fill(email);
+  await page.getByLabel('Password', { exact: true }).fill('correct horse');
+  await page.getByRole('button', { name: 'Log in', exact: true }).click();
+  await page.waitForURL(`${WEB}/m/unified`);
+
+  const twoDaysAgo = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString();
+  execFileSync(
+    'pnpm',
+    [
+      '-F',
+      '@yozz.app/worker-api',
+      'exec',
+      'wrangler',
+      'd1',
+      'execute',
+      'yozz',
+      '--local',
+      '--command',
+      `UPDATE session SET createdAt = '${twoDaysAgo}'`,
+    ],
+    { encoding: 'utf8' },
+  );
+
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send('WebAuthn.enable');
+  await cdp.send('WebAuthn.addVirtualAuthenticator', {
+    options: {
+      protocol: 'ctap2',
+      ctap2Version: 'ctap2_1',
+      transport: 'internal',
+      hasResidentKey: true,
+      hasUserVerification: true,
+      isUserVerified: true,
+      hasPrf: true,
+    },
+  });
+
+  await page.goto(`${WEB}/settings/vault`);
+  await page.getByRole('button', { name: 'Switch to a passkey' }).click();
+  await page.getByRole('heading', { name: 'Confirm it’s you' }).waitFor();
+  assertEqual('stale session: Settings asks to confirm before switching', true, true);
+
+  await page.getByLabel('Current password').fill('correct horse');
+  await page.getByRole('button', { name: 'Confirm', exact: true }).click();
+  // Derivation, then the passkey's create and PRF assertion: the switch lands after the panel goes.
+  const method = page.locator('dt:text-is("Method") + dd');
+  await method.filter({ hasText: 'passkey' }).waitFor({ timeout: 30_000 });
+  assertEqual(
+    'stale session: confirmed, then switched to a passkey',
+    await method.textContent(),
+    'passkey',
+  );
+};
+
 /** `newPage` gives each call its own context. */
 const openPage = async (): Promise<Page> => {
   const page = await browser.newPage();
@@ -289,7 +359,7 @@ const openPage = async (): Promise<Page> => {
 };
 
 try {
-  for (const mode of [passwordMode, passkeyMode]) {
+  for (const mode of [passwordMode, passkeyMode, staleSession]) {
     const page = await openPage();
     await mode(page);
     await page.close();

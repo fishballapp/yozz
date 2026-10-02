@@ -104,6 +104,8 @@ describe('vaultErrorMessage', () => {
         ),
       ),
     ).toBe(cancelled);
+    // Better Auth's passkey sign-in swaps the browser's error for its own AUTH_CANCELLED copy.
+    expect(vaultErrorMessage(new PasskeyPrfError('Auth cancelled'))).toBe(cancelled);
     expect(vaultErrorMessage(new Error('plain failure'))).toBe('plain failure');
     expect(vaultErrorMessage('thrown string')).toBe('Something failed and gave no reason.');
   });

@@ -9,28 +9,27 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
-import { Route as WelcomeRouteImport } from './routes/welcome'
-import { Route as LoginRouteImport } from './routes/login'
-import { Route as EnrolRouteImport } from './routes/enrol'
-import { Route as AppRouteImport } from './routes/_app'
 import { Route as IndexRouteImport } from './routes/index'
-import { Route as AppSettingsRouteImport } from './routes/_app.settings'
+import { Route as AppRouteImport } from './routes/_app'
+import { Route as EnrolRouteImport } from './routes/enrol'
+import { Route as LoginRouteImport } from './routes/login'
+import { Route as WelcomeRouteImport } from './routes/welcome'
 import { Route as AppConnectRouteImport } from './routes/_app.connect'
+import { Route as AppSettingsRouteImport } from './routes/_app.settings'
+import { Route as AppMMailboxRouteImport } from './routes/_app.m.$mailbox'
 import { Route as AppSettingsIndexRouteImport } from './routes/_app.settings.index'
 import { Route as AppSettingsVaultRouteImport } from './routes/_app.settings.vault'
-import { Route as AppMMailboxRouteImport } from './routes/_app.m.$mailbox'
 import { Route as AppMMailboxIndexRouteImport } from './routes/_app.m.$mailbox.index'
 import { Route as AppSettingsAAddressRouteImport } from './routes/_app.settings.a.$address'
 import { Route as AppMMailboxTSplatRouteImport } from './routes/_app.m.$mailbox.t.$'
 
-const WelcomeRoute = WelcomeRouteImport.update({
-  id: '/welcome',
-  path: '/welcome',
+const IndexRoute = IndexRouteImport.update({
+  id: '/',
+  path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
-const LoginRoute = LoginRouteImport.update({
-  id: '/login',
-  path: '/login',
+const AppRoute = AppRouteImport.update({
+  id: '/_app',
   getParentRoute: () => rootRouteImport,
 } as any)
 const EnrolRoute = EnrolRouteImport.update({
@@ -38,23 +37,29 @@ const EnrolRoute = EnrolRouteImport.update({
   path: '/enrol',
   getParentRoute: () => rootRouteImport,
 } as any)
-const AppRoute = AppRouteImport.update({
-  id: '/_app',
+const LoginRoute = LoginRouteImport.update({
+  id: '/login',
+  path: '/login',
   getParentRoute: () => rootRouteImport,
 } as any)
-const IndexRoute = IndexRouteImport.update({
-  id: '/',
-  path: '/',
+const WelcomeRoute = WelcomeRouteImport.update({
+  id: '/welcome',
+  path: '/welcome',
   getParentRoute: () => rootRouteImport,
+} as any)
+const AppConnectRoute = AppConnectRouteImport.update({
+  id: '/connect',
+  path: '/connect',
+  getParentRoute: () => AppRoute,
 } as any)
 const AppSettingsRoute = AppSettingsRouteImport.update({
   id: '/settings',
   path: '/settings',
   getParentRoute: () => AppRoute,
 } as any)
-const AppConnectRoute = AppConnectRouteImport.update({
-  id: '/connect',
-  path: '/connect',
+const AppMMailboxRoute = AppMMailboxRouteImport.update({
+  id: '/m/$mailbox',
+  path: '/m/$mailbox',
   getParentRoute: () => AppRoute,
 } as any)
 const AppSettingsIndexRoute = AppSettingsIndexRouteImport.update({
@@ -66,11 +71,6 @@ const AppSettingsVaultRoute = AppSettingsVaultRouteImport.update({
   id: '/vault',
   path: '/vault',
   getParentRoute: () => AppSettingsRoute,
-} as any)
-const AppMMailboxRoute = AppMMailboxRouteImport.update({
-  id: '/m/$mailbox',
-  path: '/m/$mailbox',
-  getParentRoute: () => AppRoute,
 } as any)
 const AppMMailboxIndexRoute = AppMMailboxIndexRouteImport.update({
   id: '/',
@@ -184,25 +184,11 @@ export interface RootRouteChildren {
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
-    '/welcome': {
-      id: '/welcome'
-      path: '/welcome'
-      fullPath: '/welcome'
-      preLoaderRoute: typeof WelcomeRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/login': {
-      id: '/login'
-      path: '/login'
-      fullPath: '/login'
-      preLoaderRoute: typeof LoginRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/enrol': {
-      id: '/enrol'
-      path: '/enrol'
-      fullPath: '/enrol'
-      preLoaderRoute: typeof EnrolRouteImport
+    '/': {
+      id: '/'
+      path: '/'
+      fullPath: '/'
+      preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/_app': {
@@ -212,12 +198,33 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/': {
-      id: '/'
-      path: '/'
-      fullPath: '/'
-      preLoaderRoute: typeof IndexRouteImport
+    '/enrol': {
+      id: '/enrol'
+      path: '/enrol'
+      fullPath: '/enrol'
+      preLoaderRoute: typeof EnrolRouteImport
       parentRoute: typeof rootRouteImport
+    }
+    '/login': {
+      id: '/login'
+      path: '/login'
+      fullPath: '/login'
+      preLoaderRoute: typeof LoginRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/welcome': {
+      id: '/welcome'
+      path: '/welcome'
+      fullPath: '/welcome'
+      preLoaderRoute: typeof WelcomeRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/_app/connect': {
+      id: '/_app/connect'
+      path: '/connect'
+      fullPath: '/connect'
+      preLoaderRoute: typeof AppConnectRouteImport
+      parentRoute: typeof AppRoute
     }
     '/_app/settings': {
       id: '/_app/settings'
@@ -226,11 +233,11 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppSettingsRouteImport
       parentRoute: typeof AppRoute
     }
-    '/_app/connect': {
-      id: '/_app/connect'
-      path: '/connect'
-      fullPath: '/connect'
-      preLoaderRoute: typeof AppConnectRouteImport
+    '/_app/m/$mailbox': {
+      id: '/_app/m/$mailbox'
+      path: '/m/$mailbox'
+      fullPath: '/m/$mailbox'
+      preLoaderRoute: typeof AppMMailboxRouteImport
       parentRoute: typeof AppRoute
     }
     '/_app/settings/': {
@@ -246,13 +253,6 @@ declare module '@tanstack/react-router' {
       fullPath: '/settings/vault'
       preLoaderRoute: typeof AppSettingsVaultRouteImport
       parentRoute: typeof AppSettingsRoute
-    }
-    '/_app/m/$mailbox': {
-      id: '/_app/m/$mailbox'
-      path: '/m/$mailbox'
-      fullPath: '/m/$mailbox'
-      preLoaderRoute: typeof AppMMailboxRouteImport
-      parentRoute: typeof AppRoute
     }
     '/_app/m/$mailbox/': {
       id: '/_app/m/$mailbox/'

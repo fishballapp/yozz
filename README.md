@@ -76,8 +76,10 @@ address while the tab is visible. The protocol libraries are the mature part; th
 must print are in [docs/gates.md](docs/gates.md).
 
 This repository is an exported copy of a private monorepo, so it has no pull requests and its
-history is one commit per snapshot. Self-hosting is possible (`apps/worker-api/wrangler.jsonc`
-and `.dev.vars.example` list what the worker needs) but not something we document or support.
+history is one commit per snapshot. Production deploys from here: every push to `main` runs every
+gate, then deploys [yozz.app](https://yozz.app) through [`cd.yml`](.github/workflows/cd.yml).
+Self-hosting is possible (`apps/worker-api/wrangler.jsonc` and `.dev.vars.example` list what the
+worker needs; replace our account and database ids) but not something we document or support.
 
 ## What is in this repository
 
@@ -118,7 +120,8 @@ PRF-capable authenticator (Chrome with Google Password Manager, or Safari with i
 
 ## Checks
 
-`pnpm check`, `pnpm typecheck` and `pnpm test` are the floor; CI runs them on every push.
+`pnpm check`, `pnpm typecheck` and `pnpm test` are the floor; CI runs them, and every suite
+below, on every push.
 [docs/gates.md](docs/gates.md) lists every suite, how to run it and the numbers it must print,
 including the two exhaustive ones that are not in `pnpm test`: x509-limbo for `packages/x509`
 and BoringSSL's BoGo runner for `packages/tls`.

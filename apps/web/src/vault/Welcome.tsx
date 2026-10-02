@@ -1,6 +1,5 @@
 import { Link } from '@tanstack/react-router';
 import { useState } from 'react';
-import { agentLabel } from '../ui/agent-label';
 import { Button } from '../ui/Button';
 import { FieldRow, Input } from '../ui/Field';
 import { AuthColumn } from './AuthColumn';
@@ -87,7 +86,6 @@ export const Welcome = () => {
         >
           <Input
             id="welcome-email"
-            aria-label={agentLabel('Email address', email)}
             type="email"
             required
             autoFocus

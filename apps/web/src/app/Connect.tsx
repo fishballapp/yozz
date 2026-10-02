@@ -12,7 +12,6 @@ import {
 import { type AddressRecord, addressRecordSchema, isInbound } from '../addresses/record';
 import { describeMailFailure } from '../relay/describe-failure';
 import { useMail } from '../store/MailProvider';
-import { agentLabel } from '../ui/agent-label';
 import { Button } from '../ui/Button';
 import { FieldRow, Input } from '../ui/Field';
 import { Definition, PageColumn } from '../ui/PageColumn';
@@ -253,7 +252,6 @@ export const Connect = () => {
         <FieldRow label="Email address" htmlFor="connect-address">
           <Input
             id="connect-address"
-            aria-label={agentLabel('Email address', address)}
             type="email"
             required
             autoComplete="email"

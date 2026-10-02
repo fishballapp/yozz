@@ -32,6 +32,7 @@ const API_ERROR_MESSAGES: Record<ApiErrorCode | 'NETWORK_ERROR', string> = {
   PAYLOAD_TOO_LARGE: 'That was too large to store.',
   INTERNAL_ERROR: 'The server failed on that request. Try again.',
   INVALID_MODE: 'This account is not in that login method.',
+  SESSION_NOT_FRESH: 'Sign in again to change how this vault opens.',
   UPGRADE_REQUIRED: 'A WebSocket connection is required.',
   RATE_LIMITED: 'Too many requests. Please wait a moment and try again.',
   UPSTREAM_UNREACHABLE: 'Could not reach the upstream mail server. Check the host and port.',
@@ -47,9 +48,15 @@ const VAULT_ERROR_MESSAGES: Record<VaultFailureCode, string> = {
 
 const PASSKEY_CANCELLED = 'The passkey prompt was cancelled or timed out. Try again.';
 
-/** A dismissed WebAuthn prompt arrives as `NotAllowedError`, or re-thrown by SimpleWebAuthn / Better Auth as a plain Error carrying the spec boilerplate. */
+/**
+ * A dismissed or timed-out WebAuthn prompt arrives as `NotAllowedError`, re-thrown by
+ * SimpleWebAuthn as a plain Error carrying the spec boilerplate, or replaced by Better Auth's
+ * passkey client with its `AUTH_CANCELLED` message.
+ */
 const isPasskeyCancelled = (error: Error) =>
-  error.name === 'NotAllowedError' || /timed out or was not allowed/i.test(error.message);
+  error.name === 'NotAllowedError' ||
+  /timed out or was not allowed/i.test(error.message) ||
+  error.message === 'Auth cancelled';
 
 /** Every failure a vault screen can catch, as one sentence the reader can act on. */
 export const vaultErrorMessage = (error: unknown): string => {

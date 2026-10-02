@@ -226,16 +226,15 @@ describe('fetchBody size boundary', () => {
     throw new Error('run should not be called');
   }) as Parameters<typeof fetchBody>[0];
 
-  it.each([
-    -1,
-    1.5,
-    Number.MAX_SAFE_INTEGER + 1,
-  ])('refuses an invalid advertised size (%s) before connecting', async size => {
-    await expect(fetchBody(unusedRun, 'INBOX', 1, size)).resolves.toEqual({
-      ok: false,
-      error: { kind: 'error', detail: 'Message size is unavailable' },
-    });
-  });
+  it.each([-1, 1.5, Number.MAX_SAFE_INTEGER + 1])(
+    'refuses an invalid advertised size (%s) before connecting',
+    async size => {
+      await expect(fetchBody(unusedRun, 'INBOX', 1, size)).resolves.toEqual({
+        ok: false,
+        error: { kind: 'error', detail: 'Message size is unavailable' },
+      });
+    },
+  );
 
   it('refuses an oversized message before connecting', async () => {
     await expect(fetchBody(unusedRun, 'INBOX', 1, DEFAULT_MAX_LITERAL_BYTES + 1)).resolves.toEqual({

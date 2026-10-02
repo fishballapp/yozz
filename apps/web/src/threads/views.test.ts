@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { AccountSyncState } from './sync';
 import type { Folder, Message, ThreadState } from './thread';
-import { olderAvailable, syncProgressIn, threadsIn } from './views';
+import { neighbourOf, olderAvailable, syncProgressIn, threadsIn } from './views';
 
 const message = (id: string): Message => ({
   id,
@@ -117,5 +117,17 @@ describe('syncProgressIn', () => {
     expect(pending).toEqual([]);
     expect(addresses(bad.map(entry => entry.account))).toEqual(['us@y']);
     expect(syncProgressIn(states, accounts, 'me@x').failed).toEqual([]);
+  });
+});
+
+describe('neighbourOf', () => {
+  const list = ['a', 'b', 'c'].map(id => thread(id, ['inbox']));
+
+  it('moves down the list, up from its foot, and nowhere from a list of one or a thread not in it', () => {
+    expect(neighbourOf(list, 'a')?.id).toBe('b');
+    expect(neighbourOf(list, 'b')?.id).toBe('c');
+    expect(neighbourOf(list, 'c')?.id).toBe('b');
+    expect(neighbourOf(list.slice(0, 1), 'a')).toBeUndefined();
+    expect(neighbourOf(list, 'elsewhere')).toBeUndefined();
   });
 });

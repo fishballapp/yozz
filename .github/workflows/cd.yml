@@ -1,27 +1,73 @@
-name: Publish
+name: CD
 
-# Every push to main publishes whatever library versions npm does not have yet: bump the four
-# packages in lockstep, eject, and the release follows. No token: npm trusted publishing over the
-# workflow's OIDC identity, configured per package on npmjs.com. The apps are private and never
-# publish.
+# Every push to main runs every gate (ci.yml), then deploys yozz.app and publishes whatever library
+# versions npm does not have yet. This is the only path to production, so what is live is always a
+# commit on this branch.
+#
+# Keep this filename: npm trusted publishing validates it for all four packages.
 on:
   push:
-    branches:
-      - main
+    branches: [main]
 
-# Two releases pushed close together must not race `pnpm -r publish`'s read-then-write.
-concurrency:
-  group: publish
-  cancel-in-progress: false
+permissions:
+  contents: read
 
 jobs:
+  gates:
+    name: Gates
+    uses: ./.github/workflows/ci.yml
+
+  # D1 migrations, then the API Worker, then the web host. Each step resolves its Cloudflare deploy
+  # token (and the API's runtime secrets) from 1Password through varlock and YOZZ_OP_TOKEN, a
+  # secret of the `production` environment, which only main can deploy to.
+  deploy:
+    name: Deploy yozz.app
+    needs: gates
+    runs-on: ubuntu-latest
+    environment: production
+    # A hung wrangler or 1Password call would otherwise hold the deploy group for the 360m default.
+    timeout-minutes: 15
+    concurrency:
+      group: deploy
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 26
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # Before the Worker, so it never ships ahead of its schema. Needs the deploy token's D1: Edit.
+      - name: Apply D1 migrations
+        run: pnpm -F @yozz.app/worker-api db:migrate:remote
+        env:
+          OP_TOKEN: ${{ secrets.YOZZ_OP_TOKEN }}
+      - name: Deploy the API Worker
+        run: pnpm -F @yozz.app/worker-api run deploy
+        env:
+          OP_TOKEN: ${{ secrets.YOZZ_OP_TOKEN }}
+      # Builds apps/web with VITE_API_URL=https://api.yozz.app, then deploys the assets-only host.
+      # Its varlock schema loads the deploy token alone, so no runtime secret reaches this step.
+      - name: Deploy the web host
+        run: pnpm -F @yozz.app/worker-web run deploy
+        env:
+          OP_TOKEN: ${{ secrets.YOZZ_OP_TOKEN }}
+
+  # No token: npm trusted publishing over the workflow's OIDC identity, configured per package on
+  # npmjs.com. The apps are private and never publish.
   publish:
-    # GitHub-hosted on purpose: npm trusted publishing (the OIDC exchange below) does not work on
-    # self-hosted runners.
+    name: Publish to npm
+    needs: gates
+    # GitHub-hosted on purpose: npm trusted publishing does not work on self-hosted runners.
     runs-on: ubuntu-latest
     permissions:
       contents: read
       id-token: write
+    # Two releases pushed close together must not race `pnpm -r publish`'s read-then-write.
+    concurrency:
+      group: publish
+      cancel-in-progress: false
     steps:
       - uses: actions/checkout@v6
       - uses: pnpm/action-setup@v6
@@ -31,11 +77,6 @@ jobs:
           cache: pnpm
           registry-url: https://registry.npmjs.org
       - run: pnpm install --frozen-lockfile
-      # An npm version is permanent, so the publish job runs every gate itself rather than
-      # trusting ci.yml, which runs in parallel and cannot hold this one back.
-      - run: pnpm check
-      - run: pnpm typecheck
-      - run: pnpm test
       # Each package builds itself in `prepack`; this is only so a build failure reads as one.
       - run: pnpm -r --filter './packages/*' build
       - id: version

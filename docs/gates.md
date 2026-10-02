@@ -30,8 +30,8 @@ pnpm -F @yozz.app/worker-api db:check-auth   # fails if the generated Better Aut
 ## Owed when touching `packages/x509` or `packages/tls`
 
 Neither is in `pnpm test` — limbo needs a 39MB corpus and BoGo a Go toolchain plus a pinned
-BoringSSL checkout — so both fetch once and then run offline. CI runs them on every push that
-touches either package (`_yozz-gates.yml`). Run them yourself anyway: two authentication bypasses
+BoringSSL checkout — so both fetch once and then run offline. CI runs them on every push
+(`ci.yml`). Run them yourself anyway: two authentication bypasses
 shipped in `@yozz.app/x509` while limbo was a command someone had to remember.
 
 ```bash
@@ -92,7 +92,7 @@ pnpm -F @yozz.app/web html:security     # Chromium + Firefox + WebKit: loads the
                                     #   build first, because it also rejects inline scripts in dist.
 ```
 
-This gate runs in `_yozz-gates.yml` on every code push touching YOZZ. It needs
+This gate runs in `ci.yml` on every push. It needs
 `pnpm -F @yozz.app/web exec playwright install chromium firefox webkit` once on a new machine; CI
 derives the installed Playwright version and caches those exact browser binaries against it.
 
@@ -114,7 +114,7 @@ pnpm -F @yozz.app/x509 anchors:fetch    # curl's cacert.pem + NSS certdata.txt, 
                                     #   read what moved before pasting a new hash
 pnpm -F @yozz.app/x509 anchors:build    # recompile src/root-bundle-generated.ts (COMMITTED)
 pnpm -F @yozz.app/x509 anchors:check    # upstream today vs what we ship; the daily cron
-                                    #   (yozz-trust-store.yml) runs exactly this
+                                    #   (trust-store.yml) runs exactly this
 pnpm -F @yozz.app/x509 corpus:harvest   # only to REBUILD the corpus — network + openssl
 pnpm -F @yozz.app/worker-api db:migrate:local   # apply migrations to wrangler dev's local D1
 ```

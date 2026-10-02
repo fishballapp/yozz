@@ -144,5 +144,11 @@ export const visibleThreads = (
   );
 };
 
+/** Where the reader goes when `threadId` is filed out of `list`: the row below, else the row above. */
+export const neighbourOf = (list: readonly ThreadState[], threadId: string) => {
+  const index = list.findIndex(candidate => candidate.id === threadId);
+  return index === -1 ? undefined : (list[index + 1] ?? list[index - 1]);
+};
+
 /** The id stays `unified`; on screen this is the inbox (DECISIONS.md, "Inbox", not "Unified"). */
 export const mailboxLabel = (mailbox: MailboxId) => (mailbox === 'unified' ? 'inbox' : mailbox);

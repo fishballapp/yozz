@@ -1,7 +1,8 @@
 import type { ImapAddress, ImapMessageSummary } from '@yozz.app/imap';
+import { addressList } from '../compose/draft';
 import type { DraftRecord } from '../compose/draft-record';
 import { toParagraphs } from './bodies';
-import type { ThreadState } from './thread';
+import type { Recipient, ThreadState } from './thread';
 import {
   draftIdOf,
   FOLDERS,
@@ -10,6 +11,7 @@ import {
   type Message,
   messageIdOf,
   physicalIdOf,
+  VAULT_UID_VALIDITY,
 } from './thread';
 import { baseSubject, groupIntoThreads } from './threading';
 
@@ -113,14 +115,17 @@ const upper = (flags: readonly string[]) => flags.map(f => f.toUpperCase());
 const addressOf = (address: ImapAddress | undefined) =>
   address?.mailbox && address?.host ? `${address.mailbox}@${address.host}` : null;
 
-/** The envelope's `To` + `Cc`, lowercased, distinct, in header order. */
-const recipientsOf = (envelope: ImapMessageSummary['envelope']): readonly string[] => [
-  ...new Set(
-    [...(envelope?.to ?? []), ...(envelope?.cc ?? [])].flatMap(
-      address => addressOf(address)?.toLowerCase() ?? [],
-    ),
-  ),
-];
+/**
+ * A group-syntax marker has no mailbox or host, so it is not a recipient. A name that only repeats
+ * the address (Outlook's `"bob@x.com" <bob@x.com>`) is no name.
+ */
+const recipientsIn = (addresses: readonly ImapAddress[] | undefined): readonly Recipient[] =>
+  (addresses ?? []).flatMap(address => {
+    const at = addressOf(address);
+    const name = address.name?.trim();
+    const isName = name !== undefined && name !== '' && name.toLowerCase() !== at?.toLowerCase();
+    return at === null ? [] : [{ address: at, ...(isName ? { name } : {}) }];
+  });
 
 /**
  * `toAddress` is read from a copy that arrived (any folder but Sent); a message with only Sent
@@ -137,6 +142,11 @@ const messageFromCopies = (
   const owner = arrived?.account ?? locations[0]?.account ?? '';
   const fromName = firstFrom?.name?.trim() || fromMailboxHost || owner;
   const outbound = arrived === undefined || fromMailboxHost?.toLowerCase() === owner.toLowerCase();
+  // The server fills an absent Reply-To with From (RFC 9051 §7.5.2), so only another address is news.
+  const replyTo = recipientsIn(summary.envelope?.replyTo);
+  const repliesElsewhere = replyTo.some(
+    ({ address }) => address.toLowerCase() !== fromMailboxHost?.toLowerCase(),
+  );
   return {
     id,
     locations,
@@ -144,7 +154,9 @@ const messageFromCopies = (
     fromAddress: fromMailboxHost ?? '',
     // Your own copy went to whoever the envelope names; everything else arrived here whatever its To says.
     toAddress: outbound ? (addressOf(summary.envelope?.to?.[0]) ?? '') : owner,
-    recipients: recipientsOf(summary.envelope),
+    to: recipientsIn(summary.envelope?.to),
+    cc: recipientsIn(summary.envelope?.cc),
+    ...(repliesElsewhere ? { replyTo } : {}),
     at: parseDate(summary),
     body: [],
     bodyStatus: 'pending',
@@ -166,15 +178,21 @@ const asImapAddress = (address: string): ImapAddress | null => {
   return { name: null, mailbox: address.slice(0, at).trim(), host: address.slice(at + 1).trim() };
 };
 
+/** By the composer's own rule, which is the one the send used: commas, semicolons and spaces. */
 const asImapAddresses = (list: string): readonly ImapAddress[] =>
-  list.split(',').flatMap(part => asImapAddress(part.trim()) ?? []);
+  addressList(list).flatMap(part => asImapAddress(part) ?? []);
 
 /**
- * `uidValidity: 0` marks a location no server issued. When the same message later turns up in a
+ * `VAULT_UID_VALIDITY` marks a location no server issued. When the same message later turns up in a
  * real Sent folder the fingerprint collapses the two and the real copy leads.
  */
 const asSyntheticCopy = (message: VaultSentMessage) => ({
-  location: { account: message.from, folder: 'sent' as const, uidValidity: 0, uid: 0 },
+  location: {
+    account: message.from,
+    folder: 'sent' as const,
+    uidValidity: VAULT_UID_VALIDITY,
+    uid: 0,
+  },
   summary: {
     seq: 0,
     uid: 0,

@@ -7,7 +7,7 @@ import {
   withDrafts,
 } from './summaries';
 import type { ThreadState } from './thread';
-import { type Folder, isArchived } from './thread';
+import { type Folder, isArchived, VAULT_UID_VALIDITY } from './thread';
 
 const envelope = (over: Partial<ImapMessageSummary['envelope'] & {}> = {}) => ({
   date: 'Sun, 23 Aug 2026 09:00:00 +0000',
@@ -114,7 +114,7 @@ describe('threadFromSummary', () => {
     expect(message.body).toEqual([]);
   });
 
-  it('collects To and Cc as the recipients Reply all offers', () => {
+  it('keeps To and Cc apart, as written, names and all', () => {
     const thread = threadFromSummary(
       summaryOf({
         envelope: envelope({
@@ -133,11 +133,40 @@ describe('threadFromSummary', () => {
       }),
       'user@yozz.app',
     );
-    expect(thread.messages[0]?.recipients).toEqual([
-      'user@yozz.app',
-      'sam@example.com',
-      'kim@example.com',
+    expect(thread.messages[0]?.to).toEqual([
+      { address: 'User@YOZZ.app' },
+      { name: 'Sam', address: 'sam@example.com' },
     ]);
+    expect(thread.messages[0]?.cc).toEqual([
+      { address: 'kim@example.com' },
+      { address: 'user@yozz.app' },
+    ]);
+  });
+
+  it('drops a name that only repeats the address', () => {
+    const thread = threadFromSummary(
+      summaryOf({
+        envelope: envelope({
+          to: [{ name: 'Bob@Example.com', mailbox: 'bob', host: 'example.com' }],
+        }),
+      }),
+      'user@yozz.app',
+    );
+    expect(thread.messages[0]?.to).toEqual([{ address: 'bob@example.com' }]);
+  });
+
+  it('keeps Reply-To only when it names someone other than From', () => {
+    const replyingTo = (replyTo: NonNullable<ImapMessageSummary['envelope']>['replyTo']) =>
+      threadFromSummary(summaryOf({ envelope: envelope({ replyTo }) }), 'user@yozz.app').messages[0]
+        ?.replyTo;
+    expect(replyingTo([{ name: null, mailbox: 'replies', host: 'example.com' }])).toEqual([
+      { address: 'replies@example.com' },
+    ]);
+    // The server fills an absent Reply-To with From, so From again is no Reply-To at all.
+    expect(replyingTo([{ name: 'Alice Smith', mailbox: 'Alice', host: 'example.com' }])).toBe(
+      undefined,
+    );
+    expect(replyingTo([])).toBe(undefined);
   });
 
   it('maps a summary without a subject to (no subject)', () => {
@@ -488,8 +517,9 @@ describe('threads that span accounts', () => {
         at: 1_700_000_000_000,
         date: 'Sun, 23 Aug 2026 11:00:00 +0000',
         from: 'alias@example.com',
-        to: 'alice@example.com',
-        cc: '',
+        // The composer's own separators: what the send split on, the record must split on too.
+        to: 'alice@example.com; bob@example.com',
+        cc: 'carol@example.com dan@example.com',
         subject: 'Re: Important update',
         body: 'Sent from an address with no mailbox.',
         inReplyTo: '<msg-1@example.com>',
@@ -500,6 +530,20 @@ describe('threads that span accounts', () => {
     // Its text is already here.
     expect(thread.messages[1]?.body).toEqual(['Sent from an address with no mailbox.']);
     expect(thread.messages[1]?.bodyStatus).toBeUndefined();
+    expect(thread.messages[1]?.to?.map(r => r.address)).toEqual([
+      'alice@example.com',
+      'bob@example.com',
+    ]);
+    expect(thread.messages[1]?.cc?.map(r => r.address)).toEqual([
+      'carol@example.com',
+      'dan@example.com',
+    ]);
+    // Kept in the vault, not in a Sent folder the address does not have.
+    const sent = thread.messages[1];
+    if (sent === undefined) throw new Error('the vault copy lost its message');
+    expect(sent.locations).toEqual([
+      { account: 'alias@example.com', folder: 'sent', uidValidity: VAULT_UID_VALIDITY, uid: 0 },
+    ]);
   });
 
   it('collapses the vault copy into the real one once a mailbox holds the same message', () => {

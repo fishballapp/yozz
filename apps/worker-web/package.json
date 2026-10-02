@@ -1,0 +1,17 @@
+{
+  "name": "@yozz.app/worker-web",
+  "version": "0.0.0",
+  "private": true,
+  "license": "AGPL-3.0-only",
+  "type": "module",
+  "description": "Assets-only Worker serving the YOZZ SPA (../web build). No Hono, no worker code \u2014 static hits aren't billed as Worker invocations. VITE_API_URL is baked at build so apps/web/src/vault/api-base-url.ts sees a configured API.",
+  "scripts": {
+    "deploy": "VITE_API_URL=https://api.yozz.app pnpm -F @yozz.app/web build && varlock run -- wrangler deploy",
+    "dev": "wrangler dev"
+  },
+  "devDependencies": {
+    "@varlock/1password-plugin": "catalog:",
+    "varlock": "catalog:",
+    "wrangler": "catalog:"
+  }
+}

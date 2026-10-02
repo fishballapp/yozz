@@ -87,7 +87,7 @@ export const DEMO_ADDRESSES: readonly AddressRecord[] = [
   },
 ];
 
-export const THREADS: readonly Thread[] = [
+const AUTHORED: readonly Thread[] = [
   {
     id: 't-deploy',
     accounts: ['jason@northlane.example'],
@@ -101,6 +101,8 @@ export const THREADS: readonly Thread[] = [
         fromName: 'Ana Ferreira',
         fromAddress: 'ana@acme.co',
         toAddress: 'jason@northlane.example',
+        to: [{ name: 'Jason Yu', address: 'jason@northlane.example' }],
+        cc: [{ name: 'Leo Park', address: 'leo@acme.co' }],
         at: ago(52 * MINUTE),
         body: [
           'Hey — the main branch build failed at step 14 with exit code 137. That is the OOM kill, so I think the runner ran out of memory again rather than anything in the diff.',
@@ -127,6 +129,8 @@ export const THREADS: readonly Thread[] = [
         fromName: 'Stripe',
         fromAddress: 'billing@stripe.com',
         toAddress: 'jason@northlane.example',
+        // To the billing alias, which forwards here: named in neither To nor Cc.
+        to: [{ address: 'billing@northlane.example' }],
         at: ago(3 * HOUR),
         body: [
           'Your receipt for Acme Workspace (Annual) is attached.',
@@ -150,6 +154,7 @@ export const THREADS: readonly Thread[] = [
         fromName: 'Dune & Down',
         fromAddress: 'hello@duneanddown.example',
         toAddress: 'jason@jyu.example',
+        to: [{ address: 'jason@jyu.example' }],
         at: ago(4 * HOUR),
         // The one fixture with an HTML body.
         hasTextPart: true,
@@ -192,6 +197,14 @@ export const THREADS: readonly Thread[] = [
         fromName: 'Mum',
         fromAddress: 'mum@jyu.example',
         toAddress: 'jason@jyu.example',
+        to: [
+          { name: 'Jason Yu', address: 'jason@jyu.example' },
+          { name: 'Dad', address: 'dad@jyu.example' },
+          { name: 'Mei Yu', address: 'mei.yu@gmail.com' },
+          { name: 'Ollie Yu', address: 'ollie@yu-family.example' },
+          { name: 'Grandma Lin', address: 'lin.huiying@outlook.example' },
+          { name: 'Auntie Wen', address: 'wen.chan@outlook.example' },
+        ],
         at: ago(5 * HOUR),
         body: [
           'Are you free around one o’clock on Sunday? I am doing the roast and your dad has been asking when you are next over.',
@@ -213,6 +226,7 @@ export const THREADS: readonly Thread[] = [
         fromName: 'Linear',
         fromAddress: 'notifications@linear.app',
         toAddress: 'jason@northlane.example',
+        to: [{ name: 'Jason Yu', address: 'jason@northlane.example' }],
         at: ago(5 * HOUR + 20 * MINUTE),
         body: [
           'Three issues were assigned to you in the last day.',
@@ -235,6 +249,14 @@ export const THREADS: readonly Thread[] = [
         fromName: 'GitHub',
         fromAddress: 'noreply@github.com',
         toAddress: 'jason@northlane.example',
+        // GitHub's own shape: the repository in To, you and the reason in Cc.
+        to: [{ name: 'northlane/web', address: 'web@noreply.github.com' }],
+        cc: [
+          { name: 'Jason Yu', address: 'jason@northlane.example' },
+          { name: 'Review requested', address: 'review_requested@noreply.github.com' },
+        ],
+        // Answers go to the pull request, not to noreply.
+        replyTo: [{ name: 'northlane/web', address: 'reply+AAB7XQ4M@reply.github.com' }],
         at: ago(1 * DAY + 2 * HOUR),
         body: [
           'ana-f opened pull request #204: Rewrite auth middleware to drop the session table.',
@@ -245,7 +267,8 @@ export const THREADS: readonly Thread[] = [
         id: 'm-github-2',
         fromName: 'Jason Yu',
         fromAddress: 'jason@northlane.example',
-        toAddress: 'noreply@github.com',
+        toAddress: 'reply+AAB7XQ4M@reply.github.com',
+        to: [{ name: 'northlane/web', address: 'reply+AAB7XQ4M@reply.github.com' }],
         at: ago(1 * DAY + 40 * MINUTE),
         body: [
           'Reviewed and approved. One note left inline about the refresh-token rotation — non-blocking, but worth doing before we forget it exists.',
@@ -266,6 +289,7 @@ export const THREADS: readonly Thread[] = [
         fromName: 'Notion',
         fromAddress: 'digest@notion.so',
         toAddress: 'jason@jyu.example',
+        to: [{ address: 'jason@jyu.example' }],
         at: ago(2 * DAY),
         body: [
           'Your workspace had 14 updates this week.',
@@ -287,6 +311,7 @@ export const THREADS: readonly Thread[] = [
         fromName: 'Vercel',
         fromAddress: 'notifications@vercel.com',
         toAddress: 'jason@northlane.example',
+        to: [{ name: 'Jason Yu', address: 'jason@northlane.example' }],
         at: ago(2 * DAY + 3 * HOUR),
         body: [
           'Production deployment for yozz-web finished in 47 seconds.',
@@ -309,6 +334,11 @@ export const THREADS: readonly Thread[] = [
         fromName: 'Kate Lai',
         fromAddress: 'kate@contractlaw.co',
         toAddress: 'jason@northlane.example',
+        to: [{ name: 'Jason Yu', address: 'jason@northlane.example' }],
+        cc: [
+          { name: 'Sofia Mendes', address: 'sofia@contractlaw.co' },
+          { name: 'Northlane Billing', address: 'billing@northlane.example' },
+        ],
         at: ago(3 * DAY),
         body: [
           'Please find the revised contract attached, with the new payment schedule and clause 7.3 updated per our call on Tuesday.',
@@ -335,6 +365,7 @@ export const THREADS: readonly Thread[] = [
         fromName: 'Fastmail',
         fromAddress: 'security@fastmail.com',
         toAddress: 'jason@jyu.example',
+        to: [{ name: 'Jason Yu', address: 'jason@jyu.example' }],
         at: ago(4 * DAY),
         body: [
           'The password on your account was changed from a new device in London, United Kingdom.',
@@ -356,6 +387,8 @@ export const THREADS: readonly Thread[] = [
         fromName: 'Hacker Newsletter',
         fromAddress: 'mail@hackernewsletter.com',
         toAddress: 'jason@jyu.example',
+        // Sent to the list by Bcc, so the sender's own address stands in To.
+        to: [{ name: 'Hacker Newsletter', address: 'mail@hackernewsletter.com' }],
         at: ago(4 * DAY + 6 * HOUR),
         body: [
           'The ten highest scoring stories from the last 24 hours.',
@@ -377,6 +410,10 @@ export const THREADS: readonly Thread[] = [
         fromName: 'Dad',
         fromAddress: 'dad@jyu.example',
         toAddress: 'jason@jyu.example',
+        to: [
+          { name: 'Jason', address: 'jason@jyu.example' },
+          { name: 'Mei', address: 'mei.yu@gmail.com' },
+        ],
         at: ago(5 * DAY),
         body: [
           'Got some good ones of the dog at the beach. The big files are in the drive link below, the attached ones are already resized.',
@@ -393,6 +430,8 @@ export const THREADS: readonly Thread[] = [
         fromName: 'Jason Yu',
         fromAddress: 'jason@jyu.example',
         toAddress: 'dad@jyu.example',
+        to: [{ name: 'Dad', address: 'dad@jyu.example' }],
+        cc: [{ name: 'Mei', address: 'mei.yu@gmail.com' }],
         at: ago(4 * DAY + 20 * HOUR),
         body: ['These are great. I will get the stick one printed this week — A3 or bigger?'],
       },
@@ -411,6 +450,7 @@ export const THREADS: readonly Thread[] = [
         fromName: 'Cloudflare',
         fromAddress: 'noreply@notify.cloudflare.com',
         toAddress: 'jason@northlane.example',
+        to: [{ address: 'jason@northlane.example' }],
         at: ago(6 * DAY),
         body: [
           'Your zone yozz.app is now active on Cloudflare.',
@@ -433,6 +473,7 @@ export const THREADS: readonly Thread[] = [
         fromName: 'Priya Nandakumar',
         fromAddress: 'priya.n@gmail.com',
         toAddress: 'hello@stillwater.example',
+        to: [{ name: 'Stillwater', address: 'hello@stillwater.example' }],
         at: ago(9 * HOUR),
         body: [
           'Hi — I bought the pro upgrade on my phone, then tapped restore purchases on my iPad and it charged me a second time.',
@@ -454,6 +495,7 @@ export const THREADS: readonly Thread[] = [
         fromName: 'App Store Connect',
         fromAddress: 'no_reply@email.apple.com',
         toAddress: 'hello@stillwater.example',
+        to: [{ address: 'hello@stillwater.example' }],
         at: ago(1 * DAY + 8 * HOUR),
         body: [
           'The status for stillwater 1.4.0 has changed to Ready for Sale.',
@@ -475,6 +517,7 @@ export const THREADS: readonly Thread[] = [
         fromName: 'Tom Beckett',
         fromAddress: 'tom@beckett.dev',
         toAddress: 'hello@stillwater.example',
+        to: [{ name: 'Stillwater', address: 'hello@stillwater.example' }],
         at: ago(3 * DAY + 5 * HOUR),
         body: [
           'Love the app. One thing I keep wanting: the same list reshuffled every morning without me opening it.',
@@ -486,6 +529,7 @@ export const THREADS: readonly Thread[] = [
         fromName: 'stillwater',
         fromAddress: 'hello@stillwater.example',
         toAddress: 'tom@beckett.dev',
+        to: [{ name: 'Tom Beckett', address: 'tom@beckett.dev' }],
         at: ago(3 * DAY + 2 * HOUR),
         body: [
           'Thanks Tom — that is the most requested thing by a distance, and it is on the list for the next release.',
@@ -507,6 +551,7 @@ export const THREADS: readonly Thread[] = [
         fromName: 'Porkbun',
         fromAddress: 'support@porkbun.com',
         toAddress: 'jason@jyu.example',
+        to: [{ name: 'Jason Yu', address: 'jason@jyu.example' }],
         at: ago(7 * DAY),
         body: [
           'jyu.example renews in 30 days for $11.06.',
@@ -516,3 +561,24 @@ export const THREADS: readonly Thread[] = [
     ],
   },
 ];
+
+/** One copy per message: in the sending account's Sent when it is yours, else in the inbox it landed in. */
+const filed = (thread: Thread): Thread => ({
+  ...thread,
+  messages: thread.messages.map((message, index) => {
+    const isOwn = thread.accounts.includes(message.fromAddress);
+    return {
+      ...message,
+      locations: [
+        {
+          account: isOwn ? message.fromAddress : message.toAddress,
+          folder: isOwn ? 'sent' : 'inbox',
+          uidValidity: 1,
+          uid: index + 1,
+        },
+      ],
+    };
+  }),
+});
+
+export const THREADS: readonly Thread[] = AUTHORED.map(filed);

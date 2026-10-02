@@ -14,7 +14,6 @@ import { useEffect, useRef, useState } from 'react';
 import { describeMailFailure } from '../relay/describe-failure';
 import { useMail } from '../store/MailProvider';
 import { ATTACHMENT_LABEL, formatBytes } from '../threads/attachments';
-import { agentLabel } from '../ui/agent-label';
 import { Button } from '../ui/Button';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
 import { isDemo } from '../ui/chrome';
@@ -259,7 +258,6 @@ export const Compose = () => {
                     <Input
                       ref={toInput}
                       id="compose-to"
-                      aria-label={agentLabel('To', draft.to)}
                       type="email"
                       multiple
                       value={draft.to}
@@ -285,7 +283,6 @@ export const Compose = () => {
                         <FieldLabel htmlFor="compose-cc">Cc</FieldLabel>
                         <Input
                           id="compose-cc"
-                          aria-label={agentLabel('Cc', draft.cc)}
                           type="email"
                           multiple
                           value={draft.cc}
@@ -298,7 +295,6 @@ export const Compose = () => {
                         <FieldLabel htmlFor="compose-bcc">Bcc</FieldLabel>
                         <Input
                           id="compose-bcc"
-                          aria-label={agentLabel('Bcc', draft.bcc)}
                           type="email"
                           multiple
                           value={draft.bcc}

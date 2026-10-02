@@ -935,5 +935,5 @@ export const useComposer = ({
     ],
   );
 
-  return { slice, load, reset, setDrafts, drafts, vaultSent };
+  return { slice, load, reset, drafts, vaultSent };
 };

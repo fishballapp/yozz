@@ -1,17 +1,17 @@
-import { Link, useNavigate, useParams, useSearch } from '@tanstack/react-router';
+import { Link, useNavigate, useParams } from '@tanstack/react-router';
 import { useEffect } from 'react';
 import { keepCompose } from '../compose/intent';
 import { useMail } from '../store/MailProvider';
 import { ThreadReader } from './ThreadReader';
 import { threadByHandle } from './thread';
-import { visibleThreads } from './views';
+import { useAdvancePast } from './use-advance';
 
 /** Resolved against the whole store, not the filtered list, so a search must not unmount the open message. */
 export const ThreadPage = () => {
   const { mailbox, _splat: threadId } = useParams({ from: '/_app/m/$mailbox/t/$' });
   const navigate = useNavigate({ from: '/m/$mailbox/t/$' });
-  const { q } = useSearch({ from: '/_app/m/$mailbox' });
   const { threads, markRead, loadBody } = useMail();
+  const advancePast = useAdvancePast();
   // The root can change under a URL (paging, a move), so the id is tried as a message of a thread before it is called missing.
   const thread = threadByHandle(threads, threadId ?? '');
 
@@ -28,27 +28,10 @@ export const ThreadPage = () => {
 
   if (thread === null) return <ThreadMissing />;
 
-  // Computed from the list as it is now, before the move has applied.
-  const advance = () => {
-    const list = visibleThreads(threads, mailbox, q);
-    const index = list.findIndex(candidate => candidate.id === thread.id);
-    const next = list[index + 1] ?? list[index - 1];
-    if (next === undefined || index === -1) {
-      void navigate({ to: '/m/$mailbox', params: { mailbox }, search: previous => previous });
-      return;
-    }
-    void navigate({
-      to: '/m/$mailbox/t/$',
-      params: { mailbox, _splat: next.id },
-      search: previous => previous,
-      replace: true,
-    });
-  };
-
   return (
     <ThreadReader
       thread={thread}
-      onTriaged={advance}
+      onTriaged={() => advancePast(thread.id)}
       // Closing keeps the search.
       onClose={() =>
         navigate({ to: '/m/$mailbox', params: { mailbox }, search: previous => previous })

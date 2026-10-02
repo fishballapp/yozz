@@ -37,8 +37,7 @@
     "build": "tsdown src/index.ts --format esm --dts",
     "prepack": "pnpm build",
     "test": "vitest run",
-    "live": "node harness/live.ts",
-    "seed": "node harness/seed-inbox.ts"
+    "live": "node harness/live.ts"
   },
   "devDependencies": {
     "@types/node": "catalog:",

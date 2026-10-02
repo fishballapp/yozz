@@ -1,0 +1,19 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "yozz-web",
+  "compatibility_date": "2026-06-21",
+  "account_id": "ef1db00eff7bafcb12e7acb5754d1377",
+  // Assets-only Worker — no `main`/worker code, so static hits are served by Cloudflare's asset
+  // layer and NOT billed as Worker invocations (cost-equivalent to Pages). `not_found_handling`
+  // serves index.html for client-side routing. The custom domain (yozz.app apex) is in
+  // infra/workers.tf. Build the SPA first: `pnpm -F @yozz.app/web build` (produces ../web/dist).
+  // Deploy bakes VITE_API_URL=https://api.yozz.app — apps/web/src/vault/api-base-url.ts reads it
+  // and the vault screens refuse to work without it (isApiConfigured).
+  "assets": {
+    "directory": "../web/dist",
+    "not_found_handling": "single-page-application"
+  },
+  "observability": {
+    "enabled": true
+  }
+}

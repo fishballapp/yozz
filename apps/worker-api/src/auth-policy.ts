@@ -95,6 +95,13 @@ const refuseWrappedPasskeyDeletion = async ({
   }
 };
 
+/** Registration from a session must not mint a second session that outlives the first. */
+const refuseSessionFromRegistration = async ({ body }: PolicyContext): Promise<void> => {
+  if ((body as { createSession?: unknown } | undefined)?.createSession !== undefined) {
+    return badRequest('Adding a passkey never creates a session');
+  }
+};
+
 /** One magic-link endpoint serves signup and recovery; a recovery link (`?reset=1`) for an unknown address would otherwise create an account. */
 const refuseRecoveryOfUnknownEmail = async ({ env, body }: PolicyContext): Promise<void> => {
   const { email, callbackURL } =
@@ -120,4 +127,5 @@ export const ENDPOINT_POLICIES: Readonly<
   '/sign-in/email': requireActivePasswordMode,
   '/passkey/verify-authentication': requireActivePasskeyMode,
   '/passkey/delete-passkey': refuseWrappedPasskeyDeletion,
+  '/passkey/verify-registration': refuseSessionFromRegistration,
 };

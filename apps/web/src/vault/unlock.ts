@@ -5,9 +5,10 @@ import {
   openVault,
   rewrapDek,
   type Vault,
+  VaultError,
 } from '@yozz.app/vault';
 import type { UnlockStatusResponse } from '@yozz.app/vault-contract';
-import { type VaultApiClient, vaultApi } from './api';
+import { type VaultApiClient, VaultApiError, vaultApi } from './api';
 import {
   addPasskeyAuthenticator as authAddPasskey,
   signInWithPasskey as authSignInPasskey,
@@ -223,6 +224,10 @@ const enrolPrfPasskey = async (): Promise<{
   }
 
   const regRes = await authAddPasskey(getPrfEnableInput());
+  // The error union only sometimes carries a `code`; Better Auth's freshness refusal always does.
+  if (regRes.error && 'code' in regRes.error && regRes.error.code === 'SESSION_NOT_FRESH') {
+    throw new VaultApiError('SESSION_NOT_FRESH', regRes.error.message, 403);
+  }
   if (regRes.error || !regRes.data) {
     throw new PasskeyPrfError(regRes.error?.message || 'Passkey registration failed');
   }
@@ -264,6 +269,9 @@ export const createPasskeyVault = async ({
   return openSession({ mode: 'passkey', encKey, wrappedDek, vault, api, idbFactory });
 };
 
+export const PASSKEY_DERIVES_ANOTHER_KEY =
+  'This passkey signed you in, but on this device it derives a different vault key from the one it was set up with, which synced passkeys can do. Log in on a device where it works, or with your password, then add a passkey on this device from Settings.';
+
 export const loginWithPasskey = async ({
   api = vaultApi,
   idbFactory,
@@ -280,7 +288,15 @@ export const loginWithPasskey = async ({
   const encKey = await derivePasskeyEncKey(extractPrfOutput(clientExtensionResults));
 
   const wrappedDek = await api.getPasskeyWrap(credentialId);
-  const vault = await openVault({ encKey }, wrappedDek);
+  const vault = await openVault({ encKey }, wrappedDek).catch((error: unknown) => {
+    // The server accepted the passkey, so a wrap that will not open means this device's PRF
+    // output differs from the one it was enrolled with: synced passkeys need not agree
+    // (docs/knowledge/webauthn-prf.md). The generic copy blamed a passphrase.
+    if (error instanceof VaultError && error.code === 'unreadable') {
+      throw new PasskeyPrfError(PASSKEY_DERIVES_ANOTHER_KEY);
+    }
+    throw error;
+  });
   return openSession({ mode: 'passkey', encKey, wrappedDek, vault, api, idbFactory });
 };
 
@@ -357,6 +373,45 @@ export const switchModeToPasskey = async ({
   }
 
   return { ...currentSession, mode: 'passkey', encKey, wrappedDek: newWrappedDek };
+};
+
+/**
+ * The server refuses to change how a vault opens from a session older than a day, so a stolen
+ * cookie cannot plant a credential of its own. Better Auth's passkey registration and our own
+ * routes both say so as `SESSION_NOT_FRESH`.
+ */
+export const needsFreshSession = (error: unknown): boolean =>
+  error instanceof VaultApiError && error.code === 'SESSION_NOT_FRESH';
+
+/**
+ * A new sign-in by the vault's own method, which gives the server a fresh session; the keys this
+ * tab holds are untouched. With a session open, the passkey prompt offers only this account's
+ * passkeys; the account is checked anyway.
+ */
+export const confirmIdentity = async ({
+  currentSession,
+  password,
+}: {
+  readonly currentSession: UnlockedVaultSession;
+  readonly password?: string;
+}): Promise<void> => {
+  if (currentSession.mode === 'passkey') {
+    const res = await authSignInPasskey();
+    if (res.error || !res.data) {
+      throw new PasskeyPrfError(res.error?.message || 'Passkey sign-in failed');
+    }
+  } else {
+    if (password === undefined || password === '') {
+      throw new UnlockError('Enter your current password.');
+    }
+    const keys = await deriveAccountKeys({ email: currentSession.email, password });
+    const res = await authSignInPassword(currentSession.email, keys.authValue);
+    if (res.error) throw new UnlockError('That is not the password this vault opens with.');
+  }
+  const { userId } = await resolveUser();
+  if (userId !== currentSession.userId) {
+    throw new UnlockError('That signed in to a different account.');
+  }
 };
 
 /** The server's view of the vault as one string; the only thing that can notice a reset or re-enrolment elsewhere. */

@@ -8,7 +8,7 @@ import { buttonClass } from '../ui/Button';
 import { useChromePref } from '../ui/chrome';
 import { IconSwitch } from '../ui/IconSwitch';
 import { ColumnsRow, DESKTOP_COLUMNS, StackedRow } from './ThreadRow';
-import type { ThreadState } from './thread';
+import { type ThreadState, threadByHandle } from './thread';
 import { isViewId, type MailboxId, olderAvailable, syncProgressIn } from './views';
 
 /** The list over a mailbox: search, the layout switch, the rows, the empty states and Older mail. */
@@ -62,7 +62,9 @@ export const ThreadList = ({
   onQueryChange: (query: string) => void;
 }) => {
   // Which row is open is a fact about the URL, so the row link and its inversion cannot disagree.
-  const { _splat: threadId } = useParams({ strict: false });
+  // Resolved the way `ThreadPage` resolves it: a message id in the URL names its conversation.
+  const { _splat: handle } = useParams({ strict: false });
+  const openId = handle === undefined ? undefined : threadByHandle(threads, handle)?.id;
   const { accounts, recordsError, syncStates, sync, loadOlder, isLoadingOlder, isDemo } = useMail();
   const [layout, setLayout] = useChromePref<Layout>('yozz:list-layout', 'columns', raw =>
     raw === 'stacked' ? 'stacked' : 'columns',
@@ -202,7 +204,7 @@ export const ThreadList = ({
                 key={thread.id}
                 thread={thread}
                 mailbox={mailbox}
-                isSelected={thread.id === threadId}
+                isSelected={thread.id === openId}
               />
             ))}
           </ul>

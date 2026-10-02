@@ -4,8 +4,8 @@ import type { DraftContent } from '../compose/draft';
 import type { DeleteOutcome, DraftHandle, SaveOutcome } from '../compose/draft-vault';
 import { quoteForReply, seedFor } from '../compose/intent';
 import type { BodyOutcome } from '../threads/body-state';
-import type { ThreadState } from '../threads/thread';
-import { isArchived, isTrashed, threadByHandle } from '../threads/thread';
+import type { Recipient, ThreadState } from '../threads/thread';
+import { inboxesOf, isArchived, isTrashed, threadByHandle } from '../threads/thread';
 import { previewOf, visibleThreads } from '../threads/views';
 
 /**
@@ -71,6 +71,8 @@ export const OUTPUT_CHARS = 6_000;
 export const DEPTH: Record<'none' | 'latest' | 'full', number> = { none: 50, latest: 10, full: 3 };
 /** A skim gets a short body per thread, so ten still fit one output. */
 export const SKIM_CHARS = 400;
+/** Per `to` / `cc` line: a list mail to hundreds must not spend the whole output on its header. */
+export const RECIPIENTS_LISTED = 10;
 
 const clip = (text: string, max: number) =>
   text.length <= max ? text : `${text.slice(0, max)}…[truncated ${text.length - max} chars]`;
@@ -105,8 +107,27 @@ const tool = <Schema extends z.ZodType>({
   },
 });
 
-const senderOf = ({ fromName, fromAddress }: { fromName: string; fromAddress: string }) =>
-  fromName === '' ? fromAddress : `${fromName} <${fromAddress}>`;
+const named = (name: string | undefined, address: string) =>
+  name === undefined || name === '' ? address : `${name} <${address}>`;
+
+/**
+ * Bare addresses, the shape `save_draft` takes back: its address rule splits on spaces, so a
+ * `Name <address>` would come back as three broken recipients.
+ */
+const addressesOf = (recipients: readonly Recipient[]) =>
+  recipients
+    .slice(0, RECIPIENTS_LISTED)
+    .map(({ address }) => address)
+    .join(', ');
+
+/** How many a capped `to`, `cc` and `replyTo` left out, said rather than silently dropped. */
+const omittedFrom = (...lines: readonly (readonly Recipient[] | undefined)[]) => {
+  const omitted = lines.reduce(
+    (sum, line) => sum + Math.max(0, (line?.length ?? 0) - RECIPIENTS_LISTED),
+    0,
+  );
+  return omitted === 0 ? {} : { recipientsOmitted: omitted };
+};
 
 /** The largest newest-first prefix that fits the budget, never fewer than one. */
 const fitting = <T>(items: readonly T[], budget: number): readonly T[] => {
@@ -181,19 +202,31 @@ const selected = (
   });
 };
 
+const deliveredTo = (message: ThreadState['messages'][number]) => {
+  const inboxes = inboxesOf(message);
+  return inboxes.length === 0 ? {} : { deliveredTo: inboxes.join(', ') };
+};
+
 const messageOf = (
   message: ThreadState['messages'][number],
   body: string | null,
   bodyChars: number,
 ) => ({
   id: message.id,
-  from: senderOf(message),
-  to: message.toAddress,
+  from: named(message.fromName, message.fromAddress),
+  // A draft's `to` is already the line the user typed; received mail has the header's.
+  to: message.to === undefined ? message.toAddress : addressesOf(message.to),
+  ...(message.cc !== undefined && message.cc.length > 0 ? { cc: addressesOf(message.cc) } : {}),
+  // Where a reply seeded from this message goes, so a draft's recipients are no surprise.
+  ...(message.replyTo !== undefined ? { replyTo: addressesOf(message.replyTo) } : {}),
+  ...omittedFrom(message.to, message.cc, message.replyTo),
+  // The inbox it landed in, which To need not name (a Bcc, a list, an alias forwarding in).
+  ...deliveredTo(message),
   at: new Date(message.at).toISOString(),
   ...(message.isDraft === true
     ? { isDraft: true, draftKey: message.draftKey, draftId: message.draftId }
     : {}),
-  // A draft lives only in Drafts; fixture messages have no locations.
+  // A draft lives only in Drafts.
   ...(message.isDraft === true
     ? { mailboxes: ['drafts'] }
     : message.locations !== undefined && message.locations.length > 0

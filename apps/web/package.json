@@ -12,8 +12,7 @@
     "test": "vitest run --passWithNoTests",
     "html:security": "node harness/html-security.ts",
     "vault:drive": "node harness/vault-drive.ts",
-    "draft:drive": "node harness/draft-open.ts",
-    "judge:accounts": "node harness/judge-accounts.ts"
+    "draft:drive": "node harness/draft-open.ts"
   },
   "dependencies": {
     "@base-ui/react": "catalog:",

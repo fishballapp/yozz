@@ -1,9 +1,16 @@
 import { describe, expect, it, vi } from 'vitest';
+import { addressList } from '../compose/draft';
 import type { DraftRecord } from '../compose/draft-record';
 import type { DraftHandle } from '../compose/draft-vault';
 import type { BodyOutcome } from '../threads/body-state';
 import type { Folder, Message, ThreadState } from '../threads/thread';
-import { type AgentPort, BODY_CHARS, buildAgentTools } from './tools';
+import {
+  type AgentPort,
+  BODY_CHARS,
+  buildAgentTools,
+  OUTPUT_CHARS,
+  RECIPIENTS_LISTED,
+} from './tools';
 
 const message = (id: string, overrides: Partial<Message> = {}): Message => ({
   id,
@@ -202,10 +209,78 @@ describe('get_threads', () => {
         },
       ],
     });
-    // Fixture messages have no locations.
+    // A message with no locations, like this file's own `message()`, names no mailbox.
     const fixture = await call(tools, 'get_threads', { ids: ['a'], body: 'latest' });
     const [only] = (fixture as { threads: { messages: Record<string, unknown>[] }[] }).threads;
     expect(only?.messages[0]).not.toHaveProperty('mailboxes');
+  });
+
+  it('gives the recipients and the inbox it landed in, which need not agree', async () => {
+    // To a billing alias that forwards into me@: delivered somewhere To does not name.
+    const forwarded = thread('f', ['inbox'], {
+      messages: [
+        message('f/1', {
+          to: [{ name: 'Doe, Jane', address: 'billing@yozz.app' }],
+          cc: [{ name: 'Ops', address: 'ops@example.com' }],
+          locations: [{ account: 'me@yozz.app', folder: 'inbox', uidValidity: 1, uid: 3 }],
+        }),
+      ],
+    });
+    const { tools } = fakePort([forwarded]);
+    const result = await call(tools, 'get_threads', { ids: ['f'], body: 'latest' });
+    expect(result).toMatchObject({
+      threads: [
+        {
+          messages: [
+            {
+              from: 'Ada <ada@example.com>',
+              to: 'billing@yozz.app',
+              cc: 'ops@example.com',
+              deliveredTo: 'me@yozz.app',
+            },
+          ],
+        },
+      ],
+    });
+    // Bare addresses, so what comes out goes back into save_draft as the same recipients.
+    const [first] =
+      (result as { threads: { messages: { to: string }[] }[] }).threads[0]?.messages ?? [];
+    expect(addressList(first?.to ?? '')).toEqual(['billing@yozz.app']);
+
+    // Your own sent copy was delivered nowhere of yours.
+    const own = thread('o', ['sent'], {
+      messages: [
+        message('o/1', {
+          fromAddress: 'me@yozz.app',
+          to: [{ address: 'ada@example.com' }],
+          locations: [{ account: 'me@yozz.app', folder: 'sent', uidValidity: 1, uid: 4 }],
+        }),
+      ],
+    });
+    const { tools: ownTools } = fakePort([own]);
+    const sent = await call(ownTools, 'get_threads', { ids: ['o'], body: 'latest' });
+    const [message0] =
+      (sent as { threads: { messages: Record<string, unknown>[] }[] }).threads[0]?.messages ?? [];
+    expect(message0).toMatchObject({ to: 'ada@example.com' });
+    expect(message0).not.toHaveProperty('deliveredTo');
+    expect(message0).not.toHaveProperty('cc');
+    expect(message0).not.toHaveProperty('recipientsOmitted');
+  });
+
+  it('lists a capped number of recipients and says how many it left out', async () => {
+    const crowd = Array.from({ length: 200 }, (_, index) => ({
+      name: `Person Number ${index} With A Long Name`,
+      address: `person-${index}@a-long-mailing-list-domain.example`,
+    }));
+    const blast = thread('b', ['inbox'], { messages: [message('b/1', { to: crowd })] });
+    const { tools } = fakePort([blast]);
+    const result = await call(tools, 'get_threads', { ids: ['b'], body: 'latest' });
+    const [only] =
+      (result as { threads: { messages: { to: string; recipientsOmitted: number }[] }[] })
+        .threads[0]?.messages ?? [];
+    expect(addressList(only?.to ?? '')).toHaveLength(RECIPIENTS_LISTED);
+    expect(only?.recipientsOmitted).toBe(200 - RECIPIENTS_LISTED);
+    expect(JSON.stringify(result).length).toBeLessThanOrEqual(OUTPUT_CHARS);
   });
 
   it('reads bodies only when asked, and only as deep as asked', async () => {

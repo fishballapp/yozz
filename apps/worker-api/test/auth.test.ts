@@ -1,4 +1,5 @@
 import { env } from 'cloudflare:test';
+import { WEBAUTHN_TIMEOUT_MS } from '@yozz.app/vault-contract';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { createApp } from '../src/app.ts';
 import type { EmailSender } from '../src/email.ts';
@@ -8,6 +9,27 @@ describe('Worker auth policies and magic link', () => {
   beforeEach(async () => {
     await applyMigrations(env.DB);
   });
+
+  /** A magic-link sign-in, returning the app and the session cookie it set. */
+  const signedIn = async (email: string) => {
+    let magicUrl = '';
+    const app = createApp({
+      emailSender: async mail => {
+        magicUrl = mail.url;
+      },
+    });
+    await app.request(
+      'http://localhost/api/auth/sign-in/magic-link',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Origin: 'https://yozz.app' },
+        body: JSON.stringify({ email, name: email }),
+      },
+      env,
+    );
+    const verifyRes = await app.request(magicUrl, { method: 'GET' }, env);
+    return { app, cookieHeader: verifyRes.headers.get('set-cookie') ?? '' };
+  };
 
   it('signs up via magic link with test email sender seam', async () => {
     let capturedMail: { to: string; url: string; token: string } | null = null;
@@ -169,6 +191,96 @@ describe('Worker auth policies and magic link', () => {
     expect(resWrongMode.status).toBe(403);
     const bodyWrongMode = await resWrongMode.json<{ code: string }>();
     expect(bodyWrongMode.code).toBe('INVALID_MODE');
+  });
+
+  it('gives every passkey prompt five minutes, and never mints a session from registration', async () => {
+    const { app, cookieHeader } = await signedIn('fresh@example.com');
+
+    const register = await app.request(
+      'http://localhost/api/auth/passkey/generate-register-options',
+      { headers: { Cookie: cookieHeader, Origin: 'https://yozz.app' } },
+      env,
+    );
+    expect(register.status).toBe(200);
+    const registerOptions = await register.json<{ challenge: string; timeout: number }>();
+    expect(registerOptions.challenge).toBeTruthy();
+    expect(registerOptions.timeout).toBe(WEBAUTHN_TIMEOUT_MS);
+    // The hook replaces the body; the plugin's challenge cookie must survive it.
+    expect(register.headers.get('set-cookie')).toContain('better-auth-passkey');
+
+    const authenticate = await app.request(
+      'http://localhost/api/auth/passkey/generate-authenticate-options',
+      { headers: { Origin: 'https://yozz.app' } },
+      env,
+    );
+    expect(authenticate.status).toBe(200);
+    const authOptions = await authenticate.json<{ challenge: string; timeout: number }>();
+    expect(authOptions.challenge).toBeTruthy();
+    expect(authOptions.timeout).toBe(WEBAUTHN_TIMEOUT_MS);
+
+    // A second session that outlives the first is persistence for whoever holds the first.
+    const minted = await app.request(
+      'http://localhost/api/auth/passkey/verify-registration',
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Cookie: cookieHeader,
+          Origin: 'https://yozz.app',
+        },
+        body: JSON.stringify({ response: {}, createSession: true }),
+      },
+      env,
+    );
+    expect(minted.status).toBe(400);
+    // Refused by our policy before Better Auth reads the (empty) attestation at all.
+    expect(await minted.json()).toMatchObject({
+      message: 'Adding a passkey never creates a session',
+    });
+  });
+
+  it('refuses a day-old session every change to how the vault opens', async () => {
+    const { app, cookieHeader } = await signedIn('stale@example.com');
+    const twoDaysAgo = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000);
+    await env.DB.prepare('UPDATE session SET createdAt = ?').bind(twoDaysAgo.toISOString()).run();
+    const headers = {
+      'Content-Type': 'application/json',
+      Cookie: cookieHeader,
+      Origin: 'https://yozz.app',
+    };
+
+    const register = await app.request(
+      'http://localhost/api/auth/passkey/generate-register-options',
+      { headers },
+      env,
+    );
+    expect(register.status).toBe(403);
+
+    // A stolen cookie on a passkey account could otherwise set a password of its own.
+    const switched = await app.request(
+      'http://localhost/api/v1/vault/unlock',
+      {
+        method: 'PUT',
+        headers,
+        body: JSON.stringify({
+          mode: 'password',
+          isNewVault: false,
+          wrappedDek: 'd3JhcA',
+          authValue: 'a'.repeat(64),
+        }),
+      },
+      env,
+    );
+    expect(switched.status).toBe(403);
+    expect(await switched.json()).toMatchObject({ error: { code: 'SESSION_NOT_FRESH' } });
+
+    const reset = await app.request(
+      'http://localhost/api/v1/vault',
+      { method: 'DELETE', headers },
+      env,
+    );
+    expect(reset.status).toBe(403);
+    expect(await reset.json()).toMatchObject({ error: { code: 'SESSION_NOT_FRESH' } });
   });
 
   it('refuses passkey deletion for active wrapped passkeys and allows unwrapped ones', async () => {

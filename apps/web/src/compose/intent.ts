@@ -51,15 +51,33 @@ export const isUntouched = (draft: ComposeDraft, opened: ComposeDraft): boolean 
   draft.attachments.length === 0 &&
   (['to', 'cc', 'bcc', 'subject', 'body'] as const).every(field => draft[field] === opened[field]);
 
-/** Everyone the message was addressed to, minus your own addresses and the sender. The empty array is also "hide the button". */
+/**
+ * Where a reply goes: the message's Reply-To (RFC 5322 §3.6.2) minus your own addresses, else its
+ * sender. A list echoing your post back with `Reply-To: you` is answered on the list, not to you.
+ */
+const replyAddresses = (message: Message, ownedAddresses: readonly string[]): readonly string[] => {
+  const owned = new Set(ownedAddresses.map(address => address.toLowerCase()));
+  const others = (message.replyTo ?? [])
+    .map(({ address }) => address)
+    .filter(address => !owned.has(address.toLowerCase()));
+  return others.length > 0 ? others : [message.fromAddress];
+};
+
+/** Everyone the message was addressed to, minus your own addresses, the sender and whoever the reply already goes to. The empty array is also "hide the button". */
 export const replyAllCc = (
   message: Message,
   ownedAddresses: readonly string[],
 ): readonly string[] => {
   const drop = new Set(
-    [...ownedAddresses, message.fromAddress].map(address => address.toLowerCase()),
+    [...ownedAddresses, message.fromAddress, ...replyAddresses(message, ownedAddresses)].map(
+      address => address.toLowerCase(),
+    ),
   );
-  return (message.recipients ?? []).filter(address => !drop.has(address.toLowerCase()));
+  const addressed = [...(message.to ?? []), ...(message.cc ?? [])].map(({ address }) =>
+    address.toLowerCase(),
+  );
+  // One address twice, differently cased, is one recipient.
+  return [...new Set(addressed)].filter(address => !drop.has(address));
 };
 
 /**
@@ -94,7 +112,7 @@ export const seedFor = (
     const cc = intent.startsWith('reply-all:') ? replyAllCc(inbound, ownedAddresses) : [];
     return {
       identityId,
-      to: inbound.fromAddress,
+      to: replyAddresses(inbound, ownedAddresses).join(', '),
       ...(cc.length > 0 ? { cc: cc.join(', ') } : {}),
       subject: thread.subject.startsWith('Re: ') ? thread.subject : `Re: ${thread.subject}`,
       // `>` is both the mail convention and markdown's blockquote.

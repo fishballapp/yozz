@@ -14,7 +14,13 @@ import {
   resetVault,
   VaultAlreadyExistsError,
 } from '../db/unlock.ts';
-import { type AppEnv, apiError, readJsonBody, requireSession } from '../http.ts';
+import {
+  type AppEnv,
+  apiError,
+  readJsonBody,
+  requireFreshSession,
+  requireSession,
+} from '../http.ts';
 
 export const unlockRoute = new Hono<AppEnv>()
   .use('*', requireSession)
@@ -39,7 +45,7 @@ export const unlockRoute = new Hono<AppEnv>()
     const response = PasskeyWrapResponseSchema.parse({ wrappedDek });
     return c.json(response, 200);
   })
-  .put('/unlock', async c => {
+  .put('/unlock', requireFreshSession, async c => {
     const user = c.get('user');
     const body = await readJsonBody(c, FinalizeUnlockRequestSchema, 'unlock finalisation payload');
     if (!body.ok) return body.response;
@@ -83,7 +89,7 @@ export const unlockRoute = new Hono<AppEnv>()
       throw err;
     }
   })
-  .delete('/', async c => {
+  .delete('/', requireFreshSession, async c => {
     const user = c.get('user');
     await resetVault(c.env.DB, user.id);
     return c.json({ ok: true as const }, 200);

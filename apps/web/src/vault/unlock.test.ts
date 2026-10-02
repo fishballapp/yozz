@@ -5,10 +5,13 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { VaultApiClient } from './api';
 import {
   addPasskeyToSession,
+  confirmIdentity,
   createPasskeyVault,
   createPasswordVault,
   loginWithPasskey,
   loginWithPassword,
+  needsFreshSession,
+  PASSKEY_DERIVES_ANOTHER_KEY,
   switchModeToPasskey,
   switchModeToPassword,
 } from './unlock';
@@ -208,6 +211,32 @@ describe('Vault unlock and session orchestration', () => {
     loginSession.store.close();
   });
 
+  it('says a synced passkey derived another key here, rather than blaming a passphrase', async () => {
+    mocks.addPasskey.mockResolvedValue({
+      data: { id: 'pk-row-id' },
+      webauthn: {
+        response: { id: 'pk-registered-id' },
+        clientExtensionResults: { prf: { enabled: true } },
+      },
+    });
+    mockPrfAssertion('pk-registered-id', new Uint8Array(32).fill(99));
+    const enrolled = await createPasskeyVault({ api, idbFactory });
+
+    // The same credential on a second device: the server accepts it, the PRF output differs.
+    mocks.signInPasskey.mockResolvedValue({
+      data: { session: {}, user: { id: 'user-123' } },
+      webauthn: {
+        response: { id: 'pk-registered-id' },
+        clientExtensionResults: { prf: { results: { first: new Uint8Array(32).fill(7).buffer } } },
+      },
+    });
+    await expect(loginWithPasskey({ api, idbFactory })).rejects.toThrow(
+      PASSKEY_DERIVES_ANOTHER_KEY,
+    );
+
+    enrolled.store.close();
+  });
+
   it('reports a provisional passkey it could not clean up, rather than only the cause', async () => {
     // Enrolment must fail and remove the credential; if that also fails, the caller has to be told.
     mocks.addPasskey.mockResolvedValue({
@@ -307,6 +336,61 @@ describe('Vault unlock and session orchestration', () => {
     expect(api.finalizePasswordUnlock).toHaveBeenCalled();
 
     pwSession.store.close();
+  });
+
+  it('reports a refused passkey registration from an old session as the one that needs confirming', async () => {
+    const pw = await createPasswordVault({
+      email: 'alice@example.com',
+      password: 'password123456',
+      api,
+      idbFactory,
+    });
+    mocks.addPasskey.mockResolvedValue({
+      data: null,
+      error: { code: 'SESSION_NOT_FRESH', message: 'Session is not fresh', status: 403 },
+    });
+
+    const refused = await switchModeToPasskey({ currentSession: pw }).catch(
+      (error: unknown) => error,
+    );
+    expect(needsFreshSession(refused)).toBe(true);
+    // Refused before any authenticator prompt, so nothing provisional was created to clean up.
+    expect(mocks.deletePasskey).not.toHaveBeenCalled();
+    pw.store.close();
+  });
+
+  it('confirms identity by the vault’s own method, and only as the same account', async () => {
+    const pw = await createPasswordVault({
+      email: 'alice@example.com',
+      password: 'password123456',
+      api,
+      idbFactory,
+    });
+    mocks.signInEmail.mockClear();
+
+    await confirmIdentity({ currentSession: pw, password: 'password123456' });
+    expect(mocks.signInEmail).toHaveBeenCalledTimes(1);
+    expect(mocks.signInEmail.mock.calls[0]?.[0]).toBe('alice@example.com');
+    // The auth value, never the password itself, leaves the tab.
+    expect(mocks.signInEmail.mock.calls[0]?.[1]).not.toBe('password123456');
+
+    mocks.signInEmail.mockResolvedValueOnce({ error: { message: 'Invalid password' } });
+    await expect(
+      confirmIdentity({ currentSession: pw, password: 'wrong-password-1' }),
+    ).rejects.toThrow(/not the password this vault opens with/);
+
+    const asPasskey = { ...pw, mode: 'passkey' as const };
+    mocks.signInPasskey.mockResolvedValue({ data: { session: {}, user: { id: 'user-123' } } });
+    await confirmIdentity({ currentSession: asPasskey });
+    expect(mocks.signInPasskey).toHaveBeenCalledTimes(1);
+
+    mocks.getSession.mockResolvedValueOnce({
+      data: { user: { id: 'someone-else', email: 'bob@example.com' } },
+    });
+    await expect(confirmIdentity({ currentSession: asPasskey })).rejects.toThrow(
+      /different account/,
+    );
+    pw.store.close();
   });
 });
 

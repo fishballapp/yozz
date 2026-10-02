@@ -56,7 +56,7 @@ describe('seedFor — forward', () => {
   });
 });
 
-/** A group thread: `recipients` comes off a real envelope, and the demo inbox has none. */
+/** A group thread: `to` and `cc` come off a real envelope. */
 const GROUP: Thread = {
   id: 't-group',
   accounts: ['jason@jyu.example'],
@@ -70,7 +70,8 @@ const GROUP: Thread = {
       fromName: 'Kate',
       fromAddress: 'kate@example.com',
       toAddress: 'jason@jyu.example',
-      recipients: ['jason@jyu.example', 'sam@example.com', 'me@jyu.example', 'kate@example.com'],
+      to: [{ address: 'jason@jyu.example' }, { name: 'Sam', address: 'sam@example.com' }],
+      cc: [{ address: 'me@jyu.example' }, { address: 'kate@example.com' }],
       at: 1,
       body: ['See you Friday.'],
     },
@@ -151,18 +152,27 @@ describe('replyAllCc', () => {
     const message = GROUP.messages[0];
     if (message === undefined) throw new Error('the group fixture lost its message');
     expect(replyAllCc(message, GROUP_OWNED)).toEqual(['sam@example.com']);
-    // Case is not a difference between addresses.
+    // Case is not a difference between addresses, and To plus Cc naming one twice is one recipient.
     expect(
-      replyAllCc({ ...message, recipients: ['SAM@Example.com', 'Jason@JYu.example'] }, GROUP_OWNED),
-    ).toEqual(['SAM@Example.com']);
+      replyAllCc(
+        {
+          ...message,
+          to: [{ address: 'SAM@Example.com' }, { address: 'Jason@JYu.example' }],
+          cc: [{ address: 'sam@example.com' }],
+        },
+        GROUP_OWNED,
+      ),
+    ).toEqual(['sam@example.com']);
   });
 
   it('is empty when the message was to you alone — the answer to whether to offer it', () => {
     const message = GROUP.messages[0];
     if (message === undefined) throw new Error('the group fixture lost its message');
-    expect(replyAllCc({ ...message, recipients: ['jason@jyu.example'] }, GROUP_OWNED)).toEqual([]);
-    // Fixture mail carries no envelope to read recipients from.
-    expect(replyAllCc({ ...message, recipients: undefined }, GROUP_OWNED)).toEqual([]);
+    expect(
+      replyAllCc({ ...message, to: [{ address: 'jason@jyu.example' }], cc: [] }, GROUP_OWNED),
+    ).toEqual([]);
+    // A draft carries no envelope to read recipients from.
+    expect(replyAllCc({ ...message, to: undefined, cc: undefined }, GROUP_OWNED)).toEqual([]);
   });
 });
 
@@ -180,6 +190,55 @@ describe('seedFor — reply all', () => {
     expect(seedGroup('reply-all:m-group-1').body).toContain('Kate <kate@example.com> wrote:');
     // Reply is the same mail without the copies.
     expect(seedGroup('reply:m-group-1').cc).toBeUndefined();
+  });
+});
+
+describe('seedFor — Reply-To', () => {
+  const [kate] = GROUP.messages;
+  if (kate === undefined) throw new Error('the group fixture lost its message');
+  const LIST: Thread = {
+    ...GROUP,
+    messages: [{ ...kate, replyTo: [{ address: 'friday@lists.example' }] }],
+  };
+  const seedList = (intent: string) =>
+    seedFor(composeIntentSchema.parse(intent), [LIST], DEMO_ADDRESSES, GROUP_OWNED);
+
+  it('replies where the sender asked, not to the sender', () => {
+    expect(seedList('reply:m-group-1').to).toBe('friday@lists.example');
+  });
+
+  it('copies the rest on reply all, never the sender who asked to be answered elsewhere', () => {
+    expect(seedList('reply-all:m-group-1').to).toBe('friday@lists.example');
+    expect(seedList('reply-all:m-group-1').cc).toBe('sam@example.com');
+  });
+
+  it('never replies to yourself: a Reply-To naming your own address answers the sender', () => {
+    // A list echoing your own post back: From the list, Reply-To you.
+    const echo: Thread = {
+      ...GROUP,
+      messages: [
+        {
+          ...kate,
+          fromName: 'Friday list',
+          fromAddress: 'friday@lists.example',
+          replyTo: [{ address: 'Jason@JYU.example' }],
+        },
+      ],
+    };
+    const seedEcho = (intent: string) =>
+      seedFor(composeIntentSchema.parse(intent), [echo], DEMO_ADDRESSES, GROUP_OWNED);
+    expect(seedEcho('reply:m-group-1').to).toBe('friday@lists.example');
+    // Of a mixed Reply-To, only the others are answered.
+    const mixed: Thread = {
+      ...GROUP,
+      messages: [
+        { ...kate, replyTo: [{ address: 'me@jyu.example' }, { address: 'ops@example.com' }] },
+      ],
+    };
+    expect(
+      seedFor(composeIntentSchema.parse('reply:m-group-1'), [mixed], DEMO_ADDRESSES, GROUP_OWNED)
+        .to,
+    ).toBe('ops@example.com');
   });
 });
 

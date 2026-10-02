@@ -4,6 +4,7 @@
   "main": "src/index.ts",
   "compatibility_date": "2026-06-21",
   "compatibility_flags": ["nodejs_compat"],
+  "account_id": "ef1db00eff7bafcb12e7acb5754d1377",
   "observability": {
     "enabled": true
   },
@@ -24,6 +25,7 @@
     {
       "binding": "DB",
       "database_name": "yozz",
+      "database_id": "e613d9ec-35ce-46b9-a578-7566994c9753",
       "migrations_dir": "migrations"
     }
   ],

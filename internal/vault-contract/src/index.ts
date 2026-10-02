@@ -2,6 +2,14 @@ import { z } from 'zod';
 
 export const PRF_INPUT_LABEL = 'yozz-vault-prf-v1';
 
+/**
+ * Every WebAuthn ceremony's `timeout`: WebAuthn Level 3's recommended default when user
+ * verification is required or preferred (§15.1). A passkey in a phone's password manager means an
+ * app switch and Face ID, which outlasts SimpleWebAuthn's 60 s default. Also the passkey plugin's
+ * challenge lifetime, so a longer prompt would only outlive the challenge it signs.
+ */
+export const WEBAUTHN_TIMEOUT_MS = 300_000;
+
 /** Below D1's 2 MB row limit. */
 export const MAX_CIPHERTEXT_BYTES = 1_000_000;
 
@@ -44,6 +52,7 @@ export const ApiErrorCodeSchema = z.enum([
   'PAYLOAD_TOO_LARGE',
   'INTERNAL_ERROR',
   'INVALID_MODE',
+  'SESSION_NOT_FRESH',
   'UPGRADE_REQUIRED',
   'RATE_LIMITED',
   'UPSTREAM_UNREACHABLE',

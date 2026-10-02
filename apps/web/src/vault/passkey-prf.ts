@@ -1,4 +1,4 @@
-import { PRF_INPUT_LABEL } from '@yozz.app/vault-contract';
+import { PRF_INPUT_LABEL, WEBAUTHN_TIMEOUT_MS } from '@yozz.app/vault-contract';
 
 export class PasskeyPrfError extends Error {
   constructor(message: string) {
@@ -105,6 +105,7 @@ export const evaluatePrfForCredential = async (credentialId: string): Promise<Ui
         { id: Uint8Array.fromBase64(credentialId, { alphabet: 'base64url' }), type: 'public-key' },
       ],
       userVerification: 'required',
+      timeout: WEBAUTHN_TIMEOUT_MS,
       extensions: getPrfEvalInput() as AuthenticationExtensionsClientInputs,
     },
   });
