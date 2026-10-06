@@ -59,7 +59,7 @@ export const draftRecordSchema = z.object({
   send: sendSchema.optional(),
   /**
    * A send whose SMTP answer was never seen, put aside so the draft can be edited. Discarding stays
-   * refused; cleared when a sync finds the Message-ID in Sent or the person sends again.
+   * refused until a sync finds the Message-ID in Sent or the person sends again.
    */
   unconfirmedSend: sendSchema.optional(),
   /** What the draft became, so its old id still resolves. */

@@ -1,9 +1,7 @@
 /**
  * Adversarial browser gate for received HTML. Unit tests pin sanitizer output; this proves the
- * browser actually enforces the composed sanitizer + srcdoc CSP + opaque iframe sandbox across all
- * three engine families.
- *
- *   pnpm -F @yozz.app/web html:security
+ * browser enforces the composed sanitizer, srcdoc CSP and opaque iframe sandbox across all three
+ * engine families.
  */
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';

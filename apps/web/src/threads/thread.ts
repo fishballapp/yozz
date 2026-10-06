@@ -44,9 +44,9 @@ export type Message = {
   /** The `References` chain this message arrived with, oldest first; a reply sends its parent's chain plus the parent. */
   references?: readonly string[];
   /**
-   * Every physical copy on a server; every IMAP command addresses one of these, since a copy's
-   * uid changes on every move while `id` does not. A list because one message can sit in two
-   * accounts once threads span them.
+   * Every physical copy on a server; every IMAP command addresses one of these, since a copy's uid
+   * changes on every move while `id` does not. A list because one message can sit in two accounts
+   * once threads span them.
    */
   locations?: readonly Location[];
   attachments?: Attachment[];
@@ -82,10 +82,9 @@ export type Folder = 'inbox' | 'sent' | 'archive' | 'trash' | 'drafts';
 export const FOLDERS: readonly Folder[] = ['inbox', 'sent', 'archive', 'trash', 'drafts'];
 
 /**
- * `mid/<Message-ID>` when that Message-ID names exactly one displayed message across every
- * account, else the physical form below. No account prefix, and the form survives a move; see
- * DECISIONS.md, "Threads span accounts, and an id stops naming one". The URL carries it as a
- * splat, so `/t/mid/<abc@example.com>` reads as typed.
+ * `mid/<Message-ID>` when that Message-ID names exactly one displayed message across every account,
+ * else the physical form below. No account prefix, and the form survives a move; see DECISIONS.md.
+ * The URL carries it as a splat, so `/t/mid/<abc@example.com>` reads as typed.
  */
 export const messageIdOf = (messageId: string) => `mid/${messageId}`;
 
@@ -121,16 +120,15 @@ export const attachmentsOf = (thread: Thread) =>
   thread.messages.flatMap(message => message.attachments ?? []);
 
 /**
- * RFC 9051's UIDVALIDITY is a non-zero number, so 0 marks a copy no server holds: sent mail kept
- * in the vault because its address has no mailbox to keep it in.
+ * RFC 9051's UIDVALIDITY is a non-zero number, so 0 marks a copy no server holds: sent mail kept in
+ * the vault because its address has no mailbox to keep it in.
  */
 export const VAULT_UID_VALIDITY = 0;
 
 /**
- * The accounts a message arrived at, once each: where it landed, whether it has since been archived
- * or binned there. Empty for mail you sent, unless another of your addresses received it too. The
- * account that sent it is never an arrival, which is what keeps a deleted Sent copy, now in Trash,
- * from reading as received.
+ * The accounts a message arrived at, once each. Empty for mail you sent, unless another of your
+ * addresses received it too. The account that sent it is never an arrival, which keeps a deleted
+ * Sent copy, now in Trash, from reading as received.
  */
 export const inboxesOf = (message: Message): readonly string[] => [
   ...new Set(
@@ -144,8 +142,8 @@ export const inboxesOf = (message: Message): readonly string[] => [
 ];
 
 /**
- * Gmail's "to me, Alice": To then Cc as one list, once per address, with every address you own
- * read as a single "me". Empty when nobody is named, which is the Bcc's `undisclosed-recipients:;`.
+ * Gmail's "to me, Alice": To then Cc as one list, once per address, with every address you own read
+ * as a single "me". Empty when nobody is named, which is the Bcc's `undisclosed-recipients:;`.
  */
 export const addresseesOf = (
   message: Message,

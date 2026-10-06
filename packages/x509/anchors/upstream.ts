@@ -1,7 +1,6 @@
 /**
- * What upstream has done to the trust store since the pin. A root added or removed shows in
- * `cacert.pem`; a root that gained a cutoff does not, and only `certdata.txt` knows. Pure over bytes
- * so the test can hand it a simulated distrust.
+ * A root added or removed shows in `cacert.pem`; a root that gained a cutoff does not, and only
+ * `certdata.txt` knows. Pure over bytes so the test can hand it a simulated distrust.
  */
 
 import { derFromPem } from '../harness/pem.ts';

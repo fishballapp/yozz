@@ -8,9 +8,8 @@ import { Toasts } from '../ui/Toast';
 import { VaultProvider } from '../vault/session';
 
 /**
- * The vault session, the mail store, and the composer, which is valid over every route.
- * `?compose=` is declared here because a search param is readable only at or below the route
- * that validates it. Design direction lives in DESIGN.md.
+ * `?compose=` is declared here because a search param is readable only at or below the route that
+ * validates it, and the composer is valid over every route.
  */
 export const Route = createRootRoute({
   validateSearch: z.object({

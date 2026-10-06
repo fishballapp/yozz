@@ -29,9 +29,9 @@ import { createRecordStore, type RecordStore } from './record-store';
 import { forgetUnlockKeys, loadUnlockKeys, type UnlockKeys } from './unlock-keys';
 
 /**
- * The password is the only entropy in password mode, so this floor plus PBKDF2's 650,000
- * iterations is what stands between a leaked `wrappedDek` and the vault. The server never sees
- * it, so this is the only place to refuse.
+ * The password is the only entropy in password mode, so this floor plus PBKDF2's 650,000 iterations
+ * is what stands between a leaked `wrappedDek` and the vault. The server never sees it, so this is
+ * the only place to refuse.
  */
 export const MIN_PASSWORD_LENGTH = 12;
 
@@ -149,10 +149,9 @@ export const loginWithPassword = async ({
 };
 
 /**
- * `createVault()` is a fresh DEK, and every existing ciphertext is bound to the previous one;
- * the server cannot tell a new DEK from a rewrap. A wipe goes through `resetVault`, a mode
- * change through `switchModeTo*`. This is for the message only: `isNewVault: true` on the
- * finalisation is the guarantee (a plain INSERT, so one creator commits).
+ * `createVault()` mints a fresh DEK, and every existing ciphertext is bound to the previous one;
+ * the server cannot tell a new DEK from a rewrap. This check only gives the message: `isNewVault:
+ * true` on the finalisation is the guarantee (a plain INSERT, so one creator commits).
  */
 const refuseIfAlreadyEnrolled = async (api: VaultApiClient): Promise<void> => {
   const status = await api.getUnlockStatus();
@@ -164,9 +163,9 @@ const refuseIfAlreadyEnrolled = async (api: VaultApiClient): Promise<void> => {
 };
 
 /**
- * An orphaned credential stays in the chooser and is refused at sign-in for having no wrap.
- * Better Auth rejects only on transport failure, so the resolved `{ error }` is checked too.
- * Takes the passkey row id: `/passkey/delete-passkey` deletes by `field: 'id'`.
+ * An orphaned credential stays in the chooser and is refused at sign-in for having no wrap. Better
+ * Auth rejects only on transport failure, so the resolved `{ error }` is checked too. Takes the
+ * passkey row id: `/passkey/delete-passkey` deletes by `field: 'id'`.
  */
 const discardProvisionalPasskey = async (credentialId: string, cause: unknown): Promise<never> => {
   if (!credentialId) throw cause;
@@ -181,8 +180,8 @@ const discardProvisionalPasskey = async (credentialId: string, cause: unknown): 
 
 /**
  * With `returnWebAuthnResponse` the WebAuthn half lives on `webauthn`, not `data` (the server's
- * verify response). `response.id` is the base64url credential id every wrap lookup takes;
- * `data.id` on registration is Better Auth's row id, which only deletion wants.
+ * verify response). `response.id` is the base64url credential id every wrap lookup takes; `data.id`
+ * on registration is Better Auth's row id, which only deletion wants.
  */
 type PasskeyCeremony = {
   /** base64url WebAuthn credential id: `allowCredentials`, and wrap lookup. */
@@ -210,9 +209,9 @@ const readCeremony = (result: unknown): PasskeyCeremony => {
 };
 
 /**
- * `create()` associates the PRF key but does not reliably return PRF output, so the bytes come
- * from a scoped assertion afterwards, on every hardware. A failure at any step deletes the
- * provisional passkey.
+ * `create()` associates the PRF key but does not reliably return PRF output, so the bytes come from
+ * a scoped assertion afterwards, on every hardware. A failure at any step deletes the provisional
+ * passkey.
  */
 const enrolPrfPasskey = async (): Promise<{
   readonly credentialId: string;

@@ -25,9 +25,8 @@ import type { RecordStore } from '../vault/record-store';
 import type { useVault } from '../vault/session';
 
 /**
- * The composer's half of the store: the open draft, every draft in the vault, and sending. The
- * mailbox half hands it the accounts, the live connections and the threads; it hands back the
- * slice `useMail` exposes plus the load and reset the session effect calls.
+ * Split from the mailbox half, which hands it the accounts, the live connections and the threads;
+ * it hands back the slice `useMail` exposes plus the load and reset the session effect calls.
  */
 
 /** Autosave debounce after the last keystroke. */
@@ -44,9 +43,8 @@ export type Composer = {
   /** A send whose Sent-folder copy did not store; cleared by the next send that does. */
   sentCopyError: string | null;
   /**
-   * Opens, replaces or clears the draft. `?compose=` decides whether the composer is on screen
-   * (`lib/compose.ts`); this follows it. A device-stored draft for the same intent wins over the
-   * seed (`lib/draft-store.ts`).
+   * `?compose=` decides whether the composer is on screen; this follows it. A device-stored draft
+   * for the same intent wins over the seed.
    */
   /** Every live draft in the vault, other devices' included. */
   drafts: readonly DraftHandle[];
@@ -80,8 +78,8 @@ export type Composer = {
   ) => Promise<DeleteOutcome | { readonly outcome: 'busy' | 'locked' }>;
   /**
    * Sends the draft over its identity's SMTP. Resolves at the claim, where the bytes are frozen
-   * into the record; a refusal before then is an error the composer shows, and everything after
-   * is reported through `settled`.
+   * into the record; a refusal before then is an error the composer shows, and everything after is
+   * reported through `settled`.
    */
   send: () => Promise<Result<{ readonly settled: Promise<SendReport> }, MailConnectionFailure>>;
   attach: (attachments: readonly Attachment[]) => void;
@@ -133,8 +131,8 @@ export const useComposer = ({
   const draftIntentRef = useRef<ComposeIntent | undefined>(undefined);
   /**
    * The draft as it opened, and the intent it opened from. A reply opens already holding text, so
-   * "did anybody write anything" is measured against this. `fresh` distinguishes a restored
-   * draft, which is text somebody already wrote.
+   * "did anybody write anything" is measured against this; `fresh` distinguishes a restored draft,
+   * which is text somebody already wrote.
    */
   const openedRef = useRef<{
     intent: ComposeIntent;

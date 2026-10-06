@@ -3,10 +3,9 @@ import type { InboundAddress } from '../addresses/record';
 import type { MailConnection, MailConnectionFailure, Result } from './connection';
 
 /**
- * One live IMAP connection per inbound address. Opened by the first task, kept while the tab is
- * visible, holding `INBOX` in IDLE whenever nothing is queued so the server can say "new mail"
- * instead of being asked. Every IMAP touch the app makes is a task on this queue; nothing else
- * opens a connection to an address that is stored (Connect's pre-store test is the exception).
+ * Opened by the first task, kept while the tab is visible, holding `INBOX` in IDLE whenever nothing
+ * is queued so the server can say "new mail" instead of being asked. Every IMAP touch is a task on
+ * this queue; Connect's pre-store test is the one exception.
  */
 
 export type LiveState =
@@ -20,8 +19,8 @@ export type LiveState =
 
 export type LiveClient = ImapClient & {
   /**
-   * SELECT only if `name` is not already the selected mailbox. Sync calls `client.select`
-   * directly because it wants fresh UIDVALIDITY/UIDNEXT; body fetches and flag writes use this.
+   * SELECT only if `name` is not already the selected mailbox. Sync calls `client.select` directly
+   * because it wants fresh UIDVALIDITY/UIDNEXT; body fetches and flag writes use this.
    */
   readonly ensureSelected: (name: string) => Promise<ImapResult<ImapSelected>>;
 };

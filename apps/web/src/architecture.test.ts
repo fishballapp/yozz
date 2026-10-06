@@ -3,10 +3,9 @@ import { dirname, join, relative } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 /**
- * The folder rule, checked rather than remembered. `src/` is split by product noun (vault,
- * addresses, relay, threads, compose, agent), with `ui/` below every context, `store/` composing
- * their non-React modules, and `app/` + `routes/` on top. A cycle between files is the one shape
- * that always means a module is in the wrong folder.
+ * The folder rule, checked rather than remembered: `src/` is split by product noun, with `ui/`
+ * below every context, `store/` composing their non-React modules, and `app/` + `routes/` on top. A
+ * cycle between files always means a module is in the wrong folder.
  */
 const SRC = import.meta.dirname;
 

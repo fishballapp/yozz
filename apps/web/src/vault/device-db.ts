@@ -1,7 +1,7 @@
 /**
- * The one IndexedDB database on this device: per-user rows (`revision-marks`, `unlock-keys`),
- * per-host rows (`tls-pins`, `tls-sessions`), and the derived mail cache per user, account and
- * folder. One database so one version number covers the schema.
+ * The one IndexedDB database on this device, so one version number covers the schema: per-user rows
+ * (`revision-marks`, `unlock-keys`), per-host rows (`tls-pins`, `tls-sessions`), and the derived
+ * mail cache per user, account and folder.
  */
 export class DeviceDbError extends Error {
   constructor(message: string) {

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
- * `pnpm -F @yozz.app/worker-api run deploy`: code and secrets in one `wrangler deploy`, then every
- * Worker secret not in SECRET_KEYS is deleted over the API (wrangler's `secret delete` is interactive only).
+ * Code and secrets go in one `wrangler deploy`, then every Worker secret not in SECRET_KEYS is
+ * deleted over the API (wrangler's `secret delete` is interactive only).
  */
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';

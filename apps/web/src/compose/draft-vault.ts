@@ -15,8 +15,8 @@ import {
 } from './draft-record';
 
 /**
- * Drafts in the vault under compare-and-swap: the loser is refused and told the current version,
- * and the person decides. Online only, like every vault write today.
+ * Drafts live in the vault under compare-and-swap: the loser is refused and told the current
+ * version, and the person decides. Online only, like every vault write today.
  */
 
 export type DraftHandle = {
@@ -160,8 +160,8 @@ export const replaceDraft = async (
 };
 
 /**
- * Phase (0): the record states under CAS that a send is in flight, written before SMTP so a
- * second device cannot deliver a duplicate.
+ * Phase (0): the record states under CAS that a send is in flight, written before SMTP so a second
+ * device cannot deliver a duplicate.
  */
 export const claimSend = async (
   store: RecordStore,
@@ -221,8 +221,8 @@ export const releaseSend = async (store: RecordStore, draftId: string): Promise<
 };
 
 /**
- * "Back to editing" for an unconfirmed send. Not a release: that would say the message never went
- * out, so discarding stays refused until a sync finds it in Sent or the person sends again.
+ * "Back to editing" for an unconfirmed send. Not a release, which would say the message never went
+ * out: discarding stays refused until a sync finds it in Sent or the person sends again.
  */
 export const unconfirmSend = (store: RecordStore, draftId: string): Promise<DraftHandle | null> =>
   bumpVersion(store, draftId, ({ send, ...rest }) =>

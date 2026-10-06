@@ -89,8 +89,7 @@ const Detail = ({ term, children }: { term: string; children: ReactNode }) => (
 
 /**
  * "to me, Alice ▾": To and Cc on one line, the whole line the trigger. The panel answers who and
- * where — the inbox it landed in, then from, reply-to, to and cc; the date and subject are already
- * on screen in full.
+ * where; the date and subject are already on screen in full.
  */
 const MessageDetails = ({
   message,

@@ -86,9 +86,8 @@ type Handshake = {
 };
 
 /**
- * Relay socket → TLS 1.3 in the browser → a ByteDuplex. The port is checked against the one
- * implicit-TLS port, since 143/587 are STARTTLS. Trust on first use lives here on top of chain
- * validation; a stored session is offered once.
+ * The port is checked against the one implicit-TLS port, since 143/587 are STARTTLS. Trust on first
+ * use lives here on top of chain validation; a stored session is offered once.
  */
 export const openTlsDuplex = async (
   { host, port }: Host,

@@ -3,9 +3,8 @@ import type { ComposeDraft } from './draft';
 import type { ComposeIntent } from './intent';
 
 /**
- * The open draft, on the device, so the reload a stale build triggers (`main.tsx`) does not eat
+ * Keeps the open draft on the device so the reload a stale build triggers (`main.tsx`) does not eat
  * it. Keyed by user and the `?compose=` intent, so only a draft for that intent is restored.
- * Attachment bytes are not stored. Cleared on lock, discard and a send that went out.
  */
 const storedDraftSchema = z.object({
   intent: z.string(),

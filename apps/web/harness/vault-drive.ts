@@ -1,11 +1,6 @@
 /**
- * The vault's unlock flows in a real browser against `wrangler dev` and its local D1. Needs
- * both dev servers up (AGENTS.md, "Running the vault locally"). Chromium only: its CDP virtual
- * authenticator can do PRF headlessly.
- *
- *   pnpm -F @yozz.app/web vault:drive
- *   YOZZ_API=http://localhost:8792 pnpm -F @yozz.app/web vault:drive   # wrangler on another port
- *   YOZZ_WEB=http://localhost:5178 pnpm -F @yozz.app/web vault:drive   # vite on another port
+ * Drives the vault's unlock flows in a real browser against `wrangler dev` and its local D1; needs
+ * both dev servers up. Chromium only: its CDP virtual authenticator can do PRF headlessly.
  */
 import { execFileSync } from 'node:child_process';
 import { chromium, type Page } from '@playwright/test';
@@ -276,8 +271,8 @@ const passkeyMode = async (page: Page) => {
 const browser = await chromium.launch();
 
 /**
- * Through the real Settings screen: a session older than a day may not change how the vault
- * opens, so the switch asks for the current password and then goes through.
+ * Through the real Settings screen: a session older than a day may not change how the vault opens,
+ * so the switch asks for the current password and then goes through.
  */
 const staleSession = async (page: Page) => {
   const email = `drive-stale-${Date.now()}@example.com`;

@@ -2,9 +2,9 @@ import type { TlsSession } from '@yozz.app/tls';
 import { getIdbFactory, openDeviceDb, runTransaction, STORES } from '../vault/device-db';
 
 /**
- * The pin and the resumption session `@yozz.app/tls` leaves to its caller, keyed by `host:port`
- * and per device (DECISIONS.md, "Pins and sessions are per device"). IndexedDB structured-clones
- * a session as it is, so nothing here revives anything.
+ * The pin and resumption session `@yozz.app/tls` leaves to its caller, keyed by `host:port` and per
+ * device (DECISIONS.md, "Pins and sessions are per device"). IndexedDB structured-clones a session
+ * as it is, so nothing here revives anything.
  */
 
 export type PinnedPeer = { readonly peer: string; readonly pin: string };

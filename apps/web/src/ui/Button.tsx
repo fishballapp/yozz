@@ -4,8 +4,8 @@ import type { ButtonHTMLAttributes } from 'react';
 
 /** Square by design: nothing in Ink & Rule has a corner radius. */
 /**
- * Disabled is a colour change, never `opacity` (the signal fill at 40% put its label at 2.2:1),
- * and drops the fill rather than borrowing `--ink-hover`, which is `secondary`'s ground.
+ * Disabled is a colour change, never `opacity` (the signal fill at 40% leaves its label too faint
+ * to read), and drops the fill rather than borrowing `--ink-hover`, which is `secondary`'s ground.
  */
 /** Exported because some buttons are links a middle-click must open in a tab. */
 export const buttonClass = cva(

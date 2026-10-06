@@ -5,9 +5,9 @@ import { PageSection } from '../ui/PageColumn';
 import { forgetPin, listPins, type PinnedPeer } from './peer-store';
 
 /**
- * Every mail host this device has pinned, and the one way to accept a new key: forget the old
- * one, so the next connection learns whatever key the host proves it holds. Deliberately a
- * step away from the failure rather than a button on it — a pin alarm is meant to be read.
+ * Accepting a new key means forgetting the old one, so the next connection learns whatever key the
+ * host proves it holds. Deliberately a step away from the failure rather than a button on it: a pin
+ * alarm is meant to be read.
  */
 export const ServerKeysSection = () => {
   const [pins, setPins] = useState<readonly PinnedPeer[] | null>(null);

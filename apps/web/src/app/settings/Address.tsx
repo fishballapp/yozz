@@ -13,9 +13,8 @@ import { SendOnlyTag } from '../../ui/SendOnlyTag';
 import { vaultErrorMessage } from '../../vault/screen-policy';
 
 /**
- * One address: where its servers are, and the one destructive act. Servers and
- * the password are read-only on purpose — the record is re-tested end to end when it is added, and
- * an edit that skipped that would store a server nobody has proven reachable.
+ * Servers and the password are read-only on purpose: the record is re-tested end to end when it is
+ * added, and an edit that skipped that would store a server nobody has proven reachable.
  */
 export const Address = () => {
   const { address } = useParams({ from: '/_app/settings/a/$address' });

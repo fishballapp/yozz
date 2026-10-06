@@ -159,15 +159,8 @@ export const masterSecret = async (
   );
 
 /**
- * RFC 9846 §7.5:
- *
- * ```
- * TLS-Exporter(label, context_value, key_length) =
- *     HKDF-Expand-Label(Derive-Secret(Secret, label, ""),
- *                       "exporter", Hash(context_value), key_length)
- * ```
- *
- * The only caller that reaches `hkdfExpand`'s multi-block loop: BoGo asks for 1024 octets.
+ * RFC 9846 §7.5 TLS-Exporter. The only caller that reaches `hkdfExpand`'s multi-block loop, since
+ * BoGo asks for 1024 octets.
  */
 export const exportKeyingMaterial = async (
   suite: CipherSuite,

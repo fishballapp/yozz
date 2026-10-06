@@ -180,11 +180,8 @@ describe('a record', () => {
       plaintext: '{"password":"someone else\'s"}',
     });
 
-    // The row is entirely genuine — real id, real type, ciphertext that
-    // authenticates against them — and this is the substitution an untrusted
-    // store can perform for free, by answering one lookup with another row.
-    // `decryptRecord` computes the id from what was ASKED FOR, which is the
-    // only reason it fails.
+    // Catches row substitution: decryptRecord verifies the record against what
+    // was requested, not the ID returned by the store.
     await expect(read(vault, substituted.ciphertext)).rejects.toMatchObject({
       code: 'unreadable',
     });
@@ -237,9 +234,8 @@ describe('rewrapDek', () => {
     const changed = await deriveAccountKeys({ ...ACCOUNT, password: 'a different password' });
     const reopened = await openVault(changed, await rewrapDek(keys, changed, wrappedDek));
 
-    // The reason `indexKey` hangs off the DEK and not off `masterKey`. Derived
-    // from the password, every id would move and re-wrapping 32 bytes would
-    // strand the whole store at addresses the new keys cannot compute.
+    // Deriving indexKey from DEK keeps record IDs stable across password changes;
+    // deriving from masterKey would strand records after re-wrapping the DEK.
     expect(await reopened.recordId('account', 'jason@posteo.de')).toBe(
       await vault.recordId('account', 'jason@posteo.de'),
     );

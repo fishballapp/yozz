@@ -21,8 +21,7 @@ import { latestOf, type MailboxId, previewOf } from './views';
 
 /**
  * Two layouts over one record, the reader's choice kept across reloads: columns (one 34px line,
- * address as a gutter letter) and stacked (subject, `from → to`, three lines of body). The star
- * leads the row in both; selection inverts; the accent marks unread and starred only. Contrast
+ * address as a gutter letter) and stacked (subject, `from → to`, three lines of body). Contrast
  * figures and rationale are in DESIGN.md.
  */
 

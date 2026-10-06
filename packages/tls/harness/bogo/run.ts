@@ -1,12 +1,7 @@
 /**
- * ```
- * pnpm -F @yozz.app/tls bogo:inventory   # sweep every test, rebuild manifest.txt
- * pnpm -F @yozz.app/tls bogo             # the gate: every manifest test must pass
- * ```
- *
- * Re-run the inventory when the pin moves or the shim learns a flag: two scope rules classify a
- * test by what the peer did, and a declined test never gets that far. See DECISIONS.md,
- * "The BoGo gate".
+ * `bogo` is the gate: every manifest test must pass. Re-run `bogo:inventory` when the pin moves or
+ * the shim learns a flag: two scope rules classify a test by what the peer did, and a declined test
+ * never gets that far. See DECISIONS.md, "The BoGo gate".
  */
 
 import { execFileSync, spawnSync } from 'node:child_process';

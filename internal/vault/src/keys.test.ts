@@ -1,7 +1,4 @@
-/**
- * The schedule re-derived over `node:crypto` (OpenSSL, a separate implementation), which pins every
- * parameter that would otherwise fail silently: iteration count, salts, the fold, the `info` labels.
- */
+/** Re-derives the schedule with OpenSSL to pin iteration count, salts, fold, and info labels. */
 
 import { createDecipheriv, createHmac, hkdfSync, pbkdf2Sync } from 'node:crypto';
 import { describe, expect, it } from 'vitest';

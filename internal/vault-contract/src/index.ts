@@ -3,10 +3,10 @@ import { z } from 'zod';
 export const PRF_INPUT_LABEL = 'yozz-vault-prf-v1';
 
 /**
- * Every WebAuthn ceremony's `timeout`: WebAuthn Level 3's recommended default when user
- * verification is required or preferred (§15.1). A passkey in a phone's password manager means an
- * app switch and Face ID, which outlasts SimpleWebAuthn's 60 s default. Also the passkey plugin's
- * challenge lifetime, so a longer prompt would only outlive the challenge it signs.
+ * WebAuthn Level 3's recommended timeout when user verification is required or preferred (§15.1). A
+ * passkey in a phone's password manager means an app switch and Face ID, which outlasts
+ * SimpleWebAuthn's 60 s default. It is also the passkey plugin's challenge lifetime, so a longer
+ * prompt would outlive its challenge.
  */
 export const WEBAUTHN_TIMEOUT_MS = 300_000;
 

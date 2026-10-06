@@ -8,9 +8,9 @@ import { isArchived, isTrashed } from '../threads/thread';
 import { type AgentPort, buildAgentTools } from './tools';
 
 /**
- * Registers the tools on `document.modelContext` behind the vault gate, once, under one
- * `AbortController`. The tools read the store through a ref: re-registering on every sync would
- * fire `toolchange` and race abort-then-register under StrictMode. Renders nothing.
+ * Registers once, under one `AbortController`. The tools read the store through a ref:
+ * re-registering on every sync would fire `toolchange` and race abort-then-register under
+ * StrictMode.
  */
 export const AgentTools = () => {
   const mail = useMail();

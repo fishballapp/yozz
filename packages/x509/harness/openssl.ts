@@ -11,7 +11,7 @@ const run = promisify(execFile);
 
 /**
  * `openssl verify` falls back to the Common Name when a leaf has no SAN and cannot be told not to;
- * RFC 9525 forbids that and limbo tests it 972 times. A byte scan for the SAN OID, not a parser.
+ * RFC 9525 forbids that, and limbo tests it. A byte scan for the SAN OID, not a parser.
  */
 const SAN_EXTENSION_OID = Uint8Array.of(0x55, 0x1d, 0x11);
 

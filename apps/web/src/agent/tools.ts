@@ -9,10 +9,9 @@ import { inboxesOf, isArchived, isTrashed, threadByHandle } from '../threads/thr
 import { previewOf, visibleThreads } from '../threads/views';
 
 /**
- * The tools an agent can call, as pure functions over a port; `AgentTools` registers them and
- * the tests drive a fake. Every input is parsed (docs/knowledge/webmcp.md) and every failure is
- * returned as `{ error }`, since a rejected `execute` reaches the agent with no text. Nothing
- * here sends mail. See DECISIONS.md, "Six agent tools" and "the agent sends through the composer".
+ * Pure functions over a port, so the tests can drive a fake. Every input is parsed
+ * (docs/knowledge/webmcp.md) and every failure is returned as `{ error }`, since a rejected
+ * `execute` reaches the agent with no text. Nothing here sends mail.
  */
 
 /** Read through a getter, because the store changes under the tools. */
@@ -111,8 +110,8 @@ const named = (name: string | undefined, address: string) =>
   name === undefined || name === '' ? address : `${name} <${address}>`;
 
 /**
- * Bare addresses, the shape `save_draft` takes back: its address rule splits on spaces, so a
- * `Name <address>` would come back as three broken recipients.
+ * Bare addresses, the shape `save_draft` takes back: its address rule splits on spaces, so a `Name
+ * <address>` would come back as three broken recipients.
  */
 const addressesOf = (recipients: readonly Recipient[]) =>
   recipients

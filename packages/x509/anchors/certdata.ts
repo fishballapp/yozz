@@ -66,9 +66,8 @@ export type ServerDistrust = {
 };
 
 /**
- * The attribute hangs off either object class. On NSS `70a8ff50`: three on `CKO_CERTIFICATE`, one
- * (`Izenpe.com`, the only shipped root past its cutoff) on `CKO_NSS_TRUST`. A future cutoff is
- * returned like any other.
+ * The attribute hangs off either object class: `CKO_CERTIFICATE` or, for the only shipped root past
+ * its cutoff (`Izenpe.com`), `CKO_NSS_TRUST`. A future cutoff is returned like any other.
  */
 export const serverDistrustAfter = (certdata: string): ReadonlyMap<string, ServerDistrust> =>
   new Map(

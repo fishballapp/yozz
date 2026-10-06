@@ -4,9 +4,9 @@ import { Wordmark } from '../ui/Wordmark';
 import { unreadCount } from './views';
 
 /**
- * The reader at rest. On a wide screen this pane is roughly a third of the first viewport, and
- * "Select a message." wastes it — so it holds the product's own statement instead: what YOZZ is,
- * which addresses are feeding the stream, and an honest note of what is and is not fetched.
+ * On a wide screen this pane is roughly a third of the first viewport and "Select a message."
+ * wastes it, so it holds the product's own statement: what YOZZ is, which addresses are feeding the
+ * stream, and an honest note of what is and is not fetched.
  */
 export const ReaderRest = () => {
   const { accounts, threads } = useMail();

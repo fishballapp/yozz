@@ -1,7 +1,7 @@
 /**
- * Two inputs, both required: `cacert.pem` carries no metadata, so a root Mozilla distrusted for
- * new issuance looks like any other; `certdata.txt` is where the date lives. To bump: change the
- * ref, run `pnpm -F @yozz.app/x509 anchors:fetch`, paste the hash, rebuild. Read what moved first.
+ * Two inputs, both required: `cacert.pem` carries no metadata, so a root Mozilla distrusted for new
+ * issuance looks like any other; `certdata.txt` is where the date lives. To bump: change the ref,
+ * run `anchors:fetch`, paste the hash, rebuild. Read what moved first.
  */
 
 /** curl's bundle, republished on its own schedule rather than versioned. */

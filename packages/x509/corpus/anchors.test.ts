@@ -57,9 +57,9 @@ describe('the compiled store', () => {
   });
 
   /**
-   * A loose ceiling: a regression guard against decoding the whole store, not a benchmark. Measured
-   * ~0.33 ms to first usable anchor against the 314 ms the spike saw. No `loadingMs < indexingMs`
-   * comparison: sub-millisecond wall clock under `pnpm test` contention is a coin flip.
+   * A loose ceiling: a regression guard against decoding the whole store, not a benchmark. No
+   * `loadingMs < indexingMs` comparison: sub-millisecond wall clock under `pnpm test` contention is
+   * a coin flip.
    */
   it('pays a cold cost far below the build-time one', () => {
     const index = indexAnchors(bundle);

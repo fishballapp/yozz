@@ -1,19 +1,9 @@
 /**
- * One full handshake per engine against real mail servers. Network, so by hand only.
- *
- *     pnpm -F @yozz.app/tls browser                       # local bridge, all three engines
- *     pnpm -F @yozz.app/tls browser --engine webkit       # one engine
- *     pnpm -F @yozz.app/tls browser --bridge "wss://…?key=…"   # through a deployed Worker
- *     pnpm -F @yozz.app/tls browser --relay ws://localhost:8177/api/v1/relay --cookie <token>
- *
- * Through the production relay (`apps/worker-api`, `/api/v1/relay`): the relay wants a session
- * and an `Origin` equal to the web origin, and this page is served from port 5178, so start the
- * API Worker as `WEB_ORIGIN=http://localhost:5178 pnpm -F @yozz.app/worker-api dev`, sign up
- * against it (the magic link prints in that terminal), and pass the `better-auth.session_token`
- * cookie value as `--cookie`.
- *
- * Node's WebCrypto is not Chromium's, WebKit's or Gecko's; see DECISIONS.md, "Live hosts must
- * greet, not merely handshake".
+ * One full handshake per engine against real mail servers, by hand only since it needs the network:
+ * Node's WebCrypto is not Chromium's, WebKit's or Gecko's (DECISIONS.md, "Live hosts must greet,
+ * not merely handshake"). Through the production relay (`--relay`) the session cookie and an
+ * `Origin` equal to the web origin are required, so start the API Worker with
+ * `WEB_ORIGIN=http://localhost:5178` and pass its `better-auth.session_token` as `--cookie`.
  */
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';

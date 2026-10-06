@@ -1,8 +1,5 @@
 #!/usr/bin/env node
-/**
- * Writes the runtime secrets from process.env (loaded by the `varlock run` around the deploy) to the
- * JSON that `wrangler deploy --secrets-file` accepts.
- */
+/** Writes process.env runtime secrets to JSON for wrangler deploy --secrets-file. */
 import { writeFileSync } from 'node:fs';
 import SECRET_KEYS from './secret-keys.json' with { type: 'json' };
 

@@ -14,9 +14,9 @@ const FrameMessageSchema = z.discriminatedUnion('type', [
 ]);
 
 /**
- * A received HTML body in a sandboxed iframe (containment is documented on `mail/html.ts`). The
- * frame cannot be measured from outside, so a nonce'd script posts its own height; only messages
- * from this frame's window are trusted, and the height is capped.
+ * The frame cannot be measured from outside, so a nonce'd script posts its own height; only
+ * messages from this frame's window are trusted, and the height is capped. Containment is
+ * documented on `threads/html.ts`.
  */
 export const HtmlBody = ({
   html,

@@ -1,7 +1,7 @@
 /**
- * Harvests the certificate corpus off real mail servers plus Node's Mozilla root store, deduplicated
- * by signature algorithm, key type, extension set and ASN.1 string/time encoding. The output is
- * committed. Run by hand: `pnpm -F @yozz.app/x509 corpus:harvest`.
+ * Harvests the certificate corpus off real mail servers plus Node's Mozilla root store,
+ * deduplicated by signature algorithm, key type, extension set and ASN.1 string/time encoding. The
+ * output is committed; run by hand.
  */
 import { execFile } from 'node:child_process';
 import { X509Certificate } from 'node:crypto';

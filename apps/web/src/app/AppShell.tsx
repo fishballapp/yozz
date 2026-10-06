@@ -16,7 +16,7 @@ import { StatusBar } from './StatusBar';
 /**
  * A pathless layout route (`routes/_app.tsx`), so the rail mounts once; anything that renders
  * without the app is a sibling route. The vault gate sits here because `beforeLoad` cannot read
- * React context; while a persisted unlock resumes it renders nothing.
+ * React context.
  */
 export const AppShell = () => {
   const { session, isResuming } = useVault();

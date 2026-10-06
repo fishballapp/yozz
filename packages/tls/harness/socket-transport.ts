@@ -62,14 +62,10 @@ const LINGER_QUIET_MS = 250;
 const LINGER_MAX_MS = 2_000;
 
 /**
- * Drain, flush, half-close, then linger. A socket closed with unread bytes in its receive buffer
- * answers the peer with a RST, and so does one closed while the peer is still writing, which is
- * what exiting the process does: either fails the peer's next write before it reads the alert we
- * sent (BoGo: `write: broken pipe` where `remote error: bad record MAC` was expected). So after
- * our FIN the socket goes on draining until the peer closes back or has been quiet for
- * LINGER_QUIET_MS, the lingering close web servers do. It cannot simply wait for the peer's close:
- * BoGo's runner waits for the shim to exit before it closes. The flush is not timed out, since
- * only an alert or close_notify is buffered here.
+ * Closing with unread bytes in the receive buffer, or while the peer is still writing, sends a RST
+ * that kills the peer's next write before it reads our alert. So after our FIN we keep draining
+ * until the peer closes or goes quiet; waiting for its close alone would deadlock BoGo's runner,
+ * which waits for the shim to exit first.
  */
 export const endGracefully = async (socket: Socket): Promise<void> => {
   if (socket.destroyed) return;

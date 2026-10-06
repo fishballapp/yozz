@@ -4,9 +4,8 @@ import { cn } from '@fishballapps/cn';
 import type { Icon } from '@phosphor-icons/react';
 
 /**
- * Base UI's Toggle Group, so the row is one labelled control with arrow-key movement. The
- * pressed cell takes the rail's active ground, not a list row's inversion. `cellClassName` sizes
- * the hit area per call site.
+ * Base UI's Toggle Group, so the row is one labelled control with arrow-key movement. The pressed
+ * cell takes the rail's active ground, not a list row's inversion.
  */
 export const IconSwitch = <T extends string>({
   label,

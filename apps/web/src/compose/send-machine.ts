@@ -6,15 +6,9 @@ import type { SentCopyFailure } from './send';
 
 /**
  * Each phase is written before the step it names, so a crash repeats a step that finds its own
- * earlier attempt:
- *
- *   (0) `submitting`  the claim: content frozen on every device, bytes and target stored
- *   (1) SMTP submit of exactly those bytes → `submitted`
- *   (2) the Sent copy (IMAP APPEND, or a vault record) → `copied`
- *   (3) tombstone the draft with what it became
- *   (4) expunge the IMAP mirror of the draft
- *
- * Only `submitting` is ambiguous, so it is never resumed automatically.
+ * earlier attempt: (0) `submitting` claim, (1) SMTP submit, (2) Sent copy, (3) tombstone the draft,
+ * (4) expunge the IMAP mirror. Only `submitting` is ambiguous, so it is never resumed
+ * automatically.
  */
 
 type Send = NonNullable<DraftRecord['send']>;

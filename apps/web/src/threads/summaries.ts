@@ -220,10 +220,9 @@ const asSyntheticCopy = (message: VaultSentMessage) => ({
 });
 
 /**
- * Every account's summaries grouped into conversations (`lib/threading.ts`) in one pass. Copies
- * collapse into one displayed message on equal Message-ID, From, envelope Date and base subject
- * (not INTERNALDATE, which differs between the Inbox and Sent copies). Flags are the union across
- * copies. See DECISIONS.md, "Threads span accounts, and an id stops naming one".
+ * Copies collapse into one displayed message on equal Message-ID, From, envelope Date and base
+ * subject (not INTERNALDATE, which differs between the Inbox and Sent copies). Flags are the union
+ * across copies. See DECISIONS.md, "Threads span accounts, and an id stops naming one".
  */
 export const threadsFromAccounts = (
   byAccount: AccountSummaries,

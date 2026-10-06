@@ -4,8 +4,8 @@ import type { AccountSyncState } from './sync';
 import { type Folder, isArchived, isTrashed, type Thread, type ThreadState } from './thread';
 
 /**
- * Every destination the rail can point at. A mailbox id is a URL segment: views are a closed
- * set, an address is any email string, and an unconnected address is an in-pane state.
+ * A mailbox id is a URL segment: views are a closed set, an address is any email string, and an
+ * unconnected address is an in-pane state.
  */
 const viewIdSchema = z.enum(['unified', 'starred', 'archive', 'sent', 'trash', 'drafts']);
 type ViewId = z.infer<typeof viewIdSchema>;
@@ -119,9 +119,8 @@ const matches = (haystack: string, query: string) =>
   haystack.toLowerCase().includes(query.toLowerCase());
 
 /**
- * The mailbox narrowed by `?q=`. Search reads subject, sender and whole body, not the snippet
- * (drawn from the newest message and cut to display length). One function because the list and
- * the status line need the same answer.
+ * Search reads subject, sender and whole body, not the snippet (drawn from the newest message and
+ * cut to display length). One function because the list and the status line need the same answer.
  */
 export const visibleThreads = (
   threads: readonly ThreadState[],

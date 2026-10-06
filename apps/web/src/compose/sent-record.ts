@@ -1,8 +1,9 @@
 import { z } from 'zod';
 
 /**
- * A message sent from an address with no mailbox; the vault is the only copy, so never purged.
- * Keyed by Message-ID, so a retried send is a no-op under the create's `absent` precondition.
+ * A message sent from an address with no mailbox; the vault is the only copy, so it is never
+ * purged. Keyed by Message-ID, so a retried send is a no-op under the create's `absent`
+ * precondition.
  */
 export const SENT_RECORD_TYPE = 'sent';
 

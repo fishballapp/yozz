@@ -3,10 +3,9 @@ import { SAFE_INLINE_IMAGE_MIME_TYPES } from './image-types';
 import { isPermittedExternalHostname, normalizedUrlInputOf, outboundHrefOf } from './url-policy';
 
 /**
- * A received HTML body, made renderable. Three layers, each assuming the one before failed:
- * DOMPurify's HTML-only profile with hooks narrowing URL shapes; a CSP `<meta>` in the srcdoc
- * denying every fetch (remote images opt in per message); and the iframe sandbox in `HtmlBody.tsx`
- * (no `allow-same-origin`).
+ * Three layers, each assuming the one before failed: DOMPurify's HTML-only profile with hooks
+ * narrowing URL shapes; a CSP `<meta>` in the srcdoc denying every fetch (remote images opt in per
+ * message); and the iframe sandbox in `HtmlBody.tsx` (no `allow-same-origin`).
  */
 export type MailFrame = {
   readonly srcdoc: string;
@@ -92,8 +91,8 @@ const COLOUR_ATTRIBUTE_SELECTOR = '[bgcolor], [color], [style*="color"]';
 
 /**
  * Mail is authored against webmail's white ground, and one side of the pair set alone
- * (`color:#1f2430`, no background) is legible only there. The dark frame is for mail that
- * declares nothing or ships its own dark-scheme rules.
+ * (`color:#1f2430`, no background) is legible only there. The dark frame is for mail that declares
+ * nothing or ships its own dark-scheme rules.
  */
 const declaresColours = (parsed: Document, stylesheets: readonly string[]): boolean =>
   parsed.body.querySelector(COLOUR_ATTRIBUTE_SELECTOR) !== null ||

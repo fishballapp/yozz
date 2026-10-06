@@ -19,8 +19,8 @@ import { Wordmark } from '../ui/Wordmark';
 import { markOf } from './record';
 
 /**
- * Address-first (PRODUCT.md principle 2); connecting an account lives in Settings. The Inbox row
- * is labelled "Inbox" while its id stays `unified` (DECISIONS.md). Every link uses `keepCompose`.
+ * Address-first (PRODUCT.md principle 2), so connecting an account lives in Settings. The Inbox
+ * row's id stays `unified` (DECISIONS.md), and every link uses `keepCompose`.
  */
 
 const UnifiedRow = ({ onNavigate }: { onNavigate?: () => void }) => {

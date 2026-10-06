@@ -27,8 +27,8 @@ import { MarkdownView } from './MarkdownView';
 import { MAX_ATTACHMENT_BYTES } from './send';
 
 /**
- * A modal document, From first. `?compose=` says whether it is open and the store holds the text;
- * the store follows the URL, and this is the only place that seeds a draft. See DECISIONS.md.
+ * `?compose=` says whether the composer is open and the store holds the text; the store follows the
+ * URL, and this is the only place that seeds a draft. See DECISIONS.md.
  */
 
 const FieldLabel = ({ children, htmlFor }: { children: string; htmlFor?: string }) => (

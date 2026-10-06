@@ -5,7 +5,7 @@ import { Button } from './Button';
 
 /**
  * The one transient report line, for a send that outlives the composer. The manager is created
- * outside React so anything can queue one. A panel in miniature, sized by its content.
+ * outside React so anything can queue one.
  */
 export const toast = Toast.createToastManager();
 

@@ -6,16 +6,16 @@ import type { DraftRecord } from './draft-record';
 import { type DraftHandle, readMirror, writeMirror } from './draft-vault';
 
 /**
- * The IMAP copy of a vault draft, a courtesy to the user's other clients and never read back as
- * authority. Bookkeeping is its own record so a late mirror cannot conflict with a save.
+ * The IMAP copy of a vault draft is a courtesy to the user's other clients and is never read back
+ * as authority. Bookkeeping is its own record so a late mirror cannot conflict with a save.
  */
 
 type Run = <T>(task: LiveTask<T>) => Promise<Result<T, MailConnectionFailure>>;
 
 /**
  * Derived from the draft key so a later mirror finds every copy. A Message-ID rather than an
- * `X-Yozz-Draft` header because Forward Email indexes only the headers IMAP names: `SEARCH
- * HEADER X-Yozz-Draft` answered empty for a message that carried it.
+ * `X-Yozz-Draft` header because Forward Email indexes only the headers IMAP names: `SEARCH HEADER
+ * X-Yozz-Draft` answered empty for a message that carried it.
  */
 export const draftMirrorMessageId = (draftKey: string, account: string): string =>
   `<yozz-draft-${draftKey}@${account.slice(account.indexOf('@') + 1)}>`;

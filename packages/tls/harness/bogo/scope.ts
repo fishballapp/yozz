@@ -1,8 +1,7 @@
 /**
  * BoGo tests declared out of scope, as rules over what the runner tells us about each test;
- * `manifest.txt` is what survives them. A version token in a name is trustworthy because
- * `checkTests` (`ssl/test/runner/runner.go`) panics when the name and config disagree; the side
- * and protocol arrive in the `-write-settings` path.
+ * `manifest.txt` is what survives. A version token in a name is trustworthy because `checkTests`
+ * (`ssl/test/runner/runner.go`) panics when the name and config disagree.
  */
 
 export type InventoryRow = {

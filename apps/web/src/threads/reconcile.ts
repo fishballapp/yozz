@@ -1,10 +1,9 @@
 import { FOLDERS, type Folder } from './thread';
 
 /**
- * Rendered mail is `applyOps(base, ops)`. An op leaves the list when the server refused it, or
- * when a sync of that account that started after the ack lands (`retireAtSyncSeq`); every IMAP
- * command of an account runs on one serial queue, so such a sync observed the server after the
- * command. See DECISIONS.md, 2026-08-27.
+ * An op leaves the list when the server refused it, or when a sync of that account that started
+ * after the ack lands (`retireAtSyncSeq`); every IMAP command of an account runs on one serial
+ * queue, so such a sync observed the server after the command. See DECISIONS.md, 2026-08-27.
  */
 
 /** Sent is not one: nothing moves mail into the Sent folder. */
@@ -77,8 +76,8 @@ export const retireOps = (
 
 /**
  * After a UIDVALIDITY change the server may hand the same uid to different mail, and the threads
- * React is still rendering predate the sync that cleared the cache. The op is dropped and its
- * error surfaces; the running sync replaces the base.
+ * React is still rendering predate the sync that cleared the cache. The op is dropped and its error
+ * surfaces; the running sync replaces the base.
  */
 export const assertSameUidValidity = (
   folder: Folder,

@@ -151,7 +151,6 @@ const runTranscriptSession = async (
       if (step.kind === 'send') {
         await pair.server.write(stringToBytes(step.raw));
       } else if (step.kind === 'recv') {
-        // Read until we have a full line matching expected
         const decoder = new TextDecoder('utf-8');
         while (!decoder.decode(clientBuffer).includes('\r\n')) {
           const chunk = await pair.server.read();
@@ -169,7 +168,6 @@ const runTranscriptSession = async (
           const lineByteLen = stringToBytes(receivedLine).length;
           clientBuffer = clientBuffer.slice(lineByteLen);
 
-          // Normalise tags (e.g. A0001 -> Axxxx) for comparison
           const normReceived = receivedLine.replace(/^A\d{4}/, 'TAG');
           const normExpected = step.raw.replace(/^A\d{4}/, 'TAG');
           expect(normReceived).toBe(normExpected);
@@ -469,12 +467,10 @@ describe('IMAP Client transcripts and state machine', () => {
     const pair = createTestDuplexPair();
     const client = createImapClient(pair.client);
 
-    // Write greeting
     await pair.server.write(stringToBytes(steps[0]?.raw ?? ''));
     const greeting = await client.greeting();
     expect(greeting.ok).toBe(true);
 
-    // Close server transport (EOF)
     pair.close();
 
     const noopRes = await client.noop();
@@ -489,14 +485,13 @@ describe('IMAP Client transcripts and state machine', () => {
     const pair = createTestDuplexPair();
     const client = createImapClient(pair.client);
 
-    // Send greeting
     await pair.server.write(stringToBytes(steps[0]?.raw ?? ''));
     await client.greeting();
 
-    // Server sends bare LF
     const serverPromise = (async () => {
-      await pair.server.read(); // client writes NOOP
-      await pair.server.write(stringToBytes('* BARE LF\n')); // malformed bare LF!
+      await pair.server.read();
+      // RFC 9051 requires CRLF line endings.
+      await pair.server.write(stringToBytes('* BARE LF\n'));
     })();
 
     const noopRes = await client.noop();
@@ -505,7 +500,6 @@ describe('IMAP Client transcripts and state machine', () => {
       expect(noopRes.reason.kind).toBe('protocol');
     }
 
-    // Subsequent call should fail with closed
     const laterRes = await client.noop();
     expect(laterRes.ok).toBe(false);
     if (!laterRes.ok) {

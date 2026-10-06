@@ -72,7 +72,7 @@ describe('envelope and fetch parsing', () => {
     const envItem = items.find(i => i.kind === 'envelope');
     expect(envItem).toBeDefined();
     if (envItem?.kind === 'envelope') {
-      // Group (Core Team) flattened to Charlie and David
+      // RFC 9051 §7.5.2 group syntax flattens to member addresses.
       expect(envItem.envelope.from).toEqual([
         { name: 'Charlie', mailbox: 'charlie', host: 'example.com' },
         { name: 'David', mailbox: 'david', host: 'example.com' },

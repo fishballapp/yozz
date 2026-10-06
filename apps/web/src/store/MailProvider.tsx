@@ -46,9 +46,8 @@ import { useVault } from '../vault/session';
 import { type Composer, useComposer } from './use-composer';
 
 /**
- * The app's mutable mail state. Threads are held in memory only: a lock drops them. The contexts'
- * IO modules are reached through dynamic imports so the TLS stack and root bundle stay out of the
- * entry chunk.
+ * Threads are held in memory only: a lock drops them. The contexts' IO modules are reached through
+ * dynamic imports so the TLS stack and root bundle stay out of the entry chunk.
  */
 
 type InboundAddress = AddressRecord & { imap: NonNullable<AddressRecord['imap']> };
@@ -582,11 +581,10 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
   );
 
   /**
-   * One optimistic write against the server's copies: an op showing the thread as it is about
-   * to be, then one IMAP command per account (its own connection, sync and uid space) over the
-   * locations `pick` keeps, grouped by folder because a uid only means something in its own
-   * mailbox. A refused command drops that account's op and lands in `flagError`, never in the
-   * account's sync state.
+   * One optimistic write against the server's copies: one IMAP command per account (its own
+   * connection, sync and uid space), grouped by folder because a uid only means something in its
+   * own mailbox. A refused command drops that account's op and lands in `flagError`, never in its
+   * sync state.
    */
   const runThreadOp = useCallback(
     (

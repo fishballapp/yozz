@@ -10,9 +10,9 @@ import { consoleEmailSender, createProductionEmailSender, type EmailSender } fro
 import { getBaseUrl, getWebOrigin, type RuntimeEnv } from './env.ts';
 
 /**
- * Changing how a vault opens needs a session this young: Better Auth's own passkey registration,
- * and our `PUT /unlock` and vault reset (`requireFreshSession`). A stolen older cookie can read
- * ciphertext but cannot plant a credential that outlives it. Better Auth's default, stated.
+ * Changing how a vault opens needs a session this young: Better Auth's passkey registration, our
+ * `PUT /unlock` and vault reset (`requireFreshSession`). A stolen older cookie can read ciphertext
+ * but cannot plant a credential that outlives it.
  */
 export const SESSION_FRESH_AGE_SECONDS = 60 * 60 * 24;
 

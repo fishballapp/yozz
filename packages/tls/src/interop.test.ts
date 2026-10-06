@@ -173,11 +173,7 @@ describe('resumption against a real TLS 1.3 server', () => {
         const second = await connectOnce(offered);
         expect(second.isResumed).toBe(true);
 
-        /**
-         * A resumed handshake verifies no signature, so the scheme came out of the session; pinned to
-         * what the server's key can sign. Nothing here reaches the ticket minted on the resumed
-         * connection: OpenSSL issues none there (measured).
-         */
+        // Resumed handshake verifies no signature; peerSignatureScheme comes from stored session.
         expect(first.peerSignatureScheme).toBe('ecdsa_secp256r1_sha256');
         expect(second.peerSignatureScheme).toBe(first.peerSignatureScheme);
       } finally {
@@ -188,9 +184,8 @@ describe('resumption against a real TLS 1.3 server', () => {
 });
 
 /**
- * Only `validationTime` moves; `now` stays put, so the ticket is still inside its lifetime and
- * the session is offered. The chain is issued at test time, so the refusal comes from a real
- * expiry.
+ * Only `validationTime` moves; `now` stays put, so the ticket is still inside its lifetime and the
+ * session is offered. The chain is issued at test time, so the refusal comes from a real expiry.
  */
 describe('a resumed handshake re-checks the stored chain', () => {
   const YEAR = 365 * 24 * 3600 * 1000;

@@ -10,9 +10,8 @@ import type { FetchedBody } from './bodies';
 import type { Folder } from './thread';
 
 /**
- * Per device, derived from IMAP, rebuilt whenever lost (ARCHITECTURE.md, "State placement").
- * Per vault user, account and folder; dropped whole on lock. `mail-sync` holds the folder's IMAP
- * name, `UIDVALIDITY`, highest uid and whether its start is cached.
+ * Per device, derived from IMAP, rebuilt whenever lost (ARCHITECTURE.md, "State placement"). Per
+ * vault user, account and folder; dropped whole on lock.
  */
 
 export type FolderSync = {

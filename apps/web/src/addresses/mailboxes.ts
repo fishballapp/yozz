@@ -30,9 +30,9 @@ const specialUseOf = (
   listed.find(mailbox => names.has(mailbox.name.toLowerCase()));
 
 /**
- * The IMAP name behind each folder: `INBOX` is reserved by the protocol; Sent, Archive and Trash
- * are whichever mailbox `LIST` marks with the matching special-use attribute, else the usual
- * names, else absent — a sync never creates them; only a move does, and only the one it needs.
+ * `INBOX` is reserved by the protocol; Sent, Archive and Trash are whichever mailbox `LIST` marks
+ * with the matching special-use attribute, else the usual names, else absent. A sync never creates
+ * them; only a move does, and only the one it needs.
  */
 export const resolveFolders = async (
   client: ImapClient,

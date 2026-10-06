@@ -1,8 +1,6 @@
 /**
- * Open a vault draft in the composer in a real browser and read what the fields hold. Nothing
- * in the unit tests renders the composer. Needs both dev servers up.
- *
- *   pnpm -F @yozz.app/web draft:drive
+ * Nothing in the unit tests renders the composer, so this opens a vault draft in a real browser and
+ * reads what the fields hold. Needs both dev servers up.
  */
 import { execFileSync } from 'node:child_process';
 import { chromium, type Page } from '@playwright/test';

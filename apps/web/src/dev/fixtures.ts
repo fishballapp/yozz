@@ -1,6 +1,6 @@
 /**
- * Dev-only fixture inbox, loaded only when `isDemo()` is true. Every address, message and host is
- * invented; times are offsets from module load.
+ * Loaded only when `isDemo()` is true. Every address, message and host is invented; times are
+ * offsets from module load.
  */
 
 import type { AddressRecord } from '../addresses/record';

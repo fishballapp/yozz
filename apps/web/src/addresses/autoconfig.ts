@@ -2,8 +2,8 @@ import { type MailAutoconfig, MailAutoconfigSchema } from '@yozz.app/vault-contr
 import { getApiBaseUrl } from '../vault/api-base-url';
 
 /**
- * Asks the Worker what a domain publishes about its mail servers. Only the domain travels: the
- * address itself stays here, so the server learns no more than the relay already does.
+ * Only the domain travels to the Worker: the address itself stays here, so the server learns no
+ * more than the relay already does.
  */
 
 export type AutoconfigLookup =

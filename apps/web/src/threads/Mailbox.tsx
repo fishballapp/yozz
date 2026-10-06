@@ -7,9 +7,8 @@ import { ThreadList } from './ThreadList';
 import { visibleThreads } from './views';
 
 /**
- * The list column, its resizer, and the reader `<Outlet/>`; the rail and status line are
- * `AppShell`'s. The list never tracks the viewport; the reader keeps a `24rem` floor and CSS
- * arbitrates. Below `lg` the panes show one at a time.
+ * The rail and status line are `AppShell`'s. The list never tracks the viewport; the reader keeps a
+ * `24rem` floor and CSS arbitrates. Below `lg` the panes show one at a time.
  */
 
 /** The designed list widths, and what double-clicking the hairline returns to. */

@@ -1,7 +1,4 @@
-/**
- * Writes the DDL Better Auth still wants, after every committed migration, as a new
- * `000N_better_auth_*.sql`. `db:generate-auth` writes it; `db:check-auth` fails when there is a delta.
- */
+/** Writes pending Better Auth DDL as a new migration; db:check-auth fails if a delta exists. */
 import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { DatabaseSync, type SQLInputValue } from 'node:sqlite';
