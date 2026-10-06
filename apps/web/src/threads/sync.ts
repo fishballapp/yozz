@@ -88,8 +88,11 @@ const syncFolder = async (
       const expunged: number[] = [];
       for (const summary of known) {
         const flags = flagsByUid.get(summary.uid);
-        if (flags === undefined) expunged.push(summary.uid);
-        else kept.push({ ...summary, flags });
+        if (flags === undefined) {
+          expunged.push(summary.uid);
+        } else {
+          kept.push({ ...summary, flags });
+        }
       }
       if (expunged.length > 0) await folderCache.deleteSummaries(expunged);
     }
@@ -373,8 +376,9 @@ export const prefetchBodies = (
           run: async client => {
             if (isStale()) return { ok: true, value: undefined };
             const selected = await client.ensureSelected(mark.name);
-            if (!selected.ok)
+            if (!selected.ok) {
               return { ok: false, error: { kind: 'imap', reason: selected.reason } };
+            }
             const raw = await client.fetchRaw(summary.uid);
             if (!raw.ok) return { ok: false, error: { kind: 'imap', reason: raw.reason } };
             if (isStale()) return { ok: true, value: undefined };

@@ -85,8 +85,9 @@ export const AgentTools = () => {
       for (const outcome of outcomes) {
         if (outcome.status !== 'rejected') continue;
         // Aborted before it registered: StrictMode's double mount, or a sign-out mid-registration.
-        if (outcome.reason instanceof DOMException && outcome.reason.name === 'AbortError')
+        if (outcome.reason instanceof DOMException && outcome.reason.name === 'AbortError') {
           continue;
+        }
         // biome-ignore lint/suspicious/noConsole: a refused tool must be visible in DevTools; the app works without it
         console.warn('WebMCP tool did not register', outcome.reason);
       }

@@ -211,8 +211,11 @@ export const parseBodyStructureParts = (
 
     let depth = 1;
     while (idx < tokens.length && depth > 0) {
-      if (tokens[idx]?.kind === 'lparen') depth++;
-      else if (tokens[idx]?.kind === 'rparen') depth--;
+      if (tokens[idx]?.kind === 'lparen') {
+        depth++;
+      } else if (tokens[idx]?.kind === 'rparen') {
+        depth--;
+      }
       idx++;
     }
 
@@ -228,8 +231,11 @@ export const parseBodyStructureParts = (
 
   let depth = 1;
   while (idx < tokens.length && depth > 0) {
-    if (tokens[idx]?.kind === 'lparen') depth++;
-    else if (tokens[idx]?.kind === 'rparen') depth--;
+    if (tokens[idx]?.kind === 'lparen') {
+      depth++;
+    } else if (tokens[idx]?.kind === 'rparen') {
+      depth--;
+    }
     idx++;
   }
 

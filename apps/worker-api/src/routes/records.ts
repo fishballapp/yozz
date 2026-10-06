@@ -70,12 +70,11 @@ export const recordsRoute = new Hono<AppEnv>()
 
     const user = c.get('user');
     const stated = body.data.precondition;
-    const precondition: PutPrecondition | undefined =
-      stated === undefined
-        ? undefined
-        : stated.expect === 'absent'
-          ? 'create'
-          : { ifRevision: stated.revision };
+    const precondition = ((): PutPrecondition | undefined => {
+      if (stated === undefined) return undefined;
+      if (stated.expect === 'absent') return 'create';
+      return { ifRevision: stated.revision };
+    })();
     try {
       await putRecord(
         c.env.DB,

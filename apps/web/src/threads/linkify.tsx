@@ -38,8 +38,9 @@ const linkifyString = (text: string, keyPrefix: string): ReactNode[] =>
 /** Linkifies only the string leaves. */
 export const linkify = (node: ReactNode, keyPrefix = 'l'): ReactNode => {
   if (typeof node === 'string') return linkifyString(node, keyPrefix);
-  if (Array.isArray(node))
+  if (Array.isArray(node)) {
     return Children.map(node, (child, index) => linkify(child, `${keyPrefix}${index}`));
+  }
   // An element carries its own semantics; its renderer decides.
   if (isValidElement(node)) return node;
   return node;

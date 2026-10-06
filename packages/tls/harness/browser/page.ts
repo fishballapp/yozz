@@ -131,8 +131,9 @@ const handshake = async (
     // The greeting fails the host: only it proves application data decrypts.
     const greeting = await result.connection.read();
     await result.connection.close();
-    if (!greeting.ok)
+    if (!greeting.ok) {
       return failed(host, `handshake ok, read failed: ${describeFailure(greeting.reason)}`);
+    }
     if (greeting.kind !== 'data') return failed(host, 'handshake ok, closed without a greeting');
     const line = new TextDecoder().decode(greeting.bytes).split('\r\n')[0] ?? '';
     if (!isReadyGreeting(line)) {

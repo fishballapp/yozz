@@ -70,8 +70,11 @@ const collectRecordSteps = (trace: Rfc8448Trace): readonly RecordStepInfo[] => {
       const key = bytesOf(step, 'key expanded');
       const iv = bytesOf(step, 'iv expanded');
       if (key !== undefined && iv !== undefined) {
-        if (step.actor === 'server') serverHandshakeReadKeys = { key, iv };
-        else clientHandshakeReadKeys = { key, iv };
+        if (step.actor === 'server') {
+          serverHandshakeReadKeys = { key, iv };
+        } else {
+          clientHandshakeReadKeys = { key, iv };
+        }
       }
       continue;
     }
@@ -80,8 +83,11 @@ const collectRecordSteps = (trace: Rfc8448Trace): readonly RecordStepInfo[] => {
       const key = bytesOf(step, 'key expanded');
       const iv = bytesOf(step, 'iv expanded');
       if (key !== undefined && iv !== undefined) {
-        if (step.actor === 'server') serverAppReadKeys = { key, iv };
-        else clientAppReadKeys = { key, iv };
+        if (step.actor === 'server') {
+          serverAppReadKeys = { key, iv };
+        } else {
+          clientAppReadKeys = { key, iv };
+        }
       }
       continue;
     }

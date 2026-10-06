@@ -143,8 +143,9 @@ const inlineCidImages = (
 };
 
 export const parseBody = async (raw: Uint8Array): Promise<FetchedBody> => {
-  if (raw.byteLength > MAX_RAW_MESSAGE_BYTES)
+  if (raw.byteLength > MAX_RAW_MESSAGE_BYTES) {
     throw new Error('Message is too large to open safely');
+  }
   const mail = await PostalMime.parse(raw);
   // The text part stays even when HTML renders: it is the snippet and the fallback.
   const senderText = mail.text?.trim() ? mail.text : null;
@@ -196,16 +197,18 @@ export const fetchBody = async (
   if (
     expectedRawSize !== undefined &&
     (!Number.isSafeInteger(expectedRawSize) || expectedRawSize < 0)
-  )
+  ) {
     return {
       ok: false,
       error: { kind: 'error', detail: 'Message size is unavailable' },
     };
-  if (expectedRawSize !== undefined && expectedRawSize > MAX_RAW_MESSAGE_BYTES)
+  }
+  if (expectedRawSize !== undefined && expectedRawSize > MAX_RAW_MESSAGE_BYTES) {
     return {
       ok: false,
       error: { kind: 'error', detail: 'Message is too large to open safely' },
     };
+  }
   return run({
     priority: 'user',
     retry: true,

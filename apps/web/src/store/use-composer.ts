@@ -413,12 +413,15 @@ export const useComposer = ({
           ok: false,
           error: {
             kind: 'error',
-            detail:
-              claimed.reason === 'sending'
-                ? 'This draft is already being sent on another device.'
-                : claimed.reason === 'conflict'
-                  ? 'This draft was edited on another device. Reopen it before sending.'
-                  : 'The draft could not be claimed for sending; check your connection.',
+            detail: (() => {
+              if (claimed.reason === 'sending') {
+                return 'This draft is already being sent on another device.';
+              }
+              if (claimed.reason === 'conflict') {
+                return 'This draft was edited on another device. Reopen it before sending.';
+              }
+              return 'The draft could not be claimed for sending; check your connection.';
+            })(),
           },
         };
       }
@@ -559,8 +562,9 @@ export const useComposer = ({
             open !== null &&
             open.draftId === pending.draftId &&
             sameDraftContent(open.record, content)
-          )
+          ) {
             return;
+          }
           // The first save of an ordinary compose mints the record.
           if (pending.draftId === undefined) {
             const { createDraft } = await import('../compose/draft-vault');
@@ -856,8 +860,9 @@ export const useComposer = ({
         if (session === null || isDemo()) return { ok: false, reason: 'locked' };
         if (draftId !== undefined && draftRef.current?.draftId !== undefined) {
           const open = parseDraftId(draftId)?.key;
-          if (open !== undefined && open === draftRef.current.draftKey)
+          if (open !== undefined && open === draftRef.current.draftKey) {
             return { ok: false, reason: 'busy' };
+          }
         }
         const { createDraft, listDrafts, replaceDraft } = await import('../compose/draft-vault');
         const outcome =

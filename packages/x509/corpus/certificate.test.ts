@@ -44,8 +44,9 @@ const renderRfc2253 = (name: Name): string =>
         .map(({ oid, valueDer }) => {
           const value = decodeDer(valueDer);
           const encoding = STRING_DECODERS[value.tagNumber];
-          if (encoding === undefined)
+          if (encoding === undefined) {
             throw new Error(`no decoder for string tag ${value.tagNumber}`);
+          }
           const text = new TextDecoder(encoding).decode(value.content);
           const escaped = text
             .replace(/([,+"\\<>;])/g, '\\$1')

@@ -64,8 +64,11 @@ export const quotedPrintable = (text: string): string => {
       let rest = encoded;
       while (rest.length > 76) {
         let cut = 75;
-        if (rest[cut - 1] === '=') cut -= 1;
-        else if (rest[cut - 2] === '=') cut -= 2;
+        if (rest[cut - 1] === '=') {
+          cut -= 1;
+        } else if (rest[cut - 2] === '=') {
+          cut -= 2;
+        }
         out.push(`${rest.slice(0, cut)}=`);
         rest = rest.slice(cut);
       }

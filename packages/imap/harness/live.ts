@@ -111,11 +111,11 @@ for (const host of targets) {
     }
 
     const upperCaps = capRes.value.map(c => c.toUpperCase());
-    const literalSupport = upperCaps.includes('LITERAL+')
-      ? 'LITERAL+'
-      : upperCaps.includes('LITERAL-')
-        ? 'LITERAL-'
-        : '-';
+    const literalSupport = (() => {
+      if (upperCaps.includes('LITERAL+')) return 'LITERAL+';
+      if (upperCaps.includes('LITERAL-')) return 'LITERAL-';
+      return '-';
+    })();
     const saslIrSupport = upperCaps.includes('SASL-IR') ? 'SASL-IR' : '-';
     const authMechs = upperCaps
       .filter(c => c.startsWith('AUTH='))

@@ -117,18 +117,21 @@ const MessageDetails = ({
           to{' '}
           {addressees.length === 0
             ? summary
-            : addressees.map((entry, index) => (
-                <Fragment key={entry === 'me' ? 'me' : entry.address}>
-                  {index > 0 && ', '}
-                  {entry === 'me' ? (
-                    <span className="text-paper-dim">me</span>
-                  ) : entry.name !== undefined ? (
-                    <bdi className="text-paper-dim">{entry.name}</bdi>
-                  ) : (
-                    <span className="font-mono text-paper-dim">{entry.address}</span>
-                  )}
-                </Fragment>
-              ))}
+            : addressees.map((entry, index) => {
+                const name = (() => {
+                  if (entry === 'me') return <span className="text-paper-dim">me</span>;
+                  if (entry.name !== undefined) {
+                    return <bdi className="text-paper-dim">{entry.name}</bdi>;
+                  }
+                  return <span className="font-mono text-paper-dim">{entry.address}</span>;
+                })();
+                return (
+                  <Fragment key={entry === 'me' ? 'me' : entry.address}>
+                    {index > 0 && ', '}
+                    {name}
+                  </Fragment>
+                );
+              })}
         </span>
         <CaretDownIcon
           size={11}
@@ -320,7 +323,7 @@ const MessageBody = ({
           ))
         );
       // `hasTextPart === false` includes an HTML message too large to frame, where `body` is our reduction.
-      if (mode === 'text')
+      if (mode === 'text') {
         return message.hasTextPart === false ? (
           <p className="text-paper-dim">
             This message has no plain-text version. Switch to HTML to read it.
@@ -328,6 +331,7 @@ const MessageBody = ({
         ) : (
           fallback
         );
+      }
       if (message.html === undefined) return fallback;
       return (
         <HtmlBody

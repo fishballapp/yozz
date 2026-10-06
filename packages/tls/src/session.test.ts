@@ -251,8 +251,9 @@ describe('§4 resumed through the state machine, and the ticket it renews', () =
 
   it("reproduces §4's server application traffic key, proven by decrypting under it", async () => {
     const { offered, result, renewed, revalidated, duplex } = await resume();
-    if (!result.ok)
+    if (!result.ok) {
       throw new Error(`the §4 replay did not complete: ${JSON.stringify(result.reason)}`);
+    }
     expect(result.isResumed).toBe(true);
 
     // The only chain there is to validate is the one §3 put on the session.

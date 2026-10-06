@@ -170,13 +170,19 @@ const summariesFrom = (untagged: readonly ImapUntagged[]): readonly ImapMessageS
     let gmailThreadId: string | null = null;
 
     for (const fItem of item.items) {
-      if (fItem.kind === 'uid') uid = fItem.uid;
-      else if (fItem.kind === 'flags') flags = fItem.flags;
-      else if (fItem.kind === 'internalDate') internalDate = fItem.date;
-      else if (fItem.kind === 'size') size = fItem.size;
-      else if (fItem.kind === 'envelope') envelope = fItem.envelope;
-      else if (fItem.kind === 'gmailThreadId') gmailThreadId = fItem.id;
-      else if (fItem.kind === 'body' && fItem.section.toUpperCase().startsWith('HEADER.FIELDS')) {
+      if (fItem.kind === 'uid') {
+        uid = fItem.uid;
+      } else if (fItem.kind === 'flags') {
+        flags = fItem.flags;
+      } else if (fItem.kind === 'internalDate') {
+        internalDate = fItem.date;
+      } else if (fItem.kind === 'size') {
+        size = fItem.size;
+      } else if (fItem.kind === 'envelope') {
+        envelope = fItem.envelope;
+      } else if (fItem.kind === 'gmailThreadId') {
+        gmailThreadId = fItem.id;
+      } else if (fItem.kind === 'body' && fItem.section.toUpperCase().startsWith('HEADER.FIELDS')) {
         references = parseReferencesHeader(fItem.bytes);
       }
     }
@@ -385,8 +391,9 @@ export const createImapClient = (
           while (!continuationReceived) {
             const respResult = await readNextResponse();
             if (!respResult.ok) {
-              if (respResult.reason.kind === 'closed' && allowedByeReason !== null)
+              if (respResult.reason.kind === 'closed' && allowedByeReason !== null) {
                 return { ok: false, reason: allowedByeReason };
+              }
               return respResult;
             }
 
@@ -440,8 +447,9 @@ export const createImapClient = (
     while (true) {
       const respResult = await readNextResponse();
       if (!respResult.ok) {
-        if (respResult.reason.kind === 'closed' && allowedByeReason !== null)
+        if (respResult.reason.kind === 'closed' && allowedByeReason !== null) {
           return { ok: false, reason: allowedByeReason };
+        }
         return respResult;
       }
 
@@ -617,11 +625,17 @@ export const createImapClient = (
 
         const applyCode = (code: ImapResponseCode | null) => {
           if (code === null) return;
-          if (code.kind === 'uidValidity') uidValidity = code.value;
-          else if (code.kind === 'uidNext') uidNext = code.value;
-          else if (code.kind === 'permanentFlags') permanentFlags = [...code.flags];
-          else if (code.kind === 'readOnly') isReadOnly = true;
-          else if (code.kind === 'readWrite') isReadOnly = false;
+          if (code.kind === 'uidValidity') {
+            uidValidity = code.value;
+          } else if (code.kind === 'uidNext') {
+            uidNext = code.value;
+          } else if (code.kind === 'permanentFlags') {
+            permanentFlags = [...code.flags];
+          } else if (code.kind === 'readOnly') {
+            isReadOnly = true;
+          } else if (code.kind === 'readWrite') {
+            isReadOnly = false;
+          }
         };
 
         for (const item of res.value.untagged) {
@@ -678,8 +692,11 @@ export const createImapClient = (
           let uid = 0;
           let flags: readonly string[] = [];
           for (const fItem of item.items) {
-            if (fItem.kind === 'uid') uid = fItem.uid;
-            else if (fItem.kind === 'flags') flags = fItem.flags;
+            if (fItem.kind === 'uid') {
+              uid = fItem.uid;
+            } else if (fItem.kind === 'flags') {
+              flags = fItem.flags;
+            }
           }
           if (uid !== 0) result.push({ uid, flags });
         }
@@ -862,8 +879,9 @@ export const createImapClient = (
               return { ok: false, reason: failureReason };
             }
             if (resp.status === 'NO') return { ok: false, reason: { kind: 'no', text: resp.text } };
-            if (resp.status === 'BAD')
+            if (resp.status === 'BAD') {
               return { ok: false, reason: { kind: 'bad', text: resp.text } };
+            }
             isClosed = true;
             failureReason = {
               kind: 'protocol',
@@ -922,8 +940,9 @@ export const createImapClient = (
             }
             if (resp.status === 'OK') return { ok: true, value: undefined };
             if (resp.status === 'NO') return { ok: false, reason: { kind: 'no', text: resp.text } };
-            if (resp.status === 'BAD')
+            if (resp.status === 'BAD') {
               return { ok: false, reason: { kind: 'bad', text: resp.text } };
+            }
           }
         }
       });

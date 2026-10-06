@@ -107,11 +107,8 @@ const persistedUnlock = async (page: Page, label: string, userId: string) => {
       const k = (await import(KEYS)) as KeysModule;
       const resumed = await u.resumeSession();
       const stored = await k.loadUnlockKeys(id);
-      return resumed === null
-        ? stored === null
-          ? 'locked, keys forgotten'
-          : 'locked'
-        : 'unlocked';
+      if (resumed !== null) return 'unlocked';
+      return stored === null ? 'locked, keys forgotten' : 'locked';
     },
     { UNLOCK, KEYS, id: userId },
   );

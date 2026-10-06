@@ -83,6 +83,12 @@ const StarButton = ({
 }: Omit<RowProps, 'mailbox'> & { className: string }) => {
   const { toggleStar } = useMail();
 
+  // On --select the star steps to --signal-deep (same hue at 3.37:1); an --ink star there reads as off.
+  const tone = (() => {
+    if (thread.isStarred) return isSelected ? 'text-signal-deep' : 'text-signal';
+    return isSelected ? 'text-ink/50 hover:text-ink' : 'text-paper-faint hover:text-paper';
+  })();
+
   return (
     <button
       type="button"
@@ -91,14 +97,7 @@ const StarButton = ({
         'relative z-10 flex items-center justify-center -outline-offset-2',
         className,
         isSelected && 'focus-visible:outline-ink',
-        // On --select the star steps to --signal-deep (same hue at 3.37:1); an --ink star there reads as off.
-        thread.isStarred
-          ? isSelected
-            ? 'text-signal-deep'
-            : 'text-signal'
-          : isSelected
-            ? 'text-ink/50 hover:text-ink'
-            : 'text-paper-faint hover:text-paper',
+        tone,
       )}
       aria-label={`Star ${thread.subject}`}
       aria-pressed={thread.isStarred}
@@ -115,16 +114,13 @@ type DiscardOutcome = Exclude<
 >;
 
 /** Each refusal names a different thing to do next. */
-const discardRefusal = (outcome: DiscardOutcome) =>
-  outcome === 'busy'
-    ? 'It is open in the composer — close that first.'
-    : outcome === 'sending'
-      ? 'It is being sent right now.'
-      : outcome === 'conflict'
-        ? 'Another device changed it since this list was built. Reload and try again.'
-        : outcome === 'locked'
-          ? 'The vault is locked.'
-          : 'The vault could not be reached.';
+const DISCARD_REFUSALS: Record<DiscardOutcome, string> = {
+  busy: 'It is open in the composer — close that first.',
+  sending: 'It is being sent right now.',
+  conflict: 'Another device changed it since this list was built. Reload and try again.',
+  locked: 'The vault is locked.',
+  offline: 'The vault could not be reached.',
+};
 
 /** Revealed by hover and by keyboard focus. Archive and delete for server messages; undo in Trash; discard in Drafts. */
 /** One mark in the hover cluster. `confirm` present means it asks before it acts. */
@@ -155,53 +151,54 @@ const RowTriage = ({
   };
   // A draft has no IMAP copy, so archive and delete can do nothing to it.
   const draftId = thread.messages.find(message => message.isDraft === true)?.draftId;
-  const actions: readonly RowAction[] =
-    mailbox === 'drafts' && draftId !== undefined
-      ? [
-          {
-            icon: TrashIcon,
-            label: `Discard ${thread.subject}`,
-            // The same sheet the composer's Discard takes.
-            confirm: {
-              title: 'Discard this draft?',
-              description: DISCARD_WARNING,
-              confirmLabel: 'Discard',
-              busyLabel: 'Discarding…',
-            },
-            act: async () => {
-              const { outcome } = await removeDraft(draftId);
-              if (outcome === 'deleted' || outcome === 'absent') return;
-              toast.add({
-                title: 'Draft not discarded',
-                description: discardRefusal(outcome),
-                timeout: 0,
-                priority: 'high',
-              });
-            },
+  const actions = ((): readonly RowAction[] => {
+    if (mailbox === 'drafts' && draftId !== undefined) {
+      return [
+        {
+          icon: TrashIcon,
+          label: `Discard ${thread.subject}`,
+          // The same sheet the composer's Discard takes.
+          confirm: {
+            title: 'Discard this draft?',
+            description: DISCARD_WARNING,
+            confirmLabel: 'Discard',
+            busyLabel: 'Discarding…',
           },
-        ]
-      : mailbox === 'trash'
-        ? [
-            {
-              icon: ArrowCounterClockwiseIcon,
-              label: `Restore ${thread.subject}`,
-              act: file(restoreThread),
-            },
-          ]
-        : [
-            {
-              icon: ArchiveIcon,
-              label: isArchived(thread)
-                ? `Move ${thread.subject} to inbox`
-                : `Archive ${thread.subject}`,
-              act: file(toggleArchive),
-            },
-            {
-              icon: TrashIcon,
-              label: `Delete ${thread.subject}`,
-              act: file(trashThread),
-            },
-          ];
+          act: async () => {
+            const { outcome } = await removeDraft(draftId);
+            if (outcome === 'deleted' || outcome === 'absent') return;
+            toast.add({
+              title: 'Draft not discarded',
+              description: DISCARD_REFUSALS[outcome],
+              timeout: 0,
+              priority: 'high',
+            });
+          },
+        },
+      ];
+    }
+    if (mailbox === 'trash') {
+      return [
+        {
+          icon: ArrowCounterClockwiseIcon,
+          label: `Restore ${thread.subject}`,
+          act: file(restoreThread),
+        },
+      ];
+    }
+    return [
+      {
+        icon: ArchiveIcon,
+        label: isArchived(thread) ? `Move ${thread.subject} to inbox` : `Archive ${thread.subject}`,
+        act: file(toggleArchive),
+      },
+      {
+        icon: TrashIcon,
+        label: `Delete ${thread.subject}`,
+        act: file(trashThread),
+      },
+    ];
+  })();
 
   return (
     <span className={cn('relative z-10 hidden items-center justify-end lg:flex', className)}>
@@ -246,6 +243,11 @@ const RowTriage = ({
 export const ColumnsRow = ({ thread, mailbox, isSelected }: RowProps) => {
   const isUnread = thread.isUnread;
   const { latest, inbound, attachments } = useRecord(thread);
+  const marksTone = (() => {
+    if (isSelected) return 'text-ink/60';
+    if (isUnread) return 'text-signal';
+    return 'text-paper-faint';
+  })();
 
   return (
     <li
@@ -269,7 +271,7 @@ export const ColumnsRow = ({ thread, mailbox, isSelected }: RowProps) => {
         aria-hidden
         className={cn(
           'pointer-events-none col-start-2 row-start-1 flex justify-center font-mono text-2xs',
-          isSelected ? 'text-ink/60' : isUnread ? 'text-signal' : 'text-paper-faint',
+          marksTone,
         )}
       >
         {marksOf(thread.accounts)}
@@ -344,6 +346,11 @@ export const StackedRow = ({ thread, mailbox, isSelected }: RowProps) => {
   const isUnread = thread.isUnread;
   const { latest, inbound, attachments } = useRecord(thread);
   const dim = isSelected ? 'text-ink/60' : 'text-paper-faint';
+  const senderTone = (() => {
+    if (isSelected) return 'text-ink/60';
+    if (isUnread) return 'text-paper';
+    return 'text-paper-dim';
+  })();
 
   return (
     <li
@@ -397,13 +404,7 @@ export const StackedRow = ({ thread, mailbox, isSelected }: RowProps) => {
         aria-hidden
         className="pointer-events-none col-start-3 row-start-2 flex min-w-0 items-baseline gap-1.5 text-2xs"
       >
-        <span
-          dir="auto"
-          className={cn(
-            'max-w-[50%] shrink-0 truncate',
-            isSelected ? 'text-ink/60' : isUnread ? 'text-paper' : 'text-paper-dim',
-          )}
-        >
+        <span dir="auto" className={cn('max-w-[50%] shrink-0 truncate', senderTone)}>
           {inbound.fromName}
         </span>
         <span className={cn('shrink-0 font-mono', dim)}>→</span>

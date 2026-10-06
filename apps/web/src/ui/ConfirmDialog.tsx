@@ -51,13 +51,15 @@ export const ConfirmDialog = ({
     mode.onOpenChange?.(next);
   };
 
+  const trigger = (() => {
+    if (mode.trigger === undefined) return null;
+    if (mode.triggerLabel === undefined) return <AlertDialog.Trigger render={mode.trigger} />;
+    return <AlertDialog.Trigger render={mode.trigger}>{mode.triggerLabel}</AlertDialog.Trigger>;
+  })();
+
   return (
     <AlertDialog.Root open={isOpen} onOpenChange={setOpen}>
-      {mode.trigger === undefined ? null : mode.triggerLabel === undefined ? (
-        <AlertDialog.Trigger render={mode.trigger} />
-      ) : (
-        <AlertDialog.Trigger render={mode.trigger}>{mode.triggerLabel}</AlertDialog.Trigger>
-      )}
+      {trigger}
       <AlertDialog.Portal>
         {/*
           This sheet interrupts whatever asked the question, so it sits ABOVE the app's dialog

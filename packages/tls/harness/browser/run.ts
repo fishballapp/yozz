@@ -77,8 +77,9 @@ const startBridge = async (): Promise<() => void> => {
       if (probe.status === 426) break;
       throw new Error(`bridge answered ${probe.status}: ${await probe.text()}`);
     } catch (error) {
-      if (Date.now() > deadline)
+      if (Date.now() > deadline) {
         throw new Error(`bridge never came up:\n${log.join('')}\n${error}`);
+      }
       await new Promise(resolve => setTimeout(resolve, 300));
     }
   }
@@ -106,8 +107,9 @@ const endpointUrl = relayFlag ?? bridgeFlag ?? `ws://localhost:${BRIDGE_PORT}/?k
 const engines: readonly EngineName[] = (() => {
   const only = argOf('--engine');
   if (only === undefined) return Object.keys(ENGINES) as EngineName[];
-  if (!(only in ENGINES))
+  if (!(only in ENGINES)) {
     throw new Error(`unknown engine ${only}; want one of ${Object.keys(ENGINES).join(', ')}`);
+  }
   return [only as EngineName];
 })();
 

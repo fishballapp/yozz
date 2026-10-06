@@ -138,12 +138,11 @@ export const Connect = () => {
         }
         // Submitting straight from the address field: wait for this domain's lookup, or start one.
         const pending = inFlight.current;
-        const awaited =
-          pending !== null && pending.domain === domain
-            ? await pending.done
-            : lookup.state === 'idle' || lookup.domain !== domain
-              ? await lookUp(domain, trimmed)
-              : null;
+        const awaited = await (async () => {
+          if (pending !== null && pending.domain === domain) return pending.done;
+          if (lookup.state === 'idle' || lookup.domain !== domain) return lookUp(domain, trimmed);
+          return null;
+        })();
         const use =
           awaited === null ? serversWith(found, isEditingServers, servers) : awaited.servers;
         if (use.smtpHost.trim() === '' || (needsImap && use.imapHost.trim() === '')) {

@@ -15,8 +15,11 @@ const read = (key: string) => {
 
 const write = (key: string, value: string | null) => {
   try {
-    if (value === null) localStorage.removeItem(key);
-    else localStorage.setItem(key, value);
+    if (value === null) {
+      localStorage.removeItem(key);
+    } else {
+      localStorage.setItem(key, value);
+    }
   } catch {
     // The session keeps the preference; the next one starts at the default.
   }

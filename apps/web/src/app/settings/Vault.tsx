@@ -57,8 +57,11 @@ export const Vault = () => {
       await action();
     } catch (err) {
       // Wrapped: a bare function handed to a setter is called as an updater.
-      if (needsFreshSession(err)) setAwaitingConfirmation(() => action);
-      else setError(vaultErrorMessage(err));
+      if (needsFreshSession(err)) {
+        setAwaitingConfirmation(() => action);
+      } else {
+        setError(vaultErrorMessage(err));
+      }
     } finally {
       setIsBusy(false);
     }
@@ -108,6 +111,13 @@ export const Vault = () => {
   }
 
   const canOfferPasskey = prf !== null && PASSKEY_OFFER[prf].canOffer;
+
+  const confirmLabel = (() => {
+    if (isBusy) {
+      return session.mode === 'passkey' ? 'Waiting for your authenticator…' : 'Deriving keys…';
+    }
+    return session.mode === 'passkey' ? 'Confirm with your passkey' : 'Confirm';
+  })();
 
   const confirmAndRetry = (retry: () => Promise<void>) =>
     run(async () => {
@@ -166,13 +176,7 @@ export const Vault = () => {
               disabled={isBusy}
               autoFocus={session.mode === 'passkey'}
             >
-              {isBusy
-                ? session.mode === 'passkey'
-                  ? 'Waiting for your authenticator…'
-                  : 'Deriving keys…'
-                : session.mode === 'passkey'
-                  ? 'Confirm with your passkey'
-                  : 'Confirm'}
+              {confirmLabel}
             </Button>
             <Button
               variant="ghost"

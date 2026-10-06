@@ -272,7 +272,9 @@ export const threadsFromAccounts = (
       const byFolder = FOLDERS.indexOf(a.folder) - FOLDERS.indexOf(b.folder);
       if (byFolder !== 0) return byFolder;
       const [ia, ib] = [physicalIdOf(a.location), physicalIdOf(b.location)];
-      return ia < ib ? -1 : ia > ib ? 1 : 0;
+      if (ia < ib) return -1;
+      if (ia > ib) return 1;
+      return 0;
     });
 
   // Flags are per copy: a message read in one account is still unread in the other.

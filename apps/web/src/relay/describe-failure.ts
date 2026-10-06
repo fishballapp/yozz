@@ -15,12 +15,11 @@ export const describeMailFailure = (failure: MailConnectionFailure, host: string
       return `${host} rejected the username or password`;
     case 'smtp': {
       const { reason } = failure;
-      const text =
-        reason.kind === 'reply'
-          ? `${reason.code} ${reason.text}`
-          : reason.kind === 'protocol' || reason.kind === 'unsupported'
-            ? reason.detail
-            : reason.kind;
+      const text = (() => {
+        if (reason.kind === 'reply') return `${reason.code} ${reason.text}`;
+        if (reason.kind === 'protocol' || reason.kind === 'unsupported') return reason.detail;
+        return reason.kind;
+      })();
       return `${host}: ${text}`;
     }
     case 'imap':

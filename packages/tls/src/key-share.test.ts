@@ -21,12 +21,11 @@ const collectEphemeralKeySteps = (trace: Rfc8448Trace): readonly EphemeralKeySte
   for (const step of trace.steps) {
     if (step.title.startsWith('create an ephemeral')) {
       const lower = step.title.toLowerCase();
-      const group: NamedGroup =
-        lower.includes('secp256r1') || lower.includes('p-256')
-          ? 'secp256r1'
-          : lower.includes('secp384r1') || lower.includes('p-384')
-            ? 'secp384r1'
-            : 'x25519';
+      const group = ((): NamedGroup => {
+        if (lower.includes('secp256r1') || lower.includes('p-256')) return 'secp256r1';
+        if (lower.includes('secp384r1') || lower.includes('p-384')) return 'secp384r1';
+        return 'x25519';
+      })();
       const privateKey = bytesOf(step, 'private key');
       const publicKey = bytesOf(step, 'public key');
       if (privateKey !== undefined && publicKey !== undefined) {

@@ -16,8 +16,11 @@ const resolved: Record<string, string> = {};
 const missing: string[] = [];
 for (const key of SECRET_KEYS) {
   const value = process.env[key];
-  if (value) resolved[key] = value;
-  else missing.push(key);
+  if (value) {
+    resolved[key] = value;
+  } else {
+    missing.push(key);
+  }
 }
 
 if (missing.length > 0) {

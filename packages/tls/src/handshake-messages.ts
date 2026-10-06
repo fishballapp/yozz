@@ -471,8 +471,9 @@ const decodeExtensions = (
         if (extData.length < 4) return { ok: false, description: 'decode_error' };
         const idListLen = readUint16(extData, 0);
         let idOffset = 2;
-        if (idOffset + idListLen > extData.length)
+        if (idOffset + idListLen > extData.length) {
           return { ok: false, description: 'decode_error' };
+        }
         const identities: PskIdentity[] = [];
         const idEnd = 2 + idListLen;
         while (idOffset < idEnd) {

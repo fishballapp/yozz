@@ -340,7 +340,11 @@ export const decodeOid = (node: DerNode): string => {
   const [first, ...rest] = subidentifiers;
   if (first === undefined) throw malformed('an OID has at least one subidentifier');
   // The first octet packs `40 * arc1 + arc2`, but arc1 is only ever 0, 1 or 2: above 119 the second arc keeps growing.
-  const firstArc = first < 40n ? 0n : first < 80n ? 1n : 2n;
+  const firstArc = (() => {
+    if (first < 40n) return 0n;
+    if (first < 80n) return 1n;
+    return 2n;
+  })();
   return [firstArc, first - firstArc * 40n, ...rest].join('.');
 };
 

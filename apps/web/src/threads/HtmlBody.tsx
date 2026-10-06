@@ -61,8 +61,11 @@ export const HtmlBody = ({
       const message = FrameMessageSchema.safeParse(event.data);
       if (!message.success) return;
       if (message.data.type === 'yozz:load-remote-images') {
-        if (asksBeforeImageClick) setAskingFor(html);
-        else setRemoteAllowedFor(html);
+        if (asksBeforeImageClick) {
+          setAskingFor(html);
+        } else {
+          setRemoteAllowedFor(html);
+        }
         return;
       }
       const next = Math.min(Math.max(Math.ceil(message.data.height), 40), 20000);

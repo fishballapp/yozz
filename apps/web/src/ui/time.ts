@@ -22,8 +22,9 @@ export const stackTime = (at: number, now = Date.now()) => {
   const date = new Date(at);
   const clock = date.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
   if (elapsed < DAY) return clock;
-  if (elapsed < 7 * DAY)
+  if (elapsed < 7 * DAY) {
     return `${date.toLocaleDateString('en-GB', { weekday: 'short' })} ${clock}`;
+  }
   return date.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
 };
 

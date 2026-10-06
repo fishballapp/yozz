@@ -139,8 +139,9 @@ const remoteImageUrlOf = (
   if (!REMOTE_IMAGE_URL.test(candidate)) return null;
   try {
     const url = new URL(candidate);
-    if (url.username !== '' || url.password !== '' || !isPermittedExternalHostname(url.hostname))
+    if (url.username !== '' || url.password !== '' || !isPermittedExternalHostname(url.hostname)) {
       return null;
+    }
     return { href: url.href, origin: url.origin };
   } catch {
     return null;
@@ -195,12 +196,16 @@ export const buildMailFrame = (
       const rawStyle = node.getAttribute('style');
       if (rawStyle !== null) {
         const fetchFreeStyle = fetchFreeInlineStyleOf(rawStyle);
-        if (fetchFreeStyle === '') node.removeAttribute('style');
-        else node.setAttribute('style', fetchFreeStyle);
+        if (fetchFreeStyle === '') {
+          node.removeAttribute('style');
+        } else {
+          node.setAttribute('style', fetchFreeStyle);
+        }
       }
       for (const property of Array.from(node.style)) {
-        if (CSS_RESOURCE_SYNTAX.test(node.style.getPropertyValue(property)))
+        if (CSS_RESOURCE_SYNTAX.test(node.style.getPropertyValue(property))) {
           node.style.removeProperty(property);
+        }
       }
     }
     // A relative href would inherit the app's base URL; `https:settings/delete` and credential-bearing

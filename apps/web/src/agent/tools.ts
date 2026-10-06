@@ -227,11 +227,13 @@ const messageOf = (
     ? { isDraft: true, draftKey: message.draftKey, draftId: message.draftId }
     : {}),
   // A draft lives only in Drafts.
-  ...(message.isDraft === true
-    ? { mailboxes: ['drafts'] }
-    : message.locations !== undefined && message.locations.length > 0
-      ? { mailboxes: [...new Set(message.locations.map(location => location.folder))] }
-      : {}),
+  ...(() => {
+    if (message.isDraft === true) return { mailboxes: ['drafts'] };
+    if (message.locations !== undefined && message.locations.length > 0) {
+      return { mailboxes: [...new Set(message.locations.map(location => location.folder))] };
+    }
+    return {};
+  })(),
   ...(body === null ? {} : { body: clip(body, bodyChars) }),
 });
 
@@ -241,7 +243,11 @@ const threadOf = async (
   { depth, bodyChars }: { depth: 'none' | 'latest' | 'full'; bodyChars: number },
 ) => {
   const newestFirst = thread.messages.toReversed();
-  const wanted = depth === 'none' ? [] : depth === 'latest' ? newestFirst.slice(0, 1) : newestFirst;
+  const wanted = (() => {
+    if (depth === 'none') return [];
+    if (depth === 'latest') return newestFirst.slice(0, 1);
+    return newestFirst;
+  })();
   // The render that puts the text in the store is later than this promise.
   const bodies = new Map(
     await Promise.all(
@@ -301,20 +307,23 @@ const saved = (outcome: Awaited<ReturnType<AgentPort['writeDraft']>>, threadId?:
         'Saved to Drafts, not sent. navigate to it so the user can review and press Send. Press Send yourself only if the user explicitly asked you to send this draft.',
     };
   }
-  const error =
-    outcome.reason === 'busy'
-      ? 'The user has that draft open in the composer; ask them to close it first.'
-      : outcome.reason === 'sending'
-        ? 'That draft is being sent right now and cannot be changed.'
-        : outcome.reason === 'conflict'
-          ? `That draft was changed since you read it${
-              'currentDraftId' in outcome && outcome.currentDraftId !== null
-                ? `; its current draftId is ${outcome.currentDraftId}`
-                : ''
-            }. Read it again with get_threads before writing.`
-          : outcome.reason === 'locked'
-            ? 'The vault is locked, so nothing can be written.'
-            : 'The draft could not be saved; the vault could not be reached.';
+  const error = (() => {
+    if (outcome.reason === 'busy') {
+      return 'The user has that draft open in the composer; ask them to close it first.';
+    }
+    if (outcome.reason === 'sending') {
+      return 'That draft is being sent right now and cannot be changed.';
+    }
+    if (outcome.reason === 'conflict') {
+      return `That draft was changed since you read it${
+        'currentDraftId' in outcome && outcome.currentDraftId !== null
+          ? `; its current draftId is ${outcome.currentDraftId}`
+          : ''
+      }. Read it again with get_threads before writing.`;
+    }
+    if (outcome.reason === 'locked') return 'The vault is locked, so nothing can be written.';
+    return 'The draft could not be saved; the vault could not be reached.';
+  })();
   return { error };
 };
 
@@ -445,19 +454,29 @@ export const buildAgentTools = (port: () => AgentPort): readonly AgentTool[] => 
             if (!port().setStar(thread.id, starred)) return true;
           }
           if (mailbox === 'archive') {
-            if (isArchived(thread)) notes.push('already archived');
+            if (isArchived(thread)) {
+              notes.push('already archived');
+            }
             // A thread with no inbox copies has nothing to move, and "ok" would claim a move.
-            else if (!thread.folders.includes('inbox'))
+            else if (!thread.folders.includes('inbox')) {
               notes.push('nothing in the inbox to archive');
-            else if (!port().archive(thread.id)) return true;
+            } else if (!port().archive(thread.id)) {
+              return true;
+            }
           }
           if (mailbox === 'trash') {
-            if (isTrashed(thread)) notes.push('already in the trash');
-            else if (!port().trash(thread.id)) return true;
+            if (isTrashed(thread)) {
+              notes.push('already in the trash');
+            } else if (!port().trash(thread.id)) {
+              return true;
+            }
           }
           if (mailbox === 'inbox') {
-            if (!isArchived(thread) && !isTrashed(thread)) notes.push('already in the inbox');
-            else if (!port().restore(thread.id)) return true;
+            if (!isArchived(thread) && !isTrashed(thread)) {
+              notes.push('already in the inbox');
+            } else if (!port().restore(thread.id)) {
+              return true;
+            }
           }
           return false;
         };
@@ -507,8 +526,9 @@ export const buildAgentTools = (port: () => AgentPort): readonly AgentTool[] => 
         const handle = handleFor(port(), draftId);
         if (handle === null) return { error: `No draft ${draftId} is in this vault.` };
         const identity = identityFor(port(), from, handle.record.from);
-        if (identity === null)
+        if (identity === null) {
           return { error: `${from} is not one of the user's addresses; see get_addresses.` };
+        }
         const { record } = handle;
         return saved(
           await port().writeDraft({
@@ -532,8 +552,9 @@ export const buildAgentTools = (port: () => AgentPort): readonly AgentTool[] => 
           return { error: 'A new message needs both `to` and `subject`.' };
         }
         const identity = identityFor(port(), from, undefined);
-        if (identity === null)
+        if (identity === null) {
           return { error: `${from} is not one of the user's addresses; see get_addresses.` };
+        }
         return saved(
           await port().writeDraft({
             content: { from: identity, to, cc: cc ?? '', bcc: bcc ?? '', subject, body },
@@ -542,8 +563,9 @@ export const buildAgentTools = (port: () => AgentPort): readonly AgentTool[] => 
       }
 
       const thread = threadByHandle(port().threads, threadId);
-      if (thread === null)
+      if (thread === null) {
         return { error: `No conversation ${threadId} is cached on this device.` };
+      }
       const named =
         replyToMessageId === undefined
           ? undefined
@@ -566,8 +588,9 @@ export const buildAgentTools = (port: () => AgentPort): readonly AgentTool[] => 
         port().ownedAddresses,
       );
       const identity = identityFor(port(), from, seed.identityId);
-      if (identity === null)
+      if (identity === null) {
         return { error: `${from} is not one of the user's addresses; see get_addresses.` };
+      }
       return saved(
         await port().writeDraft({
           content: {
@@ -641,12 +664,14 @@ export const buildAgentTools = (port: () => AgentPort): readonly AgentTool[] => 
         return { ok: true, showing: 'composer', draftId: handle.draftId };
       }
       const thread = threadByHandle(port().threads, input.threadId);
-      if (thread === null)
+      if (thread === null) {
         return { error: `No conversation ${input.threadId} is cached on this device.` };
+      }
       await port().openThread(thread);
       // The page's own effect marks read after it renders; the second write is a no-op.
-      if (thread.isUnread && !port().markRead(thread.id))
+      if (thread.isUnread && !port().markRead(thread.id)) {
         return { ok: true, showing: 'thread', note: MOVE_PENDING };
+      }
       return { ok: true, showing: 'thread', id: thread.id };
     },
   }),

@@ -24,8 +24,9 @@ export const createForwardEmailClient = ({
   password,
 }: ForwardEmailClientOptions): EmailClient => ({
   send: async ({ from = alias, to, subject, text, html }) => {
-    if (text === undefined && html === undefined)
+    if (text === undefined && html === undefined) {
       throw new TypeError('send needs at least one of text/html');
+    }
     const response = await fetch('https://api.forwardemail.net/v1/emails', {
       method: 'POST',
       headers: {
@@ -40,7 +41,8 @@ export const createForwardEmailClient = ({
         ...(html !== undefined && { html }),
       }),
     });
-    if (!response.ok)
+    if (!response.ok) {
       throw new Error(`forwardemail send failed: ${response.status} ${await response.text()}`);
+    }
   },
 });

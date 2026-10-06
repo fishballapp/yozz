@@ -69,15 +69,21 @@ export const groupIntoThreads = (
     const ra = find(a);
     const rb = find(b);
     if (ra === rb) return;
-    if (rank(ra) < rank(rb)) parent.set(rb, ra);
-    else parent.set(ra, rb);
+    if (rank(ra) < rank(rb)) {
+      parent.set(rb, ra);
+    } else {
+      parent.set(ra, rb);
+    }
   };
 
   const firstByKey = new Map<string, string>();
   const link = (key: string, id: string) => {
     const first = firstByKey.get(key);
-    if (first === undefined) firstByKey.set(key, id);
-    else union(first, id);
+    if (first === undefined) {
+      firstByKey.set(key, id);
+    } else {
+      union(first, id);
+    }
   };
 
   for (const message of messages) {
@@ -93,8 +99,11 @@ export const groupIntoThreads = (
   for (const { id } of messages) {
     const root = find(id);
     const group = groups.get(root);
-    if (group === undefined) groups.set(root, [id]);
-    else group.push(id);
+    if (group === undefined) {
+      groups.set(root, [id]);
+    } else {
+      group.push(id);
+    }
   }
   return groups;
 };

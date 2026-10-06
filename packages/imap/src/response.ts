@@ -67,15 +67,25 @@ const tokensToText = (tokens: readonly ImapToken[], start: number): string => {
   for (let i = start; i < tokens.length; i++) {
     const tok = tokens[i];
     if (tok === undefined) continue;
-    if (tok.kind === 'atom' || tok.kind === 'quoted') parts.push(tok.value);
-    else if (tok.kind === 'number') parts.push(String(tok.value));
-    else if (tok.kind === 'literal') parts.push(asciiToString(tok.value));
-    else if (tok.kind === 'plus') parts.push('+');
-    else if (tok.kind === 'nil') parts.push('NIL');
-    else if (tok.kind === 'lparen') parts.push('(');
-    else if (tok.kind === 'rparen') parts.push(')');
-    else if (tok.kind === 'lbracket') parts.push('[');
-    else if (tok.kind === 'rbracket') parts.push(']');
+    if (tok.kind === 'atom' || tok.kind === 'quoted') {
+      parts.push(tok.value);
+    } else if (tok.kind === 'number') {
+      parts.push(String(tok.value));
+    } else if (tok.kind === 'literal') {
+      parts.push(asciiToString(tok.value));
+    } else if (tok.kind === 'plus') {
+      parts.push('+');
+    } else if (tok.kind === 'nil') {
+      parts.push('NIL');
+    } else if (tok.kind === 'lparen') {
+      parts.push('(');
+    } else if (tok.kind === 'rparen') {
+      parts.push(')');
+    } else if (tok.kind === 'lbracket') {
+      parts.push('[');
+    } else if (tok.kind === 'rbracket') {
+      parts.push(']');
+    }
   }
   return parts.join(' ');
 };

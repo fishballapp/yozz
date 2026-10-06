@@ -4,6 +4,7 @@
   "files": {
     "includes": ["**", "!**/node_modules", "!**/dist", "!**/routeTree.gen.ts", "!**/*.gen.*"]
   },
+  "plugins": ["./biome-plugins/multiline-if-braces.grit"],
   "assist": { "enabled": true, "actions": { "source": { "organizeImports": "on" } } },
   "linter": {
     "enabled": true,
@@ -58,6 +59,7 @@
         },
         "noParameterAssign": "off",
         "noNonNullAssertion": "error",
+        "noNestedTernary": "error",
         "noUnusedTemplateLiteral": "off",
         "useDefaultParameterLast": "off",
         "useConst": "off",

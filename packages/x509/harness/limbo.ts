@@ -113,8 +113,11 @@ const skips = new Map<string, number>();
 const executed: Testcase[] = [];
 for (const testcase of ours) {
   const reason = isSkipped(testcase.id, testcase.features);
-  if (reason === undefined) executed.push(testcase);
-  else skips.set(reason, (skips.get(reason) ?? 0) + 1);
+  if (reason === undefined) {
+    executed.push(testcase);
+  } else {
+    skips.set(reason, (skips.get(reason) ?? 0) + 1);
+  }
 }
 
 console.log(`x509-limbo @ ${LIMBO_COMMIT.slice(0, 10)}  profile=${PROFILE}`);

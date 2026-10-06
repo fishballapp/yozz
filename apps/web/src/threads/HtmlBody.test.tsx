@@ -56,8 +56,9 @@ describe('HtmlBody remote-image consent', () => {
     expect(container.querySelector('iframe')?.srcdoc).toContain('first.example');
     const firstFrame = container.querySelector('iframe');
     const firstWindow = firstFrame?.contentWindow;
-    if (firstFrame === null || firstWindow === null || firstWindow === undefined)
+    if (firstFrame === null || firstWindow === null || firstWindow === undefined) {
       throw new Error('first iframe did not mount');
+    }
     await act(async () =>
       window.dispatchEvent(
         new MessageEvent('message', {

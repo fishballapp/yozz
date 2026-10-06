@@ -44,8 +44,9 @@ export const outboundHrefOf = (value: string): string | null => {
   if (!ABSOLUTE_WEB_URL.test(candidate)) return null;
   try {
     const url = new URL(candidate);
-    if (url.username !== '' || url.password !== '' || !isPermittedExternalHostname(url.hostname))
+    if (url.username !== '' || url.password !== '' || !isPermittedExternalHostname(url.hostname)) {
       return null;
+    }
     return url.href;
   } catch {
     return null;

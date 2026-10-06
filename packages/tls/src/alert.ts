@@ -62,8 +62,11 @@ export const decodeAlert = (bytes: Uint8Array): DecodeAlertResult => {
     return { ok: false, description: 'decode_error' };
   }
 
-  const level: AlertLevel | undefined =
-    levelCode === 1 ? 'warning' : levelCode === 2 ? 'fatal' : undefined;
+  const level = ((): AlertLevel | undefined => {
+    if (levelCode === 1) return 'warning';
+    if (levelCode === 2) return 'fatal';
+    return undefined;
+  })();
   if (level === undefined) {
     return { ok: false, description: 'illegal_parameter' };
   }

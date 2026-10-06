@@ -116,7 +116,11 @@ const decodeOidOf = (content: Uint8Array): string | null => {
   }
   const [first, ...rest] = arcs;
   if (!isStart || first === undefined) return null;
-  const firstArc = first < 40n ? 0n : first < 80n ? 1n : 2n;
+  const firstArc = (() => {
+    if (first < 40n) return 0n;
+    if (first < 80n) return 1n;
+    return 2n;
+  })();
   return [firstArc, first - firstArc * 40n, ...rest].join('.');
 };
 

@@ -71,11 +71,17 @@ export const Resizer = ({
       onKeyDown={event => {
         const step = event.shiftKey ? 64 : 16;
         const from = measure(event.currentTarget);
-        if (event.key === 'ArrowLeft') onResize(clamp(from - step));
-        else if (event.key === 'ArrowRight') onResize(clamp(from + step));
-        else if (event.key === 'Home') onResize(min);
-        else if (event.key === 'End') onResize(max);
-        else return;
+        if (event.key === 'ArrowLeft') {
+          onResize(clamp(from - step));
+        } else if (event.key === 'ArrowRight') {
+          onResize(clamp(from + step));
+        } else if (event.key === 'Home') {
+          onResize(min);
+        } else if (event.key === 'End') {
+          onResize(max);
+        } else {
+          return;
+        }
         event.preventDefault();
       }}
       className={cn(

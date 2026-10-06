@@ -153,8 +153,9 @@ export const createLiveManager = (deps: {
   /** Only an unsolicited response while idling is "the mailbox changed": a command's own responses are the command's. */
   const handleUntagged = (conn: Connection, untagged: ImapUntagged): void => {
     if (conn.socket?.idle === null || conn.socket === null) return;
-    if (untagged.kind !== 'exists' && untagged.kind !== 'expunge' && untagged.kind !== 'fetch')
+    if (untagged.kind !== 'exists' && untagged.kind !== 'expunge' && untagged.kind !== 'fetch') {
       return;
+    }
     const at = now();
     if (conn.changedAt !== null && at - conn.changedAt < MAILBOX_CHANGE_THROTTLE_MS) return;
     conn.changedAt = at;
@@ -325,14 +326,18 @@ export const createLiveManager = (deps: {
   /** Nothing queued: idle in INBOX, or tick, until something is. */
   const rest = (conn: Connection): void => {
     const socket = conn.socket;
-    if (socket === null || !canRest(conn) || socket.idle !== null || conn.keepalive !== null)
+    if (socket === null || !canRest(conn) || socket.idle !== null || conn.keepalive !== null) {
       return;
+    }
     if (conn.socketKey !== conn.imapKey) {
       void closeSocket(conn).then(() => setState(conn, CLOSED));
       return;
     }
-    if (socket.client.hasCapability('IDLE')) void idleUntilNeeded(conn, socket);
-    else scheduleTick(conn);
+    if (socket.client.hasCapability('IDLE')) {
+      void idleUntilNeeded(conn, socket);
+    } else {
+      scheduleTick(conn);
+    }
   };
 
   type Attempt = {
@@ -451,8 +456,11 @@ export const createLiveManager = (deps: {
           task: task as LiveTask<unknown>,
           resolve: resolve as Queued['resolve'],
         };
-        if (task.priority === 'user') conn.userQueue.push(queued);
-        else conn.backgroundQueue.push(queued);
+        if (task.priority === 'user') {
+          conn.userQueue.push(queued);
+        } else {
+          conn.backgroundQueue.push(queued);
+        }
         pump(conn);
       }),
 

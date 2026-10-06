@@ -75,8 +75,9 @@ const mount = async (page: Page, html: string, allowRemoteImages: boolean): Prom
             event.source !== frame.contentWindow ||
             event.data?.type !== 'yozz:mail-height' ||
             typeof event.data.height !== 'number'
-          )
+          ) {
             return;
+          }
           clearTimeout(timeout);
           removeEventListener('message', onMessage);
           resolve(event.data.height);

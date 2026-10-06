@@ -67,8 +67,9 @@ export const unlockRoute = new Hono<AppEnv>()
         await finalizePasswordUnlock(c.env.DB, user.id, { isNewVault, wrappedDek, now });
         return c.json({ ok: true as const }, 200);
       } catch (err) {
-        if (err instanceof VaultAlreadyExistsError)
+        if (err instanceof VaultAlreadyExistsError) {
           return apiError(c, 409, 'CONFLICT', err.message);
+        }
         throw err;
       }
     }

@@ -31,7 +31,9 @@ export const checkPasskeyPrfCapability = async (): Promise<PrfCapability> => {
   try {
     const capabilities = await getClientCapabilities();
     const prf = capabilities['extension:prf'];
-    return prf === true ? 'supported' : prf === false ? 'unsupported' : 'unknown';
+    if (prf === true) return 'supported';
+    if (prf === false) return 'unsupported';
+    return 'unknown';
   } catch {
     return 'unknown';
   }
@@ -74,14 +76,14 @@ export const extractPrfOutput = (clientExtensionResults: unknown): Uint8Array =>
   }
 
   // The spec says `BufferSource`; 1Password's extension has shipped a plain array.
-  const bytes =
-    rawFirst instanceof ArrayBuffer
-      ? new Uint8Array(rawFirst)
-      : ArrayBuffer.isView(rawFirst)
-        ? new Uint8Array(rawFirst.buffer, rawFirst.byteOffset, rawFirst.byteLength)
-        : Array.isArray(rawFirst)
-          ? Uint8Array.from(rawFirst)
-          : null;
+  const bytes = (() => {
+    if (rawFirst instanceof ArrayBuffer) return new Uint8Array(rawFirst);
+    if (ArrayBuffer.isView(rawFirst)) {
+      return new Uint8Array(rawFirst.buffer, rawFirst.byteOffset, rawFirst.byteLength);
+    }
+    if (Array.isArray(rawFirst)) return Uint8Array.from(rawFirst);
+    return null;
+  })();
 
   if (!bytes || bytes.length !== 32) {
     throw new PasskeyPrfError(

@@ -448,8 +448,9 @@ export const decodeCertificate = (der: Uint8Array): Certificate => {
   const version = ((): 1 | 2 | 3 => {
     if (versionField === undefined || !isVersionPresent) return 1;
     const [encoded] = childrenOf(versionField, 'the version field');
-    if (encoded === undefined)
+    if (encoded === undefined) {
       throw structure(versionField, '[0] EXPLICIT Version wraps one INTEGER');
+    }
     const value = decodeInteger(encoded);
     const known = VERSIONS[Number(value) as 0 | 1 | 2];
     if (value < 0n || value > 2n || known === undefined) {
@@ -501,8 +502,9 @@ export const decodeCertificate = (der: Uint8Array): Certificate => {
   for (const tagNumber of [1, 2]) {
     const unique = fields.peek();
     if (unique?.tagClass === 'context' && unique.tagNumber === tagNumber) {
-      if (version === 1)
+      if (version === 1) {
         throw structure(unique, `[${tagNumber}] UniqueIdentifier needs v2 or later`);
+      }
       fields.skip();
     }
   }
@@ -531,8 +533,9 @@ export const decodeCertificate = (der: Uint8Array): Certificate => {
     }
     if (version !== 3) throw structure(extensionsField, 'extensions need v3');
     const [sequence] = childrenOf(extensionsField, 'the extensions field');
-    if (sequence === undefined)
+    if (sequence === undefined) {
       throw structure(extensionsField, '[3] EXPLICIT Extensions wraps one SEQUENCE');
+    }
     const extensionList = expectUniversal(sequence, UNIVERSAL.SEQUENCE, 'Extensions');
     // RFC 5280 §4.1.2.9: Extensions ::= SEQUENCE SIZE (1..MAX).
     if (childrenOf(extensionList, 'Extensions').length === 0) {

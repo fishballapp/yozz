@@ -119,12 +119,11 @@ export const heldSend = (record: DraftRecord, now: number) =>
 export const openSendStateOf = (
   record: DraftRecord,
   now: number,
-): 'sending' | 'unconfirmed' | null =>
-  heldSend(record, now) !== undefined
-    ? 'sending'
-    : record.unconfirmedSend !== undefined || record.send !== undefined
-      ? 'unconfirmed'
-      : null;
+): 'sending' | 'unconfirmed' | null => {
+  if (heldSend(record, now) !== undefined) return 'sending';
+  if (record.unconfirmedSend !== undefined || record.send !== undefined) return 'unconfirmed';
+  return null;
+};
 
 /** How long a tombstoned draft stays revivable. */
 export const DRAFT_TOMBSTONE_MS = 30 * 24 * 60 * 60 * 1000;

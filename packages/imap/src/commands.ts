@@ -172,13 +172,15 @@ export const buildFetchRawCommand = (tag: string, uid: number): OutgoingCommand 
   lines: [{ text: stringToBytes(`${tag} UID FETCH ${uid} (BODY.PEEK[])\r\n`) }],
 });
 
+const STORE_OPS = { add: '+FLAGS', remove: '-FLAGS', set: 'FLAGS' } as const;
+
 export const buildStoreFlagsCommand = (
   tag: string,
   uidSet: string,
-  mode: 'add' | 'remove' | 'set',
+  mode: keyof typeof STORE_OPS,
   flags: readonly string[],
 ): OutgoingCommand => {
-  const op = mode === 'add' ? '+FLAGS' : mode === 'remove' ? '-FLAGS' : 'FLAGS';
+  const op = STORE_OPS[mode];
   return {
     lines: [{ text: stringToBytes(`${tag} UID STORE ${uidSet} ${op} (${flags.join(' ')})\r\n`) }],
   };

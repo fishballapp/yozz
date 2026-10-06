@@ -28,7 +28,7 @@ export const Login = () => {
   // One session per tab for now: an unlocked vault has nowhere to log in to. Multi-account
   // sessions, when they come, replace this redirect with an account switch.
   if (isResuming) return null;
-  if (session !== null)
+  if (session !== null) {
     return (
       <Navigate
         to="/m/$mailbox"
@@ -37,6 +37,7 @@ export const Login = () => {
         replace
       />
     );
+  }
 
   const footer = (
     <p className="text-base text-paper-dim">
