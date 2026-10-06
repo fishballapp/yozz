@@ -118,7 +118,7 @@ const MessageDetails = ({
           {addressees.length === 0
             ? summary
             : addressees.map((entry, index) => {
-                const name = (() => {
+                const addressee = (() => {
                   if (entry === 'me') return <span className="text-paper-dim">me</span>;
                   if (entry.name !== undefined) {
                     return <bdi className="text-paper-dim">{entry.name}</bdi>;
@@ -128,7 +128,7 @@ const MessageDetails = ({
                 return (
                   <Fragment key={entry === 'me' ? 'me' : entry.address}>
                     {index > 0 && ', '}
-                    {name}
+                    {addressee}
                   </Fragment>
                 );
               })}

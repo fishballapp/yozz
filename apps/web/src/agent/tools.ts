@@ -456,9 +456,8 @@ export const buildAgentTools = (port: () => AgentPort): readonly AgentTool[] => 
           if (mailbox === 'archive') {
             if (isArchived(thread)) {
               notes.push('already archived');
-            }
-            // A thread with no inbox copies has nothing to move, and "ok" would claim a move.
-            else if (!thread.folders.includes('inbox')) {
+            } else if (!thread.folders.includes('inbox')) {
+              // No inbox copy: nothing to move, so don't report one.
               notes.push('nothing in the inbox to archive');
             } else if (!port().archive(thread.id)) {
               return true;
