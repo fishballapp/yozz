@@ -17,7 +17,7 @@ import {
   XIcon,
 } from '@phosphor-icons/react';
 import { Link, useParams } from '@tanstack/react-router';
-import { Fragment, type ReactNode } from 'react';
+import { Fragment, type ReactNode, useState } from 'react';
 import { marksOf } from '../addresses/record';
 import { replyAllCc, withCompose } from '../compose/intent';
 import { useMail } from '../store/MailProvider';
@@ -94,9 +94,12 @@ const Detail = ({ term, children }: { term: string; children: ReactNode }) => (
 const MessageDetails = ({
   message,
   ownedAddresses,
+  pane,
 }: {
   message: Message;
   ownedAddresses: readonly string[];
+  /** The reader's scroll area, which the panel stays inside rather than spilling over the list. */
+  pane: HTMLElement | null;
 }) => {
   const addressees = addresseesOf(message, ownedAddresses);
   const inboxes = inboxesOf(message);
@@ -144,12 +147,16 @@ const MessageDetails = ({
           align="start"
           sideOffset={4}
           collisionPadding={12}
+          collisionBoundary={pane ?? 'clipping-ancestors'}
+          // Slides only as far as the pane's edge forces it; the default flips to align its right
+          // edge with the trigger's, hanging the panel back over the message list.
+          collisionAvoidance={{ align: 'shift' }}
           // Portalled, so it would ride over the reader header once its trigger scrolls away.
           className="z-30 data-[anchor-hidden]:invisible"
         >
           <Popover.Popup
             aria-label="Message details"
-            className="max-h-[var(--available-height)] w-[min(36rem,var(--available-width))] overflow-y-auto border border-rule bg-ink-raised px-4 py-3 outline-none"
+            className="max-h-[var(--available-height)] w-max max-w-[min(36rem,var(--available-width))] overflow-y-auto border border-rule bg-ink-raised px-4 py-3 outline-none"
           >
             <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-1.5 text-2xs">
               {/* First: across several addresses, which one this landed in is the first question. */}
@@ -380,6 +387,7 @@ export const ThreadReader = ({
   // Read from the same place `seedFor` reads, or a button would appear that seeds nothing.
   const canReplyAll = replyAllCc(inbound, ownedAddresses).length > 0;
   const { mailbox } = useParams({ strict: false });
+  const [pane, setPane] = useState<HTMLDivElement | null>(null);
 
   return (
     <article className="flex h-full flex-col bg-ink-sunken">
@@ -499,7 +507,7 @@ export const ThreadReader = ({
         </div>
       </header>
 
-      <div className="min-h-0 flex-1 overflow-y-auto">
+      <div ref={setPane} className="min-h-0 flex-1 overflow-y-auto">
         {thread.messages.map((message, index) => (
           <div
             key={message.id}
@@ -516,7 +524,7 @@ export const ThreadReader = ({
             </div>
             {/* A draft has no envelope yet. */}
             {message.to !== undefined && (
-              <MessageDetails message={message} ownedAddresses={ownedAddresses} />
+              <MessageDetails message={message} ownedAddresses={ownedAddresses} pane={pane} />
             )}
 
             {/* Body copy is the one place in this app that is READ rather than scanned, so it
