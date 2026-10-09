@@ -6,7 +6,13 @@ import { createRoot } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { InboundAddress } from '../addresses/record';
 import type { DraftContent } from '../compose/draft';
-import { claimSend, createDraft, listDrafts, replaceDraft } from '../compose/draft-vault';
+import {
+  claimSend,
+  createDraft,
+  listDrafts,
+  replaceDraft,
+  unconfirmSend,
+} from '../compose/draft-vault';
 import type { SentCopyFailure } from '../compose/send';
 import type { Result } from '../relay/connection';
 import { threadsFromAccounts } from '../threads/summaries';
@@ -146,7 +152,10 @@ const render = async (store: RecordStore) => {
     session: { userId: 'user-1', store } as unknown as Props['session'],
     identities: [ACCOUNT],
     accounts: [ACCOUNT],
-    runOn: () => async () => ({ ok: false, error: { kind: 'error', detail: 'no IMAP here' } }),
+    bindRunOn: () => () => async () => ({
+      ok: false,
+      error: { kind: 'error', detail: 'no IMAP here' },
+    }),
     sync: async () => {},
     threadsRef: { current: [] },
     baseByAccount: {},
@@ -521,6 +530,69 @@ describe('an answer that lands after its session ended', () => {
       vault.release();
       expect(await act(() => answer)).toEqual({ ok: false, reason: 'ended' });
       expect(mounted.hook().drafts).toEqual(next);
+    },
+  );
+
+  it.each(Object.entries(SESSION_ENDINGS))(
+    'a discard whose conflict re-read lands after %s writes nothing more',
+    async (_, end) => {
+      const opened = await openInComposer();
+      const { vault, created, hook } = opened;
+      // Its own autosave moved the record on, so the first tombstone is refused and re-read.
+      await replaceDraft(vault.store, created.draftId, content(), 0);
+      const reread = vault.holdNextRead();
+      const { discarded } = await act(async () => ({ discarded: hook().slice.discardDraft() }));
+      await act(() => reread.reached);
+      await end(opened);
+
+      reread.open();
+      expect(await act(() => discarded)).toEqual({ outcome: 'ended' });
+      expect(await listDrafts(vault.store)).toHaveLength(1);
+    },
+  );
+
+  it.each(Object.entries(SESSION_ENDINGS))(
+    'unconfirmed sends found in Sent across %s: the one under way finishes, no other starts',
+    async (_, end) => {
+      const vault = vaultOver(fakeRecordStore().store);
+      const summaries: ImapMessageSummary[] = [];
+      for (const subject of ['Plans', 'Lunch']) {
+        const created = await createDraft(vault.store, content({ subject }), 0);
+        if (!created.ok) throw new Error('no draft to send');
+        const messageId = `<${subject.toLowerCase()}@x.test>`;
+        const bytes = new TextEncoder().encode(
+          `From: ${ACCOUNT.address}\r\nMessage-ID: ${messageId}\r\nSubject: ${subject}\r\n\r\nHi`,
+        );
+        const claimed = await claimSend(
+          vault.store,
+          created.handle.draftId,
+          {
+            messageId,
+            opId: subject,
+            state: 'submitting',
+            claimedAt: 0,
+            bytes: bytes.toBase64(),
+            target: { account: ACCOUNT.address, folder: 'sent' },
+          },
+          0,
+        );
+        if (!claimed.ok) throw new Error('no claim to leave unconfirmed');
+        await unconfirmSend(vault.store, claimed.handle.draftId);
+        summaries.push(await serverCopyOf(bytes));
+      }
+      const mounted = await mount(vault.store);
+
+      // Both turn up in Sent; the first completion's write is held.
+      vault.hold();
+      await mounted.rerender({
+        baseByAccount: { [ACCOUNT.address]: { sent: { uidValidity: 7, summaries } } },
+      });
+      await end(mounted);
+
+      vault.release();
+      await act(() => new Promise(resolve => setTimeout(resolve, 20)));
+      // The other is completed by the next unlock that finds it in Sent.
+      expect(await listDrafts(vault.store)).toHaveLength(1);
     },
   );
 });

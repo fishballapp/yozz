@@ -1,6 +1,7 @@
 import { Link, useNavigate } from '@tanstack/react-router';
 import { useEffect, useState } from 'react';
 import { ServerKeysSection } from '../../relay/ServerKeysSection';
+import { useMail } from '../../store/MailProvider';
 import { Button, buttonClass } from '../../ui/Button';
 import { ConfirmDialog } from '../../ui/ConfirmDialog';
 import { FieldRow, Input } from '../../ui/Field';
@@ -20,10 +21,14 @@ import {
   switchModeToPassword,
 } from '../../vault/unlock';
 
+/** Handed whether the session it started in is still open, checked after each of its awaits. */
+type Action = (isCurrent: () => boolean) => Promise<void>;
+
 /** One section per thing you might come here to do. */
 export const Vault = () => {
   const navigate = useNavigate();
   const { session, setSession, lock } = useVault();
+  const { watchSession } = useMail();
 
   const [error, setError] = useState<string | null>(null);
   const [isBusy, setIsBusy] = useState(false);
@@ -34,9 +39,7 @@ export const Vault = () => {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [addedPasskeyNote, setAddedPasskeyNote] = useState(false);
   /** A change the server refused for want of a fresh session, run again once the person confirms. */
-  const [awaitingConfirmation, setAwaitingConfirmation] = useState<(() => Promise<void>) | null>(
-    null,
-  );
+  const [awaitingConfirmation, setAwaitingConfirmation] = useState<Action | null>(null);
   const [currentPassword, setCurrentPassword] = useState('');
 
   useEffect(() => {
@@ -50,12 +53,18 @@ export const Vault = () => {
     })();
   }, [session]);
 
-  const run = async (action: () => Promise<void>) => {
+  /**
+   * An action that outlives its session (a lock, a sign-in as someone else) shows nothing in the
+   * next one, and neither reopens the session it ended with nor locks the one after.
+   */
+  const run = async (action: Action) => {
+    const isCurrent = watchSession();
     setIsBusy(true);
     setError(null);
     try {
-      await action();
+      await action(isCurrent);
     } catch (err) {
+      if (!isCurrent()) return;
       // Wrapped: a bare function handed to a setter is called as an updater.
       if (needsFreshSession(err)) {
         setAwaitingConfirmation(() => action);
@@ -119,12 +128,13 @@ export const Vault = () => {
     return session.mode === 'passkey' ? 'Confirm with your passkey' : 'Confirm';
   })();
 
-  const confirmAndRetry = (retry: () => Promise<void>) =>
-    run(async () => {
+  const confirmAndRetry = (retry: Action) =>
+    run(async isCurrent => {
       await confirmIdentity({ currentSession: session, password: currentPassword });
+      if (!isCurrent()) return;
       setAwaitingConfirmation(null);
       setCurrentPassword('');
-      await retry();
+      await retry(isCurrent);
     });
 
   return (
@@ -241,7 +251,7 @@ export const Vault = () => {
                     variant="secondary"
                     disabled={isBusy}
                     onClick={() =>
-                      void run(async () => {
+                      void run(async isCurrent => {
                         if (password.length < MIN_PASSWORD_LENGTH) {
                           setError(`Use at least ${MIN_PASSWORD_LENGTH} characters.`);
                           return;
@@ -254,6 +264,8 @@ export const Vault = () => {
                           currentSession: session,
                           password,
                         });
+                        // Switched on the server; the next unlock of that vault takes the password.
+                        if (!isCurrent()) return;
                         setSession(next);
                         setIsSwitchingToPassword(false);
                         setPassword('');
@@ -292,8 +304,9 @@ export const Vault = () => {
                 variant="secondary"
                 disabled={isBusy}
                 onClick={() =>
-                  void run(async () => {
+                  void run(async isCurrent => {
                     const next = await switchModeToPasskey({ currentSession: session });
+                    if (!isCurrent()) return;
                     setSession(next);
                   })
                 }
@@ -320,9 +333,9 @@ export const Vault = () => {
               variant="secondary"
               disabled={isBusy}
               onClick={() =>
-                void run(async () => {
+                void run(async isCurrent => {
                   await addPasskeyToSession({ currentSession: session });
-                  setAddedPasskeyNote(true);
+                  if (isCurrent()) setAddedPasskeyNote(true);
                 })
               }
             >
@@ -351,8 +364,9 @@ export const Vault = () => {
           confirmLabel="Reset vault"
           busyLabel="Resetting…"
           onConfirm={() =>
-            run(async () => {
+            run(async isCurrent => {
               await resetVaultAccount();
+              if (!isCurrent()) return;
               await lock();
               void navigate({ to: '/enrol', search: previous => previous });
             })
@@ -365,21 +379,24 @@ export const Vault = () => {
           variant="ghost"
           disabled={isBusy}
           onClick={() => {
+            const isCurrent = watchSession();
             void (async () => {
               setIsBusy(true);
               setError(null);
               try {
                 // Better Auth reports a refused sign-out as `{ error }`; the local vault is closed either way.
                 const res = await signOut();
+                if (!isCurrent()) return;
                 if (res.error) {
                   setError(res.error.message || 'Signing out failed.');
                   return;
                 }
                 void navigate({ to: '/login', search: previous => previous });
               } catch (err) {
-                setError(vaultErrorMessage(err));
+                if (isCurrent()) setError(vaultErrorMessage(err));
               } finally {
-                await lock();
+                // The session after this one is not this button's to lock.
+                if (isCurrent()) await lock();
                 setIsBusy(false);
               }
             })();

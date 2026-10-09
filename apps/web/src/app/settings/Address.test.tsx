@@ -14,8 +14,12 @@ const ALICE: AddressRecord = {
   smtp: { host: 'smtp.example.com', port: 465, username: 'alice', password: 'pw' },
 };
 
-/** The store's addresses, re-rendering the page when they change, as `useMail` would. */
+/**
+ * The store's addresses, re-rendering the page when they change, as `useMail` would, and a session a
+ * test can end, as a lock or a sign-in would.
+ */
 const mocks = vi.hoisted(() => ({
+  generation: 0,
   identities: [] as readonly AddressRecord[],
   listeners: new Set<() => void>(),
   removeAddress: vi.fn<(address: string) => Promise<void>>(),
@@ -41,6 +45,10 @@ vi.mock('../../store/MailProvider', async () => {
       ),
       removeAddress: mocks.removeAddress,
       setSenderName: mocks.setSenderName,
+      watchSession: () => {
+        const taken = mocks.generation;
+        return () => mocks.generation === taken;
+      },
     }),
   };
 });
@@ -122,6 +130,28 @@ describe('Address', () => {
     expect(page.textContent).toContain(ALICE.address);
     expect(page.textContent).not.toContain('Not one of your addresses');
     expect(mocks.navigate).toHaveBeenCalledWith(expect.objectContaining({ to: '/settings' }));
+  });
+
+  it('goes nowhere once the session ended under the vault delete', async () => {
+    const vaultDelete = Promise.withResolvers<void>();
+    mocks.removeAddress.mockImplementation(() => vaultDelete.promise);
+    await mount();
+    await confirmRemoval();
+
+    mocks.generation += 1;
+    await act(async () => vaultDelete.resolve());
+    expect(mocks.navigate).not.toHaveBeenCalled();
+  });
+
+  it('says nothing once the session ended under a refused vault delete', async () => {
+    const vaultDelete = Promise.withResolvers<void>();
+    mocks.removeAddress.mockImplementation(() => vaultDelete.promise);
+    const page = await mount();
+    await confirmRemoval();
+
+    mocks.generation += 1;
+    await act(async () => vaultDelete.reject(new Error('The vault refused')));
+    expect(page.querySelector('[role="alert"]')).toBeNull();
   });
 
   it('stays on the page with the refusal when the vault keeps the address', async () => {

@@ -19,7 +19,7 @@ import { vaultErrorMessage } from '../../vault/screen-policy';
 export const Address = () => {
   const { address } = useParams({ from: '/_app/settings/a/$address' });
   const navigate = useNavigate();
-  const { identities, removeAddress, setSenderName } = useMail();
+  const { identities, removeAddress, setSenderName, watchSession } = useMail();
   /** The store drops an address the moment the vault deletes it; the page holds it until it has left. */
   const [removing, setRemoving] = useState<AddressRecord>();
   const record = identities.find(candidate => candidate.address === address) ?? removing;
@@ -47,12 +47,14 @@ export const Address = () => {
     );
   }
 
-  const run = async (action: () => Promise<void>) => {
+  /** An action that outlives its session shows nothing and goes nowhere in the next one. */
+  const run = async (action: (isCurrent: () => boolean) => Promise<void>) => {
+    const isCurrent = watchSession();
     setError(null);
     try {
-      await action();
+      await action(isCurrent);
     } catch (err) {
-      setError(vaultErrorMessage(err));
+      if (isCurrent()) setError(vaultErrorMessage(err));
     }
   };
 
@@ -152,7 +154,7 @@ export const Address = () => {
           confirmLabel="Remove address"
           busyLabel="Removing…"
           onConfirm={() =>
-            run(async () => {
+            run(async isCurrent => {
               setRemoving(record);
               try {
                 await removeAddress(record.address);
@@ -160,6 +162,7 @@ export const Address = () => {
                 setRemoving(undefined);
                 throw err;
               }
+              if (!isCurrent()) return;
               await navigate({ to: '/settings', search: previous => previous });
             })
           }

@@ -17,7 +17,7 @@ import type { SendEffects } from '../compose/send-machine';
 import type { SentRecord } from '../compose/sent-record';
 import type { MailConnectionFailure, Result } from '../relay/connection';
 import { describeMailFailure } from '../relay/describe-failure';
-import type { LiveTask } from '../relay/live';
+import type { RunOn } from '../relay/live';
 import type { AccountSummaries, VaultSentMessage } from '../threads/summaries';
 import type { Attachment, ThreadState } from '../threads/thread';
 import { isDemo } from '../ui/chrome';
@@ -114,7 +114,7 @@ export const useComposer = ({
   session,
   identities,
   accounts,
-  runOn,
+  bindRunOn,
   sync,
   threadsRef,
   baseByAccount,
@@ -123,9 +123,11 @@ export const useComposer = ({
   session: ReturnType<typeof useVault>['session'];
   identities: readonly AddressRecord[];
   accounts: readonly InboundAddress[];
-  runOn: (
-    account: InboundAddress,
-  ) => <T>(task: LiveTask<T>) => Promise<Result<T, MailConnectionFailure>>;
+  /**
+   * The IMAP runner of the session open now, refusing every task once that session has ended.
+   * Taken with `watchSession`, before the first await, and carried through the work it starts.
+   */
+  bindRunOn: () => RunOn;
   sync: (address?: string) => Promise<void>;
   /** The threads as rendered; read by the draft writes, which run outside a render. */
   threadsRef: RefObject<readonly ThreadState[]>;
@@ -175,10 +177,9 @@ export const useComposer = ({
    * sent message, a refusal), so it checks this before writing anything into state.
    */
   const sessionGeneration = useRef(0);
-  /** Read by the unlock through a ref, so the unlock stays off the send effects' deps. */
-  const sendEffectsRef = useRef<
-    ((store: RecordStore, identity: AddressRecord) => SendEffects) | null
-  >(null);
+  /** Read by the mirror's erase after its awaits; a later session's list is harmless there, since the runner it is handed refuses once its own session has ended. */
+  const accountsRef = useRef(accounts);
+  accountsRef.current = accounts;
 
   // A pasted `?compose=` URL seeds the draft before the vault has answered, so heal the sender
   // once identities exist without touching anything else typed.
@@ -202,29 +203,30 @@ export const useComposer = ({
   }, [baseByAccount, justSent]);
 
   /**
-   * Erases a draft's IMAP copy wherever the mirror record says it is. Handed the store, not reading
-   * the session: a send that outlives its session must not look in the next one's vault.
+   * Erases a draft's IMAP copy wherever the mirror record says it is. Handed the store and the
+   * runner, not reading the session: a send that outlives its session must not look in the next
+   * one's vault, nor reach its connections.
    */
   const expungeMirrorCopy = useCallback(
-    async (store: RecordStore, draftKey: string) => {
+    async (store: RecordStore, runOn: RunOn, draftKey: string) => {
       if (draftKey === '' || isDemo()) return;
       const [{ readMirror }, { expungeMirror }] = await Promise.all([
         import('../compose/draft-vault'),
         import('../compose/draft-mirror'),
       ]);
       const mirror = await readMirror(store, draftKey);
-      const account = accounts.find(
+      const account = accountsRef.current.find(
         candidate => candidate.address === mirror?.mirror.locator?.account,
       );
       if (account === undefined) return;
       await expungeMirror(runOn(account), store, draftKey);
     },
-    [accounts, runOn],
+    [],
   );
 
-  /** One implementation of each phase for a live send and a resumed one. */
+  /** One implementation of each phase for a live send and a resumed one, in the session it began in. */
   const sendEffectsFor = useCallback(
-    (store: RecordStore, identity: AddressRecord): SendEffects => ({
+    (store: RecordStore, runOn: RunOn, identity: AddressRecord): SendEffects => ({
       store,
       submit: async (bytes, handle) => {
         const { envelopeRecipients, submitBytes } = await import('../compose/send');
@@ -256,13 +258,11 @@ export const useComposer = ({
         };
       },
       // Phase (4): sent, so no client should still offer it for editing.
-      expungeMirror: handle => expungeMirrorCopy(store, handle.draftKey),
+      expungeMirror: handle => expungeMirrorCopy(store, runOn, handle.draftKey),
       now: Date.now,
     }),
-    [runOn, expungeMirrorCopy],
+    [expungeMirrorCopy],
   );
-
-  sendEffectsRef.current = sendEffectsFor;
 
   /** Sends past their claim and still on the network; the browser asks before unloading. */
   const [sendsInFlight, setSendsInFlight] = useState(0);
@@ -284,6 +284,7 @@ export const useComposer = ({
   const settleSend = useCallback(
     async (
       store: RecordStore,
+      runOn: RunOn,
       identity: AddressRecord,
       handle: DraftHandle,
       isCurrent: () => boolean,
@@ -295,7 +296,7 @@ export const useComposer = ({
           import('../compose/send-machine'),
           import('../compose/sent-vault'),
         ]);
-        const progress = await driveSend(sendEffectsFor(store, identity), handle);
+        const progress = await driveSend(sendEffectsFor(store, runOn, identity), handle);
         if (!isCurrent()) return { state: 'ended' };
         // SMTP refused the message; the account's IMAP host is where the Sent copy was going.
         const smtpHost = identity.smtp.host;
@@ -416,6 +417,7 @@ export const useComposer = ({
       if (session === null) return lockedBeforeSend;
       // Taken before the first await and carried into the settling, which may outlive the session.
       const isCurrent = watchSession(sessionGeneration);
+      const runOn = bindRunOn();
       const [{ claimSend, createDraft }, { buildOutgoing }, { renderHtml }] = await Promise.all([
         import('../compose/draft-vault'),
         import('../compose/send'),
@@ -509,13 +511,13 @@ export const useComposer = ({
       return {
         ok: true,
         // Claimed, so it goes out even if the session ended under the claim; never a second time.
-        value: { settled: settleSend(session.store, identity, claimed.handle, isCurrent) },
+        value: { settled: settleSend(session.store, runOn, identity, claimed.handle, isCurrent) },
       };
     }
 
     clearComposedDraft(draft);
     return { ok: true, value: { settled: Promise.resolve<SendReport>({ state: 'sent' }) } };
-  }, [draft, identities, settleSend, clearComposedDraft, ownerAccountOf]);
+  }, [draft, identities, bindRunOn, settleSend, clearComposedDraft, ownerAccountOf]);
 
   // Clears are explicit (send, discard, lock), so an empty first render cannot wipe the copy a reload is about to restore.
   useEffect(() => {
@@ -546,6 +548,7 @@ export const useComposer = ({
     if (identity === undefined) return;
     const timer = setTimeout(() => {
       const isCurrent = watchSession(sessionGeneration);
+      const runOn = bindRunOn();
       void (async () => {
         const [
           { draftMirrorMessageId, mirrorAccountOf, mirrorDraft },
@@ -583,7 +586,7 @@ export const useComposer = ({
       })();
     }, DRAFT_MIRROR_MS);
     return () => clearTimeout(timer);
-  }, [openHandle, accounts, identities, runOn]);
+  }, [openHandle, accounts, identities, bindRunOn]);
 
   /** An unconfirmed send is settled by the message turning up in a Sent folder, read off the summaries. */
   useEffect(() => {
@@ -617,6 +620,8 @@ export const useComposer = ({
       const { completeSend, listDrafts } = await import('../compose/draft-vault');
       for (const handle of settled) {
         const messageId = handle.record.unconfirmedSend?.messageId;
+        // Each one, since the last completion's round trip may have spanned a lock.
+        if (!isCurrent()) return;
         if (messageId === undefined) continue;
         await completeSend(session.store, handle.draftId, messageId, Date.now());
       }
@@ -653,6 +658,7 @@ export const useComposer = ({
           // The first save of an ordinary compose mints the record.
           if (pending.draftId === undefined) {
             const { createDraft } = await import('../compose/draft-vault');
+            if (!isCurrent()) return;
             const created = await createDraft(session.store, content, Date.now());
             if (!isCurrent()) return;
             if (!created.ok) {
@@ -673,6 +679,7 @@ export const useComposer = ({
             return;
           }
           const { replaceDraft } = await import('../compose/draft-vault');
+          if (!isCurrent()) return;
           const outcome = await replaceDraft(session.store, pending.draftId, content, Date.now());
           if (!isCurrent()) return;
           if (!outcome.ok) {
@@ -739,6 +746,7 @@ export const useComposer = ({
     const identity = identities.find(candidate => candidate.address === openHandle.record.from);
     if (identity === undefined) return;
     const isCurrent = watchSession(sessionGeneration);
+    const runOn = bindRunOn();
     const [{ reclaimSend }, { driveSend }] = await Promise.all([
       import('../compose/draft-vault'),
       import('../compose/send-machine'),
@@ -751,17 +759,19 @@ export const useComposer = ({
         ? await reclaimSend(session.store, openHandle.draftId, Date.now())
         : openHandle;
     if (claimed === null) return;
-    await driveSend(sendEffectsFor(session.store, identity), claimed);
+    await driveSend(sendEffectsFor(session.store, runOn, identity), claimed);
+    if (!isCurrent()) return;
     const { listDrafts } = await import('../compose/draft-vault');
     const live = await listDrafts(session.store);
     if (isCurrent()) setDrafts(live);
-  }, [openHandle, identities, sendEffectsFor]);
+  }, [openHandle, identities, bindRunOn, sendEffectsFor]);
 
   const backToEditing = useCallback(async () => {
     const session = sessionRef.current;
     if (openHandle === null || session === null) return;
     const isCurrent = watchSession(sessionGeneration);
     const { listDrafts, unconfirmSend } = await import('../compose/draft-vault');
+    if (!isCurrent()) return;
     await unconfirmSend(session.store, openHandle.draftId);
     const live = await listDrafts(session.store);
     if (isCurrent()) setDrafts(live);
@@ -770,28 +780,35 @@ export const useComposer = ({
   /** The vault's drafts and sent records, then the sends this vault left in flight. */
   const load = useCallback(
     async (store: RecordStore, records: readonly AddressRecord[], isCancelled: () => boolean) => {
+      // Before the first await: a send resumed below copies into this session's mailboxes or nowhere.
+      const runOn = bindRunOn();
       // Drafts come from the vault too.
       const { listDrafts, purgeExpiredDrafts } = await import('../compose/draft-vault');
       // Before listing, so an expired tombstone stops costing storage.
       await purgeExpiredDrafts(store, Date.now());
       const drafts = await listDrafts(store);
-      if (!isCancelled()) setDrafts(drafts);
+      if (isCancelled()) return;
+      setDrafts(drafts);
       const { listSentRecords } = await import('../compose/sent-vault');
       const sent = await listSentRecords(store);
-      if (!isCancelled()) setVaultSent(sent);
+      // An ended session resumes nothing; the next unlock of this vault finds the same phases.
+      if (isCancelled()) return;
+      setVaultSent(sent);
       // A send this vault left in flight is finished before anything else touches the draft;
       // `submitting` is skipped inside `resumeSends`.
       const { resumeSends } = await import('../compose/send-machine');
+      if (isCancelled()) return;
+      // Asked again before each send: one that ran on finishes, but none starts after a lock.
       await resumeSends(drafts, handle => {
+        if (isCancelled()) return null;
         const identity = records.find(record => record.address === handle.record.from);
-        const effectsFor = sendEffectsRef.current;
-        return identity === undefined || effectsFor === null ? null : effectsFor(store, identity);
+        return identity === undefined ? null : sendEffectsFor(store, runOn, identity);
       });
       // Checked after the read: one that spans a lock holds this user's drafts.
       const live = await listDrafts(store);
       if (!isCancelled()) setDrafts(live);
     },
-    [],
+    [bindRunOn, sendEffectsFor],
   );
 
   /**
@@ -803,21 +820,29 @@ export const useComposer = ({
     async (
       store: RecordStore,
       draftKey: string,
-      tombstone: () => Promise<DeleteOutcome>,
+      /** Handed `isCurrent`, so a tombstone that writes twice starts no second write after a lock. */
+      tombstone: (
+        vault: typeof import('../compose/draft-vault'),
+        isCurrent: () => boolean,
+      ) => Promise<DeleteOutcome>,
     ): Promise<DeleteOutcome | SessionEnded> => {
       const isIt = (candidate: DraftHandle) => candidate.draftKey === draftKey;
       const shown = draftsRef.current.find(isIt);
       const isCurrent = watchSession(sessionGeneration);
+      const runOn = bindRunOn();
       setDrafts(current => current.filter(candidate => !isIt(candidate)));
-      const outcome = await (async (): Promise<DeleteOutcome> => {
+      const outcome = await (async (): Promise<DeleteOutcome | SessionEnded> => {
         try {
-          return await tombstone();
+          const vault = await import('../compose/draft-vault');
+          // An ended session tombstones nothing; the draft stays in that vault's Drafts.
+          if (!isCurrent()) return { outcome: 'ended' };
+          return await tombstone(vault, isCurrent);
         } catch {
           return { outcome: 'offline' };
         }
       })();
       if (!isCurrent()) return { outcome: 'ended' };
-      if (outcome.outcome === 'deleted') void expungeMirrorCopy(store, draftKey);
+      if (outcome.outcome === 'deleted') void expungeMirrorCopy(store, runOn, draftKey);
       if (outcome.outcome === 'deleted' || outcome.outcome === 'absent') {
         // Again: a re-list that read before the tombstone landed has put the row back.
         setDrafts(current => current.filter(candidate => !isIt(candidate)));
@@ -828,7 +853,7 @@ export const useComposer = ({
       }
       return outcome;
     },
-    [expungeMirrorCopy],
+    [bindRunOn, expungeMirrorCopy],
   );
 
   /** Everything here is this user's plaintext; the provider outlives the session. */
@@ -901,6 +926,7 @@ export const useComposer = ({
                 const { createDraft, listDrafts, replaceDraft } = await import(
                   '../compose/draft-vault'
                 );
+                if (!isCurrent()) return;
                 const outcome =
                   open.draftId === undefined
                     ? await createDraft(session.store, content, Date.now())
@@ -926,12 +952,14 @@ export const useComposer = ({
           if (open.draftId === undefined) return null;
           const abandoned = open.draftId;
           const isCurrent = watchSession(sessionGeneration);
+          const runOn = bindRunOn();
           void (async () => {
             const { deleteDraft } = await import('../compose/draft-vault');
+            if (!isCurrent()) return;
             const gone = await deleteDraft(session.store, abandoned, Date.now());
             // Refused means another device wrote since.
             if (gone.outcome !== 'deleted' || !isCurrent()) return;
-            void expungeMirrorCopy(session.store, open.draftKey ?? '');
+            void expungeMirrorCopy(session.store, runOn, open.draftKey ?? '');
             setDrafts(current => current.filter(candidate => candidate.draftKey !== open.draftKey));
           })();
           return null;
@@ -1006,6 +1034,7 @@ export const useComposer = ({
         }
         const isCurrent = watchSession(sessionGeneration);
         const { createDraft, listDrafts, replaceDraft } = await import('../compose/draft-vault');
+        if (!isCurrent()) return { ok: false, reason: 'ended' };
         const outcome =
           draftId === undefined
             ? await createDraft(session.store, content, Date.now())
@@ -1033,19 +1062,22 @@ export const useComposer = ({
         }
         if (session === null || demo) return { outcome: 'absent' };
         const onScreen = contentOf(open, ownerAccountOf(open));
-        return dropDraft(session.store, draftKey, async () => {
-          const { deleteDraft, listDrafts } = await import('../compose/draft-vault');
-          const outcome = await deleteDraft(session.store, draftId, Date.now());
-          if (outcome.outcome !== 'conflict') return outcome;
-          // This tab's own autosave can land first. A newer version holding exactly the text on
-          // screen is still what the person discarded; any other is another device's writing.
-          const newer = (await listDrafts(session.store)).find(
-            candidate => candidate.draftId === outcome.currentDraftId,
-          );
-          return newer !== undefined && sameDraftContent(newer.record, onScreen)
-            ? deleteDraft(session.store, newer.draftId, Date.now())
-            : outcome;
-        });
+        return dropDraft(
+          session.store,
+          draftKey,
+          async ({ deleteDraft, listDrafts }, isCurrent) => {
+            const outcome = await deleteDraft(session.store, draftId, Date.now());
+            if (outcome.outcome !== 'conflict') return outcome;
+            // This tab's own autosave can land first. A newer version holding exactly the text on
+            // screen is still what the person discarded; any other is another device's writing.
+            const newer = (await listDrafts(session.store)).find(
+              candidate => candidate.draftId === outcome.currentDraftId,
+            );
+            return newer !== undefined && isCurrent() && sameDraftContent(newer.record, onScreen)
+              ? deleteDraft(session.store, newer.draftId, Date.now())
+              : outcome;
+          },
+        );
       },
       removeDraft: async draftId => {
         const session = sessionRef.current;
@@ -1053,10 +1085,9 @@ export const useComposer = ({
         const key = parseDraftId(draftId)?.key;
         if (key === undefined) return { outcome: 'absent' };
         if (key === draftRef.current?.draftKey) return { outcome: 'busy' };
-        return dropDraft(session.store, key, async () => {
-          const { deleteDraft } = await import('../compose/draft-vault');
-          return deleteDraft(session.store, draftId, Date.now());
-        });
+        return dropDraft(session.store, key, ({ deleteDraft }) =>
+          deleteDraft(session.store, draftId, Date.now()),
+        );
       },
       send,
       watchSession: () => watchSession(sessionGeneration),
@@ -1093,6 +1124,7 @@ export const useComposer = ({
       send,
       demo,
       identities,
+      bindRunOn,
       expungeMirrorCopy,
       ownerAccountOf,
       dropDraft,

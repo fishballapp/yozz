@@ -16,7 +16,7 @@ import {
 } from '../addresses/record';
 import type { MailConnectionFailure, Result } from '../relay/connection';
 import { describeMailFailure } from '../relay/describe-failure';
-import type { LiveManager, LiveState, LiveTask } from '../relay/live';
+import type { LiveManager, LiveState, RunOn } from '../relay/live';
 import {
   type BodyEntry,
   type BodyOutcome,
@@ -93,6 +93,12 @@ type MailContextValue = Composer & {
 };
 
 const MailContext = createContext<MailContextValue | null>(null);
+
+/** What a runner answers once its session has ended, or before the session's manager exists. */
+const VAULT_LOCKED = {
+  ok: false,
+  error: { kind: 'error', detail: 'The vault is locked' },
+} as const satisfies Result<never, MailConnectionFailure>;
 
 const upsertRecord = (current: readonly AddressRecord[], record: AddressRecord) => [
   ...current.filter(candidate => candidate.address !== record.address),
@@ -173,6 +179,9 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
         throw new Error('The vault was locked; nothing was stored.');
       }
       await storeAddress(record);
+      // Stored in the vault the call began in, whose next unlock lists it. Shown in the session
+      // after it, it would sync that person's mailbox over this one's connections.
+      if (generation !== sessionGeneration.current) return;
       setRecords(current => upsertRecord(current, record));
     },
     [storeAddress],
@@ -270,20 +279,21 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
     [records, storeAddress],
   );
 
-  const runOn = useCallback(
-    (account: InboundAddress) =>
-      <T,>(task: LiveTask<T>): Promise<Result<T, MailConnectionFailure>> => {
-        const manager = liveManagerRef.current;
-        if (manager === null) {
-          return Promise.resolve({
-            ok: false,
-            error: { kind: 'error', detail: 'The vault is locked' },
-          });
-        }
-        return manager.run(account, task);
-      },
-    [],
-  );
+  /**
+   * The IMAP runner of the session open now, taken where the work starts, before its first await,
+   * as the generation is. Once that session has ended it refuses every task before reaching a
+   * manager, so one person's mail never travels over the next session's connections.
+   */
+  const bindRunOn = useCallback((): RunOn => {
+    const generation = sessionGeneration.current;
+    return account => task => {
+      const manager = liveManagerRef.current;
+      if (generation !== sessionGeneration.current || manager === null) {
+        return Promise.resolve(VAULT_LOCKED);
+      }
+      return manager.run(account, task);
+    };
+  }, []);
 
   const identities = records;
 
@@ -303,6 +313,7 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
       }
 
       const generation = sessionGeneration.current;
+      const runOn = bindRunOn();
       const userId = userIdRef.current;
       if (userId === null) return Promise.resolve();
       const entry = { dirty: false, promise: Promise.resolve() };
@@ -313,6 +324,8 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
           const isStale = () =>
             generation !== sessionGeneration.current ||
             !accountsRef.current.some(a => a.address === address);
+          // The next session's hydrated set is not this run's to mark.
+          if (isStale()) return;
           // The cache is the list until the server answers.
           if (!hydratedRef.current.has(address)) {
             hydratedRef.current.add(address);
@@ -332,6 +345,8 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
             if (isStale()) return;
           }
           const { syncAccount, prefetchBodies } = await import('../threads/sync');
+          // The first one fetches the TLS stack, long enough for a lock to land under it.
+          if (isStale()) return;
           do {
             entry.dirty = false;
             syncSeqRef.current += 1;
@@ -391,7 +406,7 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
       syncRunsRef.current.set(address, entry);
       return entry.promise;
     },
-    [runOn],
+    [bindRunOn],
   );
 
   const sync = useCallback(
@@ -417,7 +432,7 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
     session,
     identities,
     accounts,
-    runOn,
+    bindRunOn,
     sync,
     threadsRef,
     baseByAccount,
@@ -552,6 +567,7 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
       if (inFlight !== undefined) return inFlight;
 
       const generation = sessionGeneration.current;
+      const runOn = bindRunOn();
       const userId = userIdRef.current;
       if (userId === null) return;
       const promise = (async () => {
@@ -603,7 +619,7 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
       inFlightOlderRef.current.set(key, promise);
       return promise;
     },
-    [runOn],
+    [bindRunOn],
   );
 
   const loadOlder = useCallback(
@@ -612,11 +628,15 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
       const folder = folderPaged(mailbox);
       const targets = accountsShown(accountsRef.current, mailbox);
       if (targets.length === 0) return;
+      const generation = sessionGeneration.current;
       setOlderInFlight(current => ({ ...current, [mailbox]: true }));
       try {
         await Promise.all(targets.map(account => loadOlderOn(account, folder)));
       } finally {
-        setOlderInFlight(current => ({ ...current, [mailbox]: false }));
+        // The next session may be paging the same mailbox.
+        if (generation === sessionGeneration.current) {
+          setOlderInFlight(current => ({ ...current, [mailbox]: false }));
+        }
       }
     },
     [loadOlderOn],
@@ -711,7 +731,7 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
       change: PendingChange,
       pick: (folder: Folder) => boolean,
       command: (
-        run: ReturnType<typeof runOn>,
+        run: ReturnType<RunOn>,
         targets: readonly FlagTarget[],
       ) => Promise<Result<unknown, MailConnectionFailure>>,
       onRefused?: OnRefused,
@@ -762,6 +782,7 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
       setOps(current => [...current, ...ops]);
 
       const generation = sessionGeneration.current;
+      const runOn = bindRunOn();
       // Flipped by the first account to refuse, so a move both accounts refused is reported once.
       let isRefusalReported = false;
       for (const [index, { account, uidsByFolder }] of work.entries()) {
@@ -811,7 +832,7 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
       }
       return true;
     },
-    [acknowledge, isMoving, requestSync, runOn, threads],
+    [acknowledge, bindRunOn, isMoving, requestSync, threads],
   );
 
   const setThreadFlag = useCallback(
@@ -863,6 +884,7 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
       const setEntry = (entry: BodyEntry) =>
         setBodiesById(current => ({ ...current, [messageId]: entry }));
       const generation = sessionGeneration.current;
+      const runOn = bindRunOn();
       const promise = (async (): Promise<BodyOutcome> => {
         try {
           const [{ fetchBody }, { createMailCache }] = await Promise.all([
@@ -896,6 +918,7 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
           ) {
             // Best effort: a body that did not cache is fetched again next time.
             await cache.putBody(uid, res.value).catch(() => {});
+            if (generation !== sessionGeneration.current) return failed;
           }
           const loaded: BodyOutcome = {
             status: 'loaded',
@@ -925,7 +948,7 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
       inFlightBodiesRef.current.set(messageId, promise);
       return promise;
     },
-    [runOn, threads],
+    [bindRunOn, threads],
   );
 
   const markRead = useCallback(

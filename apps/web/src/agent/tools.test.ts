@@ -60,7 +60,8 @@ const handle = (draftKey: string, record = draftRecord()): DraftHandle => ({
 
 /** A port over mutable state, so a tool can observe what the app would have changed. */
 const fakePort = (threads: ThreadState[], overrides: Partial<AgentPort> = {}) => {
-  const state = { threads, drafts: [] as DraftHandle[], written: [] as unknown[] };
+  /** Bumped by `endSession`, as a lock or a sign-in bumps the store's. */
+  const state = { threads, drafts: [] as DraftHandle[], written: [] as unknown[], generation: 0 };
   const loadedBody = (body: string[]): BodyOutcome => ({
     status: 'loaded',
     body,
@@ -108,9 +109,20 @@ const fakePort = (threads: ThreadState[], overrides: Partial<AgentPort> = {}) =>
       outcome: 'deleted' as const,
       draftId: `${draftId}-tombstone`,
     })),
+    watchSession: () => {
+      const taken = state.generation;
+      return () => state.generation === taken;
+    },
     ...overrides,
   };
-  return { port, state, tools: buildAgentTools(() => port) };
+  return {
+    port,
+    state,
+    tools: buildAgentTools(() => port),
+    endSession: () => {
+      state.generation += 1;
+    },
+  };
 };
 
 const call = (tools: ReturnType<typeof buildAgentTools>, name: string, input: unknown) => {
@@ -178,6 +190,21 @@ describe('get_threads', () => {
         },
       ],
     });
+  });
+
+  it('answers nothing it read once the session ended under it', async () => {
+    const body = Promise.withResolvers<BodyOutcome>();
+    const { tools, endSession } = fakePort([archived], { loadBody: () => body.promise });
+    const result = call(tools, 'get_threads', { ids: ['b'], body: 'latest' });
+    endSession();
+    body.resolve({
+      status: 'loaded',
+      body: ['Invoice attached, please pay.'],
+      hasTextPart: true,
+      inlineImagesTruncated: false,
+      attachments: [],
+    });
+    await expect(result).resolves.toEqual({ error: expect.stringContaining('locked') });
   });
 
   it('says which mailboxes hold each message, so a mixed thread is legible', async () => {
@@ -627,6 +654,22 @@ describe('navigate', () => {
     await expect(
       call(tools, 'navigate', { target: 'composer', draftKey: 'gone' }),
     ).resolves.toMatchObject({ error: expect.stringContaining('gone') });
+  });
+
+  it('does nothing more once the session ended during the navigation', async () => {
+    const navigation = Promise.withResolvers<void>();
+    const { tools, port, state, endSession } = fakePort([thread('a', ['inbox'])], {
+      openThread: () => navigation.promise,
+      openDraft: () => navigation.promise,
+    });
+    state.drafts.push(handle('k1'));
+    const opened = call(tools, 'navigate', { target: 'thread', threadId: 'a' });
+    const composed = call(tools, 'navigate', { target: 'composer', draftKey: 'k1' });
+    endSession();
+    navigation.resolve();
+    await expect(opened).resolves.toEqual({ error: expect.stringContaining('locked') });
+    await expect(composed).resolves.toEqual({ error: expect.stringContaining('locked') });
+    expect(port.markRead).not.toHaveBeenCalled();
   });
 
   it('names a conversation that is not cached', async () => {

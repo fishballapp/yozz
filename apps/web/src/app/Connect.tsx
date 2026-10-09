@@ -52,7 +52,7 @@ const serversWith = (config: MailAutoconfig | null, isEditing: boolean, typed: S
 
 export const Connect = () => {
   const navigate = useNavigate();
-  const { identities, putAddress, isDemo: demo } = useMail();
+  const { identities, putAddress, watchSession, isDemo: demo } = useMail();
 
   const [address, setAddress] = useState('');
   const [senderName, setSenderName] = useState('');
@@ -121,6 +121,9 @@ export const Connect = () => {
 
   const submit = (event: FormEvent) => {
     event.preventDefault();
+    // A lock or a sign-in during the checks ends the session this address was typed into, and its
+    // credentials must not be stored, shown or synced in the next one.
+    const isCurrent = watchSession();
     void (async () => {
       setIsBusy(true);
       setError(null);
@@ -143,6 +146,7 @@ export const Connect = () => {
           if (lookup.state === 'idle' || lookup.domain !== domain) return lookUp(domain, trimmed);
           return null;
         })();
+        if (!isCurrent()) return;
         const use =
           awaited === null ? serversWith(found, isEditingServers, servers) : awaited.servers;
         if (use.smtpHost.trim() === '' || (needsImap && use.imapHost.trim() === '')) {
@@ -181,20 +185,25 @@ export const Connect = () => {
           // Both tried before anything is stored. The TLS stack loads on demand.
           if (isInbound(record)) {
             const { testImap } = await import('../threads/sync');
+            if (!isCurrent()) return;
             const test = await testImap(record.imap);
+            if (!isCurrent()) return;
             if (!test.ok) {
               setError(describeMailFailure(test.error, record.imap.host));
               return;
             }
           }
           const { testSmtp } = await import('../compose/send');
+          if (!isCurrent()) return;
           const test = await testSmtp(record.smtp);
+          if (!isCurrent()) return;
           if (!test.ok) {
             setError(describeMailFailure(test.error, record.smtp.host));
             return;
           }
         }
         await putAddress(record);
+        if (!isCurrent()) return;
         if (isInbound(record)) {
           void navigate({
             to: '/m/$mailbox',
@@ -205,6 +214,7 @@ export const Connect = () => {
           void navigate({ to: '/settings', search: previous => previous });
         }
       } catch (err) {
+        if (!isCurrent()) return;
         if (err instanceof ZodError) {
           const first = err.issues[0];
           setError(first === undefined ? 'That form is not valid.' : first.message);

@@ -56,6 +56,7 @@ export const VaultProvider = ({ children }: { children: ReactNode }) => {
   }, []);
 
   // Read through a ref so `setSession` stays stable while still seeing the session it replaces.
+  // Also set where the session changes, so work that outlives one can tell before the next render.
   const sessionRef = useRef(session);
   sessionRef.current = session;
 
@@ -66,14 +67,17 @@ export const VaultProvider = ({ children }: { children: ReactNode }) => {
     // cleanup, the same way it does for a lock.
     // A mode switch in Settings returns a session over the same store; only another one is closed.
     if (previous !== null && previous.store !== next.store) void close(previous).catch(() => {});
+    sessionRef.current = next;
     setSessionState(next);
-    // Best effort: the next reload asks again.
+    // Best effort: the next reload asks again. Saved only while `next` is still the open session:
+    // a lock or the next sign-in under the round trip has forgotten its keys already.
     unlockKeysOf(next)
-      .then(keys => saveUnlockKeys(keys))
+      .then(keys => (sessionRef.current === next ? saveUnlockKeys(keys) : undefined))
       .catch(() => {});
   }, []);
 
   const lock = useCallback(async () => {
+    sessionRef.current = null;
     setSessionState(null);
     if (session === null) return;
     await close(session);

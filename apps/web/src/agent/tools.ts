@@ -44,6 +44,12 @@ export type AgentPort = {
   readonly removeDraft: (
     draftId: string,
   ) => Promise<DeleteOutcome | { readonly outcome: 'busy' | 'locked' | 'ended' }>;
+  /**
+   * Taken before a tool's first await: whether the session it started in is still open. After a
+   * lock or a sign-in `port()` is the next session's, and its store takes that session's runner
+   * when called, so a continuation must not reach it.
+   */
+  readonly watchSession: () => () => boolean;
 };
 
 export type AgentTool = {
@@ -141,6 +147,10 @@ const fitting = <T>(items: readonly T[], budget: number): readonly T[] => {
   })();
   return items.slice(0, count);
 };
+
+/** What a tool read belongs to a session that has ended, and what it would do next to the session after it. */
+const SESSION_ENDED =
+  'The vault locked before this finished; try again once the user has unlocked it.';
 
 const MOVE_PENDING = 'a move of this conversation is still being confirmed; retry in a moment';
 
@@ -394,6 +404,7 @@ export const buildAgentTools = (port: () => AgentPort): readonly AgentTool[] => 
       body,
       bodyChars,
     }) => {
+      const isCurrent = port().watchSession();
       const depth = body ?? 'none';
       const resolved = ids === undefined ? null : resolve(port().threads, ids);
       const matching =
@@ -407,6 +418,7 @@ export const buildAgentTools = (port: () => AgentPort): readonly AgentTool[] => 
       const threads = await Promise.all(
         page.map(thread => threadOf(port(), thread, { depth, bodyChars: chars })),
       );
+      if (!isCurrent()) return { error: SESSION_ENDED };
       const kept = fitting(threads, OUTPUT_CHARS);
       // Advance by what was returned: `fitting` drops the tail.
       const advanced = offset + kept.length;
@@ -671,10 +683,12 @@ export const buildAgentTools = (port: () => AgentPort): readonly AgentTool[] => 
     ]),
     annotations: write,
     run: async input => {
+      const isCurrent = port().watchSession();
       if (input.target === 'composer') {
         const handle = port().drafts.find(candidate => candidate.draftKey === input.draftKey);
         if (handle === undefined) return { error: `No draft ${input.draftKey} is in this vault.` };
         await port().openDraft(input.draftKey);
+        if (!isCurrent()) return { error: SESSION_ENDED };
         return { ok: true, showing: 'composer', draftId: handle.draftId };
       }
       const thread = threadByHandle(port().threads, input.threadId);
@@ -682,6 +696,8 @@ export const buildAgentTools = (port: () => AgentPort): readonly AgentTool[] => 
         return { error: `No conversation ${input.threadId} is cached on this device.` };
       }
       await port().openThread(thread);
+      // The next session may hold this thread too, and its `markRead` would write over its connections.
+      if (!isCurrent()) return { error: SESSION_ENDED };
       // The page's own effect marks read after it renders; the second write is a no-op.
       if (thread.isUnread && !port().markRead(thread.id)) {
         return { ok: true, showing: 'thread', note: MOVE_PENDING };

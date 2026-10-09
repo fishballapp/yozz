@@ -65,6 +65,7 @@ export const AgentTools = () => {
     openDraft: async draftKey => {
       await navigate({ to: '.', search: withCompose(`draft:${draftKey}`) });
     },
+    watchSession: mail.watchSession,
   };
   // Assigned in render: after `flushSync` passive effects have not run, and the tool reads the port next.
   const portRef = useRef(port);

@@ -33,6 +33,11 @@ export type LiveTask<T> = {
   readonly retry: boolean;
 };
 
+/** `LiveManager.run` for one account, as the mail store hands it out. */
+export type RunOn = (
+  account: InboundAddress,
+) => <T>(task: LiveTask<T>) => Promise<Result<T, MailConnectionFailure>>;
+
 export type LiveManager = {
   readonly run: <T>(
     account: InboundAddress,
