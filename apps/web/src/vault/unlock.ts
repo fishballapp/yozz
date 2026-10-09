@@ -8,7 +8,7 @@ import {
   VaultError,
 } from '@yozz.app/vault';
 import type { UnlockStatusResponse } from '@yozz.app/vault-contract';
-import { type VaultApiClient, VaultApiError, vaultApi } from './api';
+import { type AccountVaultApi, type VaultApiClient, VaultApiError, vaultApi } from './api';
 import {
   addPasskeyAuthenticator as authAddPasskey,
   signInWithPasskey as authSignInPasskey,
@@ -48,9 +48,13 @@ export class UnlockError extends Error {
   }
 }
 
-export type UnlockedVaultSession = {
+/** Who a vault belongs to; every request names `userId`, so the Worker refuses it for anyone else. */
+export type VaultAccount = {
   readonly userId: string;
   readonly email: string;
+};
+
+export type UnlockedVaultSession = VaultAccount & {
   readonly mode: 'password' | 'passkey';
   /** What wraps the DEK on this device; `rewrapDek` needs it to change mode. */
   readonly encKey: CryptoKey;
@@ -59,19 +63,26 @@ export type UnlockedVaultSession = {
   readonly store: RecordStore;
 };
 
-const resolveUser = async (): Promise<{ userId: string; email: string }> => {
-  const session = await getSession();
-  if (!session?.data?.user) {
-    throw new UnlockError('No authenticated Better Auth session found');
-  }
-  return {
-    userId: session.data.user.id,
-    email: session.data.user.email,
-  };
-};
+/** A vault answer that arrived after its session ended; it belongs to that user, so nobody hears it. */
+export type SessionEnded = { readonly outcome: 'ended' };
 
-/** The tail every unlock shares. Opening the store can still refuse (no IndexedDB), so it runs last. */
+const SESSION_ENDED: SessionEnded = { outcome: 'ended' };
+
+/**
+ * The account a sign-in answered for, never the cookie read back afterwards: another tab can sign in
+ * between, and this tab would open its own keys over that account's vault.
+ */
+const accountOf = (user: { readonly id: string; readonly email: string }): VaultAccount => ({
+  userId: user.id,
+  email: user.email,
+});
+
+/**
+ * The tail every unlock shares. Opening the store can still refuse (no IndexedDB), so it runs last.
+ * The store names its account on every request.
+ */
 const openSession = async ({
+  account,
   mode,
   encKey,
   wrappedDek,
@@ -79,6 +90,7 @@ const openSession = async ({
   api,
   idbFactory,
 }: {
+  readonly account: VaultAccount;
   readonly mode: 'password' | 'passkey';
   readonly encKey: CryptoKey;
   readonly wrappedDek: string;
@@ -86,32 +98,46 @@ const openSession = async ({
   readonly api: VaultApiClient;
   readonly idbFactory?: IDBFactory;
 }): Promise<UnlockedVaultSession> => {
-  const { userId, email } = await resolveUser();
-  const store = await createRecordStore({ userId, rawVault: vault, api, idbFactory });
-  return { userId, email, mode, encKey, wrappedDek, vault, store };
+  const store = await createRecordStore({
+    userId: account.userId,
+    rawVault: vault,
+    api: api.forAccount(account.userId),
+    idbFactory,
+  });
+  return { ...account, mode, encKey, wrappedDek, vault, store };
 };
 
+/** `account` is the one the screen showed; the vault is created for it or not at all. */
 export const createPasswordVault = async ({
-  email,
+  account,
   password,
   api = vaultApi,
   idbFactory,
 }: {
-  readonly email: string;
+  readonly account: VaultAccount;
   readonly password: string;
   readonly api?: VaultApiClient;
   readonly idbFactory?: IDBFactory;
 }): Promise<UnlockedVaultSession> => {
   refuseShortPassword(password);
-  await refuseIfAlreadyEnrolled(api);
+  const named = api.forAccount(account.userId);
+  await refuseIfAlreadyEnrolled(named);
 
-  const keys = await deriveAccountKeys({ email, password });
+  const keys = await deriveAccountKeys({ email: account.email, password });
 
   const { vault, wrappedDek } = await createVault(keys);
   // The Worker sets the Better Auth credential inside this call: its `setPassword` is serverOnly.
-  await api.finalizePasswordUnlock({ isNewVault: true, wrappedDek, authValue: keys.authValue });
+  await named.finalizePasswordUnlock({ isNewVault: true, wrappedDek, authValue: keys.authValue });
 
-  return openSession({ mode: 'password', encKey: keys.encKey, wrappedDek, vault, api, idbFactory });
+  return openSession({
+    account,
+    mode: 'password',
+    encKey: keys.encKey,
+    wrappedDek,
+    vault,
+    api,
+    idbFactory,
+  });
 };
 
 export const loginWithPassword = async ({
@@ -131,14 +157,16 @@ export const loginWithPassword = async ({
   if (signinRes.error) {
     throw new UnlockError(signinRes.error.message || 'Password sign-in failed');
   }
+  const account = accountOf(signinRes.data.user);
 
-  const status = await api.getUnlockStatus();
+  const status = await api.forAccount(account.userId).getUnlockStatus();
   if (status.mode !== 'password') {
     throw new UnlockError(`Account is not in password mode, found: ${status.mode}`);
   }
 
   const vault = await openVault(keys, status.wrappedDek);
   return openSession({
+    account,
     mode: 'password',
     encKey: keys.encKey,
     wrappedDek: status.wrappedDek,
@@ -153,7 +181,7 @@ export const loginWithPassword = async ({
  * the server cannot tell a new DEK from a rewrap. This check only gives the message: `isNewVault:
  * true` on the finalisation is the guarantee (a plain INSERT, so one creator commits).
  */
-const refuseIfAlreadyEnrolled = async (api: VaultApiClient): Promise<void> => {
+const refuseIfAlreadyEnrolled = async (api: AccountVaultApi): Promise<void> => {
   const status = await api.getUnlockStatus();
   if (status.mode !== null) {
     throw new UnlockError(
@@ -167,9 +195,19 @@ const refuseIfAlreadyEnrolled = async (api: VaultApiClient): Promise<void> => {
  * Auth rejects only on transport failure, so the resolved `{ error }` is checked too. Takes the
  * passkey row id: `/passkey/delete-passkey` deletes by `field: 'id'`.
  */
-const discardProvisionalPasskey = async (credentialId: string, cause: unknown): Promise<never> => {
-  if (!credentialId) throw cause;
-  const result = await deletePasskeyAuthenticator(credentialId).catch(err => ({ error: err }));
+const discardProvisionalPasskey = async ({
+  userId,
+  passkeyId,
+  cause,
+}: {
+  readonly userId: string;
+  readonly passkeyId: string;
+  readonly cause: unknown;
+}): Promise<never> => {
+  if (!passkeyId) throw cause;
+  const result = await deletePasskeyAuthenticator({ userId, passkeyId }).catch(err => ({
+    error: err,
+  }));
   if ((result as { error?: unknown } | undefined)?.error) {
     throw new PasskeyPrfError(
       `${cause instanceof Error ? cause.message : String(cause)} — and the provisional passkey could not be removed; delete it from your authenticator`,
@@ -208,64 +246,72 @@ const readCeremony = (result: unknown): PasskeyCeremony => {
   return { credentialId, rowId, clientExtensionResults: webauthn.clientExtensionResults };
 };
 
-/**
- * `create()` associates the PRF key but does not reliably return PRF output, so the bytes come from
- * a scoped assertion afterwards, on every hardware. A failure at any step deletes the provisional
- * passkey.
- */
-const enrolPrfPasskey = async (): Promise<{
-  readonly credentialId: string;
-  readonly rowId: string;
-  readonly encKey: CryptoKey;
-}> => {
+/** `create()` associates the PRF key but does not reliably return PRF output; `derivePasskeyKey` gets it. */
+const registerPrfPasskey = async (userId: string): Promise<PasskeyCeremony> => {
   if ((await checkPasskeyPrfCapability()) === 'unsupported') {
     throw new PasskeyPrfError('This browser cannot use the WebAuthn PRF extension');
   }
 
-  const regRes = await authAddPasskey(getPrfEnableInput());
-  // The error union only sometimes carries a `code`; Better Auth's freshness refusal always does.
-  if (regRes.error && 'code' in regRes.error && regRes.error.code === 'SESSION_NOT_FRESH') {
-    throw new VaultApiError('SESSION_NOT_FRESH', regRes.error.message, 403);
+  const regRes = await authAddPasskey({ userId, extensions: getPrfEnableInput() });
+  // The error union only sometimes carries a `code`; the vault's own refusals always do.
+  const code = regRes.error && 'code' in regRes.error ? regRes.error.code : undefined;
+  if (code === 'SESSION_NOT_FRESH' || code === 'ACCOUNT_MISMATCH') {
+    throw new VaultApiError(code, regRes.error?.message ?? code, 403);
   }
   if (regRes.error || !regRes.data) {
     throw new PasskeyPrfError(regRes.error?.message || 'Passkey registration failed');
   }
 
-  const { credentialId, rowId, clientExtensionResults } = readCeremony(regRes);
+  return readCeremony(regRes);
+};
 
+/** From a scoped assertion after `create()`, on every hardware. A failure deletes the provisional passkey. */
+const derivePasskeyKey = async (
+  userId: string,
+  { credentialId, rowId, clientExtensionResults }: PasskeyCeremony,
+): Promise<CryptoKey> => {
   try {
     if (!isPrfEnabled(clientExtensionResults)) {
       throw new PasskeyPrfError('This authenticator cannot use the WebAuthn PRF extension');
     }
-    return {
-      credentialId,
-      rowId,
-      encKey: await derivePasskeyEncKey(await evaluatePrfForCredential(credentialId)),
-    };
+    return await derivePasskeyEncKey(await evaluatePrfForCredential(credentialId));
   } catch (err) {
-    return discardProvisionalPasskey(rowId, err);
+    return discardProvisionalPasskey({ userId, passkeyId: rowId, cause: err });
   }
 };
 
+/** `account` is the one the screen showed; the vault is created for it or not at all. */
 export const createPasskeyVault = async ({
+  account,
   api = vaultApi,
   idbFactory,
 }: {
+  readonly account: VaultAccount;
   readonly api?: VaultApiClient;
   readonly idbFactory?: IDBFactory;
-} = {}): Promise<UnlockedVaultSession> => {
-  await refuseIfAlreadyEnrolled(api);
+}): Promise<UnlockedVaultSession> => {
+  const named = api.forAccount(account.userId);
+  await refuseIfAlreadyEnrolled(named);
 
-  const { credentialId, rowId, encKey } = await enrolPrfPasskey();
+  const passkey = await registerPrfPasskey(account.userId);
+  const encKey = await derivePasskeyKey(account.userId, passkey);
   const { vault, wrappedDek } = await createVault({ encKey });
 
   try {
-    await api.finalizePasskeyUnlock({ isNewVault: true, credentialId, wrappedDek });
+    await named.finalizePasskeyUnlock({
+      isNewVault: true,
+      credentialId: passkey.credentialId,
+      wrappedDek,
+    });
   } catch (err) {
-    return discardProvisionalPasskey(rowId, err);
+    return discardProvisionalPasskey({
+      userId: account.userId,
+      passkeyId: passkey.rowId,
+      cause: err,
+    });
   }
 
-  return openSession({ mode: 'passkey', encKey, wrappedDek, vault, api, idbFactory });
+  return openSession({ account, mode: 'passkey', encKey, wrappedDek, vault, api, idbFactory });
 };
 
 export const PASSKEY_DERIVES_ANOTHER_KEY =
@@ -283,10 +329,11 @@ export const loginWithPasskey = async ({
     throw new PasskeyPrfError(authRes.error?.message || 'Passkey sign-in failed');
   }
 
+  const account = accountOf(authRes.data.user);
   const { credentialId, clientExtensionResults } = readCeremony(authRes);
   const encKey = await derivePasskeyEncKey(extractPrfOutput(clientExtensionResults));
 
-  const wrappedDek = await api.getPasskeyWrap(credentialId);
+  const wrappedDek = await api.forAccount(account.userId).getPasskeyWrap(credentialId);
   const vault = await openVault({ encKey }, wrappedDek).catch((error: unknown) => {
     // The server accepted the passkey, so a wrap that will not open means this device's PRF
     // output differs from the one it was enrolled with: synced passkeys need not agree
@@ -296,82 +343,120 @@ export const loginWithPasskey = async ({
     }
     throw error;
   });
-  return openSession({ mode: 'passkey', encKey, wrappedDek, vault, api, idbFactory });
+  return openSession({
+    account,
+    mode: 'passkey',
+    encKey,
+    wrappedDek,
+    vault,
+    api,
+    idbFactory,
+  });
 };
 
-export const addPasskeyToSession = async ({
-  currentSession,
-  api = vaultApi,
-}: {
+/**
+ * What a change to an open session is handed. `isCurrent` is asked before each step after the
+ * first, so a session the tab closed meanwhile prompts and writes nothing more; every write names
+ * the session's account, so a session another tab replaced is refused by the Worker.
+ */
+type SessionChange = {
   readonly currentSession: UnlockedVaultSession;
+  readonly isCurrent: () => boolean;
   readonly api?: VaultApiClient;
-}): Promise<void> => {
+};
+
+/** Adding a passkey and switching to one are the same writes: register it, then wrap the DEK under it. */
+const wrapUnderNewPasskey = async ({
+  currentSession,
+  isCurrent,
+  api = vaultApi,
+}: SessionChange): Promise<
+  | { readonly outcome: 'wrapped'; readonly encKey: CryptoKey; readonly wrappedDek: string }
+  | SessionEnded
+> => {
+  const { userId } = currentSession;
+  const passkey = await registerPrfPasskey(userId);
+  // An ended session leaves the provisional passkey: what ended it took the cookie that could delete it.
+  if (!isCurrent()) return SESSION_ENDED;
+  const encKey = await derivePasskeyKey(userId, passkey);
+  const wrappedDek = await rewrapDek(currentSession, { encKey }, currentSession.wrappedDek);
+  if (!isCurrent()) return SESSION_ENDED;
+
+  try {
+    await api.forAccount(userId).finalizePasskeyUnlock({
+      isNewVault: false,
+      credentialId: passkey.credentialId,
+      wrappedDek,
+    });
+  } catch (err) {
+    return discardProvisionalPasskey({ userId, passkeyId: passkey.rowId, cause: err });
+  }
+  if (!isCurrent()) return SESSION_ENDED;
+  return { outcome: 'wrapped', encKey, wrappedDek };
+};
+
+export const addPasskeyToSession = async (
+  change: SessionChange,
+): Promise<{ readonly outcome: 'added' } | SessionEnded> => {
   // Not a mode switch: the finalisation sets `unlock_mode = 'passkey'` and deletes the
   // password credential. `switchModeToPasskey` is the deliberate version.
-  if (currentSession.mode !== 'passkey') {
+  if (change.currentSession.mode !== 'passkey') {
     throw new PasskeyPrfError(
       'This account is in password mode; use switchModeToPasskey to change mode, not addPasskeyToSession',
     );
   }
 
-  const { credentialId, rowId, encKey } = await enrolPrfPasskey();
-  const newWrappedDek = await rewrapDek(currentSession, { encKey }, currentSession.wrappedDek);
-
-  try {
-    await api.finalizePasskeyUnlock({ isNewVault: false, credentialId, wrappedDek: newWrappedDek });
-  } catch (err) {
-    return discardProvisionalPasskey(rowId, err);
-  }
+  const wrapped = await wrapUnderNewPasskey(change);
+  return wrapped.outcome === 'ended' ? wrapped : { outcome: 'added' };
 };
+
+/** The session as it opens after the switch, over the same store. */
+type ModeSwitched = { readonly outcome: 'switched'; readonly session: UnlockedVaultSession };
 
 export const switchModeToPassword = async ({
   currentSession,
+  isCurrent,
   password,
-  email = currentSession.email,
   api = vaultApi,
-}: {
-  readonly currentSession: UnlockedVaultSession;
-  readonly password: string;
-  readonly email?: string;
-  readonly api?: VaultApiClient;
-}): Promise<UnlockedVaultSession> => {
+}: SessionChange & { readonly password: string }): Promise<ModeSwitched | SessionEnded> => {
   refuseShortPassword(password);
 
-  const newKeys = await deriveAccountKeys({ email, password });
+  const newKeys = await deriveAccountKeys({ email: currentSession.email, password });
   const newWrappedDek = await rewrapDek(currentSession, newKeys, currentSession.wrappedDek);
+  if (!isCurrent()) return SESSION_ENDED;
 
-  await api.finalizePasswordUnlock({
+  await api.forAccount(currentSession.userId).finalizePasswordUnlock({
     isNewVault: false,
     wrappedDek: newWrappedDek,
     authValue: newKeys.authValue,
   });
+  if (!isCurrent()) return SESSION_ENDED;
 
   return {
-    ...currentSession,
-    email,
-    mode: 'password',
-    encKey: newKeys.encKey,
-    wrappedDek: newWrappedDek,
+    outcome: 'switched',
+    session: {
+      ...currentSession,
+      mode: 'password',
+      encKey: newKeys.encKey,
+      wrappedDek: newWrappedDek,
+    },
   };
 };
 
-export const switchModeToPasskey = async ({
-  currentSession,
-  api = vaultApi,
-}: {
-  readonly currentSession: UnlockedVaultSession;
-  readonly api?: VaultApiClient;
-}): Promise<UnlockedVaultSession> => {
-  const { credentialId, rowId, encKey } = await enrolPrfPasskey();
-  const newWrappedDek = await rewrapDek(currentSession, { encKey }, currentSession.wrappedDek);
-
-  try {
-    await api.finalizePasskeyUnlock({ isNewVault: false, credentialId, wrappedDek: newWrappedDek });
-  } catch (err) {
-    return discardProvisionalPasskey(rowId, err);
-  }
-
-  return { ...currentSession, mode: 'passkey', encKey, wrappedDek: newWrappedDek };
+export const switchModeToPasskey = async (
+  change: SessionChange,
+): Promise<ModeSwitched | SessionEnded> => {
+  const wrapped = await wrapUnderNewPasskey(change);
+  if (wrapped.outcome === 'ended') return wrapped;
+  return {
+    outcome: 'switched',
+    session: {
+      ...change.currentSession,
+      mode: 'passkey',
+      encKey: wrapped.encKey,
+      wrappedDek: wrapped.wrappedDek,
+    },
+  };
 };
 
 /**
@@ -381,6 +466,26 @@ export const switchModeToPasskey = async ({
  */
 export const needsFreshSession = (error: unknown): boolean =>
   error instanceof VaultApiError && error.code === 'SESSION_NOT_FRESH';
+
+const signInAgain = async (
+  { mode, email }: UnlockedVaultSession,
+  password: string | undefined,
+): Promise<VaultAccount> => {
+  if (mode === 'passkey') {
+    const res = await authSignInPasskey();
+    if (res.error || !res.data) {
+      throw new PasskeyPrfError(res.error?.message || 'Passkey sign-in failed');
+    }
+    return accountOf(res.data.user);
+  }
+  if (password === undefined || password === '') {
+    throw new UnlockError('Enter your current password.');
+  }
+  const keys = await deriveAccountKeys({ email, password });
+  const res = await authSignInPassword(email, keys.authValue);
+  if (res.error) throw new UnlockError('That is not the password this vault opens with.');
+  return accountOf(res.data.user);
+};
 
 /**
  * A new sign-in by the vault's own method, which gives the server a fresh session; the keys this
@@ -394,20 +499,7 @@ export const confirmIdentity = async ({
   readonly currentSession: UnlockedVaultSession;
   readonly password?: string;
 }): Promise<void> => {
-  if (currentSession.mode === 'passkey') {
-    const res = await authSignInPasskey();
-    if (res.error || !res.data) {
-      throw new PasskeyPrfError(res.error?.message || 'Passkey sign-in failed');
-    }
-  } else {
-    if (password === undefined || password === '') {
-      throw new UnlockError('Enter your current password.');
-    }
-    const keys = await deriveAccountKeys({ email: currentSession.email, password });
-    const res = await authSignInPassword(currentSession.email, keys.authValue);
-    if (res.error) throw new UnlockError('That is not the password this vault opens with.');
-  }
-  const { userId } = await resolveUser();
+  const { userId } = await signInAgain(currentSession, password);
   if (userId !== currentSession.userId) {
     throw new UnlockError('That signed in to a different account.');
   }
@@ -437,10 +529,15 @@ export const unlockKeysOf = async (
   mode: session.mode,
   encKey: session.encKey,
   wrappedDek: session.wrappedDek,
-  stamp: vaultStamp(await api.getUnlockStatus()),
+  stamp: vaultStamp(await api.forAccount(session.userId).getUnlockStatus()),
 });
 
-/** Reopen with persisted keys if the server still describes the vault they were saved against; stale keys are forgotten. */
+/**
+ * Reopen with persisted keys if the server still describes the vault they were saved against; stale
+ * keys are forgotten. The stamp waits for the session, a round trip of its own, because it is asked
+ * for the account the session names: refused if another sign-in has replaced the cookie since, and
+ * a stamp that could not be read resumes nothing but forgets nothing either.
+ */
 export const resumeSession = async ({
   api = vaultApi,
   idbFactory,
@@ -448,17 +545,17 @@ export const resumeSession = async ({
   readonly api?: VaultApiClient;
   readonly idbFactory?: IDBFactory;
 } = {}): Promise<UnlockedVaultSession | null> => {
-  // Asked together: the stamp needs only the cookie, not the user id. Signed out it is refused,
-  // and a stamp that could not be read resumes nothing but forgets nothing either.
-  const [auth, stamp] = await Promise.all([
-    getSession(),
-    api.getUnlockStatus().then(vaultStamp, () => null),
-  ]);
-  const user = auth?.data?.user;
-  if (!user || stamp === null) return null;
+  const user = (await getSession())?.data?.user;
+  if (!user) return null;
 
-  const keys = await loadUnlockKeys(user.id, idbFactory);
-  if (keys === null) return null;
+  const [stamp, keys] = await Promise.all([
+    api
+      .forAccount(user.id)
+      .getUnlockStatus()
+      .then(vaultStamp, () => null),
+    loadUnlockKeys(user.id, idbFactory),
+  ]);
+  if (stamp === null || keys === null) return null;
 
   if (stamp !== keys.stamp) {
     await forgetUnlockKeys(user.id, idbFactory);
@@ -466,10 +563,18 @@ export const resumeSession = async ({
   }
 
   const vault = await openVault({ encKey: keys.encKey }, keys.wrappedDek);
-  const store = await createRecordStore({ userId: user.id, rawVault: vault, api, idbFactory });
+  const store = await createRecordStore({
+    userId: user.id,
+    rawVault: vault,
+    api: api.forAccount(user.id),
+    idbFactory,
+  });
   return { ...keys, email: user.email, vault, store };
 };
 
-export const resetVaultAccount = async (api: VaultApiClient = vaultApi): Promise<void> => {
-  await api.resetVault();
+export const resetVaultAccount = async (
+  userId: string,
+  api: VaultApiClient = vaultApi,
+): Promise<void> => {
+  await api.forAccount(userId).resetVault();
 };

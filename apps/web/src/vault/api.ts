@@ -1,5 +1,6 @@
 import type { EncryptedRecord } from '@yozz.app/vault';
 import {
+  ACCOUNT_HEADER,
   type ApiErrorCode,
   ApiErrorResponseSchema,
   ListRecordsResponseSchema,
@@ -36,7 +37,8 @@ export type VaultApi = {
   readonly remove: (type: string, id: string, ifRevision?: number) => Promise<void>;
 };
 
-export type VaultApiClient = VaultApi & {
+/** Every request names `account`, which the Worker refuses under any other account's session or none. */
+export type AccountVaultApi = VaultApi & {
   readonly getUnlockStatus: () => Promise<UnlockStatusResponse>;
   readonly getPasskeyWrap: (credentialId: string) => Promise<string>;
   readonly finalizePasswordUnlock: (input: {
@@ -50,6 +52,11 @@ export type VaultApiClient = VaultApi & {
     readonly wrappedDek: string;
   }) => Promise<void>;
   readonly resetVault: () => Promise<void>;
+};
+
+/** Names no account, so all it can do is hand out a client that does. */
+export type VaultApiClient = {
+  readonly forAccount: (userId: string) => AccountVaultApi;
 };
 
 const parseErrorResponse = async (res: Response): Promise<VaultApiError> => {
@@ -67,16 +74,18 @@ const parseErrorResponse = async (res: Response): Promise<VaultApiError> => {
   );
 };
 
-export const createVaultApiClient = (
-  baseUrl = getApiBaseUrl(),
-  customFetch: typeof fetch = fetch,
-): VaultApiClient => {
+const createAccountVaultApi = (
+  baseUrl: string,
+  customFetch: typeof fetch,
+  account: string,
+): AccountVaultApi => {
   const request = async (path: string, init?: RequestInit): Promise<Response> => {
     const url = `${baseUrl.replace(/\/+$/, '')}${path}`;
     const headers = new Headers(init?.headers);
     if (!headers.has('Content-Type') && init?.body) {
       headers.set('Content-Type', 'application/json');
     }
+    headers.set(ACCOUNT_HEADER, account);
 
     try {
       return await customFetch(url, {
@@ -179,7 +188,7 @@ export const createVaultApiClient = (
     return parsed.wrappedDek;
   };
 
-  const finalizePasswordUnlock: VaultApiClient['finalizePasswordUnlock'] = async input => {
+  const finalizePasswordUnlock: AccountVaultApi['finalizePasswordUnlock'] = async input => {
     const res = await request('/api/v1/vault/unlock', {
       method: 'PUT',
       body: JSON.stringify({ mode: 'password', ...input }),
@@ -189,7 +198,7 @@ export const createVaultApiClient = (
     }
   };
 
-  const finalizePasskeyUnlock: VaultApiClient['finalizePasskeyUnlock'] = async input => {
+  const finalizePasskeyUnlock: AccountVaultApi['finalizePasskeyUnlock'] = async input => {
     const res = await request('/api/v1/vault/unlock', {
       method: 'PUT',
       body: JSON.stringify({ mode: 'passkey', ...input }),
@@ -218,5 +227,12 @@ export const createVaultApiClient = (
     resetVault,
   };
 };
+
+export const createVaultApiClient = (
+  baseUrl = getApiBaseUrl(),
+  customFetch: typeof fetch = fetch,
+): VaultApiClient => ({
+  forAccount: userId => createAccountVaultApi(baseUrl, customFetch, userId),
+});
 
 export const vaultApi = createVaultApiClient();

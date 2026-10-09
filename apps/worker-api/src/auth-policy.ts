@@ -1,17 +1,9 @@
 /** Every rule fails closed: a body shape it does not recognise throws rather than falling through. */
+import { ACCOUNT_HEADER } from '@yozz.app/vault-contract';
 import { APIError } from 'better-auth/api';
 import { type CreateAuthOverrides, createAuth } from './auth.ts';
 import { isPasskeyWrapped } from './db/unlock.ts';
 import type { RuntimeEnv } from './env.ts';
-
-/** Each would change a live unlock credential without re-wrapping the DEK, stranding the vault. */
-export const DISABLED_ENDPOINTS: ReadonlySet<string> = new Set([
-  '/change-password',
-  '/request-password-reset',
-  '/reset-password',
-  '/change-email',
-  '/sign-up/email',
-]);
 
 type PolicyContext = {
   readonly env: RuntimeEnv;
@@ -95,6 +87,36 @@ const refuseWrappedPasskeyDeletion = async ({
   }
 };
 
+/**
+ * Whether a request names (`ACCOUNT_HEADER`) the account whose session it carries. The session
+ * cookie belongs to the browser, so another tab's sign-in can replace it under a request one tab
+ * made for its own account; an unnamed request is refused too, which leaves a tab from before the
+ * header nothing to do but fail until it reloads.
+ */
+export const isNamedAccount = (headers: Headers, userId: string): boolean =>
+  headers.get(ACCOUNT_HEADER) === userId;
+
+/** The vault routes ask the same through `requireNamedAccount` in `http.ts`. */
+const requireNamedAccount = async ({
+  env,
+  overrides,
+  headers = new Headers(),
+}: PolicyContext): Promise<void> => {
+  const session = await createAuth(env, overrides).api.getSession({ headers });
+  if (!session) {
+    throw new APIError('UNAUTHORIZED', {
+      message: 'Authentication required',
+      code: 'UNAUTHORIZED',
+    });
+  }
+  if (!isNamedAccount(headers, session.user.id)) {
+    throw new APIError('FORBIDDEN', {
+      message: 'This browser is signed in to another account now',
+      code: 'ACCOUNT_MISMATCH',
+    });
+  }
+};
+
 /** Registration from a session must not mint a second session that outlives the first. */
 const refuseSessionFromRegistration = async ({ body }: PolicyContext): Promise<void> => {
   if ((body as { createSession?: unknown } | undefined)?.createSession !== undefined) {
@@ -119,13 +141,24 @@ const refuseRecoveryOfUnknownEmail = async ({ env, body }: PolicyContext): Promi
   }
 };
 
-/** Anything unlisted passes. */
+/**
+ * Every Better Auth path the app calls, each with what the vault requires of it, run in order. Any
+ * other path is refused: a password change or reset, an email change or signup would each change a
+ * live unlock credential without re-wrapping the DEK, and the rest (`/update-user`,
+ * `/revoke-sessions`, `/list-user-passkeys`, …) would act on whichever account holds the cookie.
+ * Signing in names no account: whoever signs in is the account.
+ */
 export const ENDPOINT_POLICIES: Readonly<
-  Record<string, (context: PolicyContext) => Promise<void>>
+  Record<string, readonly ((context: PolicyContext) => Promise<void>)[]>
 > = {
-  '/sign-in/magic-link': refuseRecoveryOfUnknownEmail,
-  '/sign-in/email': requireActivePasswordMode,
-  '/passkey/verify-authentication': requireActivePasskeyMode,
-  '/passkey/delete-passkey': refuseWrappedPasskeyDeletion,
-  '/passkey/verify-registration': refuseSessionFromRegistration,
+  '/get-session': [],
+  '/sign-in/magic-link': [refuseRecoveryOfUnknownEmail],
+  '/magic-link/verify': [],
+  '/sign-in/email': [requireActivePasswordMode],
+  '/passkey/generate-authenticate-options': [],
+  '/passkey/verify-authentication': [requireActivePasskeyMode],
+  '/passkey/generate-register-options': [requireNamedAccount],
+  '/passkey/verify-registration': [requireNamedAccount, refuseSessionFromRegistration],
+  '/passkey/delete-passkey': [requireNamedAccount, refuseWrappedPasskeyDeletion],
+  '/sign-out': [requireNamedAccount],
 };

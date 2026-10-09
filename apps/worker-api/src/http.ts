@@ -4,6 +4,7 @@ import { bodyLimit } from 'hono/body-limit';
 import { createMiddleware } from 'hono/factory';
 import type { z } from 'zod';
 import { createAuth, SESSION_FRESH_AGE_SECONDS } from './auth.ts';
+import { isNamedAccount } from './auth-policy.ts';
 import type { RuntimeEnv } from './env.ts';
 
 export type AuthSession = NonNullable<
@@ -46,6 +47,17 @@ export const requireSession = createMiddleware<AppEnv>(async (c, next) => {
 
   c.set('user', session.user);
   c.set('session', session.session);
+  return next();
+});
+
+/**
+ * After `requireSession`, on every vault route, before anything is read or written: a request one
+ * tab made for its account can arrive with the session another tab signed in since.
+ */
+export const requireNamedAccount = createMiddleware<AppEnv>(async (c, next) => {
+  if (!isNamedAccount(c.req.raw.headers, c.get('user').id)) {
+    return apiError(c, 403, 'ACCOUNT_MISMATCH', 'This browser is signed in to another account now');
+  }
   return next();
 });
 

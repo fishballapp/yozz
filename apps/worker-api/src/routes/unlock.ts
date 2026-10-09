@@ -19,11 +19,12 @@ import {
   apiError,
   readJsonBody,
   requireFreshSession,
+  requireNamedAccount,
   requireSession,
 } from '../http.ts';
 
 export const unlockRoute = new Hono<AppEnv>()
-  .use('*', requireSession)
+  .use('*', requireSession, requireNamedAccount)
   .get('/unlock', async c => {
     const user = c.get('user');
     const status = await getUnlockStatus(c.env.DB, user.id);

@@ -7,6 +7,7 @@ import { chromium, type Page } from '@playwright/test';
 
 /** The page imports by the paths Vite serves, which TypeScript cannot resolve from here. */
 type UnlockModule = typeof import('../src/vault/unlock');
+type VaultAccount = import('../src/vault/unlock').VaultAccount;
 type AuthModule = typeof import('../src/vault/auth-client');
 type KeysModule = typeof import('../src/vault/unlock-keys');
 const UNLOCK = '/src/vault/unlock.ts' as string;
@@ -54,7 +55,8 @@ const latestMagicLink = (): string => {
   return `${API}/api/auth/magic-link/verify?token=${token}&callbackURL=${encodeURIComponent(`${WEB}/`)}`;
 };
 
-const signUp = async (page: Page, email: string) => {
+/** Resolves to the account the link signed in, which a vault is created for. */
+const signUp = async (page: Page, email: string): Promise<VaultAccount> => {
   await page.goto(`${WEB}/`);
   await page.evaluate(
     async ({ e, AUTH }) => {
@@ -66,6 +68,15 @@ const signUp = async (page: Page, email: string) => {
   );
   await page.goto(latestMagicLink());
   if (!page.url().startsWith(WEB)) fail(`magic link landed on ${page.url()}, want ${WEB}`);
+  return page.evaluate(
+    async ({ AUTH }) => {
+      const auth = (await import(AUTH)) as AuthModule;
+      const { data } = await auth.getSession();
+      if (!data) throw new Error('the magic link signed nobody in');
+      return { userId: data.user.id, email: data.user.email };
+    },
+    { AUTH },
+  );
 };
 
 const RECORD = { type: 'account', naturalKey: 'imap.example.com', plaintext: '{"user":"x"}' };
@@ -89,11 +100,11 @@ const persistedUnlock = async (page: Page, label: string, userId: string) => {
 
   // A reset elsewhere must not be resumable here; only the server's stamp can say so.
   await page.evaluate(
-    async ({ UNLOCK }) => {
+    async ({ UNLOCK, userId }) => {
       const u = (await import(UNLOCK)) as UnlockModule;
-      await u.resetVaultAccount();
+      await u.resetVaultAccount(userId);
     },
-    { UNLOCK },
+    { UNLOCK, userId },
   );
   await page.reload();
   const locked = await page.evaluate(
@@ -114,11 +125,11 @@ const persistedUnlock = async (page: Page, label: string, userId: string) => {
   );
 
   await page.evaluate(
-    async ({ AUTH }) => {
+    async ({ AUTH, userId }) => {
       const auth = (await import(AUTH)) as AuthModule;
-      await auth.signOut();
+      await auth.signOut(userId);
     },
-    { AUTH },
+    { AUTH, userId },
   );
   const signedOut = await page.evaluate(
     async ({ UNLOCK }) => {
@@ -132,16 +143,16 @@ const persistedUnlock = async (page: Page, label: string, userId: string) => {
 
 const passwordMode = async (page: Page) => {
   const email = `drive-pw-${Date.now()}@example.com`;
-  await signUp(page, email);
+  const account = await signUp(page, email);
 
   const created = await page.evaluate(
-    async ({ e, record, UNLOCK }) => {
+    async ({ account, record, UNLOCK }) => {
       const u = (await import(UNLOCK)) as UnlockModule;
-      const s = await u.createPasswordVault({ email: e, password: 'correct horse' });
+      const s = await u.createPasswordVault({ account, password: 'correct horse' });
       await s.store.put(record);
       return { mode: s.mode, got: await s.store.get(record.type, record.naturalKey) };
     },
-    { e: email, record: RECORD, UNLOCK },
+    { account, record: RECORD, UNLOCK },
   );
   assertEqual('password: create, write, read', created, {
     mode: 'password',
@@ -221,16 +232,16 @@ const passkeyMode = async (page: Page) => {
     },
   });
 
-  await signUp(page, `drive-pk-${Date.now()}@example.com`);
+  const account = await signUp(page, `drive-pk-${Date.now()}@example.com`);
 
   const created = await page.evaluate(
-    async ({ record, UNLOCK }) => {
+    async ({ account, record, UNLOCK }) => {
       const u = (await import(UNLOCK)) as UnlockModule;
-      const s = await u.createPasskeyVault();
+      const s = await u.createPasskeyVault({ account });
       await s.store.put(record);
       return { mode: s.mode, got: await s.store.get(record.type, record.naturalKey) };
     },
-    { record: RECORD, UNLOCK },
+    { account, record: RECORD, UNLOCK },
   );
   assertEqual('passkey: enrol (create + PRF assertion), write, read', created, {
     mode: 'passkey',
@@ -276,13 +287,13 @@ const browser = await chromium.launch();
  */
 const staleSession = async (page: Page) => {
   const email = `drive-stale-${Date.now()}@example.com`;
-  await signUp(page, email);
+  const account = await signUp(page, email);
   await page.evaluate(
-    async ({ e, UNLOCK }) => {
+    async ({ account, UNLOCK }) => {
       const u = (await import(UNLOCK)) as UnlockModule;
-      await u.createPasswordVault({ email: e, password: 'correct horse' });
+      await u.createPasswordVault({ account, password: 'correct horse' });
     },
-    { e: email, UNLOCK },
+    { account, UNLOCK },
   );
 
   await page.goto(`${WEB}/login`);

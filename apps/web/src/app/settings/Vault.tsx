@@ -9,6 +9,7 @@ import { Definition, PageSection } from '../../ui/PageColumn';
 import { getApiBaseUrl, isApiConfigured } from '../../vault/api-base-url';
 import { signOut } from '../../vault/auth-client';
 import { checkPasskeyPrfCapability, type PrfCapability } from '../../vault/passkey-prf';
+import type { RecordStore } from '../../vault/record-store';
 import { PASSKEY_OFFER, vaultErrorMessage } from '../../vault/screen-policy';
 import { useVault } from '../../vault/session';
 import {
@@ -24,6 +25,16 @@ import {
 /** Handed whether the session it started in is still open, checked after each of its awaits. */
 type Action = (isCurrent: () => boolean) => Promise<void>;
 
+/**
+ * A change the server refused for want of a fresh session, run again once the person confirms. It
+ * keeps the guard of the session it was refused in, and only that session's screen shows it.
+ */
+type PendingConfirmation = {
+  readonly action: Action;
+  readonly isCurrent: () => boolean;
+  readonly store: RecordStore;
+};
+
 /** One section per thing you might come here to do. */
 export const Vault = () => {
   const navigate = useNavigate();
@@ -38,8 +49,9 @@ export const Vault = () => {
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [addedPasskeyNote, setAddedPasskeyNote] = useState(false);
-  /** A change the server refused for want of a fresh session, run again once the person confirms. */
-  const [awaitingConfirmation, setAwaitingConfirmation] = useState<Action | null>(null);
+  const [awaitingConfirmation, setAwaitingConfirmation] = useState<PendingConfirmation | null>(
+    null,
+  );
   const [currentPassword, setCurrentPassword] = useState('');
 
   useEffect(() => {
@@ -52,29 +64,6 @@ export const Vault = () => {
       }
     })();
   }, [session]);
-
-  /**
-   * An action that outlives its session (a lock, a sign-in as someone else) shows nothing in the
-   * next one, and neither reopens the session it ended with nor locks the one after.
-   */
-  const run = async (action: Action) => {
-    const isCurrent = watchSession();
-    setIsBusy(true);
-    setError(null);
-    try {
-      await action(isCurrent);
-    } catch (err) {
-      if (!isCurrent()) return;
-      // Wrapped: a bare function handed to a setter is called as an updater.
-      if (needsFreshSession(err)) {
-        setAwaitingConfirmation(() => action);
-      } else {
-        setError(vaultErrorMessage(err));
-      }
-    } finally {
-      setIsBusy(false);
-    }
-  };
 
   if (!isApiConfigured()) {
     return (
@@ -119,6 +108,31 @@ export const Vault = () => {
     );
   }
 
+  /**
+   * An action that outlives its session (a lock, a sign-in as someone else) shows nothing in the
+   * next one, and neither reopens the session it ended with nor locks the one after.
+   */
+  const run = async (action: Action, isCurrent = watchSession()) => {
+    setIsBusy(true);
+    setError(null);
+    try {
+      await action(isCurrent);
+    } catch (err) {
+      if (!isCurrent()) return;
+      if (needsFreshSession(err)) {
+        setCurrentPassword('');
+        setAwaitingConfirmation({ action, isCurrent, store: session.store });
+      } else {
+        setError(vaultErrorMessage(err));
+      }
+    } finally {
+      setIsBusy(false);
+    }
+  };
+
+  // A sign-in that replaced this session brings another store: the confirmation is not its to answer.
+  const pending = awaitingConfirmation?.store === session.store ? awaitingConfirmation : null;
+
   const canOfferPasskey = prf !== null && PASSKEY_OFFER[prf].canOffer;
 
   const confirmLabel = (() => {
@@ -128,14 +142,20 @@ export const Vault = () => {
     return session.mode === 'passkey' ? 'Confirm with your passkey' : 'Confirm';
   })();
 
-  const confirmAndRetry = (retry: Action) =>
-    run(async isCurrent => {
+  /** Under the refused session's guard: a confirmation that outlives it signs nobody in and retries nothing. */
+  const confirmAndRetry = ({ action, isCurrent }: PendingConfirmation) => {
+    if (!isCurrent()) {
+      setAwaitingConfirmation(null);
+      return;
+    }
+    return run(async () => {
       await confirmIdentity({ currentSession: session, password: currentPassword });
       if (!isCurrent()) return;
       setAwaitingConfirmation(null);
       setCurrentPassword('');
-      await retry(isCurrent);
-    });
+      await action(isCurrent);
+    }, isCurrent);
+  };
 
   return (
     <>
@@ -145,7 +165,7 @@ export const Vault = () => {
         </p>
       )}
 
-      {awaitingConfirmation !== null && (
+      {pending !== null && (
         <section
           aria-labelledby="vault-confirm-heading"
           className="mb-8 border-y border-rule bg-ink-raised px-4 py-3.5"
@@ -163,7 +183,7 @@ export const Vault = () => {
             className="mt-4 flex flex-wrap items-end gap-2"
             onSubmit={event => {
               event.preventDefault();
-              void confirmAndRetry(awaitingConfirmation);
+              void confirmAndRetry(pending);
             }}
           >
             {session.mode === 'password' && (
@@ -260,13 +280,14 @@ export const Vault = () => {
                           setError('The two passwords do not match.');
                           return;
                         }
-                        const next = await switchModeToPassword({
+                        const switched = await switchModeToPassword({
                           currentSession: session,
+                          isCurrent,
                           password,
                         });
                         // Switched on the server; the next unlock of that vault takes the password.
-                        if (!isCurrent()) return;
-                        setSession(next);
+                        if (switched.outcome === 'ended') return;
+                        setSession(switched.session);
                         setIsSwitchingToPassword(false);
                         setPassword('');
                         setConfirmPassword('');
@@ -305,9 +326,11 @@ export const Vault = () => {
                 disabled={isBusy}
                 onClick={() =>
                   void run(async isCurrent => {
-                    const next = await switchModeToPasskey({ currentSession: session });
-                    if (!isCurrent()) return;
-                    setSession(next);
+                    const switched = await switchModeToPasskey({
+                      currentSession: session,
+                      isCurrent,
+                    });
+                    if (switched.outcome === 'switched') setSession(switched.session);
                   })
                 }
               >
@@ -334,8 +357,8 @@ export const Vault = () => {
               disabled={isBusy}
               onClick={() =>
                 void run(async isCurrent => {
-                  await addPasskeyToSession({ currentSession: session });
-                  if (isCurrent()) setAddedPasskeyNote(true);
+                  const added = await addPasskeyToSession({ currentSession: session, isCurrent });
+                  if (added.outcome === 'added') setAddedPasskeyNote(true);
                 })
               }
             >
@@ -365,10 +388,12 @@ export const Vault = () => {
           busyLabel="Resetting…"
           onConfirm={() =>
             run(async isCurrent => {
-              await resetVaultAccount();
+              await resetVaultAccount(session.userId);
               if (!isCurrent()) return;
-              await lock();
+              // Before the lock's first await: the next session can open while the keys are being
+              // forgotten, and this reset has nowhere to send it.
               void navigate({ to: '/enrol', search: previous => previous });
+              await lock();
             })
           }
         />
@@ -385,7 +410,7 @@ export const Vault = () => {
               setError(null);
               try {
                 // Better Auth reports a refused sign-out as `{ error }`; the local vault is closed either way.
-                const res = await signOut();
+                const res = await signOut(session.userId);
                 if (!isCurrent()) return;
                 if (res.error) {
                   setError(res.error.message || 'Signing out failed.');

@@ -1,3 +1,4 @@
+import { ACCOUNT_HEADER } from '@yozz.app/vault-contract';
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { type CreateAuthOverrides, createAuth } from './auth.ts';
@@ -16,7 +17,7 @@ export const createApp = (overrides?: CreateAuthOverrides) => {
     const corsHandler = cors({
       origin,
       allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-      allowHeaders: ['Content-Type', 'Authorization'],
+      allowHeaders: ['Content-Type', 'Authorization', ACCOUNT_HEADER],
       credentials: true,
     });
     return corsHandler(c, next);

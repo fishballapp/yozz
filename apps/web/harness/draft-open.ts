@@ -6,6 +6,7 @@ import { execFileSync } from 'node:child_process';
 import { chromium, type Page } from '@playwright/test';
 
 type UnlockModule = typeof import('../src/vault/unlock');
+type VaultAccount = import('../src/vault/unlock').VaultAccount;
 type AuthModule = typeof import('../src/vault/auth-client');
 type KeysModule = typeof import('../src/vault/unlock-keys');
 type DraftsModule = typeof import('../src/compose/draft-vault');
@@ -42,7 +43,8 @@ const latestMagicLink = (): string => {
   return `${API}/api/auth/magic-link/verify?token=${token}&callbackURL=${encodeURIComponent(`${WEB}/`)}`;
 };
 
-const signUp = async (page: Page, email: string) => {
+/** Resolves to the account the link signed in, which a vault is created for. */
+const signUp = async (page: Page, email: string): Promise<VaultAccount> => {
   await page.goto(`${WEB}/`);
   await page.evaluate(
     async ({ e, AUTH }) => {
@@ -53,6 +55,15 @@ const signUp = async (page: Page, email: string) => {
     { e: email, AUTH },
   );
   await page.goto(latestMagicLink());
+  return page.evaluate(
+    async ({ AUTH }) => {
+      const auth = (await import(AUTH)) as AuthModule;
+      const { data } = await auth.getSession();
+      if (!data) throw new Error('the magic link signed nobody in');
+      return { userId: data.user.id, email: data.user.email };
+    },
+    { AUTH },
+  );
 };
 
 const run = async () => {
@@ -62,15 +73,15 @@ const run = async () => {
   page.on('pageerror', error => console.log(`  [page error] ${error.message}`));
 
   const email = `draft-open-${Date.now()}@example.com`;
-  await signUp(page, email);
+  const account = await signUp(page, email);
 
   // A draft written the way `save_draft` writes one: straight into the record store.
   const draftKey = await page.evaluate(
-    async ({ e, address, UNLOCK, KEYS, DRAFTS }) => {
+    async ({ account, address, UNLOCK, KEYS, DRAFTS }) => {
       const u = (await import(UNLOCK)) as UnlockModule;
       const k = (await import(KEYS)) as KeysModule;
       const d = (await import(DRAFTS)) as DraftsModule;
-      const s = await u.createPasswordVault({ email: e, password: 'correct horse' });
+      const s = await u.createPasswordVault({ account, password: 'correct horse' });
       await s.store.put({
         type: 'address',
         naturalKey: address,
@@ -109,7 +120,7 @@ const run = async () => {
       await k.saveUnlockKeys(await u.unlockKeysOf(s));
       return { first: outcome.handle.draftKey, second: other.handle.draftKey };
     },
-    { e: email, address: ADDRESS, UNLOCK, KEYS, DRAFTS },
+    { account, address: ADDRESS, UNLOCK, KEYS, DRAFTS },
   );
   console.log(`✓ drafts written to the vault: ${draftKey.first}, ${draftKey.second}`);
 

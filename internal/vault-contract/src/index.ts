@@ -43,6 +43,13 @@ export const WrappedDekSchema = z
   .max(4096)
   .regex(/^[A-Za-z0-9+/=_-]+$/, 'Wrapped DEK must be valid base64/base64url');
 
+/**
+ * Names the account a vault request was made for. The session cookie belongs to the browser, so
+ * another tab's sign-in can replace it under a request one tab began for its own account; a request
+ * that names an account is refused (`ACCOUNT_MISMATCH`) when the session is anyone else's.
+ */
+export const ACCOUNT_HEADER = 'Yozz-Account';
+
 export const ApiErrorCodeSchema = z.enum([
   'UNAUTHORIZED',
   'FORBIDDEN',
@@ -53,6 +60,7 @@ export const ApiErrorCodeSchema = z.enum([
   'INTERNAL_ERROR',
   'INVALID_MODE',
   'SESSION_NOT_FRESH',
+  'ACCOUNT_MISMATCH',
   'UPGRADE_REQUIRED',
   'RATE_LIMITED',
   'UPSTREAM_UNREACHABLE',

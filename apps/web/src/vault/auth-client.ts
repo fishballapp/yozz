@@ -1,8 +1,10 @@
 import { passkeyClient } from '@better-auth/passkey/client';
+import { ACCOUNT_HEADER } from '@yozz.app/vault-contract';
 import { magicLinkClient } from 'better-auth/client/plugins';
 import { createAuthClient } from 'better-auth/react';
 import { getApiBaseUrl } from './api-base-url';
 
+/** Signing in names no account: whoever signs in is the account. */
 const authClient = createAuthClient({
   baseURL: getApiBaseUrl(),
   fetchOptions: {
@@ -10,6 +12,22 @@ const authClient = createAuthClient({
   },
   plugins: [passkeyClient(), magicLinkClient()],
 });
+
+/**
+ * Names `userId` on every request (`ACCOUNT_HEADER`), which the Worker refuses under any other
+ * account's session. A client of its own because the passkey plugin sends call-site options with
+ * the registration it verifies, never with the options it asks for. Inert until something
+ * subscribes to its session, which nothing does.
+ */
+const accountAuthClient = (userId: string) =>
+  createAuthClient({
+    baseURL: getApiBaseUrl(),
+    fetchOptions: {
+      credentials: 'include',
+      headers: { [ACCOUNT_HEADER]: userId },
+    },
+    plugins: [passkeyClient()],
+  });
 
 /**
  * Absolute: Better Auth resolves a relative `callbackURL` against its own base URL, the API.
@@ -48,23 +66,32 @@ export const signInWithPasskey = async (extensions?: AuthenticationExtensionsCli
 };
 
 /** No `name`, or every password manager files the passkey under it. */
-export const addPasskeyAuthenticator = async (
-  extensions?: AuthenticationExtensionsClientInputs,
-) => {
-  return authClient.passkey.addPasskey({
+export const addPasskeyAuthenticator = async ({
+  userId,
+  extensions,
+}: {
+  readonly userId: string;
+  readonly extensions?: AuthenticationExtensionsClientInputs;
+}) => {
+  return accountAuthClient(userId).passkey.addPasskey({
     extensions,
     returnWebAuthnResponse: true,
   });
 };
 
-export const deletePasskeyAuthenticator = async (passkeyId: string) => {
-  return authClient.passkey.deletePasskey({
-    id: passkeyId,
-  });
+export const deletePasskeyAuthenticator = async ({
+  userId,
+  passkeyId,
+}: {
+  readonly userId: string;
+  readonly passkeyId: string;
+}) => {
+  return accountAuthClient(userId).passkey.deletePasskey({ id: passkeyId });
 };
 
-export const signOut = async () => {
-  return authClient.signOut();
+/** Signs `userId` out, and nobody who signed in since. */
+export const signOut = async (userId: string) => {
+  return accountAuthClient(userId).signOut();
 };
 
 export const getSession = async () => {

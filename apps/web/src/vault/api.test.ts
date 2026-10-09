@@ -1,3 +1,4 @@
+import { ACCOUNT_HEADER } from '@yozz.app/vault-contract';
 import { describe, expect, it, vi } from 'vitest';
 import { createVaultApiClient } from './api';
 
@@ -16,7 +17,7 @@ describe('Vault API client', () => {
       ),
     );
 
-    const client = createVaultApiClient('https://api.test', mockFetch);
+    const client = createVaultApiClient('https://api.test', mockFetch).forAccount('user-123');
     const result = await client.get('account', 'acc-1');
 
     expect(result).toEqual({
@@ -40,7 +41,7 @@ describe('Vault API client', () => {
       }),
     );
 
-    const client = createVaultApiClient('https://api.test', mockFetch);
+    const client = createVaultApiClient('https://api.test', mockFetch).forAccount('user-123');
     const result = await client.get('account', 'missing-id');
     expect(result).toBeNull();
   });
@@ -75,7 +76,7 @@ describe('Vault API client', () => {
         }),
       );
 
-    const client = createVaultApiClient('https://api.test', mockFetch);
+    const client = createVaultApiClient('https://api.test', mockFetch).forAccount('user-123');
     const collected: unknown[] = [];
     for await (const record of client.list('account')) {
       collected.push(record);
@@ -103,7 +104,7 @@ describe('Vault API client', () => {
       }),
     );
 
-    const client = createVaultApiClient('https://api.test', mockFetch);
+    const client = createVaultApiClient('https://api.test', mockFetch).forAccount('user-123');
     await client.put(
       {
         id: 'acc-1',
@@ -135,7 +136,7 @@ describe('Vault API client', () => {
       ),
     );
 
-    const client = createVaultApiClient('https://api.test', mockFetch);
+    const client = createVaultApiClient('https://api.test', mockFetch).forAccount('user-123');
     await expect(
       client.put(
         {
@@ -150,5 +151,19 @@ describe('Vault API client', () => {
       code: 'CONFLICT',
       status: 409,
     });
+  });
+
+  it('names its account on every request', async () => {
+    const mockFetch = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>
+      Response.json({ ok: true }),
+    );
+    const client = createVaultApiClient('https://api.test', mockFetch).forAccount('user-123');
+    const sentAccounts = () =>
+      mockFetch.mock.calls.map(([, init]) => new Headers(init?.headers).get(ACCOUNT_HEADER));
+
+    await client.resetVault();
+    await client.remove('account', 'acc-1');
+
+    expect(sentAccounts()).toEqual(['user-123', 'user-123']);
   });
 });

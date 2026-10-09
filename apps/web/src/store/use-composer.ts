@@ -23,6 +23,7 @@ import type { Attachment, ThreadState } from '../threads/thread';
 import { isDemo } from '../ui/chrome';
 import type { RecordStore } from '../vault/record-store';
 import type { useVault } from '../vault/session';
+import type { SessionEnded } from '../vault/unlock';
 
 /**
  * Split from the mailbox half, which hands it the accounts, the live connections and the threads;
@@ -43,9 +44,6 @@ const watchSession = (generation: RefObject<number>) => {
   const taken = generation.current;
   return () => generation.current === taken;
 };
-
-/** A vault answer that arrived after its session ended; it belongs to that user, so nobody hears it. */
-export type SessionEnded = { readonly outcome: 'ended' };
 
 /** A send whose session ended before its claim: nothing was claimed, so nothing went out. */
 const lockedBeforeSend = {

@@ -33,6 +33,8 @@ const API_ERROR_MESSAGES: Record<ApiErrorCode | 'NETWORK_ERROR', string> = {
   INTERNAL_ERROR: 'The server failed on that request. Try again.',
   INVALID_MODE: 'This account is not in that login method.',
   SESSION_NOT_FRESH: 'Sign in again to change how this vault opens.',
+  ACCOUNT_MISMATCH:
+    'This browser signed in to another account since this page opened, so nothing was changed. Sign in again to go on.',
   UPGRADE_REQUIRED: 'A WebSocket connection is required.',
   RATE_LIMITED: 'Too many requests. Please wait a moment and try again.',
   UPSTREAM_UNREACHABLE: 'Could not reach the upstream mail server. Check the host and port.',

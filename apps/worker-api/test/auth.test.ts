@@ -1,5 +1,5 @@
 import { env } from 'cloudflare:test';
-import { WEBAUTHN_TIMEOUT_MS } from '@yozz.app/vault-contract';
+import { ACCOUNT_HEADER, WEBAUTHN_TIMEOUT_MS } from '@yozz.app/vault-contract';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { createApp } from '../src/app.ts';
 import type { EmailSender } from '../src/email.ts';
@@ -10,7 +10,7 @@ describe('Worker auth policies and magic link', () => {
     await applyMigrations(env.DB);
   });
 
-  /** A magic-link sign-in, returning the app and the session cookie it set. */
+  /** A magic-link sign-in, returning the app, the session cookie it set and whose session it is. */
   const signedIn = async (email: string) => {
     let magicUrl = '';
     const app = createApp({
@@ -28,7 +28,11 @@ describe('Worker auth policies and magic link', () => {
       env,
     );
     const verifyRes = await app.request(magicUrl, { method: 'GET' }, env);
-    return { app, cookieHeader: verifyRes.headers.get('set-cookie') ?? '' };
+    const user = await env.DB.prepare('SELECT id FROM "user" WHERE email = ?')
+      .bind(email)
+      .first<{ id: string }>();
+    if (!user) throw new Error(`User not found for ${email}`);
+    return { app, cookieHeader: verifyRes.headers.get('set-cookie') ?? '', userId: user.id };
   };
 
   it('signs up via magic link with test email sender seam', async () => {
@@ -194,11 +198,11 @@ describe('Worker auth policies and magic link', () => {
   });
 
   it('gives every passkey prompt five minutes, and never mints a session from registration', async () => {
-    const { app, cookieHeader } = await signedIn('fresh@example.com');
+    const { app, cookieHeader, userId } = await signedIn('fresh@example.com');
 
     const register = await app.request(
       'http://localhost/api/auth/passkey/generate-register-options',
-      { headers: { Cookie: cookieHeader, Origin: 'https://yozz.app' } },
+      { headers: { Cookie: cookieHeader, Origin: 'https://yozz.app', [ACCOUNT_HEADER]: userId } },
       env,
     );
     expect(register.status).toBe(200);
@@ -227,6 +231,7 @@ describe('Worker auth policies and magic link', () => {
           'Content-Type': 'application/json',
           Cookie: cookieHeader,
           Origin: 'https://yozz.app',
+          [ACCOUNT_HEADER]: userId,
         },
         body: JSON.stringify({ response: {}, createSession: true }),
       },
@@ -240,13 +245,14 @@ describe('Worker auth policies and magic link', () => {
   });
 
   it('refuses a day-old session every change to how the vault opens', async () => {
-    const { app, cookieHeader } = await signedIn('stale@example.com');
+    const { app, cookieHeader, userId } = await signedIn('stale@example.com');
     const twoDaysAgo = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000);
     await env.DB.prepare('UPDATE session SET createdAt = ?').bind(twoDaysAgo.toISOString()).run();
     const headers = {
       'Content-Type': 'application/json',
       Cookie: cookieHeader,
       Origin: 'https://yozz.app',
+      [ACCOUNT_HEADER]: userId,
     };
 
     const register = await app.request(
@@ -353,6 +359,7 @@ describe('Worker auth policies and magic link', () => {
           'Content-Type': 'application/json',
           Cookie: cookieHeader,
           Origin: 'https://yozz.app',
+          [ACCOUNT_HEADER]: user.id,
         },
         body: JSON.stringify({ id: 'pk-wrapped' }),
       },
@@ -371,6 +378,7 @@ describe('Worker auth policies and magic link', () => {
           'Content-Type': 'application/json',
           Cookie: cookieHeader,
           Origin: 'https://yozz.app',
+          [ACCOUNT_HEADER]: user.id,
         },
         body: JSON.stringify({ id: 'pk-unwrapped' }),
       },
@@ -380,29 +388,69 @@ describe('Worker auth policies and magic link', () => {
     expect(resUnwrapped.status).toBe(200);
   });
 
-  it('strictly disables raw password change, password reset, email change, and email signup', async () => {
-    const app = createApp();
+  /**
+   * Every path Better Auth 1.7.5 mounts with these plugins that the app does not call. A password,
+   * email or signup route would change an unlock credential without re-wrapping the DEK; the rest
+   * would act on whichever account holds the cookie.
+   */
+  const UNCALLED_PATHS: readonly (readonly ['GET' | 'POST', string])[] = [
+    ['POST', '/sign-up/email'],
+    ['POST', '/change-password'],
+    ['POST', '/request-password-reset'],
+    ['POST', '/reset-password'],
+    ['GET', '/reset-password/some-token'],
+    ['POST', '/change-email'],
+    ['POST', '/update-user'],
+    ['POST', '/update-session'],
+    ['POST', '/delete-user'],
+    ['GET', '/delete-user/callback'],
+    ['GET', '/list-sessions'],
+    ['POST', '/revoke-session'],
+    ['POST', '/revoke-sessions'],
+    ['POST', '/revoke-other-sessions'],
+    ['GET', '/list-accounts'],
+    ['GET', '/account-info'],
+    ['POST', '/link-social'],
+    ['POST', '/unlink-account'],
+    ['POST', '/refresh-token'],
+    ['POST', '/get-access-token'],
+    ['POST', '/sign-in/social'],
+    ['GET', '/callback/google'],
+    ['POST', '/send-verification-email'],
+    ['GET', '/verify-email'],
+    ['POST', '/verify-password'],
+    ['GET', '/passkey/list-user-passkeys'],
+    ['POST', '/passkey/update-passkey'],
+    ['GET', '/ok'],
+    ['GET', '/error'],
+  ];
 
-    const disabledPaths = [
-      '/api/auth/change-password',
-      '/api/auth/reset-password',
-      '/api/auth/request-password-reset',
-      '/api/auth/change-email',
-      '/api/auth/sign-up/email',
-    ];
+  it.each(UNCALLED_PATHS)('refuses %s %s, which the app never calls', async (method, path) => {
+    const { app, cookieHeader, userId } = await signedIn('uncalled@example.com');
+    const before = await env.DB.prepare('SELECT * FROM "user" WHERE id = ?').bind(userId).first();
 
-    for (const path of disabledPaths) {
-      const res = await app.request(
-        `http://localhost${path}`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', Origin: 'https://yozz.app' },
-          body: JSON.stringify({ email: 'test@example.com' }),
+    const res = await app.request(
+      `http://localhost/api/auth${path}`,
+      {
+        method,
+        headers: {
+          'Content-Type': 'application/json',
+          Cookie: cookieHeader,
+          Origin: 'https://yozz.app',
+          [ACCOUNT_HEADER]: userId,
         },
-        env,
-      );
-      expect([403, 404]).toContain(res.status);
-    }
+        ...(method === 'POST'
+          ? { body: JSON.stringify({ name: 'Renamed', email: 'other@example.com' }) }
+          : {}),
+      },
+      env,
+    );
+
+    expect(res.status).toBe(403);
+    expect(await res.json()).toMatchObject({ code: 'FORBIDDEN' });
+    expect(await env.DB.prepare('SELECT * FROM "user" WHERE id = ?').bind(userId).first()).toEqual(
+      before,
+    );
   });
 
   it('failure responses never echo magic tokens, passwords, or ciphertext', async () => {

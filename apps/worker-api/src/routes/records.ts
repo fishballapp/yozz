@@ -16,7 +16,13 @@ import {
   RecordConflictError,
   RecordStaleError,
 } from '../db/records.ts';
-import { type AppEnv, apiError, readJsonBody, requireSession } from '../http.ts';
+import {
+  type AppEnv,
+  apiError,
+  readJsonBody,
+  requireNamedAccount,
+  requireSession,
+} from '../http.ts';
 
 const RecordKeySchema = z.object({ type: RecordTypeSchema, id: BlindRecordIdSchema });
 
@@ -31,7 +37,7 @@ const readRecordKey = (c: Context<AppEnv>) => {
 };
 
 export const recordsRoute = new Hono<AppEnv>()
-  .use('*', requireSession)
+  .use('*', requireSession, requireNamedAccount)
   .get('/:type/:id', async c => {
     const key = readRecordKey(c);
     if (!key.success) return key.response;

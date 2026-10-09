@@ -1,4 +1,5 @@
 import { env } from 'cloudflare:test';
+import { ACCOUNT_HEADER } from '@yozz.app/vault-contract';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { createApp } from '../src/app.ts';
 import { applyMigrations } from './apply-migrations.ts';
@@ -43,6 +44,7 @@ describe('Worker unlock and finalisation routes', () => {
         'Content-Type': 'application/json',
         Cookie: cookieHeader,
         Origin: 'https://yozz.app',
+        [ACCOUNT_HEADER]: user.id,
       },
     };
   };

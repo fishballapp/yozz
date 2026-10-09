@@ -4,7 +4,7 @@ import { betterAuth } from 'better-auth';
 import { APIError, createAuthMiddleware } from 'better-auth/api';
 import { magicLink } from 'better-auth/plugins';
 import { withCloudflare } from 'better-auth-cloudflare';
-import { DISABLED_ENDPOINTS, ENDPOINT_POLICIES } from './auth-policy.ts';
+import { ENDPOINT_POLICIES } from './auth-policy.ts';
 import { consoleEmailSender, createProductionEmailSender, type EmailSender } from './email.ts';
 
 import { getBaseUrl, getWebOrigin, type RuntimeEnv } from './env.ts';
@@ -65,18 +65,19 @@ export const createAuth = (
         session: { freshAge: SESSION_FRESH_AGE_SECONDS },
         hooks: {
           before: createAuthMiddleware(async ctx => {
-            if (DISABLED_ENDPOINTS.has(ctx.path)) {
+            const policies = ENDPOINT_POLICIES[ctx.path];
+            if (policies === undefined) {
+              // Only a call over HTTP carries a request; one without is this Worker's own route
+              // calling `auth.api` (`setPassword`, which has no path of its own).
+              if (ctx.request === undefined) return;
               throw new APIError('FORBIDDEN', {
                 message: 'Endpoint is disabled',
                 code: 'FORBIDDEN',
               });
             }
-            await ENDPOINT_POLICIES[ctx.path]?.({
-              env,
-              overrides,
-              body: ctx.body,
-              headers: ctx.headers,
-            });
+            for (const policy of policies) {
+              await policy({ env, overrides, body: ctx.body, headers: ctx.headers });
+            }
           }),
           after: createAuthMiddleware(async ctx => {
             const options = ctx.context.returned;

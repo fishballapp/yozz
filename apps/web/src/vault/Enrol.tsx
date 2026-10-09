@@ -15,12 +15,18 @@ import {
   MIN_PASSWORD_LENGTH,
   resetVaultAccount,
   UnlockError,
+  type VaultAccount,
 } from './unlock';
 
+/** `account` is the sign-in this screen found; what it creates or resets is that account's. */
 type EnrolStep =
   | { readonly step: 'checking' }
-  | { readonly step: 'reset'; readonly mode: 'password' | 'passkey' }
-  | { readonly step: 'choose'; readonly prf: PrfCapability };
+  | {
+      readonly step: 'reset';
+      readonly account: VaultAccount;
+      readonly mode: 'password' | 'passkey';
+    }
+  | { readonly step: 'choose'; readonly account: VaultAccount; readonly prf: PrfCapability };
 
 export const Enrol = () => {
   const navigate = useNavigate();
@@ -28,7 +34,6 @@ export const Enrol = () => {
   const { setSession, lock } = useVault();
 
   const [enrolStep, setEnrolStep] = useState<EnrolStep>({ step: 'checking' });
-  const [email, setEmail] = useState<string | null>(null);
   const [busyKind, setBusyKind] = useState<'passkey' | 'password' | 'reset' | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [errorPanel, setErrorPanel] = useState<'passkey' | 'password' | 'reset' | null>(null);
@@ -53,20 +58,20 @@ export const Enrol = () => {
           void navigate({ to: '/welcome', search: previous => previous, replace: true });
           return;
         }
-        setEmail(session.data.user.email);
+        const account = { userId: session.data.user.id, email: session.data.user.email };
 
-        const status = await vaultApi.getUnlockStatus();
+        const status = await vaultApi.forAccount(account.userId).getUnlockStatus();
         if (status.mode !== null && reset !== '1') {
           void navigate({ to: '/login', search: previous => previous, replace: true });
           return;
         }
         if (status.mode !== null && reset === '1') {
-          setEnrolStep({ step: 'reset', mode: status.mode });
+          setEnrolStep({ step: 'reset', account, mode: status.mode });
           return;
         }
 
         const prf = await checkPasskeyPrfCapability();
-        setEnrolStep({ step: 'choose', prf });
+        setEnrolStep({ step: 'choose', account, prf });
       } catch (err) {
         setError(vaultErrorMessage(err));
         setErrorPanel('reset');
@@ -161,10 +166,10 @@ export const Enrol = () => {
               setError(null);
               setErrorExtra(null);
               try {
-                await resetVaultAccount();
+                await resetVaultAccount(enrolStep.account.userId);
                 await lock();
                 const prf = await checkPasskeyPrfCapability();
-                setEnrolStep({ step: 'choose', prf });
+                setEnrolStep({ step: 'choose', account: enrolStep.account, prf });
               } catch (err) {
                 setError(vaultErrorMessage(err));
                 setErrorPanel('reset');
@@ -181,7 +186,7 @@ export const Enrol = () => {
     );
   }
 
-  const { prf } = enrolStep;
+  const { account, prf } = enrolStep;
   const canOfferPasskey = PASSKEY_OFFER[prf].canOffer;
 
   return (
@@ -220,7 +225,7 @@ export const Enrol = () => {
                 setError(null);
                 setErrorExtra(null);
                 try {
-                  const session = await createPasskeyVault();
+                  const session = await createPasskeyVault({ account });
                   setSession(session);
                   void navigate({
                     to: '/m/$mailbox',
@@ -283,7 +288,7 @@ export const Enrol = () => {
         </FieldRow>
         <Button
           variant="secondary"
-          disabled={isBusy || email === null}
+          disabled={isBusy}
           onClick={() => {
             void (async () => {
               setBusyKind('password');
@@ -300,8 +305,7 @@ export const Enrol = () => {
                   setErrorPanel('password');
                   return;
                 }
-                if (email === null) return;
-                const session = await createPasswordVault({ email, password });
+                const session = await createPasswordVault({ account, password });
                 setSession(session);
                 void navigate({
                   to: '/m/$mailbox',
