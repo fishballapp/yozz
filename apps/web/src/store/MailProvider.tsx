@@ -133,34 +133,100 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
   const hydratedRef = useRef<Set<string>>(new Set());
   const sessionGeneration = useRef(0);
 
-  const putAddress = useCallback(
+  /**
+   * Removals from the moment the vault delete is sent until their teardown ends. Adding the address
+   * back waits for one: a PUT that overtook the delete would be erased by it, and a teardown that
+   * outlived the PUT would clear the new address's cache.
+   */
+  const removalsRef = useRef<Map<string, Promise<void>>>(new Map());
+
+  const storeAddress = useCallback(
     async (record: AddressRecord) => {
-      if (!isDemo()) {
-        // Unreachable while locked; refuse rather than hold an address that looks stored and is not.
-        if (session === null) throw new Error('The vault is locked; nothing can be stored.');
-        await session.store.put({
-          type: ADDRESS_RECORD_TYPE,
-          naturalKey: record.address,
-          plaintext: JSON.stringify(record),
-        });
-      }
-      setRecords(current => upsertRecord(current, record));
+      if (isDemo()) return;
+      // Unreachable while locked; refuse rather than hold an address that looks stored and is not.
+      if (session === null) throw new Error('The vault is locked; nothing can be stored.');
+      await session.store.put({
+        type: ADDRESS_RECORD_TYPE,
+        naturalKey: record.address,
+        plaintext: JSON.stringify(record),
+      });
     },
     [session],
   );
 
+  /** Stored before it shows: an inbound address starts syncing the moment it renders. */
+  const putAddress = useCallback(
+    async (record: AddressRecord) => {
+      const generation = sessionGeneration.current;
+      await removalsRef.current.get(record.address);
+      if (generation !== sessionGeneration.current) {
+        throw new Error('The vault was locked; nothing was stored.');
+      }
+      await storeAddress(record);
+      setRecords(current => upsertRecord(current, record));
+    },
+    [storeAddress],
+  );
+
+  /**
+   * The vault delete is the commit point and nothing changes before it, so a refusal leaves the
+   * address as it was. After it the address and its mail leave the screen, and the slow half runs
+   * off the button: the connection closes, a sync still running finishes without writing
+   * (`isStale`), the cache is cleared, and only then does the sync and live state those two still
+   * report go.
+   */
   const removeAddress = useCallback(
     async (address: string) => {
       if (!isDemo()) {
         if (session === null) throw new Error('The vault is locked; nothing can be removed.');
-        await session.store.remove(ADDRESS_RECORD_TYPE, address);
-        hydratedRef.current.delete(address);
-        await liveManagerRef.current?.close(address);
-        // An in-flight sync of this account sees `isStale` and skips its cache write, so the clear lands last.
-        await syncRunsRef.current.get(address)?.promise;
-        const { createMailCache } = await import('../threads/cache');
-        await createMailCache(session.userId, address).clear();
+        const generation = sessionGeneration.current;
+        const { store, userId } = session;
+        const removal = Promise.withResolvers<void>();
+        removalsRef.current.set(address, removal.promise);
+        const settle = () => {
+          // A later session's removal of the same address may hold the slot by now.
+          if (removalsRef.current.get(address) === removal.promise) {
+            removalsRef.current.delete(address);
+          }
+          removal.resolve();
+        };
+        try {
+          await store.remove(ADDRESS_RECORD_TYPE, address);
+        } catch (err) {
+          settle();
+          throw err;
+        }
+        // A session that ended meanwhile tore its own mail down and cleared this user's whole cache.
+        if (generation !== sessionGeneration.current) {
+          settle();
+          return;
+        }
+        // Read at the commit, while they still belong to this session.
+        const manager = liveManagerRef.current;
+        const running = syncRunsRef.current.get(address)?.promise;
+        void (async () => {
+          await manager?.close(address);
+          await running;
+          const { createMailCache } = await import('../threads/cache');
+          // A clear that fails is finished by the lock's, which empties every account of this user.
+          await createMailCache(userId, address)
+            .clear()
+            .catch(() => {});
+          // The next session's state for an address of the same name is not this removal's to drop.
+          if (generation !== sessionGeneration.current) return;
+          setSyncStates(current => {
+            const { [address]: _, ...rest } = current;
+            return rest;
+          });
+          setLiveStates(current => {
+            const { [address]: _, ...rest } = current;
+            return rest;
+          });
+        })().finally(settle);
       }
+      // `isStale` reads the ref, so a sync of this address stops writing now, not at the next render.
+      accountsRef.current = accountsRef.current.filter(account => account.address !== address);
+      hydratedRef.current.delete(address);
       setRecords(current => current.filter(record => record.address !== address));
       setBaseByAccount(current => {
         const { [address]: _, ...rest } = current;
@@ -171,28 +237,27 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
       // later be shown for a different message.
       setBodiesById({});
       setPreviews(current => withoutAccountPreviews(current, address));
-      setSyncStates(current => {
-        const { [address]: _, ...rest } = current;
-        return rest;
-      });
-      setLiveStates(current => {
-        const { [address]: _, ...rest } = current;
-        return rest;
-      });
     },
     [session],
   );
 
+  /** A name touches no connection, so it shows before the vault has it. */
   const setSenderName = useCallback(
     async (address: string, senderName: string) => {
-      const current = records.find(record => record.address === address);
-      if (current === undefined) return;
-      const { senderName: _, ...rest } = current;
-      await putAddress(
-        senderName.trim() === '' ? rest : { ...rest, senderName: senderName.trim() },
-      );
+      const previous = records.find(record => record.address === address);
+      if (previous === undefined) return;
+      const { senderName: _, ...rest } = previous;
+      const renamed = senderName.trim() === '' ? rest : { ...rest, senderName: senderName.trim() };
+      setRecords(current => current.map(record => (record === previous ? renamed : record)));
+      try {
+        await storeAddress(renamed);
+      } catch (err) {
+        // By identity, so a refusal never undoes a later rename that has already replaced this one.
+        setRecords(current => current.map(record => (record === renamed ? previous : record)));
+        throw err;
+      }
     },
-    [putAddress, records],
+    [records, storeAddress],
   );
 
   const runOn = useCallback(
@@ -379,9 +444,12 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
       if (cancelled) return;
       liveManagerRef.current = createLiveManager({
         connect: connectImap,
-        onState: (address, state) => setLiveStates(current => ({ ...current, [address]: state })),
+        // A connection of an ended session still reports its close; the next session's are not its to set.
+        onState: (address, state) => {
+          if (!cancelled) setLiveStates(current => ({ ...current, [address]: state }));
+        },
         onMailboxChanged: address => {
-          void syncRef.current(address);
+          if (!cancelled) void syncRef.current(address);
         },
         // A tab unlocked in the background must not hold connections open for ever.
         visible: !document.hidden,

@@ -2,7 +2,7 @@ import { cn } from '@fishballapps/cn';
 import { CaretLeftIcon } from '@phosphor-icons/react';
 import { Link, useNavigate, useParams } from '@tanstack/react-router';
 import { useEffect, useState } from 'react';
-import { isInbound } from '../../addresses/record';
+import { type AddressRecord, isInbound } from '../../addresses/record';
 import { keepCompose } from '../../compose/intent';
 import { useMail } from '../../store/MailProvider';
 import { Button, buttonClass } from '../../ui/Button';
@@ -20,7 +20,9 @@ export const Address = () => {
   const { address } = useParams({ from: '/_app/settings/a/$address' });
   const navigate = useNavigate();
   const { identities, removeAddress, setSenderName } = useMail();
-  const record = identities.find(candidate => candidate.address === address);
+  /** The store drops an address the moment the vault deletes it; the page holds it until it has left. */
+  const [removing, setRemoving] = useState<AddressRecord>();
+  const record = identities.find(candidate => candidate.address === address) ?? removing;
 
   const [error, setError] = useState<string | null>(null);
   const storedSenderName = record?.senderName ?? '';
@@ -151,7 +153,13 @@ export const Address = () => {
           busyLabel="Removing…"
           onConfirm={() =>
             run(async () => {
-              await removeAddress(record.address);
+              setRemoving(record);
+              try {
+                await removeAddress(record.address);
+              } catch (err) {
+                setRemoving(undefined);
+                throw err;
+              }
               await navigate({ to: '/settings', search: previous => previous });
             })
           }
