@@ -363,12 +363,13 @@ export const prefetchBodies = (
     void (async () => {
       const mark = await folderCache.getSync();
       if (mark === null) return;
+      const cachedUids = await folderCache.listBodyUids();
       // Newest first, counting only what is eligible.
       let queued = 0;
       for (const summary of summaries.toSorted((a, b) => b.uid - a.uid)) {
         if (queued >= perFolder || isStale()) return;
         if (summary.size === null || summary.size > ceilingBytes) continue;
-        if ((await folderCache.getBody(summary.uid)) !== null) continue;
+        if (cachedUids.has(summary.uid)) continue;
         queued += 1;
         void run({
           priority: 'background',

@@ -94,9 +94,10 @@ const fakeCache = (seed: Partial<Record<Folder, Seed>> = {}) => {
       deleteSummaries: async (uids: readonly number[]) => {
         state[folder].summaries = state[folder].summaries.filter(x => !uids.includes(x.uid));
       },
-      // The double only answers "is a body cached".
       getBody: async (uid: number) =>
         (state[folder].bodies.get(uid) as FetchedBody | undefined) ?? null,
+      // The double only answers "is a body cached".
+      listBodyUids: async () => new Set(state[folder].bodies.keys()),
       listPreviews: async () =>
         [...state[folder].bodies].map(([uid, body]) => ({
           uid,

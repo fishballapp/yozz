@@ -26,6 +26,7 @@ import {
   withBodies,
   withoutAccountPreviews,
 } from '../threads/body-state';
+import { clearCachedFrames } from '../threads/frame-cache';
 import {
   applyOps,
   assertSameUidValidity,
@@ -411,6 +412,7 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
       inFlightOlderRef.current.clear();
       inFlightBodiesRef.current.clear();
       hydratedRef.current.clear();
+      clearCachedFrames();
       const manager = liveManagerRef.current;
       liveManagerRef.current = null;
       void (async () => {
@@ -724,7 +726,6 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
 
       const setEntry = (entry: BodyEntry) =>
         setBodiesById(current => ({ ...current, [messageId]: entry }));
-      setEntry({ status: 'loading' });
       const generation = sessionGeneration.current;
       const promise = (async (): Promise<BodyOutcome> => {
         try {
@@ -734,7 +735,10 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
           ]);
           const cache = createMailCache(userId, accountAddress).folder(folder);
           const cached = await cache.getBody(uid);
+          if (generation !== sessionGeneration.current) return failed;
           const fetchFresh = async () => {
+            // Only the network says "Loading…": a body on the device replaces `pending` directly.
+            setEntry({ status: 'loading' });
             const mark = await cache.getSync();
             if (mark === null) throw new Error(`${folder} has not synced`);
             // Same guard as the writes: a stale uid would fetch whatever now holds that number.

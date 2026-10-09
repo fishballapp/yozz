@@ -2,6 +2,7 @@
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { clearCachedFrames } from './frame-cache';
 import { HtmlBody } from './HtmlBody';
 
 vi.mock('./html', async importOriginal => {
@@ -233,5 +234,24 @@ describe('HtmlBody remote-image consent', () => {
 
     expect(container.textContent).toContain('Some inline images were blocked.');
     container.remove();
+  });
+  it('reopens a message on the frame it first built, without the consent given to it', async () => {
+    const html = '<p>kept</p><img src="https://cdn.example/kept.png">';
+    const first = await mountWithheld(html);
+    const withheld = first.srcdoc();
+    await act(async () => first.container.querySelector('button')?.click());
+    expect(first.srcdoc()).toContain('https://cdn.example/kept.png');
+    await act(async () => roots.pop()?.unmount());
+    first.container.remove();
+
+    const reopened = await mountWithheld(html);
+    // Byte-identical, nonce included: the sanitiser did not run again.
+    expect(reopened.srcdoc()).toBe(withheld);
+    reopened.container.remove();
+
+    clearCachedFrames();
+    const afterLock = await mountWithheld(html);
+    expect(afterLock.srcdoc()).not.toBe(withheld);
+    afterLock.container.remove();
   });
 });

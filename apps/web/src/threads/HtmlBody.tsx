@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { Button } from '../ui/Button';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
 import { useChromePref } from '../ui/chrome';
+import { cachedFrameOf } from './frame-cache';
 import { buildMailFrame } from './html';
 
 /** What the script inside the frame posts. Anything else on the channel is ignored. */
@@ -46,7 +47,10 @@ export const HtmlBody = ({
   const frameRef = useRef<HTMLIFrameElement>(null);
   const frame = useMemo(() => {
     try {
-      return buildMailFrame(html, { allowRemoteImages: isRemoteAllowed });
+      // Only the withheld frame is kept, so a reopened message never inherits a consent.
+      return isRemoteAllowed
+        ? buildMailFrame(html, { allowRemoteImages: true })
+        : cachedFrameOf(html, () => buildMailFrame(html, { allowRemoteImages: false }));
     } catch {
       return null;
     }

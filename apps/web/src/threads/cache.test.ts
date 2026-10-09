@@ -73,4 +73,36 @@ describe('mail cache', () => {
     expect(await mine.getSync()).toBeNull();
     expect((await theirs.listSummaries()).map(s => s.uid)).toEqual([1]);
   });
+
+  it("lists a folder's cached body uids", async () => {
+    const idb = new IDBFactory();
+    const account = createMailCache('u1', 'me@x', idb);
+    const inbox = account.folder('inbox');
+    const body = {
+      paragraphs: ['hi'],
+      hasTextPart: true,
+      inlineImagesTruncated: false,
+      attachments: [],
+    };
+    expect(await inbox.listBodyUids()).toEqual(new Set());
+    await inbox.putBody(10, body);
+    await inbox.putBody(20, body);
+    await account.folder('sent').putBody(30, body);
+    await createMailCache('u1', 'other@x', idb).folder('inbox').putBody(40, body);
+    expect(await inbox.listBodyUids()).toEqual(new Set([10, 20]));
+  });
+
+  it('holds one connection that steps aside for a deletion elsewhere, then reopens', async () => {
+    const idb = new IDBFactory();
+    const inbox = createMailCache('u1', 'me@x', idb).folder('inbox');
+    await inbox.putSync({ name: 'INBOX', uidValidity: 1, lastUid: 1, complete: false });
+    // A connection still open would block this delete rather than fail it.
+    await new Promise<void>((resolve, reject) => {
+      const req = idb.deleteDatabase('yozz-device-state');
+      req.onsuccess = () => resolve();
+      req.onerror = () => reject(req.error);
+      req.onblocked = () => reject(new Error('blocked by an open connection'));
+    });
+    expect(await inbox.getSync()).toBeNull();
+  });
 });

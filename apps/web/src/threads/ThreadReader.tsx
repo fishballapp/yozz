@@ -301,7 +301,9 @@ const MessageBody = ({
   onRetry: () => void;
 }) => {
   switch (message.bodyStatus) {
+    // Not yet read from the device: a cached body lands within a frame or two, so nothing flashes.
     case 'pending':
+      return null;
     case 'loading':
       return <p className="text-paper-dim">Loading…</p>;
     case 'failed':

@@ -39,19 +39,42 @@ const MAIL_STORES = [
 
 type StoreName = (typeof STORES)[keyof typeof STORES]['name'];
 
+/**
+ * One connection per factory, held for the tab's life like the revision marks' handle: a body open
+ * or a sync touches the cache a dozen times. `openDeviceDb` closes it on `versionchange` (an
+ * upgrade or deletion elsewhere), and the next call opens a fresh one.
+ */
+const connections = new WeakMap<IDBFactory, Promise<IDBDatabase>>();
+
+const deviceDbOf = (idbFactory?: IDBFactory): Promise<IDBDatabase> => {
+  const factory = getIdbFactory(idbFactory);
+  const open = connections.get(factory);
+  if (open !== undefined) return open;
+  const forget = () => {
+    if (connections.get(factory) === opening) connections.delete(factory);
+  };
+  const opening = (async () => {
+    try {
+      const db = await openDeviceDb(factory);
+      db.addEventListener('versionchange', forget);
+      // The browser closed it (site data cleared).
+      db.addEventListener('close', forget);
+      return db;
+    } catch (err) {
+      forget();
+      throw err;
+    }
+  })();
+  connections.set(factory, opening);
+  return opening;
+};
+
 const withDb = async <T>(
   storeName: StoreName,
   mode: IDBTransactionMode,
   body: (store: IDBObjectStore, done: (value: T) => void) => void,
   idbFactory?: IDBFactory,
-): Promise<T> => {
-  const db = await openDeviceDb(getIdbFactory(idbFactory));
-  try {
-    return await runTransaction<T>(db, storeName, mode, body);
-  } finally {
-    db.close();
-  }
-};
+): Promise<T> => runTransaction<T>(await deviceDbOf(idbFactory), storeName, mode, body);
 
 const folderRange = ({ userId, account, folder }: Scope) =>
   IDBKeyRange.bound(
@@ -147,6 +170,19 @@ const createFolderCache = (scope: Scope, idbFactory?: IDBFactory) => {
         idbFactory,
       ),
 
+    /** The uids of every cached body in the folder, reading keys only. */
+    listBodyUids: () =>
+      withDb<ReadonlySet<number>>(
+        STORES.mailBodies.name,
+        'readonly',
+        (store, done) => {
+          const req = store.getAllKeys(folderRange(scope));
+          req.onsuccess = () =>
+            done(new Set((req.result as [string, string, Folder, number][]).map(key => key[3])));
+        },
+        idbFactory,
+      ),
+
     /** The text of every cached body in the folder, without the bodies themselves. */
     listPreviews: () =>
       withDb<readonly { readonly uid: number; readonly paragraphs: readonly string[] }[]>(
@@ -162,19 +198,15 @@ const createFolderCache = (scope: Scope, idbFactory?: IDBFactory) => {
 
     /** The body and its preview row in one transaction, so neither exists without the other. */
     putBody: async (uid: number, body: FetchedBody) => {
-      const db = await openDeviceDb(getIdbFactory(idbFactory));
-      try {
-        await runStoresTransaction(db, [STORES.mailBodies.name, STORES.mailPreviews.name], tx => {
-          tx.objectStore(STORES.mailBodies.name).put({ ...scope, uid, body } satisfies BodyRow);
-          tx.objectStore(STORES.mailPreviews.name).put({
-            ...scope,
-            uid,
-            paragraphs: body.paragraphs,
-          } satisfies PreviewRow);
-        });
-      } finally {
-        db.close();
-      }
+      const db = await deviceDbOf(idbFactory);
+      await runStoresTransaction(db, [STORES.mailBodies.name, STORES.mailPreviews.name], tx => {
+        tx.objectStore(STORES.mailBodies.name).put({ ...scope, uid, body } satisfies BodyRow);
+        tx.objectStore(STORES.mailPreviews.name).put({
+          ...scope,
+          uid,
+          paragraphs: body.paragraphs,
+        } satisfies PreviewRow);
+      });
     },
   };
 };
@@ -187,16 +219,12 @@ export const createMailCache = (userId: string, account: string, idbFactory?: ID
 
   /** Every store in one transaction, or a reused uid could resolve to a stale body. */
   clear: async () => {
-    const db = await openDeviceDb(getIdbFactory(idbFactory));
-    try {
-      await runStoresTransaction(db, MAIL_STORES, tx => {
-        for (const name of MAIL_STORES) {
-          tx.objectStore(name).delete(accountRange(userId, account));
-        }
-      });
-    } finally {
-      db.close();
-    }
+    const db = await deviceDbOf(idbFactory);
+    await runStoresTransaction(db, MAIL_STORES, tx => {
+      for (const name of MAIL_STORES) {
+        tx.objectStore(name).delete(accountRange(userId, account));
+      }
+    });
   },
 });
 
@@ -205,14 +233,10 @@ export type MailCache = ReturnType<typeof createMailCache>;
 /** Everything this user has cached; one transaction. */
 export const clearMailCache = async (userId: string, idbFactory?: IDBFactory): Promise<void> => {
   const range = IDBKeyRange.bound([userId], [userId, []]);
-  const db = await openDeviceDb(getIdbFactory(idbFactory));
-  try {
-    await runStoresTransaction(db, MAIL_STORES, tx => {
-      for (const name of MAIL_STORES) {
-        tx.objectStore(name).delete(range);
-      }
-    });
-  } finally {
-    db.close();
-  }
+  const db = await deviceDbOf(idbFactory);
+  await runStoresTransaction(db, MAIL_STORES, tx => {
+    for (const name of MAIL_STORES) {
+      tx.objectStore(name).delete(range);
+    }
+  });
 };
