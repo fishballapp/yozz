@@ -2,11 +2,17 @@ import { describe, expect, it } from 'vitest';
 import { applyOps, foldersAfterMove, type PendingOp, retireOps } from './reconcile';
 import type { Folder } from './thread';
 
-const thread = (id: string, folders: readonly Folder[], flags = {}) => ({
+const thread = (
+  id: string,
+  folders: readonly Folder[],
+  foldersByAccount: Readonly<Record<string, readonly Folder[]>> = { 'me@x': folders },
+  flags = {},
+) => ({
   id,
   isUnread: true,
   isStarred: false,
   folders,
+  foldersByAccount,
   ...flags,
 });
 
@@ -49,7 +55,13 @@ describe('applyOps', () => {
       op('a', { kind: 'move', to: 'trash' }),
       op('gone', { kind: 'move', to: 'trash' }),
     ]);
-    expect(result[0]).toEqual({ id: 'a', isUnread: false, isStarred: false, folders: ['trash'] });
+    expect(result[0]).toEqual({
+      id: 'a',
+      isUnread: false,
+      isStarred: false,
+      folders: ['trash'],
+      foldersByAccount: { 'me@x': ['trash'] },
+    });
     expect(result[1]).toBe(base[1]);
   });
 
@@ -58,7 +70,22 @@ describe('applyOps', () => {
     const before = applyOps([thread('a', ['inbox'])], ops);
     const staleSync = applyOps([thread('a', ['inbox'])], ops);
     expect(before[0]?.folders).toEqual(['archive']);
+    expect(before[0]?.foldersByAccount['me@x']).toEqual(['archive']);
     expect(staleSync[0]?.folders).toEqual(['archive']);
+    expect(staleSync[0]?.foldersByAccount['me@x']).toEqual(['archive']);
+  });
+
+  it('moves only the op’s own account, and the thread is in every folder any account holds', () => {
+    const shared = thread('a', ['inbox'], { 'me@x': ['inbox'], 'you@y': ['inbox'] });
+    const [result] = applyOps([shared], [op('a', { kind: 'move', to: 'archive' })]);
+    expect(result?.foldersByAccount).toEqual({ 'me@x': ['archive'], 'you@y': ['inbox'] });
+    expect(result?.folders).toEqual(['inbox', 'archive']);
+  });
+
+  it('invents no copy for an account that holds none', () => {
+    const base = [thread('a', ['inbox'])];
+    const [result] = applyOps(base, [op('a', { kind: 'move', to: 'inbox' }, { account: 'you@y' })]);
+    expect(result).toBe(base[0]);
   });
 });
 

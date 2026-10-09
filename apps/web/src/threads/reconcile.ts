@@ -41,12 +41,26 @@ type Reconcilable = {
   readonly isUnread: boolean;
   readonly isStarred: boolean;
   readonly folders: readonly Folder[];
+  readonly foldersByAccount: Readonly<Record<string, readonly Folder[]>>;
 };
 
-const applyChange = <T extends Reconcilable>(thread: T, change: PendingChange): T =>
-  change.kind === 'flag'
-    ? { ...thread, [change.key]: change.value }
-    : { ...thread, folders: foldersAfterMove(thread.folders, change.to) };
+const applyChange = <T extends Reconcilable>(thread: T, op: PendingOp): T => {
+  if (op.change.kind === 'flag') {
+    return { ...thread, [op.change.key]: op.change.value };
+  }
+  const held = thread.foldersByAccount[op.account];
+  // A sync can leave the account holding no copy any more; moving nothing must not invent one.
+  if (held === undefined) return thread;
+  const foldersByAccount = {
+    ...thread.foldersByAccount,
+    [op.account]: foldersAfterMove(held, op.change.to),
+  };
+  // A move reaches only its own account's copies; the thread is wherever any account holds one.
+  const folders = FOLDERS.filter(folder =>
+    Object.values(foldersByAccount).some(accountFolders => accountFolders.includes(folder)),
+  );
+  return { ...thread, folders, foldersByAccount };
+};
 
 /** Each thread's ops in the order they were made. */
 export const applyOps = <T extends Reconcilable>(
@@ -59,7 +73,7 @@ export const applyOps = <T extends Reconcilable>(
     const own = byThread.get(thread.id);
     return own === undefined
       ? thread
-      : own.reduce((current, op) => applyChange(current, op.change), thread);
+      : own.reduce((current, op) => applyChange(current, op), thread);
   });
 };
 

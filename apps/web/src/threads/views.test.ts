@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
+import { applyOps, type MoveTarget, type PendingOp } from './reconcile';
 import type { AccountSyncState } from './sync';
 import type { Folder, Message, ThreadState } from './thread';
-import { neighbourOf, olderAvailable, syncProgressIn, threadsIn } from './views';
+import { neighbourOf, olderAvailable, syncProgressIn, threadsIn, unreadCount } from './views';
 
 const message = (id: string): Message => ({
   id,
@@ -129,5 +130,54 @@ describe('neighbourOf', () => {
     expect(neighbourOf(list, 'c')?.id).toBe('b');
     expect(neighbourOf(list.slice(0, 1), 'a')).toBeUndefined();
     expect(neighbourOf(list, 'elsewhere')).toBeUndefined();
+  });
+});
+
+describe('a pending move in an address view', () => {
+  const move = (threadId: string, account: string, to: MoveTarget): PendingOp => ({
+    id: `${threadId}:${account}:${to}`,
+    account,
+    threadId,
+    change: { kind: 'move', to },
+    retireAtSyncSeq: null,
+  });
+  const unreadIn = (foldersByAccount: Readonly<Record<string, readonly Folder[]>>) => ({
+    ...thread('t', ['inbox']),
+    accounts: Object.keys(foldersByAccount),
+    foldersByAccount,
+    isUnread: true,
+  });
+  const idsIn = (threads: readonly ThreadState[], mailbox: string) =>
+    threadsIn(threads, mailbox).map(t => t.id);
+
+  it('leaves and returns at once, and the address’s unread count follows', () => {
+    const base = [unreadIn({ 'me@x': ['inbox'] })];
+    expect(unreadCount(base, 'me@x')).toBe(1);
+
+    const archived = applyOps(base, [move('t', 'me@x', 'archive')]);
+    expect(idsIn(archived, 'me@x')).toEqual([]);
+    expect(unreadCount(archived, 'me@x')).toBe(0);
+    expect(idsIn(archived, 'archive')).toEqual(['t']);
+
+    const restored = applyOps(base, [move('t', 'me@x', 'archive'), move('t', 'me@x', 'inbox')]);
+    expect(idsIn(restored, 'me@x')).toEqual(['t']);
+    expect(unreadCount(restored, 'me@x')).toBe(1);
+  });
+
+  it('archives one account’s copy and leaves the other’s inbox, and the unified one, showing it', () => {
+    const base = [unreadIn({ 'me@x': ['inbox'], 'you@y': ['inbox'] })];
+
+    const one = applyOps(base, [move('t', 'me@x', 'archive')]);
+    expect(idsIn(one, 'me@x')).toEqual([]);
+    expect(idsIn(one, 'you@y')).toEqual(['t']);
+    expect(idsIn(one, 'unified')).toEqual(['t']);
+    expect(unreadCount(one, 'me@x')).toBe(0);
+    expect(unreadCount(one, 'you@y')).toBe(1);
+
+    const both = applyOps(base, [move('t', 'me@x', 'archive'), move('t', 'you@y', 'archive')]);
+    expect(idsIn(both, 'you@y')).toEqual([]);
+    expect(idsIn(both, 'unified')).toEqual([]);
+    expect(idsIn(both, 'archive')).toEqual(['t']);
+    expect(unreadCount(both, 'unified')).toBe(0);
   });
 });

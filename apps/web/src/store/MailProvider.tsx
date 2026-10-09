@@ -38,7 +38,7 @@ import {
 import { type AccountSummaries, threadsFromAccounts, withDrafts } from '../threads/summaries';
 import type { AccountSyncState, FlagTarget } from '../threads/sync';
 import type { ThreadState } from '../threads/thread';
-import { type Folder, isArchived, type Location as MailLocation } from '../threads/thread';
+import { type Folder, isArchived } from '../threads/thread';
 import { accountsShown, folderPaged, type MailboxId } from '../threads/views';
 import { isDemo } from '../ui/chrome';
 import { vaultErrorMessage } from '../vault/screen-policy';
@@ -590,7 +590,7 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
     (
       threadId: string,
       change: PendingChange,
-      pick: (location: MailLocation) => boolean,
+      pick: (folder: Folder) => boolean,
       command: (
         run: ReturnType<typeof runOn>,
         targets: readonly FlagTarget[],
@@ -598,18 +598,28 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
     ): boolean => {
       const thread = threads.find(t => t.id === threadId);
       if (thread === undefined) return false;
+      const opFor = (account: string): PendingOp => ({
+        id: crypto.randomUUID(),
+        account,
+        threadId,
+        change,
+        retireAtSyncSeq: null,
+      });
       if (isDemo()) {
-        setDemoThreads(current =>
-          applyOps(current, [
-            { id: crypto.randomUUID(), account: '', threadId, change, retireAtSyncSeq: null },
-          ]),
-        );
+        // Demo moves never touch the fixtures' locations, so the folders say who holds a copy.
+        const ops = Object.entries(thread.foldersByAccount)
+          .filter(([, folders]) => folders.some(pick))
+          .map(([account]) => opFor(account));
+        if (ops.length === 0) return false;
+        setDemoThreads(current => applyOps(current, ops));
         return true;
       }
       if (!isMoving(threadId)) return false;
 
       const byAccount = Map.groupBy(
-        thread.messages.flatMap(message => (message.locations ?? []).filter(pick)),
+        thread.messages.flatMap(message =>
+          (message.locations ?? []).filter(location => pick(location.folder)),
+        ),
         location => location.account,
       );
       const userId = userIdRef.current;
@@ -623,13 +633,7 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
       if (userId === null || work.length === 0) return false;
 
       // One op per account, retired by its own account's confirming sync.
-      const ops = work.map(({ account }) => ({
-        id: crypto.randomUUID(),
-        account: account.address,
-        threadId,
-        change,
-        retireAtSyncSeq: null,
-      }));
+      const ops = work.map(({ account }) => opFor(account.address));
       setOps(current => [...current, ...ops]);
 
       for (const [index, { account, uidsByFolder }] of work.entries()) {
@@ -820,7 +824,7 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
         threadId,
         { kind: 'move', to },
         // Only the copies this move consumes, in every account that holds one.
-        location => sources.includes(location.folder),
+        folder => sources.includes(folder),
         async (run, targets) => {
           const { moveThread } = await import('../threads/sync');
           return moveThread(run, targets, to);
