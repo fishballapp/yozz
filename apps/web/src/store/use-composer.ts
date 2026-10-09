@@ -51,6 +51,39 @@ const lockedBeforeSend = {
   error: { kind: 'error', detail: 'The vault is locked.' },
 } as const satisfies Result<never, MailConnectionFailure>;
 
+type SendClaim = Result<{ readonly settled: Promise<SendReport> }, MailConnectionFailure>;
+
+/**
+ * One opening of the composer, from its seed to its close. Its autosave, its Send and the flush its
+ * close runs all write one record, so they share what this holds, and an answer that lands after
+ * it closed is applied to no other opening.
+ */
+type Compose = {
+  readonly intent: ComposeIntent;
+  /** The draft as it opened: a reply opens already holding text, so "did anybody write anything" is measured against this. */
+  readonly opened: ComposeDraft;
+  /** Not a restored draft, which is text somebody already wrote. */
+  readonly isFresh: boolean;
+  /** Set by an explicit Discard so the close that follows does not file the draft. */
+  isDiscarded: boolean;
+  /** The record a new compose is minted as, by whichever write needs one first. Cleared by a refusal, which minted nothing. */
+  minting: Promise<SaveOutcome> | null;
+  /** An autosave is writing; one at a time, since each names the version it read. */
+  isSaving: boolean;
+  /** The latest Send, from its press: its claim writes the newest text itself, so the closing flush waits for it. */
+  sending: Promise<SendClaim> | null;
+};
+
+const composeOf = (intent: ComposeIntent, opened: ComposeDraft, isFresh: boolean): Compose => ({
+  intent,
+  opened,
+  isFresh,
+  isDiscarded: false,
+  minting: null,
+  isSaving: false,
+  sending: null,
+});
+
 export type Composer = {
   draft: ComposeDraft | null;
   /** A send whose Sent-folder copy did not store; cleared by the next send that does. */
@@ -156,20 +189,61 @@ export const useComposer = ({
   sessionRef.current = session;
   const userIdRef = useRef<string | null>(null);
   userIdRef.current = session?.userId ?? null;
-  /** The intent the open draft belongs to. */
-  const draftIntentRef = useRef<ComposeIntent | undefined>(undefined);
+  /** The composer's opening on screen; `null` once it closes, or the session ends. */
+  const composeRef = useRef<Compose | null>(null);
+  /** The pending autosave. A Send cancels it: the claim writes the newest text itself. */
+  const autosaveTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
   /**
-   * The draft as it opened, and the intent it opened from. A reply opens already holding text, so
-   * "did anybody write anything" is measured against this; `fresh` distinguishes a restored draft,
-   * which is text somebody already wrote.
+   * The compose's record: minted by `mint` unless another of its writes already has, or is, since a
+   * record each would send the message from one and leave the other in Drafts. Once minted it is
+   * listed, and named in the draft while that compose is still the open one.
    */
-  const openedRef = useRef<{
-    intent: ComposeIntent;
-    draft: ComposeDraft;
-    fresh: boolean;
-  } | null>(null);
-  /** Set by an explicit Discard so the close that follows does not file the draft. */
-  const discardedRef = useRef(false);
+  const mintRecord = useCallback(
+    (compose: Compose, isCurrent: () => boolean, mint: () => Promise<SaveOutcome>) => {
+      if (compose.minting !== null) return compose.minting;
+      const minting = (async () => {
+        const created = await mint();
+        if (!created.ok) {
+          compose.minting = null;
+          return created;
+        }
+        if (!isCurrent()) return created;
+        const { draftKey, draftId } = created.handle;
+        setDrafts(current => [...current, created.handle]);
+        if (composeRef.current === compose) {
+          setDraft(current => (current === null ? current : { ...current, draftKey, draftId }));
+        }
+        return created;
+      })();
+      compose.minting = minting;
+      return minting;
+    },
+    [],
+  );
+  /**
+   * Writes `content` into the compose's record: over the version named, or into the one minted for
+   * it, which another write may have minted from older text.
+   */
+  const writeContent = useCallback(
+    async (
+      { createDraft, replaceDraft }: typeof import('../compose/draft-vault'),
+      compose: Compose,
+      isCurrent: () => boolean,
+      store: RecordStore,
+      draftId: string | undefined,
+      content: DraftContent,
+    ): Promise<SaveOutcome> => {
+      if (draftId !== undefined) return replaceDraft(store, draftId, content, Date.now());
+      const minted = await mintRecord(compose, isCurrent, () =>
+        createDraft(store, content, Date.now()),
+      );
+      if (!minted.ok || !isCurrent() || sameDraftContent(minted.handle.record, content)) {
+        return minted;
+      }
+      return replaceDraft(store, minted.handle.draftId, content, Date.now());
+    },
+    [mintRecord],
+  );
   /**
    * Bumped by `reset`. Whatever awaited across it holds the ended session's plaintext (a draft, a
    * sent message, a refusal), so it checks this before writing anything into state.
@@ -374,12 +448,11 @@ export const useComposer = ({
   );
 
   /**
-   * Clears the composer's copy before the network settles: closing is discarding
-   * (`seedDraft(undefined)`), and a `draftRef` still holding this draft would tombstone the record
-   * the send is driving. Only the snapshot that went out is cleared.
+   * Lets go of a compose its Send claimed, before the network settles, while it is still the one on
+   * screen; the close that follows finds its claim and files nothing.
    */
-  const clearComposedDraft = useCallback((sent: ComposeDraft) => {
-    if (draftRef.current !== sent) return;
+  const clearComposedDraft = useCallback((sent: Compose) => {
+    if (composeRef.current !== sent) return;
     setDraft(null);
     const userId = userIdRef.current;
     if (userId !== null) clearDraft(userId);
@@ -397,132 +470,128 @@ export const useComposer = ({
    * In demo the send is pretend. Otherwise the message shows from this tab's own copy until the
    * account's Sent copy syncs.
    */
-  const send = useCallback(async (): Promise<
-    Result<{ readonly settled: Promise<SendReport> }, MailConnectionFailure>
-  > => {
+  const sendCompose = useCallback(
+    async (compose: Compose, draft: ComposeDraft): Promise<SendClaim> => {
+      const identity = identities.find(candidate => candidate.address === draft.identityId);
+      const messageId = `<${crypto.randomUUID()}@${draft.identityId.slice(draft.identityId.indexOf('@') + 1)}>`;
+
+      if (!isDemo()) {
+        if (identity === undefined) {
+          return { ok: false, error: { kind: 'error', detail: 'Pick an address to send as.' } };
+        }
+        const session = sessionRef.current;
+        if (session === null) return lockedBeforeSend;
+        // Taken before the first await and carried into the settling, which may outlive the session.
+        const isCurrent = watchSession(sessionGeneration);
+        const runOn = bindRunOn();
+        clearTimeout(autosaveTimerRef.current);
+        const content = contentOf(draft, ownerAccountOf(draft));
+        const [{ claimSend, createDraft }, { buildOutgoing }, { renderHtml }] = await Promise.all([
+          import('../compose/draft-vault'),
+          import('../compose/send'),
+          import('@tanstack/markdown/html'),
+        ]);
+        // An ended session mints and claims nothing, so nothing goes out on its behalf.
+        if (!isCurrent()) return lockedBeforeSend;
+        // Every send owns a record. A compose sent inside the debounce has none yet; minting it here
+        // makes a crash resumable and stops a second device sending its own copy.
+        const draftId = await (async () => {
+          if (draft.draftId !== undefined) return draft.draftId;
+          const created = await mintRecord(compose, isCurrent, () =>
+            createDraft(session.store, content, Date.now()),
+          );
+          return created.ok ? created.handle.draftId : null;
+        })();
+        if (!isCurrent()) return lockedBeforeSend;
+        if (draftId === null) {
+          return {
+            ok: false,
+            error: { kind: 'error', detail: 'The draft could not be stored, so it was not sent.' },
+          };
+        }
+
+        const built = buildOutgoing(identity, {
+          to: addressList(draft.to),
+          cc: addressList(draft.cc),
+          bcc: addressList(draft.bcc),
+          subject: draft.subject,
+          text: draft.body,
+          // A whole document: a bare fragment is what filters see from templating tools
+          // (docs/knowledge/email-deliverability.md).
+          html: `<!DOCTYPE html><html><head><meta charset="utf-8"></head><body>${renderHtml(draft.body)}</body></html>`,
+          messageId,
+          inReplyTo: draft.inReplyTo,
+          references: draft.references,
+          attachments: draft.attachments,
+        });
+        if (!built.ok) return built;
+
+        // Phase (0): the bytes go into the record before SMTP sees them, so a resend is the same message.
+        const claimed = await claimSend(
+          session.store,
+          draftId,
+          {
+            messageId,
+            opId: crypto.randomUUID(),
+            state: 'submitting',
+            claimedAt: Date.now(),
+            bytes: built.value.toBase64(),
+            // The logical folder; the name is resolved against LIST at copy time.
+            target: isInbound(identity) ? { account: identity.address, folder: 'sent' } : 'vault',
+          },
+          Date.now(),
+          content,
+        );
+        if (!claimed.ok) {
+          return {
+            ok: false,
+            error: {
+              kind: 'error',
+              detail: (() => {
+                if (claimed.reason === 'sending') {
+                  return 'This draft is already being sent on another device.';
+                }
+                if (claimed.reason === 'conflict') {
+                  return 'This draft was edited on another device. Reopen it before sending.';
+                }
+                return 'The draft could not be claimed for sending; check your connection.';
+              })(),
+            },
+          };
+        }
+
+        // The claim is the seam this function returns at; see DECISIONS.md, 2026-08-30.
+        clearComposedDraft(compose);
+        return {
+          ok: true,
+          // Claimed, so it goes out even if the session ended under the claim; never a second time.
+          value: { settled: settleSend(session.store, runOn, identity, claimed.handle, isCurrent) },
+        };
+      }
+
+      clearComposedDraft(compose);
+      return { ok: true, value: { settled: Promise.resolve<SendReport>({ state: 'sent' }) } };
+    },
+    [identities, bindRunOn, settleSend, clearComposedDraft, ownerAccountOf, mintRecord],
+  );
+
+  const send = useCallback(async (): Promise<SendClaim> => {
+    const compose = composeRef.current;
     // Unreachable from the composer, which only renders Send with a draft under it.
-    if (draft === null) {
+    if (draft === null || compose === null) {
       return { ok: false, error: { kind: 'error', detail: 'There is nothing to send.' } };
     }
-    const identity = identities.find(candidate => candidate.address === draft.identityId);
-    const messageId = `<${crypto.randomUUID()}@${draft.identityId.slice(draft.identityId.indexOf('@') + 1)}>`;
-
-    if (!isDemo()) {
-      if (identity === undefined) {
-        return { ok: false, error: { kind: 'error', detail: 'Pick an address to send as.' } };
-      }
-      const session = sessionRef.current;
-      if (session === null) return lockedBeforeSend;
-      // Taken before the first await and carried into the settling, which may outlive the session.
-      const isCurrent = watchSession(sessionGeneration);
-      const runOn = bindRunOn();
-      const [{ claimSend, createDraft }, { buildOutgoing }, { renderHtml }] = await Promise.all([
-        import('../compose/draft-vault'),
-        import('../compose/send'),
-        import('@tanstack/markdown/html'),
-      ]);
-      // An ended session claims nothing, so nothing goes out on its behalf.
-      if (!isCurrent()) return lockedBeforeSend;
-
-      // Every send owns a record. A compose sent inside the debounce has none yet; minting it here
-      // makes a crash resumable and stops a second device sending its own copy.
-      const content = {
-        from: draft.identityId,
-        to: draft.to,
-        cc: draft.cc,
-        bcc: draft.bcc,
-        subject: draft.subject,
-        body: draft.body,
-        ...(draft.inReplyTo === undefined ? {} : { inReplyTo: draft.inReplyTo }),
-        ...(draft.references === undefined ? {} : { references: [...draft.references] }),
-        ...(ownerAccountOf(draft) === undefined ? {} : { ownerAccount: ownerAccountOf(draft) }),
-      };
-      const existing =
-        draft.draftKey === undefined || draft.draftId === undefined
-          ? null
-          : { draftKey: draft.draftKey, draftId: draft.draftId };
-      const created =
-        existing === null ? await createDraft(session.store, content, Date.now()) : null;
-      if (!isCurrent()) return lockedBeforeSend;
-      if (created !== null && !created.ok) {
-        return {
-          ok: false,
-          error: { kind: 'error', detail: 'The draft could not be stored, so it was not sent.' },
-        };
-      }
-      const { draftId } = existing ?? {
-        draftId: created?.ok === true ? created.handle.draftId : '',
-      };
-
-      const built = buildOutgoing(identity, {
-        to: addressList(draft.to),
-        cc: addressList(draft.cc),
-        bcc: addressList(draft.bcc),
-        subject: draft.subject,
-        text: draft.body,
-        // A whole document: a bare fragment is what filters see from templating tools
-        // (docs/knowledge/email-deliverability.md).
-        html: `<!DOCTYPE html><html><head><meta charset="utf-8"></head><body>${renderHtml(draft.body)}</body></html>`,
-        messageId,
-        inReplyTo: draft.inReplyTo,
-        references: draft.references,
-        attachments: draft.attachments,
-      });
-      if (!built.ok) return built;
-
-      // Phase (0): the bytes go into the record before SMTP sees them, so a resend is the same message.
-      const claimed = await claimSend(
-        session.store,
-        draftId,
-        {
-          messageId,
-          opId: crypto.randomUUID(),
-          state: 'submitting',
-          claimedAt: Date.now(),
-          bytes: built.value.toBase64(),
-          // The logical folder; the name is resolved against LIST at copy time.
-          target: isInbound(identity) ? { account: identity.address, folder: 'sent' } : 'vault',
-        },
-        Date.now(),
-        content,
-      );
-      if (!claimed.ok) {
-        return {
-          ok: false,
-          error: {
-            kind: 'error',
-            detail: (() => {
-              if (claimed.reason === 'sending') {
-                return 'This draft is already being sent on another device.';
-              }
-              if (claimed.reason === 'conflict') {
-                return 'This draft was edited on another device. Reopen it before sending.';
-              }
-              return 'The draft could not be claimed for sending; check your connection.';
-            })(),
-          },
-        };
-      }
-
-      // The claim is the seam this function returns at; see DECISIONS.md, 2026-08-30.
-      clearComposedDraft(draft);
-      return {
-        ok: true,
-        // Claimed, so it goes out even if the session ended under the claim; never a second time.
-        value: { settled: settleSend(session.store, runOn, identity, claimed.handle, isCurrent) },
-      };
-    }
-
-    clearComposedDraft(draft);
-    return { ok: true, value: { settled: Promise.resolve<SendReport>({ state: 'sent' }) } };
-  }, [draft, identities, bindRunOn, settleSend, clearComposedDraft, ownerAccountOf]);
+    // Held before anything awaits, so a close under way waits for the claim.
+    compose.sending = sendCompose(compose, draft);
+    return compose.sending;
+  }, [draft, sendCompose]);
 
   // Clears are explicit (send, discard, lock), so an empty first render cannot wipe the copy a reload is about to restore.
   useEffect(() => {
     const userId = userIdRef.current;
-    const intent = draftIntentRef.current;
-    if (draft === null || userId === null || intent === undefined) return;
-    saveDraft(userId, intent, draft);
+    const compose = composeRef.current;
+    if (draft === null || userId === null || compose === null) return;
+    saveDraft(userId, compose.intent, draft);
   }, [draft]);
 
   /** Autosave of a vault draft: debounced, one save in flight, always the newest snapshot. A refusal is surfaced, not resolved. */
@@ -628,18 +697,19 @@ export const useComposer = ({
     })();
   }, [drafts, baseByAccount]);
 
-  const savingRef = useRef(false);
   useEffect(() => {
     const session = sessionRef.current;
+    const compose = composeRef.current;
     // A draft with no text is not yet a draft.
-    if (draft === null || session === null || isDemo()) return;
+    if (draft === null || compose === null || session === null || isDemo()) return;
     // A send in flight freezes the content on every device.
     if (openHandleRef.current?.record.send !== undefined) return;
     if (draft.body === '' && draft.subject === '' && draft.to === '') return;
     const pending = draft;
     const timer = setTimeout(() => {
-      if (savingRef.current) return;
-      savingRef.current = true;
+      // One save at a time; a compose closed under the timer is its closing flush's to file.
+      if (compose.isSaving || composeRef.current !== compose) return;
+      compose.isSaving = true;
       const isCurrent = watchSession(sessionGeneration);
       void (async () => {
         try {
@@ -653,46 +723,34 @@ export const useComposer = ({
           ) {
             return;
           }
+          const vault = await import('../compose/draft-vault');
+          if (!isCurrent()) return;
           // The first save of an ordinary compose mints the record.
-          if (pending.draftId === undefined) {
-            const { createDraft } = await import('../compose/draft-vault');
-            if (!isCurrent()) return;
-            const created = await createDraft(session.store, content, Date.now());
-            if (!isCurrent()) return;
-            if (!created.ok) {
-              setDraftError(unsavedMessage);
-              return;
-            }
-            setDraftError(null);
-            setDraft(current =>
-              current === null || current.draftKey !== undefined
-                ? current
-                : {
-                    ...current,
-                    draftKey: created.handle.draftKey,
-                    draftId: created.handle.draftId,
-                  },
-            );
-            setDrafts(current => [...current, created.handle]);
-            return;
-          }
-          const { replaceDraft } = await import('../compose/draft-vault');
+          const outcome = await writeContent(
+            vault,
+            compose,
+            isCurrent,
+            session.store,
+            pending.draftId,
+            content,
+          );
           if (!isCurrent()) return;
-          const outcome = await replaceDraft(session.store, pending.draftId, content, Date.now());
-          if (!isCurrent()) return;
+          // A refusal is said in the compose it belongs to, never in the next one.
+          const isOpen = composeRef.current === compose;
           if (!outcome.ok) {
+            if (!isOpen) return;
             if (outcome.reason !== 'conflict') setDraftError(unsavedMessage);
             if (outcome.reason === 'conflict' && outcome.currentDraftId !== null) {
-              const { listDrafts } = await import('../compose/draft-vault');
-              const live = await listDrafts(session.store);
+              const live = await vault.listDrafts(session.store);
               if (!isCurrent()) return;
               setDrafts(live);
+              if (composeRef.current !== compose) return;
               const theirs = live.find(candidate => candidate.draftId === outcome.currentDraftId);
               setDraftConflict(theirs ?? null);
             }
             return;
           }
-          setDraftError(null);
+          if (isOpen) setDraftError(null);
           // The next save must name the new version.
           setDraft(current =>
             current === null || current.draftKey !== outcome.handle.draftKey
@@ -705,12 +763,13 @@ export const useComposer = ({
             ),
           );
         } finally {
-          savingRef.current = false;
+          compose.isSaving = false;
         }
       })();
     }, DRAFT_AUTOSAVE_MS);
+    autosaveTimerRef.current = timer;
     return () => clearTimeout(timer);
-  }, [draft, ownerAccountOf]);
+  }, [draft, ownerAccountOf, writeContent]);
 
   const resolveDraftConflict = useCallback((choice: 'theirs' | 'mine') => {
     setDraftConflict(theirs => {
@@ -857,6 +916,7 @@ export const useComposer = ({
   /** Everything here is this user's plaintext; the provider outlives the session. */
   const reset = useCallback((userId: string) => {
     sessionGeneration.current += 1;
+    composeRef.current = null;
     setVaultSent([]);
     setJustSent([]);
     setSentCopyError(null);
@@ -879,27 +939,31 @@ export const useComposer = ({
       backToEditing,
       sentCopyError,
       seedDraft: (intent, seed) => {
-        draftIntentRef.current = intent;
         const userId = userIdRef.current;
         if (intent === undefined) {
           // Closing keeps the draft (see DECISIONS.md, 2026-08-31). A draft inside the debounce is
           // flushed here; a draft nobody typed into is dropped instead of filed.
           const open = draftRef.current;
           const session = sessionRef.current;
-          const opened = openedRef.current;
-          const discardedByHand = discardedRef.current;
-          discardedRef.current = false;
-          openedRef.current = null;
+          const compose = composeRef.current;
+          composeRef.current = null;
           setDraft(null);
-          if (open === null || session === null || demo || discardedByHand) {
+          if (
+            open === null ||
+            compose === null ||
+            session === null ||
+            demo ||
+            compose.isDiscarded
+          ) {
             if (userId !== null) clearDraft(userId);
             return null;
           }
+          // Pressing Send is meaning to keep it.
           const abandonable =
-            opened !== null &&
-            opened.fresh &&
-            draftKeyOfIntent(opened.intent) === null &&
-            isUntouched(open, opened.draft);
+            compose.sending === null &&
+            compose.isFresh &&
+            draftKeyOfIntent(compose.intent) === null &&
+            isUntouched(open, compose.opened);
           if (!abandonable) {
             // `setDraft(null)` cancelled the pending debounce, so a record existing is not evidence it holds this text.
             const content = contentOf(open, ownerAccountOf(open));
@@ -913,35 +977,40 @@ export const useComposer = ({
               if (userId !== null) clearDraft(userId);
               return null;
             }
-            if (savingRef.current) {
-              // An autosave is mid-flight with possibly older text; the snapshot stays.
-              return null;
-            }
-            savingRef.current = true;
             const isCurrent = watchSession(sessionGeneration);
             void (async () => {
-              try {
-                const { createDraft, listDrafts, replaceDraft } = await import(
-                  '../compose/draft-vault'
-                );
-                if (!isCurrent()) return;
-                const outcome =
-                  open.draftId === undefined
-                    ? await createDraft(session.store, content, Date.now())
-                    : await replaceDraft(session.store, open.draftId, content, Date.now());
-                if (!isCurrent()) return;
-                if (!outcome.ok) {
-                  // The snapshot is the only copy left, so it stays.
-                  setDraftError(unsavedMessage);
-                  return;
-                }
-                const live = await listDrafts(session.store);
-                if (!isCurrent()) return;
-                setDrafts(live);
+              // A Send's claim writes the newest text itself; only a refused one leaves it to file.
+              const claimed = await compose.sending;
+              if (!isCurrent()) return;
+              if (claimed?.ok === true) {
+                // ponytail: the snapshot is per user, so this also clears one a compose opened since
+                // wrote (DECISIONS.md, 2026-10-09).
                 if (userId !== null) clearDraft(userId);
-              } finally {
-                savingRef.current = false;
+                return;
               }
+              // An autosave is replacing the record with possibly older text; the snapshot stays.
+              // One still minting it is shared, and this writes over what it mints.
+              if (compose.isSaving && open.draftId !== undefined) return;
+              const vault = await import('../compose/draft-vault');
+              if (!isCurrent()) return;
+              const outcome = await writeContent(
+                vault,
+                compose,
+                isCurrent,
+                session.store,
+                open.draftId,
+                content,
+              );
+              if (!isCurrent()) return;
+              if (!outcome.ok) {
+                // The snapshot is the only copy left, so it stays.
+                setDraftError(unsavedMessage);
+                return;
+              }
+              const live = await vault.listDrafts(session.store);
+              if (!isCurrent()) return;
+              setDrafts(live);
+              if (userId !== null) clearDraft(userId);
             })();
             return null;
           }
@@ -967,6 +1036,7 @@ export const useComposer = ({
         if (draftKey !== null) {
           const handle = draftsRef.current.find(candidate => candidate.draftKey === draftKey);
           if (handle === undefined) {
+            composeRef.current = null;
             setDraft(null);
             return null;
           }
@@ -986,12 +1056,14 @@ export const useComposer = ({
             draftId: handle.draftId,
             ...(record.ownerAccount === undefined ? {} : { ownerAccount: record.ownerAccount }),
           };
+          composeRef.current = composeOf(intent, opened, false);
           setDraft(opened);
-          openedRef.current = { intent, draft: opened, fresh: false };
           return opened;
         }
 
         // A restored snapshot knows which record it is; a live handle for the same key wins.
+        // ponytail: one restored while its Send is still minting becomes a second record
+        // (DECISIONS.md, 2026-10-09).
         const restored = userId === null ? null : loadDraft(userId, intent);
         const live =
           restored?.draftKey === undefined
@@ -1015,8 +1087,8 @@ export const useComposer = ({
           // Resolved last: an identity can be deleted, and a seed may pass `undefined`.
           identityId: merged.identityId ?? identities[0]?.address ?? '',
         };
+        composeRef.current = composeOf(intent, next, stored === null);
         setDraft(next);
-        openedRef.current = { intent, draft: next, fresh: stored === null };
         return next;
       },
       updateDraft: changes =>
@@ -1050,7 +1122,8 @@ export const useComposer = ({
         const session = sessionRef.current;
         const userId = userIdRef.current;
         // The close that follows must not file what this just threw away.
-        discardedRef.current = true;
+        const compose = composeRef.current;
+        if (compose !== null) compose.isDiscarded = true;
         if (userId !== null) clearDraft(userId);
         const { draftKey, draftId } = open ?? {};
         // ponytail: discarded inside its first autosave's round trip, a draft keeps the record that
@@ -1126,6 +1199,7 @@ export const useComposer = ({
       expungeMirrorCopy,
       ownerAccountOf,
       dropDraft,
+      writeContent,
     ],
   );
 
