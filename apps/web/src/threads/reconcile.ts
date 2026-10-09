@@ -16,6 +16,10 @@ export const MOVE_SOURCES: Record<MoveTarget, readonly Folder[]> = {
   inbox: ['archive', 'trash'],
 };
 
+/** A move can only act when the conversation holds a copy in one of that target's source folders. */
+export const canMoveTo = (folders: readonly Folder[], to: MoveTarget): boolean =>
+  MOVE_SOURCES[to].some(source => folders.includes(source));
+
 /** The destination in, the sources out, the rest as they were. */
 export const foldersAfterMove = (folders: readonly Folder[], to: MoveTarget): readonly Folder[] =>
   FOLDERS.filter(

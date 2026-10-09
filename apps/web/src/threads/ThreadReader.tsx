@@ -24,10 +24,12 @@ import { useMail } from '../store/MailProvider';
 import { Button, buttonClass } from '../ui/Button';
 import { useChromePref } from '../ui/chrome';
 import { IconSwitch } from '../ui/IconSwitch';
+import { reportProblem } from '../ui/Toast';
 import { fullTime } from '../ui/time';
 import { ATTACHMENT_LABEL, formatBytes } from './attachments';
 import { HtmlBody } from './HtmlBody';
 import { linkify } from './linkify';
+import { canMoveTo } from './reconcile';
 import type { ThreadState } from './thread';
 import {
   type Attachment,
@@ -390,6 +392,12 @@ export const ThreadReader = ({
   const canReplyAll = replyAllCc(inbound, ownedAddresses).length > 0;
   const { mailbox } = useParams({ strict: false });
   const [pane, setPane] = useState<HTMLDivElement | null>(null);
+  // A move the store refused leaves the reader where it is and says why, now or when the server answers.
+  const file =
+    (move: (threadId: string, onRefused: (reason: string) => void) => boolean, notFiled: string) =>
+    () => {
+      if (move(thread.id, reason => reportProblem(notFiled, reason))) onTriaged();
+    };
 
   return (
     <article className="flex h-full flex-col bg-ink-sunken">
@@ -445,7 +453,8 @@ export const ThreadReader = ({
                 filed is not the one you are reading — while marking unread closes it, since it
                 would be read again the moment it stayed open. Opened from Trash, a thread offers
                 the one move that gets it out — the row it came from offered the same, and a
-                conversation only half in the bin must not lose it. */}
+                conversation only half in the bin must not lose it. A move with nothing in its
+                source folders is not offered at all. */}
             <Button
               variant="ghost"
               size="icon"
@@ -459,41 +468,44 @@ export const ThreadReader = ({
               <EnvelopeSimpleIcon size={15} />
             </Button>
             {mailbox === 'trash' ? (
-              <Button
-                variant="ghost"
-                size="icon"
-                className="size-11 lg:size-7"
-                onClick={() => {
-                  if (restoreThread(thread.id)) onTriaged();
-                }}
-                aria-label="Restore thread"
-              >
-                <ArrowCounterClockwiseIcon size={15} />
-              </Button>
+              canMoveTo(thread.folders, 'inbox') && (
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="size-11 lg:size-7"
+                  onClick={file(restoreThread, 'Thread not restored')}
+                  aria-label="Restore thread"
+                >
+                  <ArrowCounterClockwiseIcon size={15} />
+                </Button>
+              )
             ) : (
               <>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="size-11 lg:size-7"
-                  onClick={() => {
-                    if (toggleArchive(thread.id)) onTriaged();
-                  }}
-                  aria-label={isArchived(thread) ? 'Move to inbox' : 'Archive thread'}
-                >
-                  <ArchiveIcon size={15} />
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="size-11 lg:size-7"
-                  onClick={() => {
-                    if (trashThread(thread.id)) onTriaged();
-                  }}
-                  aria-label="Delete thread"
-                >
-                  <TrashIcon size={15} />
-                </Button>
+                {canMoveTo(thread.folders, isArchived(thread) ? 'inbox' : 'archive') && (
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="size-11 lg:size-7"
+                    onClick={file(
+                      toggleArchive,
+                      isArchived(thread) ? 'Thread not moved to inbox' : 'Thread not archived',
+                    )}
+                    aria-label={isArchived(thread) ? 'Move to inbox' : 'Archive thread'}
+                  >
+                    <ArchiveIcon size={15} />
+                  </Button>
+                )}
+                {canMoveTo(thread.folders, 'trash') && (
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="size-11 lg:size-7"
+                    onClick={file(trashThread, 'Thread not deleted')}
+                    aria-label="Delete thread"
+                  >
+                    <TrashIcon size={15} />
+                  </Button>
+                )}
               </>
             )}
             <Button

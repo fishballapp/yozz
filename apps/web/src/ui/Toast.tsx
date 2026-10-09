@@ -4,10 +4,15 @@ import { XIcon } from '@phosphor-icons/react';
 import { Button } from './Button';
 
 /**
- * The one transient report line, for a send that outlives the composer. The manager is created
- * outside React so anything can queue one.
+ * The one transient report line, for an answer that outlives what asked for it: a send its
+ * composer, a refused move its row. The manager is created outside React so anything can queue one.
  */
 export const toast = Toast.createToastManager();
+
+/** A problem waits to be read: no timeout, announced `high`, so it carries the close. */
+export const reportProblem = (title: string, description: string) => {
+  toast.add({ title, description, timeout: 0, priority: 'high' });
+};
 
 export const Toasts = () => (
   <Toast.Provider toastManager={toast}>

@@ -53,6 +53,9 @@ import { type Composer, useComposer } from './use-composer';
 
 type InboundAddress = AddressRecord & { imap: NonNullable<AddressRecord['imap']> };
 
+/** Hears why a move was refused, on the spot or once the server answers: once, however many accounts refused it. */
+type OnRefused = (reason: string) => void;
+
 type MailContextValue = Composer & {
   accounts: readonly InboundAddress[];
   identities: readonly AddressRecord[];
@@ -61,8 +64,8 @@ type MailContextValue = Composer & {
   threads: readonly ThreadState[];
   isDemo: boolean;
   recordsError: string | null;
-  /** The last refused read/star write or body fetch; cleared by the next one that works. */
-  flagError: string | null;
+  /** What last failed (a flag write, a move, a body, an older page) and why; cleared by the next one that works. */
+  mailError: string | null;
   syncStates: Readonly<Record<string, AccountSyncState>>;
   liveStates: Readonly<Record<string, LiveState>>;
   sync: (address?: string) => Promise<void>;
@@ -70,18 +73,18 @@ type MailContextValue = Composer & {
   loadOlder: (mailbox: MailboxId) => Promise<void>;
   /** Whether that mailbox's page is in flight. */
   isLoadingOlder: (mailbox: MailboxId) => boolean;
-  /** Flag and move answer `false` (and set `flagError`) while a move of the same thread is pending. */
+  /** Flag and move answer `false` (and set `mailError`) while a move of the same thread is pending. */
   markRead: (threadId: string) => boolean;
   /** Puts the whole thread back to unread; the reader closes with it. */
   markUnread: (threadId: string) => boolean;
   toggleStar: (threadId: string) => boolean;
   /** Fetches a body, joining a fetch in flight, and resolves with the outcome itself. */
   loadBody: (threadId: string, messageId: string) => Promise<BodyOutcome>;
-  toggleArchive: (threadId: string) => boolean;
+  toggleArchive: (threadId: string, onRefused?: OnRefused) => boolean;
   /** Moves the whole conversation to Trash, own sent copies included. */
-  trashThread: (threadId: string) => boolean;
+  trashThread: (threadId: string, onRefused?: OnRefused) => boolean;
   /** Brings a thread back to the inbox from Trash or Archive. */
-  restoreThread: (threadId: string) => boolean;
+  restoreThread: (threadId: string, onRefused?: OnRefused) => boolean;
   putAddress: (record: AddressRecord) => Promise<void>;
   removeAddress: (address: string) => Promise<void>;
   /** Sets or clears the From display name; an empty string clears it. */
@@ -110,7 +113,7 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
   const [ops, setOps] = useState<readonly PendingOp[]>([]);
   const [syncStates, setSyncStates] = useState<Readonly<Record<string, AccountSyncState>>>({});
   const [liveStates, setLiveStates] = useState<Readonly<Record<string, LiveState>>>({});
-  const [flagError, setFlagError] = useState<string | null>(null);
+  const [mailError, setMailError] = useState<string | null>(null);
   const inFlightBodiesRef = useRef<Map<string, Promise<BodyOutcome>>>(new Map());
   const sessionRef = useRef(session);
   sessionRef.current = session;
@@ -269,7 +272,7 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
               // This pass started after the acks it retires, on the same serial queue as their commands.
               setOps(current => retireOps(current, address, seq));
               // The server's flags just arrived; an earlier refused write is moot.
-              setFlagError(null);
+              setMailError(null);
               prefetchBodies(
                 runOn(account),
                 cache,
@@ -431,7 +434,7 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
       setLiveStates({});
       setOlderInFlight({});
       reset(userId);
-      setFlagError(null);
+      setMailError(null);
     };
   }, [store, userId, load, reset]);
 
@@ -456,13 +459,15 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
           const res = await loadOlderPage(runOn(account), cache.folder(folder), isStale);
           if (generation !== sessionGeneration.current) return;
           if (!res.ok) {
-            setFlagError(describeMailFailure(res.error, account.imap.host));
+            setMailError(
+              `older mail not loaded · ${describeMailFailure(res.error, account.imap.host)}`,
+            );
             return;
           }
           const summaries = await cachedSummaries(cache);
           if (generation !== sessionGeneration.current) return;
           setBaseByAccount(current => ({ ...current, [account.address]: summaries }));
-          setFlagError(null);
+          setMailError(null);
           if (!res.value.complete) return;
           setSyncStates(current => {
             const state = current[account.address];
@@ -474,11 +479,11 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
           });
         } catch (error) {
           if (generation !== sessionGeneration.current) return;
-          setFlagError(
-            describeMailFailure(
+          setMailError(
+            `older mail not loaded · ${describeMailFailure(
               { kind: 'error', detail: error instanceof Error ? error.message : String(error) },
               account.imap.host,
-            ),
+            )}`,
           );
         }
       })().finally(() => {
@@ -566,7 +571,7 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
           candidate.id === op.id ? { ...candidate, retireAtSyncSeq } : candidate,
         ),
       );
-      setFlagError(null);
+      setMailError(null);
       void requestSync(account);
     },
     [requestSync],
@@ -574,9 +579,11 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
 
   /** While a move is pending the messages' synced locations name uids the server is about to change. */
   const isMoving = useCallback(
-    (threadId: string) => {
+    (threadId: string, onRefused?: OnRefused) => {
       if (!ops.some(op => op.threadId === threadId && op.change.kind === 'move')) return true;
-      setFlagError('Still confirming the last move of that conversation; try again in a moment.');
+      const reason = 'Still confirming the last move of that conversation; try again in a moment.';
+      setMailError(reason);
+      onRefused?.(reason);
       return false;
     },
     [ops],
@@ -585,7 +592,7 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
   /**
    * One optimistic write against the server's copies: one IMAP command per account (its own
    * connection, sync and uid space), grouped by folder because a uid only means something in its
-   * own mailbox. A refused command drops that account's op and lands in `flagError`, never in its
+   * own mailbox. A refused command drops that account's op and lands in `mailError`, never in its
    * sync state.
    */
   const runThreadOp = useCallback(
@@ -597,6 +604,7 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
         run: ReturnType<typeof runOn>,
         targets: readonly FlagTarget[],
       ) => Promise<Result<unknown, MailConnectionFailure>>,
+      onRefused?: OnRefused,
     ): boolean => {
       const thread = threads.find(t => t.id === threadId);
       if (thread === undefined) return false;
@@ -616,7 +624,7 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
         setDemoThreads(current => applyOps(current, ops));
         return true;
       }
-      if (!isMoving(threadId)) return false;
+      if (!isMoving(threadId, onRefused)) return false;
 
       const byAccount = Map.groupBy(
         thread.messages.flatMap(message =>
@@ -632,12 +640,18 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
           : [{ account, uidsByFolder: Map.groupBy(locations, location => location.folder) }];
       });
       // Nothing on the server to change, so no op: it would mask a base that is already right.
-      if (userId === null || work.length === 0) return false;
+      if (userId === null || work.length === 0) {
+        onRefused?.('No copy of it is on a mail server YOZZ reads.');
+        return false;
+      }
 
       // One op per account, retired by its own account's confirming sync.
       const ops = work.map(({ account }) => opFor(account.address));
       setOps(current => [...current, ...ops]);
 
+      const generation = sessionGeneration.current;
+      // Flipped by the first account to refuse, so a move both accounts refused is reported once.
+      let isRefusalReported = false;
       for (const [index, { account, uidsByFolder }] of work.entries()) {
         const op = ops[index];
         if (op === undefined) continue;
@@ -659,16 +673,26 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
               }),
             );
             const res = await command(runOn(account), targets);
+            // The session the command belonged to may have ended while the server answered.
+            if (generation !== sessionGeneration.current) return;
             if (res.ok) {
               acknowledge(op, account);
               return;
             }
             failure = res.error;
           } catch (err) {
+            if (generation !== sessionGeneration.current) return;
             failure = { kind: 'error', detail: err instanceof Error ? err.message : String(err) };
           }
           setOps(current => current.filter(candidate => candidate.id !== op.id));
-          setFlagError(describeMailFailure(failure, account.imap.host));
+          const reason = describeMailFailure(failure, account.imap.host);
+          setMailError(
+            `${change.kind === 'move' ? 'thread not moved' : 'flag not saved'} · ${reason}`,
+          );
+          if (!isRefusalReported) {
+            isRefusalReported = true;
+            onRefused?.(reason);
+          }
           // A half-done move must not stay masked: the sync says which half happened.
           if (change.kind === 'move') void requestSync(account);
         })();
@@ -749,7 +773,9 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
           if (generation !== sessionGeneration.current) return failed;
           if (!res.ok) {
             setEntry(failed);
-            setFlagError(describeMailFailure(res.error, account.imap.host));
+            setMailError(
+              `message not loaded · ${describeMailFailure(res.error, account.imap.host)}`,
+            );
             return failed;
           }
           if (
@@ -768,16 +794,16 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
             attachments: res.value.attachments,
           };
           setEntry(loaded);
-          setFlagError(null);
+          setMailError(null);
           return loaded;
         } catch (err) {
           if (generation !== sessionGeneration.current) return failed;
           setEntry(failed);
-          setFlagError(
-            describeMailFailure(
+          setMailError(
+            `message not loaded · ${describeMailFailure(
               { kind: 'error', detail: err instanceof Error ? err.message : String(err) },
               account.imap.host,
-            ),
+            )}`,
           );
           return failed;
         } finally {
@@ -822,7 +848,7 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
    * cannot be atomic across them, so the sync says which half happened.
    */
   const moveThreadTo = useCallback(
-    (threadId: string, to: MoveTarget): boolean => {
+    (threadId: string, to: MoveTarget, onRefused?: OnRefused): boolean => {
       const sources = MOVE_SOURCES[to];
       return runThreadOp(
         threadId,
@@ -833,27 +859,28 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
           const { moveThread } = await import('../threads/sync');
           return moveThread(run, targets, to);
         },
+        onRefused,
       );
     },
     [runThreadOp],
   );
 
   const toggleArchive = useCallback(
-    (threadId: string) => {
+    (threadId: string, onRefused?: OnRefused) => {
       const thread = threads.find(t => t.id === threadId);
       if (thread === undefined) return false;
-      return moveThreadTo(threadId, isArchived(thread) ? 'inbox' : 'archive');
+      return moveThreadTo(threadId, isArchived(thread) ? 'inbox' : 'archive', onRefused);
     },
     [moveThreadTo, threads],
   );
 
   const trashThread = useCallback(
-    (threadId: string) => moveThreadTo(threadId, 'trash'),
+    (threadId: string, onRefused?: OnRefused) => moveThreadTo(threadId, 'trash', onRefused),
     [moveThreadTo],
   );
 
   const restoreThread = useCallback(
-    (threadId: string) => moveThreadTo(threadId, 'inbox'),
+    (threadId: string, onRefused?: OnRefused) => moveThreadTo(threadId, 'inbox', onRefused),
     [moveThreadTo],
   );
 
@@ -866,7 +893,7 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
       ...slice,
       isDemo: demo,
       recordsError,
-      flagError,
+      mailError,
       syncStates,
       liveStates,
       sync,
@@ -891,7 +918,7 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
       threads,
       demo,
       recordsError,
-      flagError,
+      mailError,
       syncStates,
       liveStates,
       sync,

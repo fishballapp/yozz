@@ -12,8 +12,9 @@ import { marksOf } from '../addresses/record';
 import { DISCARD_WARNING } from '../compose/intent';
 import { useMail } from '../store/MailProvider';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
-import { toast } from '../ui/Toast';
+import { reportProblem } from '../ui/Toast';
 import { listTime, stackTime } from '../ui/time';
+import { canMoveTo } from './reconcile';
 import type { ThreadState } from './thread';
 import { attachmentsOf, isArchived, newestInbound } from './thread';
 import { useAdvancePast } from './use-advance';
@@ -144,10 +145,14 @@ const RowTriage = ({
   const { toggleArchive, trashThread, restoreThread, removeDraft } = useMail();
   const advancePast = useAdvancePast();
   // Filing the open thread from its row moves the reader on, as the reader's own buttons do; a
-  // move the store refused (nothing there to move, or one still being confirmed) moves nothing.
-  const file = (move: (threadId: string) => boolean) => () => {
-    if (move(thread.id) && isSelected) advancePast(thread.id);
-  };
+  // move the store refused moves nothing and says why, now or when the server answers.
+  const file =
+    (move: (threadId: string, onRefused: (reason: string) => void) => boolean, notFiled: string) =>
+    () => {
+      if (move(thread.id, reason => reportProblem(notFiled, reason)) && isSelected) {
+        advancePast(thread.id);
+      }
+    };
   // A draft has no IMAP copy, so archive and delete can do nothing to it.
   const draftId = thread.messages.find(message => message.isDraft === true)?.draftId;
   const actions = ((): readonly RowAction[] => {
@@ -166,36 +171,46 @@ const RowTriage = ({
           act: async () => {
             const { outcome } = await removeDraft(draftId);
             if (outcome === 'deleted' || outcome === 'absent') return;
-            toast.add({
-              title: 'Draft not discarded',
-              description: DISCARD_REFUSALS[outcome],
-              timeout: 0,
-              priority: 'high',
-            });
+            reportProblem('Draft not discarded', DISCARD_REFUSALS[outcome]);
           },
         },
       ];
     }
     if (mailbox === 'trash') {
+      if (!canMoveTo(thread.folders, 'inbox')) return [];
       return [
         {
           icon: ArrowCounterClockwiseIcon,
           label: `Restore ${thread.subject}`,
-          act: file(restoreThread),
+          act: file(restoreThread, 'Thread not restored'),
         },
       ];
     }
+    const archiveTarget = isArchived(thread) ? 'inbox' : 'archive';
     return [
-      {
-        icon: ArchiveIcon,
-        label: isArchived(thread) ? `Move ${thread.subject} to inbox` : `Archive ${thread.subject}`,
-        act: file(toggleArchive),
-      },
-      {
-        icon: TrashIcon,
-        label: `Delete ${thread.subject}`,
-        act: file(trashThread),
-      },
+      ...(canMoveTo(thread.folders, archiveTarget)
+        ? [
+            {
+              icon: ArchiveIcon,
+              label: isArchived(thread)
+                ? `Move ${thread.subject} to inbox`
+                : `Archive ${thread.subject}`,
+              act: file(
+                toggleArchive,
+                isArchived(thread) ? 'Thread not moved to inbox' : 'Thread not archived',
+              ),
+            },
+          ]
+        : []),
+      ...(canMoveTo(thread.folders, 'trash')
+        ? [
+            {
+              icon: TrashIcon,
+              label: `Delete ${thread.subject}`,
+              act: file(trashThread, 'Thread not deleted'),
+            },
+          ]
+        : []),
     ];
   })();
 

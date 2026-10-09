@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { applyOps, foldersAfterMove, type PendingOp, retireOps } from './reconcile';
+import { applyOps, canMoveTo, foldersAfterMove, type PendingOp, retireOps } from './reconcile';
 import type { Folder } from './thread';
 
 const thread = (
@@ -27,6 +27,26 @@ const op = (
   change,
   retireAtSyncSeq: null,
   ...extra,
+});
+
+describe('canMoveTo', () => {
+  it.each([
+    [['inbox'], 'archive', true],
+    [['inbox', 'sent'], 'archive', true],
+    [['sent'], 'archive', false],
+    [['trash'], 'archive', false],
+    [['sent'], 'trash', true],
+    [['inbox'], 'trash', true],
+    [['archive'], 'trash', true],
+    [['trash'], 'trash', false],
+    [['archive'], 'inbox', true],
+    [['trash'], 'inbox', true],
+    [['inbox'], 'inbox', false],
+    [['sent'], 'inbox', false],
+    [[], 'archive', false],
+  ] as const)('%j can move to %s: %s', (folders, to, expected) => {
+    expect(canMoveTo(folders, to)).toBe(expected);
+  });
 });
 
 describe('foldersAfterMove', () => {

@@ -1,5 +1,5 @@
 import { Link, useNavigate, useParams } from '@tanstack/react-router';
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { keepCompose } from '../compose/intent';
 import { useMail } from '../store/MailProvider';
 import { ThreadReader } from './ThreadReader';
@@ -15,8 +15,14 @@ export const ThreadPage = () => {
   // The root can change under a URL (paging, a move), so the id is tried as a message of a thread before it is called missing.
   const thread = threadByHandle(threads, threadId ?? '');
 
-  // Effects, not click handlers, so a direct link marks read and fetches too.
+  // Effects, not click handlers, so a direct link marks read and fetches too. Once per thread and
+  // newest message on screen, read or not: a refused write is not retried on every render, but
+  // mail arriving is marked, and so is a thread opened again after another.
+  const shownRef = useRef<string | null>(null);
   useEffect(() => {
+    const shown = thread === null ? null : `${thread.id}/${thread.messages.at(-1)?.id}`;
+    if (shownRef.current === shown) return;
+    shownRef.current = shown;
     if (thread !== null && thread.isUnread) markRead(thread.id);
   }, [thread, markRead]);
   useEffect(() => {

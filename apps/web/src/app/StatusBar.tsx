@@ -36,7 +36,7 @@ export const StatusBar = ({
     isDemo: demo,
     syncStates,
     liveStates,
-    flagError,
+    mailError,
     sentCopyError,
     sync,
   } = useMail();
@@ -73,8 +73,8 @@ export const StatusBar = ({
     statusText = `sync failed · ${failureReason}`;
   } else if (sentCopyError !== null) {
     statusText = sentCopyError;
-  } else if (flagError !== null) {
-    statusText = 'flag not saved';
+  } else if (mailError !== null) {
+    statusText = mailError;
   } else if (syncedAccounts.length > 0) {
     const newestAt = Math.max(
       ...syncedAccounts.map(account => {
@@ -113,7 +113,7 @@ export const StatusBar = ({
           type="button"
           onClick={() => void sync()}
           className="shrink-0 truncate tracking-[0.08em] uppercase transition-colors hover:text-paper"
-          title={flagError ?? 'Sync now'}
+          title={mailError ?? 'Sync now'}
         >
           {statusText}
         </button>
