@@ -5,7 +5,7 @@ import type { DeleteOutcome, DraftHandle, SaveOutcome } from '../compose/draft-v
 import { quoteForReply, seedFor } from '../compose/intent';
 import type { BodyOutcome } from '../threads/body-state';
 import type { Recipient, ThreadState } from '../threads/thread';
-import { inboxesOf, isArchived, isOnServer, isTrashed, threadByHandle } from '../threads/thread';
+import { inboxesOf, isArchived, isTrashed, threadByHandle } from '../threads/thread';
 import { previewOf, visibleThreads } from '../threads/views';
 
 /**
@@ -24,7 +24,7 @@ export type AgentPort = {
   readonly drafts: readonly DraftHandle[];
   /** Read from the outcome, never from a later render. */
   readonly loadBody: (threadId: string, messageId: string) => Promise<BodyOutcome>;
-  /** The writes answer `false` while a move of that thread is being confirmed. */
+  /** The writes answer `false` when no mail server holds a copy of that thread to change. */
   readonly markRead: (threadId: string) => boolean;
   readonly markUnread: (threadId: string) => boolean;
   readonly setStar: (threadId: string, isStarred: boolean) => boolean;
@@ -151,8 +151,6 @@ const fitting = <T>(items: readonly T[], budget: number): readonly T[] => {
 /** What a tool read belongs to a session that has ended, and what it would do next to the session after it. */
 const SESSION_ENDED =
   'The vault locked before this finished; try again once the user has unlocked it.';
-
-const MOVE_PENDING = 'a move of this conversation is still being confirmed; retry in a moment';
 
 const NOT_ON_SERVER =
   'no copy of this conversation is on a mail server to change; a message just sent has one once its Sent copy syncs';
@@ -500,7 +498,7 @@ export const buildAgentTools = (port: () => AgentPort): readonly AgentTool[] => 
           return {
             id,
             status: 'pending' as const,
-            note: isOnServer(thread) ? MOVE_PENDING : NOT_ON_SERVER,
+            note: NOT_ON_SERVER,
           };
         }
         return {
@@ -700,7 +698,7 @@ export const buildAgentTools = (port: () => AgentPort): readonly AgentTool[] => 
       if (!isCurrent()) return { error: SESSION_ENDED };
       // The page's own effect marks read after it renders; the second write is a no-op.
       if (thread.isUnread && !port().markRead(thread.id)) {
-        return { ok: true, showing: 'thread', note: MOVE_PENDING };
+        return { ok: true, showing: 'thread', note: NOT_ON_SERVER };
       }
       return { ok: true, showing: 'thread', id: thread.id };
     },

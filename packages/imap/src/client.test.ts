@@ -3,7 +3,7 @@ import { resolve } from 'node:path';
 import type { ByteDuplex } from '@yozz.app/tls';
 import { describe, expect, it } from 'vitest';
 import { bytesToBase64, stringToBytes } from './bytes.ts';
-import { createImapClient } from './client.ts';
+import { copiedUid, createImapClient } from './client.ts';
 import { buildSaslPlainBytes } from './commands.ts';
 import type { ImapUntagged } from './response.ts';
 
@@ -219,7 +219,8 @@ describe('IMAP Client transcripts and state machine', () => {
     const steps = parseTranscript('move.txt');
     await runTranscriptSession(steps, async client => {
       const res = await client.move('10,11', 'Archive');
-      expect(res.ok).toBe(true);
+      // No UIDPLUS, so nothing says where the messages went.
+      expect(res).toEqual({ ok: true, value: null });
     });
   });
 
@@ -228,6 +229,26 @@ describe('IMAP Client transcripts and state machine', () => {
     await runTranscriptSession(steps, async client => {
       const res = await client.move('5', 'Archive');
       expect(res.ok).toBe(true);
+    });
+  });
+
+  it('reads the COPYUID a MOVE answers in an untagged OK before its EXPUNGEs', async () => {
+    const steps = parseTranscript('move-copyuid-untagged.txt');
+    await runTranscriptSession(steps, async client => {
+      const res = await client.move('10,11', 'Archive');
+      if (!res.ok || res.value === null) throw new Error('expected a COPYUID');
+      expect(res.value.uidValidity).toBe(1412345);
+      expect([copiedUid(res.value, 10), copiedUid(res.value, 11)]).toEqual([500, 501]);
+    });
+  });
+
+  it('reads the COPYUID a MOVE answers on its tagged OK, pairing uids in the order given', async () => {
+    const steps = parseTranscript('move-copyuid-tagged.txt');
+    await runTranscriptSession(steps, async client => {
+      const res = await client.move('10,11', 'Archive');
+      if (!res.ok || res.value === null) throw new Error('expected a COPYUID');
+      expect(res.value.uidValidity).toBe(77);
+      expect([copiedUid(res.value, 10), copiedUid(res.value, 11)]).toEqual([201, 200]);
     });
   });
 
@@ -714,5 +735,53 @@ describe('IMAP Client transcripts and state machine', () => {
       expect(later.ok).toBe(false);
       if (!later.ok) expect(later.reason.kind).toBe('closed');
     });
+  });
+});
+
+describe('copiedUid', () => {
+  const copyOf = async (code: string) => {
+    const pair = createTestDuplexPair();
+    const client = createImapClient(pair.client);
+    await pair.server.write(stringToBytes('* OK [CAPABILITY IMAP4rev1 MOVE UIDPLUS] ready\r\n'));
+    await client.greeting();
+    const moving = client.move('1', 'Archive');
+    await pair.server.read();
+    await pair.server.write(stringToBytes(`A0001 OK [${code}] done\r\n`));
+    const res = await moving;
+    pair.close();
+    if (!res.ok) throw new Error('move refused');
+    return res.value;
+  };
+
+  it('maps across ranges and single uids, in order', async () => {
+    const copy = await copyOf('COPYUID 9 3:5,9,11:12 20,30:33,40');
+    if (copy === null) throw new Error('expected a COPYUID');
+    expect([3, 4, 5, 9, 11, 12].map(uid => copiedUid(copy, uid))).toEqual([20, 30, 31, 32, 33, 40]);
+    expect(copiedUid(copy, 6)).toBeNull();
+  });
+
+  it('reads a range written high to low as ascending (RFC 4315 §3)', async () => {
+    const copy = await copyOf('COPYUID 9 12:10 200:202');
+    if (copy === null) throw new Error('expected a COPYUID');
+    expect([10, 11, 12].map(uid => copiedUid(copy, uid))).toEqual([200, 201, 202]);
+  });
+
+  it('answers the widest range a server can name without expanding it', async () => {
+    const copy = await copyOf('COPYUID 9 1:4294967295 1:4294967295');
+    if (copy === null) throw new Error('expected a COPYUID');
+    expect(copiedUid(copy, 4294967295)).toBe(4294967295);
+  });
+
+  it('ignores a COPYUID whose sets differ in size, carry *, or are not uids', async () => {
+    for (const code of [
+      'COPYUID 9 1:4294967295 1:2',
+      'COPYUID 9 1:* 5:*',
+      'COPYUID 9 0 5',
+      'COPYUID 9 4294967296 5',
+      'COPYUID x 1 5',
+      'COPYUID 9 1',
+    ]) {
+      expect(await copyOf(code)).toBeNull();
+    }
   });
 });

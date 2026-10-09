@@ -159,6 +159,27 @@ const createFolderCache = (scope: Scope, idbFactory?: IDBFactory) => {
         idbFactory,
       ),
 
+    /** Rewrites the summaries cached at `uids` in one transaction; a uid not cached stays absent. */
+    updateSummaries: (
+      uids: readonly number[],
+      update: (summary: ImapMessageSummary) => ImapMessageSummary,
+    ) =>
+      withDb<void>(
+        STORES.mailSummaries.name,
+        'readwrite',
+        (store, done) => {
+          for (const uid of uids) {
+            const req = store.get([userId, account, folder, uid]);
+            req.onsuccess = () => {
+              const row = req.result as SummaryRow | undefined;
+              if (row !== undefined) store.put({ ...row, summary: update(row.summary) });
+            };
+          }
+          done();
+        },
+        idbFactory,
+      ),
+
     getBody: (uid: number) =>
       withDb<FetchedBody | null>(
         STORES.mailBodies.name,

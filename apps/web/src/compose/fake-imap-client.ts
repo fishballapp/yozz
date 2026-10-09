@@ -28,7 +28,7 @@ export const stubImapClient = (over: Partial<ImapClient> = {}): ImapClient => {
     expunge: async () => ({ ok: true, value: undefined }),
     uidExpunge: async () => ({ ok: true, value: undefined }),
     uidSearchHeader: async () => ({ ok: true, value: [] }),
-    move: async () => ({ ok: true, value: undefined }),
+    move: async () => ({ ok: true, value: null }),
     create: async () => ({ ok: true, value: undefined }),
     noop: async () => ({ ok: true, value: undefined }),
     idle: () => ({

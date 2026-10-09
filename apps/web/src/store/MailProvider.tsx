@@ -26,6 +26,7 @@ import {
   withBodies,
   withoutAccountPreviews,
 } from '../threads/body-state';
+import type { MailCache } from '../threads/cache';
 import { clearCachedFrames } from '../threads/frame-cache';
 import {
   applyOps,
@@ -37,8 +38,8 @@ import {
   retireOps,
 } from '../threads/reconcile';
 import { type AccountSummaries, threadsFromAccounts, withDrafts } from '../threads/summaries';
-import type { AccountSyncState, FlagTarget } from '../threads/sync';
-import type { ThreadState } from '../threads/thread';
+import type { AccountSyncState, FlagTarget, MovedCopy } from '../threads/sync';
+import type { Location, ThreadState } from '../threads/thread';
 import { type Folder, isArchived, isServerCopy } from '../threads/thread';
 import { accountsShown, folderPaged, type MailboxId } from '../threads/views';
 import { isDemo } from '../ui/chrome';
@@ -74,7 +75,7 @@ type MailContextValue = Composer & {
   loadOlder: (mailbox: MailboxId) => Promise<void>;
   /** Whether that mailbox's page is in flight. */
   isLoadingOlder: (mailbox: MailboxId) => boolean;
-  /** Flag and move answer `false` (and set `mailError`) while a move of the same thread is pending. */
+  /** Flag and move answer `false` when no mail server holds a copy to change. */
   markRead: (threadId: string) => boolean;
   /** Puts the whole thread back to unread; the reader closes with it. */
   markUnread: (threadId: string) => boolean;
@@ -114,6 +115,22 @@ const afterNextPaint = () =>
     requestAnimationFrame(() => setTimeout(resolve, 0));
   });
 
+/** What a write answers when a move before it left a copy somewhere it cannot yet address. */
+const MOVE_PENDING = 'Still confirming the last move of that conversation; try again in a moment.';
+
+const locationKey = ({ account, folder, uidValidity, uid }: Location) =>
+  `${account}/${folder}/${uidValidity}/${uid}`;
+
+/** Where the server holds `location` now, following each move made since; null where one did not say. */
+const whereNow = (
+  moved: ReadonlyMap<string, Location | null>,
+  location: Location,
+): Location | null => {
+  const next = moved.get(locationKey(location));
+  if (next === undefined) return location;
+  return next === null ? null : whereNow(moved, next);
+};
+
 export const MailProvider = ({ children }: { children: ReactNode }) => {
   const { session } = useVault();
   const demo = isDemo();
@@ -135,8 +152,24 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
   sessionRef.current = session;
   const [olderInFlight, setOlderInFlight] = useState<Readonly<Record<string, boolean>>>({});
 
-  /** One entry per account with a sync running; `dirty` makes the loop go round again, so every request is followed by a sync that started after it. */
-  const syncRunsRef = useRef<Map<string, { promise: Promise<void>; dirty: boolean }>>(new Map());
+  /**
+   * One entry per account with a sync running; `dirty` makes the loop go round again, so every
+   * request is followed by a sync that started after it. `isTorn`: a move or an older page landed
+   * between the pass's folders, which then disagree about where mail is, so it goes round instead
+   * of landing.
+   */
+  const syncRunsRef = useRef<
+    Map<string, { promise: Promise<void>; dirty: boolean; isTorn: boolean }>
+  >(new Map());
+  /**
+   * Where this session's moves put each copy, keyed by the location it left, as the server said
+   * (RFC 4315 `COPYUID`); null when it did not. A write addresses copies through it, because the
+   * base names where they were until a sync catches up. Uids are never reused under one
+   * UIDVALIDITY, so an entry stays true.
+   */
+  const movedRef = useRef<Map<string, Location | null>>(new Map());
+  /** Per account and thread, the last write's turn: the next resolves its uids once that one has answered. */
+  const writeTurnsRef = useRef<Map<string, Promise<void>>>(new Map());
   /** Counts sync starts; an acked op is retired by the first later one to land. */
   const syncSeqRef = useRef(0);
   /** Keyed by account and folder: two mailboxes over the same folder are one page. */
@@ -303,6 +336,12 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
   const accountsRef = useRef(accounts);
   accountsRef.current = accounts;
 
+  /** A write landed between a running sync's folders; see `isTorn`. */
+  const tearRunningSync = useCallback((address: string) => {
+    const running = syncRunsRef.current.get(address);
+    if (running !== undefined) running.isTorn = true;
+  }, []);
+
   const requestSync = useCallback(
     (account: InboundAddress): Promise<void> => {
       const address = account.address;
@@ -316,7 +355,7 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
       const runOn = bindRunOn();
       const userId = userIdRef.current;
       if (userId === null) return Promise.resolve();
-      const entry = { dirty: false, promise: Promise.resolve() };
+      const entry = { dirty: false, isTorn: false, promise: Promise.resolve() };
       entry.promise = (async () => {
         try {
           const { createMailCache } = await import('../threads/cache');
@@ -349,11 +388,17 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
           if (isStale()) return;
           do {
             entry.dirty = false;
+            entry.isTorn = false;
             syncSeqRef.current += 1;
             const seq = syncSeqRef.current;
             setSyncStates(current => ({ ...current, [address]: { status: 'syncing' } }));
             const result = await syncAccount(runOn(account), cache, isStale);
             if (generation !== sessionGeneration.current) return;
+            // Its folders were read on either side of a write; the next pass lands instead.
+            if (result.state.status === 'synced' && entry.isTorn) {
+              entry.dirty = true;
+              continue;
+            }
             // A UIDVALIDITY reset dropped the cache; the threads on screen and the ops against them name invalid uids.
             if (result.state.status === 'failed' && result.state.invalidated) {
               setBaseByAccount(current => ({ ...current, [address]: {} }));
@@ -530,6 +575,8 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
       sessionGeneration.current += 1;
       // Otherwise the next unlock's sync is handed the old in-flight promise.
       syncRunsRef.current.clear();
+      movedRef.current.clear();
+      writeTurnsRef.current.clear();
       inFlightOlderRef.current.clear();
       inFlightBodiesRef.current.clear();
       hydratedRef.current.clear();
@@ -590,6 +637,7 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
             );
             return;
           }
+          tearRunningSync(account.address);
           const summaries = await cachedSummaries(cache);
           if (generation !== sessionGeneration.current) return;
           setBaseByAccount(current => ({ ...current, [account.address]: summaries }));
@@ -619,7 +667,7 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
       inFlightOlderRef.current.set(key, promise);
       return promise;
     },
-    [bindRunOn],
+    [bindRunOn, tearRunningSync],
   );
 
   const loadOlder = useCallback(
@@ -692,38 +740,26 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
 
   threadsRef.current = threads;
 
-  /** The op keeps masking the base until a sync that started after this moment lands. */
-  const acknowledge = useCallback(
-    (op: PendingOp, account: InboundAddress) => {
-      const retireAtSyncSeq = syncSeqRef.current + 1;
-      setOps(current =>
-        current.map(candidate =>
-          candidate.id === op.id ? { ...candidate, retireAtSyncSeq } : candidate,
-        ),
-      );
-      setMailError(null);
-      void requestSync(account);
-    },
-    [requestSync],
-  );
-
-  /** While a move is pending the messages' synced locations name uids the server is about to change. */
-  const isMoving = useCallback(
-    (threadId: string, onRefused?: OnRefused) => {
-      if (!ops.some(op => op.threadId === threadId && op.change.kind === 'move')) return true;
-      const reason = 'Still confirming the last move of that conversation; try again in a moment.';
-      setMailError(reason);
-      onRefused?.(reason);
-      return false;
-    },
-    [ops],
-  );
+  /**
+   * The op keeps masking the base until a sync that started after this moment lands. None is asked
+   * for: the next one that comes anyway retires it, and the op shows what the server now holds.
+   */
+  const acknowledge = useCallback((op: PendingOp) => {
+    const retireAtSyncSeq = syncSeqRef.current + 1;
+    setOps(current =>
+      current.map(candidate =>
+        candidate.id === op.id ? { ...candidate, retireAtSyncSeq } : candidate,
+      ),
+    );
+    setMailError(null);
+  }, []);
 
   /**
    * One optimistic write against the server's copies: one IMAP command per account (its own
    * connection, sync and uid space), grouped by folder because a uid only means something in its
-   * own mailbox. A refused command drops that account's op and lands in `mailError`, never in its
-   * sync state.
+   * own mailbox. Writes to one thread in one account take turns, so each addresses the copies where
+   * the one before it left them. A refused command drops that account's op and lands in
+   * `mailError`, never in its sync state.
    */
   const runThreadOp = useCallback(
     (
@@ -733,7 +769,8 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
       command: (
         run: ReturnType<RunOn>,
         targets: readonly FlagTarget[],
-      ) => Promise<Result<unknown, MailConnectionFailure>>,
+        cache: MailCache,
+      ) => Promise<Result<readonly MovedCopy[], MailConnectionFailure>>,
       onRefused?: OnRefused,
     ): boolean => {
       const thread = threads.find(t => t.id === threadId);
@@ -754,23 +791,17 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
         setDemoThreads(current => applyOps(current, ops));
         return true;
       }
-      if (!isMoving(threadId, onRefused)) return false;
 
-      const byAccount = Map.groupBy(
-        thread.messages.flatMap(message =>
-          (message.locations ?? []).filter(
-            location => isServerCopy(location) && pick(location.folder),
-          ),
-        ),
-        location => location.account,
+      const serverCopies = thread.messages.flatMap(message =>
+        (message.locations ?? []).filter(isServerCopy),
       );
       const userId = userIdRef.current;
-      const work = [...byAccount].flatMap(([address, locations]) => {
-        const account = accountsRef.current.find(a => a.address === address);
-        return account === undefined
-          ? []
-          : [{ account, uidsByFolder: Map.groupBy(locations, location => location.folder) }];
-      });
+      // By the folders on screen, where a pending move has already put its account's copies.
+      const work = accountsRef.current.filter(
+        account =>
+          serverCopies.some(location => location.account === account.address) &&
+          (thread.foldersByAccount[account.address] ?? []).some(pick),
+      );
       // Nothing on the server to change, so no op: it would mask a base that is already right.
       if (userId === null || work.length === 0) {
         onRefused?.('No copy of it is on a mail server YOZZ reads.');
@@ -778,38 +809,82 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
       }
 
       // One op per account, retired by its own account's confirming sync.
-      const ops = work.map(({ account }) => opFor(account.address));
+      const ops = work.map(account => opFor(account.address));
       setOps(current => [...current, ...ops]);
 
       const generation = sessionGeneration.current;
       const runOn = bindRunOn();
       // Flipped by the first account to refuse, so a move both accounts refused is reported once.
       let isRefusalReported = false;
-      for (const [index, { account, uidsByFolder }] of work.entries()) {
+      const refuse = (op: PendingOp, reason: string) => {
+        setOps(current => current.filter(candidate => candidate.id !== op.id));
+        setMailError(
+          `${change.kind === 'move' ? 'thread not moved' : 'flag not saved'} · ${reason}`,
+        );
+        if (isRefusalReported) return;
+        isRefusalReported = true;
+        onRefused?.(reason);
+      };
+
+      for (const [index, account] of work.entries()) {
         const op = ops[index];
         if (op === undefined) continue;
-        void (async () => {
+        const turnKey = `${account.address}\n${threadId}`;
+        const previous = writeTurnsRef.current.get(turnKey);
+        const turn = (async () => {
+          await previous;
+          if (generation !== sessionGeneration.current) return;
           let failure: MailConnectionFailure;
           try {
+            const located = serverCopies
+              .filter(location => location.account === account.address)
+              .map(location => whereNow(movedRef.current, location));
+            const here = located.filter(location => location !== null);
             const { createMailCache } = await import('../threads/cache');
             const cache = createMailCache(userId, account.address);
             const targets = await Promise.all(
-              [...uidsByFolder].map(async ([folder, locations]) => {
+              [
+                ...Map.groupBy(
+                  here.filter(location => pick(location.folder)),
+                  location => location.folder,
+                ),
+              ].map(async ([folder, locations]) => {
                 const mark = await cache.folder(folder).getSync();
-                if (mark === null) throw new Error(`${folder} has not synced`);
+                if (mark === null) return null;
                 assertSameUidValidity(folder, mark.uidValidity, locations);
                 return {
+                  folder,
                   mailbox: mark.name,
                   uidValidity: mark.uidValidity,
                   uids: locations.map(({ uid }) => uid),
                 };
               }),
             );
-            const res = await command(runOn(account), targets);
+            if (generation !== sessionGeneration.current) return;
+            const ready = targets.filter(target => target !== null);
+            // A move before this one left copies it cannot address yet (no UIDPLUS, a folder no sync
+            // has read, or a refusal that left nothing where it looks); the sync it asks for can.
+            if (
+              here.length < located.length ||
+              ready.length === 0 ||
+              ready.length < targets.length
+            ) {
+              refuse(op, MOVE_PENDING);
+              void requestSync(account);
+              return;
+            }
+            const res = await command(runOn(account), ready, cache);
             // The session the command belonged to may have ended while the server answered.
             if (generation !== sessionGeneration.current) return;
             if (res.ok) {
-              acknowledge(op, account);
+              for (const { from, to } of res.value) {
+                movedRef.current.set(
+                  locationKey({ account: account.address, ...from }),
+                  to === null ? null : { account: account.address, ...to },
+                );
+              }
+              if (change.kind === 'move') tearRunningSync(account.address);
+              acknowledge(op);
               return;
             }
             failure = res.error;
@@ -817,22 +892,20 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
             if (generation !== sessionGeneration.current) return;
             failure = { kind: 'error', detail: err instanceof Error ? err.message : String(err) };
           }
-          setOps(current => current.filter(candidate => candidate.id !== op.id));
-          const reason = describeMailFailure(failure, account.imap.host);
-          setMailError(
-            `${change.kind === 'move' ? 'thread not moved' : 'flag not saved'} · ${reason}`,
-          );
-          if (!isRefusalReported) {
-            isRefusalReported = true;
-            onRefused?.(reason);
+          refuse(op, describeMailFailure(failure, account.imap.host));
+          // A half-done move must neither stay masked nor land torn: the sync says which half
+          // happened. ponytail: until it lands, a write queued right behind addresses the half that
+          // moved where it was, which the server answers OK and does nothing. Un-park when seen.
+          if (change.kind === 'move') {
+            tearRunningSync(account.address);
+            void requestSync(account);
           }
-          // A half-done move must not stay masked: the sync says which half happened.
-          if (change.kind === 'move') void requestSync(account);
         })();
+        writeTurnsRef.current.set(turnKey, turn);
       }
       return true;
     },
-    [acknowledge, bindRunOn, isMoving, requestSync, threads],
+    [acknowledge, bindRunOn, requestSync, tearRunningSync, threads],
   );
 
   const setThreadFlag = useCallback(
@@ -843,9 +916,11 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
         threadId,
         { kind: 'flag', key, value },
         () => true,
-        async (run, targets) => {
+        async (run, targets, cache) => {
           const { setFlag } = await import('../threads/sync');
-          return setFlag(run, targets, imapFlag, on);
+          const res = await setFlag(run, cache, targets, imapFlag, on);
+          // A flag write moves nothing.
+          return res.ok ? { ok: true, value: [] } : res;
         },
       );
     },
@@ -979,8 +1054,8 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
   );
 
   /**
-   * One optimistic folder move: `UID MOVE` per source folder, then a sync. One MOVE per mailbox
-   * cannot be atomic across them, so the sync says which half happened.
+   * One optimistic folder move: `UID MOVE` per source folder. One MOVE per mailbox cannot be atomic
+   * across them, so a refusal asks for the sync that says which half happened.
    */
   const moveThreadTo = useCallback(
     (threadId: string, to: MoveTarget, onRefused?: OnRefused): boolean => {

@@ -451,26 +451,10 @@ describe('update_threads', () => {
 
   it('changes a conversation once when several ids name it', async () => {
     const { tools, port } = fakePort([thread('a', ['inbox'], { isStarred: false })]);
-    // The second pass would see the first one's pending move and report a refusal.
+    // A second write of the same change would be a second IMAP command for nothing.
     const result = await call(tools, 'update_threads', { ids: ['a', 'a/1'], starred: true });
     expect(result).toEqual({ results: [{ id: 'a', status: 'ok', isStarred: true }] });
     expect(port.setStar).toHaveBeenCalledTimes(1);
-  });
-
-  it('reports a write the store refused while a move is still being confirmed', async () => {
-    const onServer = thread('a', ['inbox'], {
-      messages: [
-        message('a/1', {
-          locations: [{ account: 'me@yozz.app', folder: 'inbox', uidValidity: 1, uid: 3 }],
-        }),
-      ],
-    });
-    const { tools } = fakePort([onServer], { archive: () => false });
-    await expect(
-      call(tools, 'update_threads', { ids: ['a'], mailbox: 'archive' }),
-    ).resolves.toMatchObject({
-      results: [{ id: 'a', status: 'pending', note: expect.stringContaining('confirmed') }],
-    });
   });
 
   it('says why a conversation no server holds a copy of did not change', async () => {

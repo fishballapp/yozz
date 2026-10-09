@@ -1,0 +1,6 @@
+S: * OK [CAPABILITY IMAP4rev1 MOVE UIDPLUS] Dovecot ready.
+C: A0001 UID MOVE 10,11 "Archive"
+S: * OK [COPYUID 1412345 10:11 500:501] Moved UIDs.
+S: * 3 EXPUNGE
+S: * 3 EXPUNGE
+S: A0001 OK Move completed (0.002 + 0.000 secs).

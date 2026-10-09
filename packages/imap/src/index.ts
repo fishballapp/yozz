@@ -1,4 +1,6 @@
 export {
+  type CopyUid,
+  copiedUid,
   createImapClient,
   type ImapAddress,
   type ImapClient,

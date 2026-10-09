@@ -62,7 +62,7 @@ const createFakeClient = (capabilities: readonly string[] = ['IDLE']): FakeClien
     append: async () => ({ ok: true, value: null }),
     expunge: async () => ({ ok: true, value: undefined }),
     uidExpunge: async () => ({ ok: true, value: undefined }),
-    move: async () => ({ ok: true, value: undefined }),
+    move: async () => ({ ok: true, value: null }),
     create: async () => ({ ok: true, value: undefined }),
     noop: async () => {
       client.noops += 1;

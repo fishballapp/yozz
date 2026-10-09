@@ -130,8 +130,8 @@ export type ImapClient = {
     header: string,
     value: string,
   ) => Promise<ImapResult<readonly number[]>>;
-  /** RFC 6851. Refuses without the MOVE capability. */
-  readonly move: (uidSet: string, mailbox: string) => Promise<ImapResult<void>>;
+  /** RFC 6851. Answers with the RFC 4315 `COPYUID`, or null when the server gave none. Refuses without MOVE. */
+  readonly move: (uidSet: string, mailbox: string) => Promise<ImapResult<CopyUid | null>>;
   readonly create: (mailbox: string) => Promise<ImapResult<void>>;
   readonly noop: () => Promise<ImapResult<void>>;
   /** RFC 2177. Occupies the command queue until `done()`; untagged responses meanwhile go to `onUntagged`. */
@@ -148,6 +148,106 @@ const appendUidOf = (tagged: ImapTagged): AppendUid | null => {
   const [uidValidity, uid] = code.args.map(Number);
   if (uidValidity === undefined || uid === undefined) return null;
   return Number.isInteger(uidValidity) && Number.isInteger(uid) ? { uidValidity, uid } : null;
+};
+
+/** `first` to `last` inclusive, ascending: RFC 4315 §3 reads a range `12:10` as 10, 11, 12. */
+type UidRange = readonly [first: number, last: number];
+
+/**
+ * RFC 4315 `COPYUID`: the n-th uid of `source` is now the n-th uid of `target`, in a destination
+ * mailbox whose UIDVALIDITY is `uidValidity`. Kept as ranges: a server's `1:4294967295` costs two
+ * numbers, never four billion. Read one uid's destination with `copiedUid`.
+ */
+export type CopyUid = {
+  readonly uidValidity: number;
+  readonly source: readonly UidRange[];
+  readonly target: readonly UidRange[];
+};
+
+/** RFC 3501 nz-number: what a uid can be. */
+const MAX_UID = 4_294_967_295;
+
+const uidOf = (text: string): number | null => {
+  if (!/^[1-9][0-9]*$/.test(text)) return null;
+  const uid = Number(text);
+  return uid <= MAX_UID ? uid : null;
+};
+
+/** A uid set without `*`, which COPYUID never carries; null when malformed. */
+const uidRangesOf = (text: string): readonly UidRange[] | null => {
+  const ranges: UidRange[] = [];
+  for (const part of text.split(',')) {
+    const bounds = part.split(':').map(uidOf);
+    const uids = bounds.filter(uid => uid !== null);
+    const [first, last] = uids;
+    if (first === undefined || uids.length < bounds.length || uids.length > 2) return null;
+    const end = last ?? first;
+    ranges.push([Math.min(first, end), Math.max(first, end)]);
+  }
+  return ranges;
+};
+
+const sizeOfRange = ([first, last]: UidRange) => last - first + 1;
+
+const sizeOf = (ranges: readonly UidRange[]) =>
+  ranges.reduce((size, range) => size + sizeOfRange(range), 0);
+
+const copyUidOfCode = (code: ImapResponseCode | null): CopyUid | null => {
+  if (code?.kind !== 'other' || code.code !== 'COPYUID') return null;
+  const [validity, sourceSet, targetSet] = code.args;
+  if (validity === undefined || sourceSet === undefined || targetSet === undefined) return null;
+  const uidValidity = uidOf(validity);
+  const source = uidRangesOf(sourceSet);
+  const target = uidRangesOf(targetSet);
+  if (uidValidity === null || source === null || target === null) return null;
+  return sizeOf(source) === sizeOf(target) ? { uidValidity, source, target } : null;
+};
+
+/**
+ * RFC 6851 §4.3 has a MOVE's COPYUID in an untagged OK ahead of its EXPUNGEs (Gmail, Dovecot);
+ * RFC 4315 puts a COPY's on the tagged OK, and some servers do that for MOVE too. Either, or
+ * several of them, read as one answer.
+ */
+const copyUidOf = (untagged: readonly ImapUntagged[], tagged: ImapTagged): CopyUid | null => {
+  const answers = [
+    ...untagged.map(response => (response.kind === 'status' ? response.code : null)),
+    tagged.code,
+  ].flatMap(code => copyUidOfCode(code) ?? []);
+  const [first] = answers;
+  if (first === undefined) return null;
+  if (answers.some(answer => answer.uidValidity !== first.uidValidity)) return null;
+  return {
+    uidValidity: first.uidValidity,
+    source: answers.flatMap(answer => answer.source),
+    target: answers.flatMap(answer => answer.target),
+  };
+};
+
+/** How many uids come before `uid`, counting through `ranges` in order; null when none holds it. */
+const positionOf = (ranges: readonly UidRange[], uid: number): number | null => {
+  let before = 0;
+  for (const range of ranges) {
+    const [first, last] = range;
+    if (uid >= first && uid <= last) return before + uid - first;
+    before += sizeOfRange(range);
+  }
+  return null;
+};
+
+/** The uid at `position`, counting through `ranges` in order; null past their end. */
+const uidAt = (ranges: readonly UidRange[], position: number): number | null => {
+  let before = 0;
+  for (const range of ranges) {
+    if (position < before + sizeOfRange(range)) return range[0] + position - before;
+    before += sizeOfRange(range);
+  }
+  return null;
+};
+
+/** Where `COPYUID` says the message at `uid` went, or null when it does not mention it. */
+export const copiedUid = ({ source, target }: CopyUid, uid: number): number | null => {
+  const position = positionOf(source, uid);
+  return position === null ? null : uidAt(target, position);
 };
 
 export const parseReferencesHeader = (bytes: Uint8Array | null): readonly string[] => {
@@ -786,7 +886,7 @@ export const createImapClient = (
         }
         const res = await executeCommand(tag => buildMoveCommand(tag, uidSet, mailbox));
         if (!res.ok) return res;
-        return { ok: true, value: undefined };
+        return { ok: true, value: copyUidOf(res.value.untagged, res.value.tagged) };
       }),
 
     create: mailbox =>

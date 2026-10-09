@@ -16,6 +16,7 @@ const fetchSummariesBySeq = vi.fn();
 const fetchFlags = vi.fn();
 const fetchRaw = vi.fn();
 const move = vi.fn();
+const storeFlags = vi.fn();
 const create = vi.fn();
 
 const fakeClient = {
@@ -27,13 +28,14 @@ const fakeClient = {
   fetchFlags,
   fetchRaw,
   move,
+  storeFlags,
   create,
 } as unknown as LiveClient;
 
 const run = <T>(task: LiveTask<T>): Promise<Result<T, MailConnectionFailure>> =>
   task.run(fakeClient);
 
-const { syncAccount, loadOlder, prefetchBodies, moveThread } = await import('./sync');
+const { syncAccount, loadOlder, prefetchBodies, moveThread, setFlag } = await import('./sync');
 
 const SENT = { name: 'Sent', delimiter: '/', attributes: ['\\Sent'] };
 const ARCHIVE = { name: 'Archive', delimiter: '/', attributes: ['\\Archive'] };
@@ -93,6 +95,16 @@ const fakeCache = (seed: Partial<Record<Folder, Seed>> = {}) => {
       deleteSummaries: async (uids: readonly number[]) => {
         state[folder].summaries = state[folder].summaries.filter(x => !uids.includes(x.uid));
       },
+      updateSummaries: async (
+        uids: readonly number[],
+        update: (summary: ImapMessageSummary) => ImapMessageSummary,
+      ) => {
+        // A transaction commits after the call returns, as IndexedDB's does.
+        await new Promise(resolve => setTimeout(resolve, 0));
+        state[folder].summaries = state[folder].summaries.map(x =>
+          uids.includes(x.uid) ? update(x) : x,
+        );
+      },
       getBody: async (uid: number) =>
         (state[folder].bodies.get(uid) as FetchedBody | undefined) ?? null,
       // The double only answers "is a body cached".
@@ -135,12 +147,45 @@ beforeEach(() => {
   fetchFlags.mockReset();
   fetchRaw.mockReset();
   move.mockReset();
+  storeFlags.mockReset();
   create.mockReset();
   list.mockResolvedValue({ ok: true, value: INBOX_ONLY });
   ensureSelected.mockImplementation(async (name: string) => select(name));
 });
 
 describe('syncAccount', () => {
+  it('reads each folder as its own task, so a click queued meanwhile runs before the next', async () => {
+    list.mockResolvedValue({ ok: true, value: [...INBOX_ONLY, SENT] });
+    const order: string[] = [];
+    // The live connection's user lane: one task at a time, first in first out.
+    let tail: Promise<unknown> = Promise.resolve();
+    const serial = <T>(task: LiveTask<T>): Promise<Result<T, MailConnectionFailure>> => {
+      const result = (async () => {
+        await tail;
+        return task.run(fakeClient);
+      })();
+      tail = result;
+      return result;
+    };
+    select.mockImplementation(async (name: string) => {
+      order.push(name);
+      if (name === 'INBOX') {
+        void serial({
+          priority: 'user',
+          retry: false,
+          run: async () => {
+            order.push('open a message');
+            return { ok: true, value: undefined };
+          },
+        });
+      }
+      return { ok: true, value: { uidValidity: 1, uidNext: 1, exists: 0 } };
+    });
+    const { state } = await syncAccount(serial, fakeCache());
+    expect(state.status).toBe('synced');
+    expect(order).toEqual(['INBOX', 'open a message', 'Sent']);
+  });
+
   it('first sync fetches a window and records the sync mark', async () => {
     selectAnswers({ INBOX: { uidValidity: 5, uidNext: 300, exists: 250 } });
     fetchSummariesBySeq.mockResolvedValue({ ok: true, value: [summary(150), summary(151)] });
@@ -438,16 +483,56 @@ describe('prefetchBodies', () => {
 });
 
 describe('moveThread', () => {
+  /** Moved, with no COPYUID to say where to. */
+  const unplaced = (folder: Folder, uids: readonly number[]) =>
+    uids.map(uid => ({ from: { folder, uidValidity: 1, uid }, to: null }));
+
+  it('answers where each message went, from the COPYUID, under the destination UIDVALIDITY', async () => {
+    list.mockResolvedValue({ ok: true, value: [...INBOX_ONLY, ARCHIVE] });
+    ensureSelected.mockResolvedValue({ ok: true, value: { uidValidity: 1 } });
+    // `11` went first in the server's answer; `12` was gone before the MOVE reached it.
+    move.mockResolvedValue({
+      ok: true,
+      value: {
+        uidValidity: 40,
+        source: [
+          [11, 11],
+          [10, 10],
+        ],
+        target: [[500, 501]],
+      },
+    });
+    const res = await moveThread(
+      run,
+      [{ folder: 'inbox', mailbox: 'INBOX', uidValidity: 1, uids: [10, 11, 12] }],
+      'archive',
+    );
+    expect(res).toEqual({
+      ok: true,
+      value: [
+        {
+          from: { folder: 'inbox', uidValidity: 1, uid: 10 },
+          to: { folder: 'archive', uidValidity: 40, uid: 501 },
+        },
+        {
+          from: { folder: 'inbox', uidValidity: 1, uid: 11 },
+          to: { folder: 'archive', uidValidity: 40, uid: 500 },
+        },
+        { from: { folder: 'inbox', uidValidity: 1, uid: 12 }, to: null },
+      ],
+    });
+  });
+
   it('archives into the LIST \\Archive mailbox without CREATE', async () => {
     list.mockResolvedValue({ ok: true, value: [...INBOX_ONLY, ARCHIVE] });
     ensureSelected.mockResolvedValue({ ok: true, value: { uidValidity: 1 } });
-    move.mockResolvedValue({ ok: true, value: undefined });
+    move.mockResolvedValue({ ok: true, value: null });
     const res = await moveThread(
       run,
-      [{ mailbox: 'INBOX', uidValidity: 1, uids: [10, 11] }],
+      [{ folder: 'inbox', mailbox: 'INBOX', uidValidity: 1, uids: [10, 11] }],
       'archive',
     );
-    expect(res).toEqual({ ok: true, value: undefined });
+    expect(res).toEqual({ ok: true, value: unplaced('inbox', [10, 11]) });
     expect(ensureSelected).toHaveBeenCalledWith('INBOX');
     expect(move).toHaveBeenCalledWith('10,11', 'Archive');
     expect(create).not.toHaveBeenCalled();
@@ -457,30 +542,30 @@ describe('moveThread', () => {
     list.mockResolvedValue({ ok: true, value: INBOX_ONLY });
     ensureSelected.mockResolvedValue({ ok: true, value: { uidValidity: 1 } });
     create.mockResolvedValue({ ok: true, value: undefined });
-    move.mockResolvedValueOnce({ ok: true, value: undefined });
+    move.mockResolvedValueOnce({ ok: true, value: null });
     const archived = await moveThread(
       run,
-      [{ mailbox: 'INBOX', uidValidity: 1, uids: [3] }],
+      [{ folder: 'inbox', mailbox: 'INBOX', uidValidity: 1, uids: [3] }],
       'archive',
     );
-    expect(archived).toEqual({ ok: true, value: undefined });
+    expect(archived).toEqual({ ok: true, value: unplaced('inbox', [3]) });
     expect(create).toHaveBeenCalledWith('Archive');
     expect(move).toHaveBeenCalledWith('3', 'Archive');
 
-    move.mockResolvedValueOnce({ ok: true, value: undefined });
+    move.mockResolvedValueOnce({ ok: true, value: null });
     const unarchived = await moveThread(
       run,
-      [{ mailbox: 'Archive', uidValidity: 1, uids: [3] }],
+      [{ folder: 'archive', mailbox: 'Archive', uidValidity: 1, uids: [3] }],
       'inbox',
     );
-    expect(unarchived).toEqual({ ok: true, value: undefined });
+    expect(unarchived).toEqual({ ok: true, value: unplaced('archive', [3]) });
     expect(move).toHaveBeenLastCalledWith('3', 'INBOX');
     expect(create).toHaveBeenCalledTimes(1);
 
     move.mockResolvedValueOnce({ ok: false, reason: { kind: 'no', text: 'denied' } });
     const refused = await moveThread(
       run,
-      [{ mailbox: 'INBOX', uidValidity: 1, uids: [4] }],
+      [{ folder: 'inbox', mailbox: 'INBOX', uidValidity: 1, uids: [4] }],
       'archive',
     );
     expect(refused).toEqual({
@@ -492,16 +577,19 @@ describe('moveThread', () => {
   it('bins every source mailbox in one task, into the trash folder LIST already names', async () => {
     list.mockResolvedValue({ ok: true, value: [...INBOX_ONLY, TRASH] });
     ensureSelected.mockResolvedValue({ ok: true, value: { uidValidity: 1 } });
-    move.mockResolvedValue({ ok: true, value: undefined });
+    move.mockResolvedValue({ ok: true, value: null });
     const res = await moveThread(
       run,
       [
-        { mailbox: 'INBOX', uidValidity: 1, uids: [1, 2] },
-        { mailbox: 'Sent', uidValidity: 1, uids: [7] },
+        { folder: 'inbox', mailbox: 'INBOX', uidValidity: 1, uids: [1, 2] },
+        { folder: 'sent', mailbox: 'Sent', uidValidity: 1, uids: [7] },
       ],
       'trash',
     );
-    expect(res).toEqual({ ok: true, value: undefined });
+    expect(res).toEqual({
+      ok: true,
+      value: [...unplaced('inbox', [1, 2]), ...unplaced('sent', [7])],
+    });
     expect(move.mock.calls).toEqual([
       ['1,2', 'Deleted Items'],
       ['7', 'Deleted Items'],
@@ -513,7 +601,11 @@ describe('moveThread', () => {
     // After a UIDVALIDITY change the same uid names different mail.
     list.mockResolvedValue({ ok: true, value: [...INBOX_ONLY, TRASH] });
     ensureSelected.mockResolvedValue({ ok: true, value: { uidValidity: 9 } });
-    const res = await moveThread(run, [{ mailbox: 'INBOX', uidValidity: 1, uids: [1] }], 'trash');
+    const res = await moveThread(
+      run,
+      [{ folder: 'inbox', mailbox: 'INBOX', uidValidity: 1, uids: [1] }],
+      'trash',
+    );
     expect(res.ok).toBe(false);
     expect(move).not.toHaveBeenCalled();
   });
@@ -522,10 +614,62 @@ describe('moveThread', () => {
     list.mockResolvedValue({ ok: true, value: INBOX_ONLY });
     ensureSelected.mockResolvedValue({ ok: true, value: { uidValidity: 1 } });
     create.mockResolvedValue({ ok: true, value: undefined });
-    move.mockResolvedValue({ ok: true, value: undefined });
-    const res = await moveThread(run, [{ mailbox: 'INBOX', uidValidity: 1, uids: [8] }], 'trash');
-    expect(res).toEqual({ ok: true, value: undefined });
+    move.mockResolvedValue({ ok: true, value: null });
+    const res = await moveThread(
+      run,
+      [{ folder: 'inbox', mailbox: 'INBOX', uidValidity: 1, uids: [8] }],
+      'trash',
+    );
+    expect(res).toEqual({ ok: true, value: unplaced('inbox', [8]) });
     expect(create).toHaveBeenCalledWith('Trash');
     expect(move).toHaveBeenCalledWith('8', 'Trash');
+  });
+});
+
+describe('setFlag', () => {
+  it('writes the flag the server took into the cached summaries, in the same task', async () => {
+    ensureSelected.mockResolvedValue({ ok: true, value: { uidValidity: 1 } });
+    storeFlags.mockResolvedValue({ ok: true, value: undefined });
+    const cache = fakeCache({
+      inbox: { summaries: [summary(3, ['\\Seen']), summary(4, ['\\Seen']), summary(5)] },
+      archive: { summaries: [summary(9, ['\\seen', '\\Flagged'])] },
+    });
+    let inboxWhenTaskEnded: unknown;
+    const res = await setFlag(
+      async task => {
+        const result = await task.run(fakeClient);
+        inboxWhenTaskEnded = cache.read('inbox').summaries.map(({ uid, flags }) => [uid, flags]);
+        return result;
+      },
+      cache,
+      [
+        { folder: 'inbox', mailbox: 'INBOX', uidValidity: 1, uids: [3, 4] },
+        { folder: 'archive', mailbox: 'Archive', uidValidity: 1, uids: [9] },
+      ],
+      '\\Seen',
+      false,
+    );
+    expect(res).toEqual({ ok: true, value: undefined });
+    expect(inboxWhenTaskEnded).toEqual([
+      [3, []],
+      [4, []],
+      [5, []],
+    ]);
+    expect(cache.read('archive').summaries[0]?.flags).toEqual(['\\Flagged']);
+  });
+
+  it('writes nothing into the cache when the server refuses the STORE', async () => {
+    ensureSelected.mockResolvedValue({ ok: true, value: { uidValidity: 1 } });
+    storeFlags.mockResolvedValue({ ok: false, reason: { kind: 'no', text: 'read-only' } });
+    const cache = fakeCache({ inbox: { summaries: [summary(3)] } });
+    const res = await setFlag(
+      run,
+      cache,
+      [{ folder: 'inbox', mailbox: 'INBOX', uidValidity: 1, uids: [3] }],
+      '\\Flagged',
+      true,
+    );
+    expect(res.ok).toBe(false);
+    expect(cache.read('inbox').summaries[0]?.flags).toEqual([]);
   });
 });

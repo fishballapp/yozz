@@ -1,8 +1,8 @@
-import type { ImapClient, ImapMessageSummary } from '@yozz.app/imap';
+import { type CopyUid, copiedUid, type ImapClient, type ImapMessageSummary } from '@yozz.app/imap';
 import { ensureMailbox, resolveFolders } from '../addresses/mailboxes';
 import type { InboundAddress } from '../addresses/record';
 import { connectImap, type MailConnectionFailure, type Result } from '../relay/connection';
-import type { LiveClient, LiveTask } from '../relay/live';
+import type { LiveTask } from '../relay/live';
 import { type FetchedBody, parseBody } from './bodies';
 import type { FolderCache, MailCache } from './cache';
 import type { FolderSummaries } from './summaries';
@@ -119,7 +119,10 @@ const syncFolder = async (
   return { ok: true, summaries: all, complete, uidValidity };
 };
 
-/** LIST, then each folder in turn, inbox first. */
+/**
+ * LIST, then each folder in turn, inbox first. Each folder is its own task, so a click queued
+ * meanwhile (a body, a flag, a move) runs before the next folder rather than after the account.
+ */
 export const syncAccount = async (
   run: Run,
   cache: MailCache,
@@ -134,22 +137,24 @@ export const syncAccount = async (
     state: { status: 'failed', failure, at: Date.now(), invalidated } as const,
   });
 
+  const folders = await run({ priority: 'user', retry: true, run: resolveFolders });
+  if (!folders.ok) return failed(folders.error);
+
   let invalidated = false;
-  const result = await run({
-    priority: 'user',
-    retry: true,
-    run: async (client: LiveClient) => {
-      const folders = await resolveFolders(client);
-      if (!folders.ok) return folders;
-      const byFolder: FolderSummaries = {};
-      const complete: Folder[] = [];
-      for (const folder of FOLDERS) {
-        const name = folders.value[folder];
-        if (name === undefined) {
-          // A folder the server does not have holds nothing older either.
-          complete.push(folder);
-          continue;
-        }
+  const byFolder: FolderSummaries = {};
+  const complete: Folder[] = [];
+  for (const folder of FOLDERS) {
+    if (isStale()) return failed({ kind: 'error', detail: 'sync superseded' }, invalidated);
+    const name = folders.value[folder];
+    if (name === undefined) {
+      // A folder the server does not have holds nothing older either.
+      complete.push(folder);
+      continue;
+    }
+    const synced = await run({
+      priority: 'user',
+      retry: true,
+      run: async client => {
         const outcome = await syncFolder(
           client,
           cache.folder(folder),
@@ -160,24 +165,16 @@ export const syncAccount = async (
           },
           isStale,
         );
-        if (!outcome.ok) return { ok: false, error: outcome.failure };
-        byFolder[folder] = { uidValidity: outcome.uidValidity, summaries: outcome.summaries };
-        if (outcome.complete) complete.push(folder);
-      }
-      // Summaries, not threads: grouping is one global pass only the store can run.
-      return { ok: true, value: { byFolder, complete } };
-    },
-  });
+        return outcome.ok ? { ok: true, value: outcome } : { ok: false, error: outcome.failure };
+      },
+    });
+    if (!synced.ok) return failed(synced.error, invalidated);
+    byFolder[folder] = { uidValidity: synced.value.uidValidity, summaries: synced.value.summaries };
+    if (synced.value.complete) complete.push(folder);
+  }
 
-  if (!result.ok) return failed(result.error, invalidated);
-  return {
-    byFolder: result.value.byFolder,
-    state: {
-      status: 'synced',
-      at: Date.now(),
-      complete: result.value.complete,
-    },
-  };
+  // Summaries, not threads: grouping is one global pass only the store can run.
+  return { byFolder, state: { status: 'synced', at: Date.now(), complete } };
 };
 
 /**
@@ -246,8 +243,9 @@ export const testImap = async (
   return { ok: true, value: undefined };
 };
 
-/** One folder's worth of a flag write, off the sync mark. */
+/** One folder's worth of a flag write or a move, off the sync mark. */
 export type FlagTarget = {
+  readonly folder: Folder;
   readonly mailbox: string;
   readonly uids: readonly number[];
   /** Checked against what the SELECT answers: across a renumbering the same uid names different mail. */
@@ -263,8 +261,18 @@ const RENUMBERED: MailConnectionFailure = {
 const renumbered = (target: FlagTarget, selected: { readonly uidValidity: number | null }) =>
   selected.uidValidity !== null && selected.uidValidity !== target.uidValidity;
 
+const withFlag = (flags: readonly string[], flag: string, on: boolean): readonly string[] => {
+  const others = flags.filter(candidate => candidate.toLowerCase() !== flag.toLowerCase());
+  return on ? [...others, flag] : others;
+};
+
+/**
+ * `UID STORE`, then the same flag into the device cache, so a reload shows it before any sync. In
+ * the task, so it lands between the sync passes around it, never under one, and before a lock's clear.
+ */
 export const setFlag = async (
   run: Run,
+  cache: MailCache,
   targets: readonly FlagTarget[],
   flag: '\\Seen' | '\\Flagged',
   on: boolean,
@@ -274,24 +282,43 @@ export const setFlag = async (
     retry: true,
     run: async client => {
       for (const target of targets) {
-        const { mailbox, uids } = target;
+        const { folder, mailbox, uids } = target;
         if (uids.length === 0) continue;
         const selectRes = await client.ensureSelected(mailbox);
         if (!selectRes.ok) return { ok: false, error: { kind: 'imap', reason: selectRes.reason } };
         if (renumbered(target, selectRes.value)) return { ok: false, error: RENUMBERED };
         const storeRes = await client.storeFlags(uids.join(','), on ? 'add' : 'remove', [flag]);
         if (!storeRes.ok) return { ok: false, error: { kind: 'imap', reason: storeRes.reason } };
+        await cache.folder(folder).updateSummaries(uids, summary => ({
+          ...summary,
+          flags: withFlag(summary.flags, flag, on),
+        }));
       }
       return { ok: true, value: undefined };
     },
   });
 
-/** `UID MOVE` every source mailbox's uids into `to`. Not retried: a half-done MOVE must not re-run. */
+/** Where a `UID MOVE` put one message; `to` is null when the server did not say (no UIDPLUS). */
+export type MovedCopy = {
+  readonly from: Omit<Location, 'account'>;
+  readonly to: Omit<Location, 'account'> | null;
+};
+
+const destinationOf = (copy: CopyUid | null, folder: Folder, uid: number) => {
+  if (copy === null) return null;
+  const copied = copiedUid(copy, uid);
+  return copied === null ? null : { folder, uidValidity: copy.uidValidity, uid: copied };
+};
+
+/**
+ * `UID MOVE` every source mailbox's uids into `to`, answering where each went. Not retried: a
+ * half-done MOVE must not re-run.
+ */
 export const moveThread = async (
   run: Run,
   sources: readonly FlagTarget[],
   to: 'inbox' | 'archive' | 'trash',
-): Promise<Result<void, MailConnectionFailure>> =>
+): Promise<Result<readonly MovedCopy[], MailConnectionFailure>> =>
   run({
     priority: 'user',
     retry: false,
@@ -299,6 +326,7 @@ export const moveThread = async (
       const destination =
         to === 'inbox' ? ({ ok: true, value: 'INBOX' } as const) : await ensureMailbox(client, to);
       if (!destination.ok) return destination;
+      const moved: MovedCopy[] = [];
       for (const source of sources) {
         const { mailbox, uids } = source;
         if (uids.length === 0) continue;
@@ -307,8 +335,14 @@ export const moveThread = async (
         if (renumbered(source, selectRes.value)) return { ok: false, error: RENUMBERED };
         const moveRes = await client.move(uids.join(','), destination.value);
         if (!moveRes.ok) return { ok: false, error: { kind: 'imap', reason: moveRes.reason } };
+        moved.push(
+          ...uids.map(uid => ({
+            from: { folder: source.folder, uidValidity: source.uidValidity, uid },
+            to: destinationOf(moveRes.value, to, uid),
+          })),
+        );
       }
-      return { ok: true, value: undefined };
+      return { ok: true, value: moved };
     },
   });
 

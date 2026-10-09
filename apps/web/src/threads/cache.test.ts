@@ -74,6 +74,23 @@ describe('mail cache', () => {
     expect((await theirs.listSummaries()).map(s => s.uid)).toEqual([1]);
   });
 
+  it('rewrites the summaries it names in place, and invents none it does not hold', async () => {
+    const idb = new IDBFactory();
+    const inbox = createMailCache('u1', 'me@x', idb).folder('inbox');
+    const sent = createMailCache('u1', 'me@x', idb).folder('sent');
+    await inbox.putSummaries([summary(1), summary(2)]);
+    await sent.putSummaries([summary(1)]);
+
+    await inbox.updateSummaries([1, 9], s => ({ ...s, flags: [] }));
+
+    expect((await inbox.listSummaries()).map(s => [s.uid, s.flags])).toEqual([
+      [1, []],
+      [2, ['\\Seen']],
+    ]);
+    // The same uid in another folder is another message.
+    expect((await sent.listSummaries())[0]?.flags).toEqual(['\\Seen']);
+  });
+
   it("lists a folder's cached body uids", async () => {
     const idb = new IDBFactory();
     const account = createMailCache('u1', 'me@x', idb);
