@@ -448,14 +448,19 @@ export const resumeSession = async ({
   readonly api?: VaultApiClient;
   readonly idbFactory?: IDBFactory;
 } = {}): Promise<UnlockedVaultSession | null> => {
-  const auth = await getSession();
+  // Asked together: the stamp needs only the cookie, not the user id. Signed out it is refused,
+  // and a stamp that could not be read resumes nothing but forgets nothing either.
+  const [auth, stamp] = await Promise.all([
+    getSession(),
+    api.getUnlockStatus().then(vaultStamp, () => null),
+  ]);
   const user = auth?.data?.user;
-  if (!user) return null;
+  if (!user || stamp === null) return null;
 
   const keys = await loadUnlockKeys(user.id, idbFactory);
   if (keys === null) return null;
 
-  if (vaultStamp(await api.getUnlockStatus()) !== keys.stamp) {
+  if (stamp !== keys.stamp) {
     await forgetUnlockKeys(user.id, idbFactory);
     return null;
   }

@@ -1,8 +1,7 @@
 import { cn } from '@fishballapps/cn';
 import { Outlet, useNavigate, useParams, useSearch } from '@tanstack/react-router';
 import { useMail } from '../store/MailProvider';
-import { useMediaQuery, usePaneWidth } from '../ui/chrome';
-import { Resizer } from '../ui/Resizer';
+import { LIST_WIDTH, Resizer, useListWidth } from '../ui/Resizer';
 import { ThreadList } from './ThreadList';
 import { visibleThreads } from './views';
 
@@ -10,9 +9,6 @@ import { visibleThreads } from './views';
  * The rail and status line are `AppShell`'s. The list never tracks the viewport; the reader keeps a
  * `24rem` floor and CSS arbitrates. Below `lg` the panes show one at a time.
  */
-
-/** The designed list widths, and what double-clicking the hairline returns to. */
-const LIST_WIDTH = { min: 320, max: 720, wide: 528, base: 432 };
 
 export const Mailbox = () => {
   const { mailbox } = useParams({ from: '/_app/m/$mailbox' });
@@ -26,13 +22,7 @@ export const Mailbox = () => {
   const { _splat: threadId } = useParams({ strict: false });
   const isReading = threadId !== undefined;
 
-  // The default still steps at `xl` and stays live; dragging replaces the step, double-click hands it back.
-  const [listWidth, setListWidth, resetListWidth] = usePaneWidth(
-    'yozz:list-width',
-    useMediaQuery('(min-width: 80rem)') ? LIST_WIDTH.wide : LIST_WIDTH.base,
-    LIST_WIDTH.min,
-    LIST_WIDTH.max,
-  );
+  const [listWidth, setListWidth, resetListWidth] = useListWidth();
 
   return (
     <>

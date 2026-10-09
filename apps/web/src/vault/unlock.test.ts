@@ -12,9 +12,12 @@ import {
   loginWithPassword,
   needsFreshSession,
   PASSKEY_DERIVES_ANOTHER_KEY,
+  resumeSession,
   switchModeToPasskey,
   switchModeToPassword,
+  unlockKeysOf,
 } from './unlock';
+import { loadUnlockKeys, saveUnlockKeys } from './unlock-keys';
 
 const mocks = vi.hoisted(() => ({
   signInEmail: vi.fn(),
@@ -391,6 +394,54 @@ describe('Vault unlock and session orchestration', () => {
       /different account/,
     );
     pw.store.close();
+  });
+
+  it('resumes a reload, asking for the stamp without waiting on the session', async () => {
+    const created = await createPasswordVault({
+      email: 'alice@example.com',
+      password: 'password123456',
+      api,
+      idbFactory,
+    });
+    await saveUnlockKeys(await unlockKeysOf(created, api), idbFactory);
+    created.store.close();
+    vi.mocked(api.getUnlockStatus).mockClear();
+
+    const { promise: session, resolve } = Promise.withResolvers<unknown>();
+    mocks.getSession.mockReturnValueOnce(session);
+    const resuming = resumeSession({ api, idbFactory });
+    expect(api.getUnlockStatus).toHaveBeenCalledTimes(1);
+    resolve({ data: { user: { id: 'user-123', email: 'alice@example.com' } } });
+
+    const resumed = await resuming;
+    expect(resumed?.userId).toBe('user-123');
+    expect(resumed?.wrappedDek).toBe(created.wrappedDek);
+    resumed?.store.close();
+  });
+
+  it('keeps the keys when the stamp cannot be read, and forgets them once it has changed', async () => {
+    const created = await createPasswordVault({
+      email: 'alice@example.com',
+      password: 'password123456',
+      api,
+      idbFactory,
+    });
+    await saveUnlockKeys(await unlockKeysOf(created, api), idbFactory);
+    created.store.close();
+
+    vi.mocked(api.getUnlockStatus).mockRejectedValueOnce(new Error('offline'));
+    expect(await resumeSession({ api, idbFactory })).toBeNull();
+    expect(await loadUnlockKeys('user-123', idbFactory)).not.toBeNull();
+
+    await api.resetVault();
+    expect(await resumeSession({ api, idbFactory })).toBeNull();
+    expect(await loadUnlockKeys('user-123', idbFactory)).toBeNull();
+  });
+
+  it('resumes nothing when signed out, though the stamp was asked for and refused', async () => {
+    mocks.getSession.mockResolvedValueOnce({ data: null });
+    vi.mocked(api.getUnlockStatus).mockRejectedValueOnce(new Error('401 UNAUTHORIZED'));
+    expect(await resumeSession({ api, idbFactory })).toBeNull();
   });
 });
 

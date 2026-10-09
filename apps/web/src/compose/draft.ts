@@ -99,6 +99,9 @@ export type SendReport =
   /** The machine threw rather than answering, so this cannot say whether the message went out. */
   | { readonly state: 'unsettled'; readonly detail: string };
 
+/** Gmail's ceiling; base64 adds a third on top. */
+export const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
+
 /** Picker files with their bytes read, so a send never snapshots a draft mid-read. */
 export const readAttachments = (files: readonly File[]): Promise<Attachment[]> =>
   Promise.all(

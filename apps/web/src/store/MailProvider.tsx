@@ -98,6 +98,15 @@ const upsertRecord = (current: readonly AddressRecord[], record: AddressRecord) 
   record,
 ];
 
+/**
+ * Resolves in the task after the next frame is drawn, so state set before the call is on screen
+ * first. A hidden tab draws no frames: there it waits until the tab is shown.
+ */
+const afterNextPaint = () =>
+  new Promise<void>(resolve => {
+    requestAnimationFrame(() => setTimeout(resolve, 0));
+  });
+
 export const MailProvider = ({ children }: { children: ReactNode }) => {
   const { session } = useVault();
   const demo = isDemo();
@@ -298,10 +307,7 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
       const entry = { dirty: false, promise: Promise.resolve() };
       entry.promise = (async () => {
         try {
-          const [
-            { syncAccount, cachedSummaries, cachedPreviews, prefetchBodies },
-            { createMailCache },
-          ] = await Promise.all([import('../threads/sync'), import('../threads/cache')]);
+          const { createMailCache } = await import('../threads/cache');
           const cache = createMailCache(userId, address);
           const isStale = () =>
             generation !== sessionGeneration.current ||
@@ -309,6 +315,7 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
           // The cache is the list until the server answers.
           if (!hydratedRef.current.has(address)) {
             hydratedRef.current.add(address);
+            const { cachedSummaries, cachedPreviews } = await import('../threads/hydrate');
             const [cached, cachedText] = await Promise.all([
               cachedSummaries(cache),
               cachedPreviews(cache, address),
@@ -318,7 +325,12 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
               setBaseByAccount(current => ({ ...current, [address]: cached }));
             }
             setPreviews(current => ({ ...current, ...cachedText }));
+            // The rows above are only scheduled, and the import below starts fetching the TLS /
+            // IMAP stack at once; one that arrived from the HTTP cache would run before the paint.
+            await afterNextPaint();
+            if (isStale()) return;
           }
+          const { syncAccount, prefetchBodies } = await import('../threads/sync');
           do {
             entry.dirty = false;
             syncSeqRef.current += 1;
@@ -370,7 +382,8 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
             },
           }));
         } finally {
-          syncRunsRef.current.delete(address);
+          // A run that outlived its session finds the next session's run in its slot.
+          if (syncRunsRef.current.get(address) === entry) syncRunsRef.current.delete(address);
         }
       })();
 
@@ -437,26 +450,47 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
     let cancelled = false;
     setRecordsError(null);
     void (async () => {
-      const [{ createLiveManager }, { connectImap }] = await Promise.all([
-        import('../relay/live'),
-        import('../relay/connection'),
-      ]);
-      if (cancelled) return;
-      liveManagerRef.current = createLiveManager({
-        connect: connectImap,
-        // A connection of an ended session still reports its close; the next session's are not its to set.
-        onState: (address, state) => {
-          if (!cancelled) setLiveStates(current => ({ ...current, [address]: state }));
-        },
-        onMailboxChanged: address => {
-          if (!cancelled) void syncRef.current(address);
-        },
-        // A tab unlocked in the background must not hold connections open for ever.
-        visible: !document.hidden,
-      });
       try {
-        const listed = await store.list(ADDRESS_RECORD_TYPE);
-        const parsed = listed.flatMap(row => {
+        const [live, listed] = await Promise.allSettled([
+          import('../relay/live'),
+          store.list(ADDRESS_RECORD_TYPE),
+        ]);
+        if (cancelled) return;
+        if (live.status === 'rejected') throw live.reason;
+        // Before the records, so every task an address can start finds it, and whatever the list
+        // says: an address added after a refused list still syncs through it.
+        liveManagerRef.current = live.value.createLiveManager({
+          // The TLS stack loads with the first connection, which the sync opens only after the
+          // cached list has painted; importing it here would hold the paint behind it.
+          connect: async (imap, options) => {
+            let connection: typeof import('../relay/connection');
+            try {
+              connection = await import('../relay/connection');
+            } catch (error) {
+              // Offline with the cache on screen: refused like an unreachable host, never thrown
+              // into the queue.
+              return {
+                ok: false,
+                error: {
+                  kind: 'error',
+                  detail: error instanceof Error ? error.message : String(error),
+                },
+              };
+            }
+            return connection.connectImap(imap, options);
+          },
+          // A connection of an ended session still reports its close; the next session's are not its to set.
+          onState: (address, state) => {
+            if (!cancelled) setLiveStates(current => ({ ...current, [address]: state }));
+          },
+          onMailboxChanged: address => {
+            if (!cancelled) void syncRef.current(address);
+          },
+          // A tab unlocked in the background must not hold connections open for ever.
+          visible: !document.hidden,
+        });
+        if (listed.status === 'rejected') throw listed.reason;
+        const parsed = listed.value.flatMap(row => {
           const record = parseAddressRecord(row.plaintext);
           if (record === null) {
             // biome-ignore lint/suspicious/noConsole: unreadable vault rows must surface without aborting the list
@@ -465,7 +499,7 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
           }
           return [record];
         });
-        if (!cancelled) setRecords(parsed);
+        setRecords(parsed);
         await load(store, parsed, () => cancelled);
       } catch (err) {
         if (!cancelled) setRecordsError(vaultErrorMessage(err));
@@ -518,8 +552,12 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
       if (userId === null) return;
       const promise = (async () => {
         try {
-          const [{ loadOlder: loadOlderPage, cachedSummaries }, { createMailCache }] =
-            await Promise.all([import('../threads/sync'), import('../threads/cache')]);
+          const [{ loadOlder: loadOlderPage }, { cachedSummaries }, { createMailCache }] =
+            await Promise.all([
+              import('../threads/sync'),
+              import('../threads/hydrate'),
+              import('../threads/cache'),
+            ]);
           const cache = createMailCache(userId, account.address);
           const isStale = () =>
             generation !== sessionGeneration.current ||

@@ -8,8 +8,9 @@ import { withCompose } from '../compose/intent';
 import { useMail } from '../store/MailProvider';
 import { mailboxLabel, visibleThreads } from '../threads/views';
 import { Button, buttonClass } from '../ui/Button';
-import { isDemo, usePaneWidth } from '../ui/chrome';
-import { RAIL_WIDTH, Resizer } from '../ui/Resizer';
+import { isDemo } from '../ui/chrome';
+import { RAIL_WIDTH, Resizer, useListWidth, useRailWidth } from '../ui/Resizer';
+import { Wordmark } from '../ui/Wordmark';
 import { useVault } from '../vault/session';
 import { StatusBar } from './StatusBar';
 
@@ -20,22 +21,48 @@ import { StatusBar } from './StatusBar';
  */
 export const AppShell = () => {
   const { session, isResuming } = useVault();
-  if (isResuming && !isDemo()) return null;
+  if (isResuming && !isDemo()) return <AppShellSkeleton />;
   if (session === null && !isDemo()) {
     return <Navigate to="/login" replace />;
   }
   return <AppShellBody />;
 };
 
+/**
+ * The shell's frame while a reload resumes the vault: its bars, rules and stored pane widths with
+ * nothing in them, so the cached list lands in place instead of onto a blank page.
+ */
+const AppShellSkeleton = () => {
+  const [railWidth] = useRailWidth();
+  const [listWidth] = useListWidth();
+
+  return (
+    <div className="flex h-dvh flex-col bg-ink" aria-busy>
+      <div className="h-11 shrink-0 border-b border-rule-soft bg-ink-raised lg:hidden" />
+      <div className="flex min-h-0 flex-1">
+        <aside className="hidden shrink-0 bg-ink-raised lg:block" style={{ width: railWidth }}>
+          <div className="px-3 pt-4 pb-3">
+            <span className="inline-flex text-paper">
+              <Wordmark className="h-3.5 w-auto" />
+            </span>
+          </div>
+        </aside>
+        <div className="hidden w-px shrink-0 bg-rule-soft lg:block" />
+        <div style={{ width: listWidth }} className="min-w-0 flex-1 lg:min-w-80 lg:flex-initial">
+          <div className="h-11 border-b border-rule-soft" />
+        </div>
+        <div className="hidden w-px shrink-0 bg-rule-soft lg:block" />
+        <div className="hidden min-w-0 flex-1 bg-ink-sunken lg:block lg:min-w-96" />
+      </div>
+      <div className="h-7 shrink-0 border-t border-rule-soft bg-ink-raised" />
+    </div>
+  );
+};
+
 const AppShellBody = () => {
   const { threads } = useMail();
   const [isRailOpen, setIsRailOpen] = useState(false);
-  const [railWidth, setRailWidth, resetRailWidth] = usePaneWidth(
-    'yozz:rail-width',
-    RAIL_WIDTH.base,
-    RAIL_WIDTH.min,
-    RAIL_WIDTH.max,
-  );
+  const [railWidth, setRailWidth, resetRailWidth] = useRailWidth();
 
   // Base UI's modal aria-hides the rest of the app while open; crossing `lg` with the sheet open
   // left the whole app hidden behind a display:none popup.

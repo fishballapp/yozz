@@ -4,7 +4,6 @@ import type { InboundAddress } from '../addresses/record';
 import { connectImap, type MailConnectionFailure, type Result } from '../relay/connection';
 import type { LiveClient, LiveTask } from '../relay/live';
 import { type FetchedBody, parseBody } from './bodies';
-import { type Previews, previewKey } from './body-state';
 import type { FolderCache, MailCache } from './cache';
 import type { FolderSummaries } from './summaries';
 import { FOLDERS, type Folder, type Location } from './thread';
@@ -235,35 +234,6 @@ export const loadOlder = async (
       return { ok: true, value: { loaded: res.value.length, complete } };
     },
   });
-};
-
-/** The list before the first sync of this unlock lands. */
-export const cachedSummaries = async (cache: MailCache): Promise<FolderSummaries> => {
-  const byFolder: FolderSummaries = {};
-  for (const folder of FOLDERS) {
-    const folderCache = cache.folder(folder);
-    const mark = await folderCache.getSync();
-    byFolder[folder] = {
-      // No sync mark means nothing read yet; UIDVALIDITY stands in as 0.
-      uidValidity: mark?.uidValidity ?? 0,
-      summaries: await folderCache.listSummaries(),
-    };
-  }
-  return byFolder;
-};
-
-/** Every cached body's text, keyed for `withBodies`, so rows show excerpts before the first open. */
-export const cachedPreviews = async (cache: MailCache, account: string): Promise<Previews> => {
-  const previews: Record<string, readonly string[]> = {};
-  for (const folder of FOLDERS) {
-    const folderCache = cache.folder(folder);
-    const mark = await folderCache.getSync();
-    if (mark === null) continue;
-    for (const { uid, paragraphs } of await folderCache.listPreviews()) {
-      previews[previewKey({ account, folder, uidValidity: mark.uidValidity, uid })] = paragraphs;
-    }
-  }
-  return previews;
 };
 
 /** Open, authenticate, close: what Connect runs before it stores a password. */

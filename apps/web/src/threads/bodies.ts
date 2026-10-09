@@ -4,7 +4,7 @@ import type { MailConnectionFailure, Result } from '../relay/connection';
 import type { LiveTask } from '../relay/live';
 import { attachmentKindOf } from './attachments';
 import { SAFE_INLINE_IMAGE_MIME_TYPES } from './image-types';
-import type { Attachment } from './thread';
+import { type Attachment, toParagraphs } from './thread';
 
 export type FetchedBody = {
   readonly paragraphs: string[];
@@ -81,13 +81,6 @@ const textOf = (node: Node, depth = 0): string => {
 /** Reduce HTML to text without mounting it or allowing document fetches. */
 export const htmlToText = (html: string): string =>
   textOf(new DOMParser().parseFromString(html, 'text/html').body);
-
-export const toParagraphs = (text: string): string[] =>
-  text
-    .replace(/\r\n/g, '\n')
-    .split(/\n{2,}/)
-    .map(paragraph => paragraph.trim())
-    .filter(paragraph => paragraph !== '');
 
 /** `btoa` takes a binary string; chunked so a large image cannot blow the call stack. */
 const toBase64 = (bytes: Uint8Array): string => {

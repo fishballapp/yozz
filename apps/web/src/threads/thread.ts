@@ -57,6 +57,14 @@ export type Message = {
   draftId?: string;
 };
 
+/** `Message.body` from text: blank lines part paragraphs, a single line break stays inside one. */
+export const toParagraphs = (text: string): string[] =>
+  text
+    .replace(/\r\n/g, '\n')
+    .split(/\n{2,}/)
+    .map(paragraph => paragraph.trim())
+    .filter(paragraph => paragraph !== '');
+
 export type Thread = {
   id: string;
   /** Every account holding some of this conversation, in address order. */

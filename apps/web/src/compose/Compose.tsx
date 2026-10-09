@@ -20,11 +20,10 @@ import { isDemo } from '../ui/chrome';
 import { Input } from '../ui/Field';
 import { toast } from '../ui/Toast';
 import { useVault } from '../vault/session';
-import { readAttachments, type SendReport } from './draft';
+import { MAX_ATTACHMENT_BYTES, readAttachments, type SendReport } from './draft';
 import { FromSwitch } from './FromSwitch';
 import { DISCARD_WARNING, draftKeyOfIntent, seedFor, withCompose, withoutCompose } from './intent';
 import { MarkdownView } from './MarkdownView';
-import { MAX_ATTACHMENT_BYTES } from './send';
 
 /**
  * `?compose=` says whether the composer is open and the store holds the text; the store follows the

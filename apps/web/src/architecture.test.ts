@@ -40,6 +40,25 @@ const imports = new Map(
     ),
   ]),
 );
+/**
+ * What a module needs before it can run: `import type` is erased and `import()` is a chunk of its
+ * own, so neither is here. A bare specifier stays a package name.
+ */
+const staticImports = new Map(
+  files.map(file => [
+    file,
+    [
+      ...readFileSync(file, 'utf8').matchAll(
+        /^(?:(?:import|export)\s+(?!type\b)[\w$*{},\s]*?from\s*|import\s*)'([^']+)'/gm,
+      ),
+    ].flatMap(match => {
+      const spec = match[1] ?? '';
+      if (!spec.startsWith('.')) return [spec];
+      const target = resolveImport(file, spec);
+      return target === null ? [] : [target];
+    }),
+  ]),
+);
 const rel = (file: string) => relative(SRC, file);
 const folderOf = (file: string) =>
   rel(file).includes('/') ? (rel(file).split('/')[0] ?? '') : 'root';
@@ -77,6 +96,30 @@ describe('src/ folder rule', () => {
         (imports.get(file) ?? [])
           .filter(target => ['routes', 'app'].includes(folderOf(target)))
           .map(target => `${rel(file)} -> ${rel(target)}`),
+      );
+    expect(leaks).toEqual([]);
+  });
+});
+
+describe('the entry chunk', () => {
+  // DECISIONS.md, "A reload paints the shell, then the cache, and only then loads the TLS stack".
+  // Routes count as reached: their code-splitting is the router plugin's, not a rule of ours.
+  it('reaches the TLS stack only through import()', () => {
+    const CONNECTION = join(SRC, 'relay/connection.ts');
+    const STACK = /^@yozz\.app\/(tls|x509|imap|smtp)$/;
+    const reached = new Set<string>();
+    const visit = (file: string) => {
+      if (reached.has(file)) return;
+      reached.add(file);
+      for (const next of staticImports.get(file) ?? []) visit(next);
+    };
+    visit(join(SRC, 'main.tsx'));
+    const leaks = [...reached]
+      .filter(file => file !== CONNECTION)
+      .flatMap(file =>
+        (staticImports.get(file) ?? [])
+          .filter(target => target === CONNECTION || STACK.test(target))
+          .map(target => `${rel(file)} -> ${target.startsWith(SRC) ? rel(target) : target}`),
       );
     expect(leaks).toEqual([]);
   });

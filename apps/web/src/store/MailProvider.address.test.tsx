@@ -58,9 +58,11 @@ vi.mock('../threads/cache', () => ({
   }),
   clearMailCache: async () => {},
 }));
-vi.mock('../threads/sync', () => ({
+vi.mock('../threads/hydrate', () => ({
   cachedSummaries: async () => ({}),
   cachedPreviews: async () => ({}),
+}));
+vi.mock('../threads/sync', () => ({
   prefetchBodies: () => {},
   syncAccount: (_run: unknown, _cache: unknown, isStale: () => boolean) =>
     new Promise(resolve => {
@@ -221,7 +223,7 @@ describe('removeAddress', () => {
   it('keeps the address until the vault deletes it, so a refusal changes nothing', async () => {
     const remove = held();
     const { mail } = await mount({ ...(await vaultWith([ALICE, BOB])), remove: remove.call });
-    await vi.waitFor(() => expect(mocks.syncs).toHaveLength(1));
+    await vi.waitFor(() => expect(mocks.syncs).toHaveLength(2));
 
     let removing = Promise.resolve();
     act(() => {
@@ -234,8 +236,8 @@ describe('removeAddress', () => {
       await expect(removing).rejects.toThrow('offline');
     });
     expect(addressesOf(mail())).toEqual([ALICE.address, BOB.address]);
-    // The sync that was running when the removal began still writes what it fetches.
-    expect(mocks.syncs[0]?.isStale()).toBe(false);
+    // The syncs that were running when the removal began still write what they fetch.
+    expect(mocks.syncs.map(sync => sync.isStale())).toEqual([false, false]);
     expect(mocks.closeLive).not.toHaveBeenCalled();
     expect(mocks.events).toEqual([]);
   });

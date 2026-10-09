@@ -4,6 +4,7 @@ import type { MailConnectionFailure, Result } from '../relay/connection';
 import type { LiveClient, LiveTask } from '../relay/live';
 import type { FetchedBody } from './bodies';
 import type { FolderSync } from './cache';
+import { cachedPreviews } from './hydrate';
 import { threadsFromAccounts } from './summaries';
 import { FOLDERS, type Folder } from './thread';
 
@@ -32,9 +33,7 @@ const fakeClient = {
 const run = <T>(task: LiveTask<T>): Promise<Result<T, MailConnectionFailure>> =>
   task.run(fakeClient);
 
-const { syncAccount, loadOlder, prefetchBodies, cachedPreviews, moveThread } = await import(
-  './sync'
-);
+const { syncAccount, loadOlder, prefetchBodies, moveThread } = await import('./sync');
 
 const SENT = { name: 'Sent', delimiter: '/', attributes: ['\\Sent'] };
 const ARCHIVE = { name: 'Archive', delimiter: '/', attributes: ['\\Archive'] };

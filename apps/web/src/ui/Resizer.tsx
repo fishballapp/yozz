@@ -2,6 +2,7 @@
 
 import { cn } from '@fishballapps/cn';
 import { useRef, useState } from 'react';
+import { useMediaQuery, usePaneWidth } from './chrome';
 
 /**
  * The pane's own `border-r`, made draggable: the affordance is the rule's colour, never its
@@ -11,6 +12,23 @@ import { useRef, useState } from 'react';
 /** Here rather than in either shell, because the mailbox and the page shell must agree on the rail. */
 /** 304, not 320: at exactly 1024px a 320px rail overflows the list and reader floors by 2px. */
 export const RAIL_WIDTH = { min: 176, max: 304, base: 224 };
+
+/** The designed list widths, and what double-clicking the hairline returns to. */
+export const LIST_WIDTH = { min: 320, max: 720, wide: 528, base: 432 };
+
+/** The stored widths, read by the panes and by the startup skeleton that stands in for them. */
+export const useRailWidth = () =>
+  usePaneWidth('yozz:rail-width', RAIL_WIDTH.base, RAIL_WIDTH.min, RAIL_WIDTH.max);
+
+/** The default still steps at `xl` and stays live; dragging replaces the step, double-click hands it back. */
+export const useListWidth = () =>
+  usePaneWidth(
+    'yozz:list-width',
+    useMediaQuery('(min-width: 80rem)') ? LIST_WIDTH.wide : LIST_WIDTH.base,
+    LIST_WIDTH.min,
+    LIST_WIDTH.max,
+  );
+
 export const Resizer = ({
   label,
   width,

@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { addresseesOf, inboxesOf, isArchived, isTrashed, type Message } from './thread';
+import {
+  addresseesOf,
+  inboxesOf,
+  isArchived,
+  isTrashed,
+  type Message,
+  toParagraphs,
+} from './thread';
 
 describe('isArchived', () => {
   it('is a thread with archive mail and nothing left in the inbox', () => {
@@ -103,5 +110,11 @@ describe('addresseesOf', () => {
   it('is empty for a Bcc that names nobody, and for a draft with no envelope', () => {
     expect(addresseesOf(message({ to: [], cc: [] }), owned)).toEqual([]);
     expect(addresseesOf(message({}), owned)).toEqual([]);
+  });
+});
+
+describe('toParagraphs', () => {
+  it('splits on blank lines and keeps single line breaks inside a paragraph', () => {
+    expect(toParagraphs('a\r\nb\r\n\r\n\r\nc\n')).toEqual(['a\nb', 'c']);
   });
 });

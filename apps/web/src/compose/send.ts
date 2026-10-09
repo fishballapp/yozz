@@ -4,6 +4,7 @@ import type { AddressRecord } from '../addresses/record';
 import { connectSmtp, type MailConnectionFailure, type Result } from '../relay/connection';
 import type { LiveTask } from '../relay/live';
 import type { Attachment } from '../threads/thread';
+import { MAX_ATTACHMENT_BYTES } from './draft';
 
 export type OutgoingMail = {
   readonly to: readonly string[];
@@ -31,9 +32,6 @@ export const envelopeRecipients = (
     return true;
   });
 };
-
-/** Gmail's ceiling; base64 adds a third on top. */
-export const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
 
 export type SentCopyFailure = MailConnectionFailure | { readonly kind: 'no-sent-mailbox' };
 

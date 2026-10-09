@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { DEFAULT_MAX_LITERAL_BYTES } from '@yozz.app/imap';
 import { describe, expect, it } from 'vitest';
-import { fetchBody, parseBody, toParagraphs } from './bodies';
+import { fetchBody, parseBody } from './bodies';
 
 const raw = (text: string) => new TextEncoder().encode(text.replace(/\n/g, '\r\n'));
 
@@ -241,11 +241,5 @@ describe('fetchBody size boundary', () => {
       ok: false,
       error: { kind: 'error', detail: 'Message is too large to open safely' },
     });
-  });
-});
-
-describe('toParagraphs', () => {
-  it('splits on blank lines and keeps single line breaks inside a paragraph', () => {
-    expect(toParagraphs('a\r\nb\r\n\r\n\r\nc\n')).toEqual(['a\nb', 'c']);
   });
 });

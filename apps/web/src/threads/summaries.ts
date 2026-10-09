@@ -1,8 +1,6 @@
 import type { ImapAddress, ImapMessageSummary } from '@yozz.app/imap';
 import { addressList } from '../compose/draft';
 import type { DraftRecord } from '../compose/draft-record';
-import { toParagraphs } from './bodies';
-import type { Recipient, ThreadState } from './thread';
 import {
   draftIdOf,
   FOLDERS,
@@ -11,6 +9,9 @@ import {
   type Message,
   messageIdOf,
   physicalIdOf,
+  type Recipient,
+  type ThreadState,
+  toParagraphs,
   VAULT_UID_VALIDITY,
 } from './thread';
 import { baseSubject, groupIntoThreads } from './threading';
