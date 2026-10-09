@@ -97,7 +97,9 @@ export type SendReport =
   | { readonly state: 'sent-with-caveat'; readonly detail: string }
   | { readonly state: 'refused'; readonly detail: string; readonly draftKey: string }
   /** The machine threw rather than answering, so this cannot say whether the message went out. */
-  | { readonly state: 'unsettled'; readonly detail: string };
+  | { readonly state: 'unsettled'; readonly detail: string }
+  /** The session that sent it ended first; the outcome is that user's, and the next unlock shows it. */
+  | { readonly state: 'ended' };
 
 /** Gmail's ceiling; base64 adds a third on top. */
 export const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;

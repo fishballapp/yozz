@@ -5,7 +5,7 @@ import type { DeleteOutcome, DraftHandle, SaveOutcome } from '../compose/draft-v
 import { quoteForReply, seedFor } from '../compose/intent';
 import type { BodyOutcome } from '../threads/body-state';
 import type { Recipient, ThreadState } from '../threads/thread';
-import { inboxesOf, isArchived, isTrashed, threadByHandle } from '../threads/thread';
+import { inboxesOf, isArchived, isOnServer, isTrashed, threadByHandle } from '../threads/thread';
 import { previewOf, visibleThreads } from '../threads/views';
 
 /**
@@ -40,10 +40,10 @@ export type AgentPort = {
   readonly writeDraft: (input: {
     readonly draftId?: string;
     readonly content: DraftContent;
-  }) => Promise<SaveOutcome | { readonly ok: false; readonly reason: 'busy' | 'locked' }>;
+  }) => Promise<SaveOutcome | { readonly ok: false; readonly reason: 'busy' | 'locked' | 'ended' }>;
   readonly removeDraft: (
     draftId: string,
-  ) => Promise<DeleteOutcome | { readonly outcome: 'busy' | 'locked' }>;
+  ) => Promise<DeleteOutcome | { readonly outcome: 'busy' | 'locked' | 'ended' }>;
 };
 
 export type AgentTool = {
@@ -143,6 +143,9 @@ const fitting = <T>(items: readonly T[], budget: number): readonly T[] => {
 };
 
 const MOVE_PENDING = 'a move of this conversation is still being confirmed; retry in a moment';
+
+const NOT_ON_SERVER =
+  'no copy of this conversation is on a mail server to change; a message just sent has one once its Sent copy syncs';
 
 const mailboxSchema = z
   .enum(['inbox', 'archive', 'trash', 'sent', 'drafts'])
@@ -321,6 +324,9 @@ const saved = (outcome: Awaited<ReturnType<AgentPort['writeDraft']>>, threadId?:
       }. Read it again with get_threads before writing.`;
     }
     if (outcome.reason === 'locked') return 'The vault is locked, so nothing can be written.';
+    if (outcome.reason === 'ended') {
+      return 'The vault locked before it answered; the draft may or may not be saved.';
+    }
     return 'The draft could not be saved; the vault could not be reached.';
   })();
   return { error };
@@ -478,7 +484,13 @@ export const buildAgentTools = (port: () => AgentPort): readonly AgentTool[] => 
           }
           return false;
         };
-        if (refused()) return { id, status: 'pending' as const, note: MOVE_PENDING };
+        if (refused()) {
+          return {
+            id,
+            status: 'pending' as const,
+            note: isOnServer(thread) ? MOVE_PENDING : NOT_ON_SERVER,
+          };
+        }
         return {
           id,
           status: 'ok' as const,
@@ -639,6 +651,10 @@ export const buildAgentTools = (port: () => AgentPort): readonly AgentTool[] => 
           };
         case 'locked':
           return { error: 'The vault is locked, so nothing can be deleted.' };
+        case 'ended':
+          return {
+            error: 'The vault locked before it answered; the draft may or may not be gone.',
+          };
         default:
           return { error: 'The draft could not be deleted; the vault could not be reached.' };
       }

@@ -3,7 +3,7 @@ import { addressList } from '../compose/draft';
 import type { DraftRecord } from '../compose/draft-record';
 import type { DraftHandle } from '../compose/draft-vault';
 import type { BodyOutcome } from '../threads/body-state';
-import type { Folder, Message, ThreadState } from '../threads/thread';
+import { type Folder, type Message, type ThreadState, VAULT_UID_VALIDITY } from '../threads/thread';
 import {
   type AgentPort,
   BODY_CHARS,
@@ -431,10 +431,39 @@ describe('update_threads', () => {
   });
 
   it('reports a write the store refused while a move is still being confirmed', async () => {
-    const { tools } = fakePort([thread('a', ['inbox'])], { archive: () => false });
+    const onServer = thread('a', ['inbox'], {
+      messages: [
+        message('a/1', {
+          locations: [{ account: 'me@yozz.app', folder: 'inbox', uidValidity: 1, uid: 3 }],
+        }),
+      ],
+    });
+    const { tools } = fakePort([onServer], { archive: () => false });
     await expect(
       call(tools, 'update_threads', { ids: ['a'], mailbox: 'archive' }),
-    ).resolves.toMatchObject({ results: [{ id: 'a', status: 'pending' }] });
+    ).resolves.toMatchObject({
+      results: [{ id: 'a', status: 'pending', note: expect.stringContaining('confirmed') }],
+    });
+  });
+
+  it('says why a conversation no server holds a copy of did not change', async () => {
+    // A message just sent whose Sent copy failed: this tab's own copy is the only one.
+    const justSent = thread('a', ['sent'], {
+      isUnread: false,
+      messages: [
+        message('a/1', {
+          locations: [
+            { account: 'me@yozz.app', folder: 'sent', uidValidity: VAULT_UID_VALIDITY, uid: 0 },
+          ],
+        }),
+      ],
+    });
+    const { tools } = fakePort([justSent], { trash: () => false });
+    await expect(
+      call(tools, 'update_threads', { ids: ['a'], mailbox: 'trash' }),
+    ).resolves.toMatchObject({
+      results: [{ id: 'a', status: 'pending', note: expect.stringContaining('mail server') }],
+    });
   });
 
   it('refuses a call that asks for no change at all', async () => {

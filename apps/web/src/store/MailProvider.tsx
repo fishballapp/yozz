@@ -39,9 +39,10 @@ import {
 import { type AccountSummaries, threadsFromAccounts, withDrafts } from '../threads/summaries';
 import type { AccountSyncState, FlagTarget } from '../threads/sync';
 import type { ThreadState } from '../threads/thread';
-import { type Folder, isArchived } from '../threads/thread';
+import { type Folder, isArchived, isServerCopy } from '../threads/thread';
 import { accountsShown, folderPaged, type MailboxId } from '../threads/views';
 import { isDemo } from '../ui/chrome';
+import { toast } from '../ui/Toast';
 import { vaultErrorMessage } from '../vault/screen-policy';
 import { useVault } from '../vault/session';
 import { type Composer, useComposer } from './use-composer';
@@ -537,6 +538,9 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
       setOlderInFlight({});
       reset(userId);
       setMailError(null);
+      // Every toast reports on this session's mail, and one that waits to be read would wait for
+      // whoever unlocks next.
+      toast.close();
     };
   }, [store, userId, load, reset]);
 
@@ -734,7 +738,9 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
 
       const byAccount = Map.groupBy(
         thread.messages.flatMap(message =>
-          (message.locations ?? []).filter(location => pick(location.folder)),
+          (message.locations ?? []).filter(
+            location => isServerCopy(location) && pick(location.folder),
+          ),
         ),
         location => location.account,
       );

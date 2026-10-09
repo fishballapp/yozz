@@ -4,7 +4,7 @@ import { createRoot } from 'react-dom/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { toast } from '../ui/Toast';
 import { ColumnsRow } from './ThreadRow';
-import type { Folder, ThreadState } from './thread';
+import { type Folder, type ThreadState, VAULT_UID_VALIDITY } from './thread';
 import type { MailboxId } from './views';
 
 const mail = vi.hoisted(() => ({
@@ -20,7 +20,8 @@ vi.mock('@tanstack/react-router', () => ({ Link: () => null }));
 vi.mock('./use-advance', () => ({ useAdvancePast: () => vi.fn() }));
 vi.mock('../store/MailProvider', () => ({ useMail: () => mail }));
 
-const threadIn = (folders: readonly Folder[]): ThreadState => ({
+/** A server's copy in each folder, unless `uidValidity` says no server issued them. */
+const threadIn = (folders: readonly Folder[], uidValidity = 1): ThreadState => ({
   id: 't1',
   accounts: ['me@example.com'],
   subject: 'Lunch',
@@ -37,15 +38,23 @@ const threadIn = (folders: readonly Folder[]): ThreadState => ({
       toAddress: 'me@example.com',
       at: 1,
       body: [],
+      locations: folders.map((folder, index) => ({
+        account: 'me@example.com',
+        folder,
+        uidValidity,
+        uid: index + 1,
+      })),
     },
   ],
 });
 
 const host = document.createElement('div');
 const root = createRoot(host);
-const showRow = async (mailbox: MailboxId, folders: readonly Folder[]) => {
+const showRow = async (mailbox: MailboxId, folders: readonly Folder[], uidValidity = 1) => {
   await act(async () =>
-    root.render(<ColumnsRow thread={threadIn(folders)} mailbox={mailbox} isSelected={false} />),
+    root.render(
+      <ColumnsRow thread={threadIn(folders, uidValidity)} mailbox={mailbox} isSelected={false} />,
+    ),
   );
   return [...host.querySelectorAll('button')].flatMap(button => button.ariaLabel ?? []);
 };
@@ -85,5 +94,16 @@ describe('RowTriage', () => {
         description: 'imap.example.com: Archive is read-only',
       }),
     );
+  });
+});
+
+describe('a row with no copy on a server', () => {
+  it('offers no star, archive or delete while its only copy is the one this tab just sent', async () => {
+    // Its Sent copy failed, so this stays until lock: every mark would act on nothing.
+    expect(await showRow('sent', ['sent'], VAULT_UID_VALIDITY)).toEqual([]);
+  });
+
+  it('offers them once the server copy is there', async () => {
+    expect(await showRow('sent', ['sent'])).toEqual(['Star Lunch', 'Delete Lunch']);
   });
 });

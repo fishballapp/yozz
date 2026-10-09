@@ -16,7 +16,7 @@ import { reportProblem } from '../ui/Toast';
 import { listTime, stackTime } from '../ui/time';
 import { canMoveTo } from './reconcile';
 import type { ThreadState } from './thread';
-import { attachmentsOf, isArchived, newestInbound } from './thread';
+import { attachmentsOf, isArchived, isOnServer, newestInbound } from './thread';
 import { useAdvancePast } from './use-advance';
 import { latestOf, type MailboxId, previewOf } from './views';
 
@@ -82,6 +82,7 @@ const StarButton = ({
   className,
 }: Omit<RowProps, 'mailbox'> & { className: string }) => {
   const { toggleStar } = useMail();
+  if (!isOnServer(thread)) return null;
 
   // On --select the star steps to --signal-deep (same hue at 3.37:1); an --ink star there reads as off.
   const tone = (() => {
@@ -107,10 +108,10 @@ const StarButton = ({
   );
 };
 
-/** Every way `removeDraft` can answer, minus the two that mean the draft is gone. */
+/** Every way `removeDraft` can answer, minus the two that mean the draft is gone and the one nobody hears. */
 type DiscardOutcome = Exclude<
   Awaited<ReturnType<ReturnType<typeof useMail>['removeDraft']>>['outcome'],
-  'deleted' | 'absent'
+  'deleted' | 'absent' | 'ended'
 >;
 
 /** Each refusal names a different thing to do next. */
@@ -170,12 +171,14 @@ const RowTriage = ({
           },
           act: async () => {
             const { outcome } = await removeDraft(draftId);
-            if (outcome === 'deleted' || outcome === 'absent') return;
+            if (outcome === 'deleted' || outcome === 'absent' || outcome === 'ended') return;
             reportProblem('Draft not discarded', DISCARD_REFUSALS[outcome]);
           },
         },
       ];
     }
+    // A just-sent message or vault-held sent mail alone: no server holds a copy to file.
+    if (!isOnServer(thread)) return [];
     if (mailbox === 'trash') {
       if (!canMoveTo(thread.folders, 'inbox')) return [];
       return [

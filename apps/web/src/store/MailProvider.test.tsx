@@ -5,6 +5,7 @@ import { createRoot } from 'react-dom/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createMailCache } from '../threads/cache';
 import type { ThreadState } from '../threads/thread';
+import { toast } from '../ui/Toast';
 import { MailProvider, useMail } from './MailProvider';
 
 const { session, moveThread, thread } = vi.hoisted(() => {
@@ -162,5 +163,18 @@ describe('MailProvider move refusals', () => {
     const pending = 'Still confirming the last move of that conversation; try again in a moment.';
     expect(onRefused).toHaveBeenCalledWith(pending);
     expect(mail().mailError).toBe(pending);
+  });
+});
+
+describe('MailProvider ending a session', () => {
+  it('takes down every toast, so none waits on screen for whoever unlocks next', async () => {
+    await mount();
+    const closed = vi.spyOn(toast, 'close');
+
+    const root = roots.pop();
+    await act(async () => root?.unmount());
+    // No id: every toast, whichever of this session's answers raised it.
+    expect(closed).toHaveBeenCalledWith();
+    closed.mockRestore();
   });
 });

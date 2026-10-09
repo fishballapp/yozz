@@ -13,14 +13,16 @@ import { useNavigate, useSearch } from '@tanstack/react-router';
 import { useEffect, useRef, useState } from 'react';
 import { describeMailFailure } from '../relay/describe-failure';
 import { useMail } from '../store/MailProvider';
+import type { SessionEnded } from '../store/use-composer';
 import { ATTACHMENT_LABEL, formatBytes } from '../threads/attachments';
 import { Button } from '../ui/Button';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
 import { isDemo } from '../ui/chrome';
 import { Input } from '../ui/Field';
-import { toast } from '../ui/Toast';
+import { reportProblem, toast } from '../ui/Toast';
 import { useVault } from '../vault/session';
 import { MAX_ATTACHMENT_BYTES, readAttachments, type SendReport } from './draft';
+import type { DeleteOutcome } from './draft-vault';
 import { FromSwitch } from './FromSwitch';
 import { DISCARD_WARNING, draftKeyOfIntent, seedFor, withCompose, withoutCompose } from './intent';
 import { MarkdownView } from './MarkdownView';
@@ -45,6 +47,10 @@ const TABS = [
 const reportSend = (settled: Promise<SendReport>, reopen: (draftKey: string) => void) => {
   const id = toast.add({ title: 'Sending…', timeout: 0 });
   void settled.then(report => {
+    if (report.state === 'ended') {
+      toast.close(id);
+      return;
+    }
     if (report.state === 'sent') {
       toast.update(id, { title: 'Sent', timeout: 4000 });
       return;
@@ -79,6 +85,20 @@ const reportSend = (settled: Promise<SendReport>, reopen: (draftKey: string) => 
   });
 };
 
+/** Every refusal a discard can meet. The composer has closed, so each says where the draft is. */
+const DISCARD_REFUSALS: Record<Exclude<DeleteOutcome['outcome'], 'deleted' | 'absent'>, string> = {
+  conflict: 'Another device changed it, so it is still in Drafts.',
+  sending: 'Its send has not settled, so it is still in Drafts.',
+  offline: 'The vault could not be reached, so it is still in Drafts.',
+};
+
+/** Discard closes the composer before the vault answers, so a refusal is a toast. */
+const reportDiscard = async (discarded: Promise<DeleteOutcome | SessionEnded>) => {
+  const { outcome } = await discarded;
+  if (outcome === 'deleted' || outcome === 'absent' || outcome === 'ended') return;
+  reportProblem('Draft not discarded', DISCARD_REFUSALS[outcome]);
+};
+
 export const Compose = () => {
   const { compose } = useSearch({ from: '__root__' });
   const navigate = useNavigate();
@@ -100,6 +120,7 @@ export const Compose = () => {
     sendAgain,
     backToEditing,
     discardDraft,
+    watchSession,
   } = useMail();
   // `to: '.'` only drops the param. `replace`, or Back after closing re-opened a blank draft.
   const close = () => {
@@ -406,11 +427,17 @@ export const Compose = () => {
                           setSendError(null);
                           // A send snapshotted mid-read would go out without the file.
                           setPendingReads(count => count + files.length);
+                          // A lock during the read hands this composer to the next session, whose
+                          // draft must not gain this person's files.
+                          const isCurrent = watchSession();
                           void (async () => {
                             try {
-                              attach(await readAttachments(files));
+                              const read = await readAttachments(files);
+                              if (isCurrent()) attach(read);
                             } catch (err) {
-                              setSendError(err instanceof Error ? err.message : String(err));
+                              if (isCurrent()) {
+                                setSendError(err instanceof Error ? err.message : String(err));
+                              }
                             } finally {
                               setPendingReads(count => count - files.length);
                             }
@@ -457,8 +484,9 @@ export const Compose = () => {
                         confirmLabel="Discard"
                         busyLabel="Discarding…"
                         onConfirm={async () => {
-                          await discardDraft();
+                          const discarded = discardDraft();
                           close();
+                          void reportDiscard(discarded);
                         }}
                       />
                     </div>
@@ -466,11 +494,15 @@ export const Compose = () => {
                       variant="primary"
                       className="h-11 lg:h-8"
                       onClick={() => {
+                        // A lock or a sign-in during the claim hands this composer to the next
+                        // session: its draft is not closed, and none of this send is said in it.
+                        const isCurrent = watchSession();
                         void (async () => {
                           setIsSending(true);
                           setSendError(null);
                           try {
                             const claimed = await send();
+                            if (!isCurrent()) return;
                             if (!claimed.ok) {
                               const host =
                                 identities.find(identity => identity.address === draft.identityId)
@@ -482,7 +514,9 @@ export const Compose = () => {
                             close();
                             reportSend(claimed.value.settled, reopenDraft);
                           } catch (err) {
-                            setSendError(err instanceof Error ? err.message : String(err));
+                            if (isCurrent()) {
+                              setSendError(err instanceof Error ? err.message : String(err));
+                            }
                           } finally {
                             setIsSending(false);
                           }

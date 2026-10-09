@@ -3,9 +3,11 @@ import {
   addresseesOf,
   inboxesOf,
   isArchived,
+  isOnServer,
   isTrashed,
   type Message,
   toParagraphs,
+  VAULT_UID_VALIDITY,
 } from './thread';
 
 describe('isArchived', () => {
@@ -43,6 +45,27 @@ const message = (overrides: Partial<Message>): Message => ({
   at: 1,
   body: [],
   ...overrides,
+});
+
+describe('isOnServer', () => {
+  // This tab's copy of a message it has just sent, or sent mail the vault holds.
+  const local = {
+    account: 'jason@jyu.example',
+    folder: 'sent' as const,
+    uidValidity: VAULT_UID_VALIDITY,
+    uid: 0,
+  };
+
+  it('is a conversation with at least one copy a server holds', () => {
+    const reply = message({ id: 'reply', locations: [local] });
+    const original = message({ locations: [at('jason@jyu.example', 'inbox')] });
+    expect(isOnServer({ messages: [original, reply] })).toBe(true);
+  });
+
+  it('is not one made only of copies no server issued, or of drafts', () => {
+    expect(isOnServer({ messages: [message({ locations: [local] })] })).toBe(false);
+    expect(isOnServer({ messages: [message({ isDraft: true })] })).toBe(false);
+  });
 });
 
 describe('inboxesOf', () => {

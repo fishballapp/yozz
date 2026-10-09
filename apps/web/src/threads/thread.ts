@@ -129,9 +129,19 @@ export const attachmentsOf = (thread: Thread) =>
 
 /**
  * RFC 9051's UIDVALIDITY is a non-zero number, so 0 marks a copy no server holds: sent mail kept in
- * the vault because its address has no mailbox to keep it in.
+ * the vault because its address has no mailbox to keep it in, or a message this tab has just sent.
  */
 export const VAULT_UID_VALIDITY = 0;
+
+/** A copy a server holds, so a flag write or a move has something there to change. */
+export const isServerCopy = ({ uidValidity }: Location) => uidValidity !== VAULT_UID_VALIDITY;
+
+/**
+ * Some copy of it is on a server. A conversation of drafts, vault-held sent mail or a message whose
+ * Sent copy has not synced (or failed) has nothing a star, an unread mark or a move could change.
+ */
+export const isOnServer = ({ messages }: Pick<Thread, 'messages'>) =>
+  messages.some(message => (message.locations ?? []).some(isServerCopy));
 
 /**
  * The accounts a message arrived at, once each. Empty for mail you sent, unless another of your

@@ -36,6 +36,7 @@ import {
   addresseesOf,
   inboxesOf,
   isArchived,
+  isOnServer,
   type Message,
   newestInbound,
   type Recipient,
@@ -398,6 +399,8 @@ export const ThreadReader = ({
     () => {
       if (move(thread.id, reason => reportProblem(notFiled, reason))) onTriaged();
     };
+  // A star, an unread mark and a move all act on server copies, so a conversation with none offers none.
+  const canMark = isOnServer(thread);
 
   return (
     <article className="flex h-full flex-col bg-ink-sunken">
@@ -406,20 +409,22 @@ export const ThreadReader = ({
             the subject a few characters on a phone. Wrapping rather than reordering keeps the
             focus order the same as the reading order. */}
         <div className="flex flex-wrap items-start gap-x-2 gap-y-1 lg:flex-nowrap">
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={() => toggleStar(thread.id)}
-            // Same mark, same colour as the list.
-            className={cn(
-              '-ml-1.5 size-11 shrink-0 lg:size-7',
-              thread.isStarred && 'text-signal hover:text-signal',
-            )}
-            aria-label="Star thread"
-            aria-pressed={thread.isStarred}
-          >
-            <StarIcon size={15} weight={thread.isStarred ? 'fill' : 'regular'} />
-          </Button>
+          {canMark && (
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => toggleStar(thread.id)}
+              // Same mark, same colour as the list.
+              className={cn(
+                '-ml-1.5 size-11 shrink-0 lg:size-7',
+                thread.isStarred && 'text-signal hover:text-signal',
+              )}
+              aria-label="Star thread"
+              aria-pressed={thread.isStarred}
+            >
+              <StarIcon size={15} weight={thread.isStarred ? 'fill' : 'regular'} />
+            </Button>
+          )}
           {/* The first line centres on the star's 44px touch target, and on its 28px one above `lg`. */}
           <div className="min-w-0 flex-1 pt-2.5 lg:pt-0.5">
             <h1
@@ -454,57 +459,62 @@ export const ThreadReader = ({
                 would be read again the moment it stayed open. Opened from Trash, a thread offers
                 the one move that gets it out — the row it came from offered the same, and a
                 conversation only half in the bin must not lose it. A move with nothing in its
-                source folders is not offered at all. */}
-            <Button
-              variant="ghost"
-              size="icon"
-              className="size-11 lg:size-7"
-              onClick={() => {
-                markUnread(thread.id);
-                onClose();
-              }}
-              aria-label="Mark as unread"
-            >
-              <EnvelopeSimpleIcon size={15} />
-            </Button>
-            {mailbox === 'trash' ? (
-              canMoveTo(thread.folders, 'inbox') && (
+                source folders is not offered at all, nor is any mark on a conversation no server
+                holds a copy of. */}
+            {canMark && (
+              <>
                 <Button
                   variant="ghost"
                   size="icon"
                   className="size-11 lg:size-7"
-                  onClick={file(restoreThread, 'Thread not restored')}
-                  aria-label="Restore thread"
+                  onClick={() => {
+                    markUnread(thread.id);
+                    onClose();
+                  }}
+                  aria-label="Mark as unread"
                 >
-                  <ArrowCounterClockwiseIcon size={15} />
+                  <EnvelopeSimpleIcon size={15} />
                 </Button>
-              )
-            ) : (
-              <>
-                {canMoveTo(thread.folders, isArchived(thread) ? 'inbox' : 'archive') && (
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="size-11 lg:size-7"
-                    onClick={file(
-                      toggleArchive,
-                      isArchived(thread) ? 'Thread not moved to inbox' : 'Thread not archived',
+                {mailbox === 'trash' ? (
+                  canMoveTo(thread.folders, 'inbox') && (
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="size-11 lg:size-7"
+                      onClick={file(restoreThread, 'Thread not restored')}
+                      aria-label="Restore thread"
+                    >
+                      <ArrowCounterClockwiseIcon size={15} />
+                    </Button>
+                  )
+                ) : (
+                  <>
+                    {canMoveTo(thread.folders, isArchived(thread) ? 'inbox' : 'archive') && (
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="size-11 lg:size-7"
+                        onClick={file(
+                          toggleArchive,
+                          isArchived(thread) ? 'Thread not moved to inbox' : 'Thread not archived',
+                        )}
+                        aria-label={isArchived(thread) ? 'Move to inbox' : 'Archive thread'}
+                      >
+                        <ArchiveIcon size={15} />
+                      </Button>
                     )}
-                    aria-label={isArchived(thread) ? 'Move to inbox' : 'Archive thread'}
-                  >
-                    <ArchiveIcon size={15} />
-                  </Button>
-                )}
-                {canMoveTo(thread.folders, 'trash') && (
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="size-11 lg:size-7"
-                    onClick={file(trashThread, 'Thread not deleted')}
-                    aria-label="Delete thread"
-                  >
-                    <TrashIcon size={15} />
-                  </Button>
+                    {canMoveTo(thread.folders, 'trash') && (
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="size-11 lg:size-7"
+                        onClick={file(trashThread, 'Thread not deleted')}
+                        aria-label="Delete thread"
+                      >
+                        <TrashIcon size={15} />
+                      </Button>
+                    )}
+                  </>
                 )}
               </>
             )}
