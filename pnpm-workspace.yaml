@@ -58,6 +58,7 @@ catalog:
   "@tailwindcss/vite": ^4.3.3
   "@tanstack/markdown": ^0.0.15
   "@tanstack/react-router": ^1.170.36
+  "@tanstack/react-virtual": ^3.14.13
   "@tanstack/router-plugin": ^1.168.38
   "@types/node": ^24.13.4
   "@varlock/1password-plugin": ^2.0.4

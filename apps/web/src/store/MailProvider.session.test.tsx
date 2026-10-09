@@ -16,7 +16,7 @@ import type { ThreadState } from '../threads/thread';
 import { fakeRecordStore } from '../vault/fake-record-store';
 import type { RecordStore } from '../vault/record-store';
 import type { UnlockedVaultSession } from '../vault/unlock';
-import { MailProvider, useMail } from './MailProvider';
+import { MailProvider, useComposer, useMail } from './MailProvider';
 
 // @ts-expect-error React reads it off the global
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
@@ -224,8 +224,10 @@ const unmounts: (() => Promise<void>)[] = [];
 const mount = async (store: RecordStore) => {
   mocks.session = { userId: 'user-1', store };
   let mail: ReturnType<typeof useMail> | null = null;
+  let composer: ReturnType<typeof useComposer> | null = null;
   const Probe = () => {
     mail = useMail();
+    composer = useComposer();
     return null;
   };
   const root = createRoot(document.createElement('div'));
@@ -247,6 +249,10 @@ const mount = async (store: RecordStore) => {
   await vi.waitFor(() => expect(current().identities).not.toHaveLength(0));
   return {
     mail: current,
+    composer: () => {
+      if (composer === null) throw new Error('Composer did not render');
+      return composer;
+    },
     /** A lock and unlock, or a sign-in as another account: the provider tears one session down for the next. */
     replaceSession: async (session: NonNullable<typeof mocks.session>) => {
       mocks.session = session;
@@ -321,9 +327,9 @@ afterEach(async () => {
 describe("an ended session's IMAP work", () => {
   it("a claimed send whose `submitted` write lands after the session ended never reaches the next session's connections", async () => {
     const theirs = await vault();
-    const { mail, replaceSession } = await mount(theirs.store);
+    const { composer, replaceSession } = await mount(theirs.store);
     await act(async () => {
-      mail().seedDraft('new', {
+      composer().seedDraft('new', {
         identityId: ALICE.address,
         to: 'bob@example.org',
         subject: 'Plans',
@@ -332,7 +338,7 @@ describe("an ended session's IMAP work", () => {
     });
     mocks.smtp = Promise.withResolvers();
     const { settled } = await act(async () => {
-      const claimed = await mail().send();
+      const claimed = await composer().send();
       if (!claimed.ok) throw new Error('the send was refused at the claim');
       return { settled: claimed.value.settled };
     });

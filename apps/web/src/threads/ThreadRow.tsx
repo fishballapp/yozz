@@ -267,7 +267,7 @@ export const ColumnsRow = ({ thread, mailbox, isSelected }: RowProps) => {
   })();
 
   return (
-    <li
+    <div
       className={cn(
         'group relative grid items-center gap-x-2 py-2 pr-2 pl-1 text-base',
         'grid-cols-[2.75rem_1.75rem_minmax(0,1fr)_auto_2.75rem]',
@@ -354,7 +354,7 @@ export const ColumnsRow = ({ thread, mailbox, isSelected }: RowProps) => {
       >
         {listTime(latest.at)}
       </span>
-    </li>
+    </div>
   );
 };
 
@@ -370,7 +370,7 @@ export const StackedRow = ({ thread, mailbox, isSelected }: RowProps) => {
   })();
 
   return (
-    <li
+    <div
       className={cn(
         'group relative grid items-start gap-x-2 py-2.5 pr-3 pl-1 text-base',
         'grid-cols-[2.75rem_1.75rem_minmax(0,1fr)_auto] lg:grid-cols-[1.5rem_1.75rem_minmax(0,1fr)_auto]',
@@ -455,6 +455,6 @@ export const StackedRow = ({ thread, mailbox, isSelected }: RowProps) => {
       >
         {stackTime(latest.at)}
       </span>
-    </li>
+    </div>
   );
 };

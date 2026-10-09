@@ -12,7 +12,7 @@ import {
 import { useNavigate, useSearch } from '@tanstack/react-router';
 import { useEffect, useRef, useState } from 'react';
 import { describeMailFailure } from '../relay/describe-failure';
-import { useMail } from '../store/MailProvider';
+import { useComposer, useMail } from '../store/MailProvider';
 import { ATTACHMENT_LABEL, formatBytes } from '../threads/attachments';
 import { Button } from '../ui/Button';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
@@ -109,10 +109,6 @@ export const Compose = () => {
     send,
     attach,
     detach,
-    threads,
-    identities,
-    ownedAddresses,
-    drafts,
     draftConflict,
     draftError,
     resolveDraftConflict,
@@ -120,8 +116,8 @@ export const Compose = () => {
     sendAgain,
     backToEditing,
     discardDraft,
-    watchSession,
-  } = useMail();
+  } = useComposer();
+  const { threads, identities, ownedAddresses, drafts, watchSession } = useMail();
   // `to: '.'` only drops the param. `replace`, or Back after closing re-opened a blank draft.
   const close = () => {
     void navigate({ to: '.', search: withoutCompose, replace: true });

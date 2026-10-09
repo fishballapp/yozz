@@ -27,7 +27,8 @@ import type { SessionEnded } from '../vault/unlock';
 
 /**
  * Split from the mailbox half, which hands it the accounts, the live connections and the threads;
- * it hands back the slice `useMail` exposes plus the load and reset the session effect calls.
+ * it hands back the composer `useComposer` exposes, the drafts and actions `useMail` carries, and
+ * the load and reset the session effect calls.
  */
 
 /** Autosave debounce after the last keystroke. */
@@ -84,16 +85,34 @@ const composeOf = (intent: ComposeIntent, opened: ComposeDraft, isFresh: boolean
   sending: null,
 });
 
-export type Composer = {
-  draft: ComposeDraft | null;
-  /** A send whose Sent-folder copy did not store; cleared by the next send that does. */
-  sentCopyError: string | null;
-  /**
-   * `?compose=` decides whether the composer is on screen; this follows it. A device-stored draft
-   * for the same intent wins over the seed.
-   */
+/**
+ * What the rest of the app reads of the composer's half, carried by `useMail`. Nothing here moves on
+ * a keystroke, so no list or rail re-renders while somebody types.
+ */
+export type ComposerShared = {
   /** Every live draft in the vault, other devices' included. */
   drafts: readonly DraftHandle[];
+  /** A send whose Sent-folder copy did not store; cleared by the next send that does. */
+  sentCopyError: string | null;
+  /** Writes a draft record from outside the composer (agent tools). Refused while the composer holds that draft. */
+  writeDraft: (input: {
+    readonly draftId?: string;
+    readonly content: DraftContent;
+  }) => Promise<SaveOutcome | { readonly ok: false; readonly reason: 'busy' | 'locked' | 'ended' }>;
+  /** Tombstones a draft record from outside the composer, and expunges its IMAP copy. */
+  removeDraft: (
+    draftId: string,
+  ) => Promise<DeleteOutcome | SessionEnded | { readonly outcome: 'busy' | 'locked' }>;
+  /**
+   * Taken before a caller's own await: whether the session it was taken in is still open. The
+   * composer outlives the session, so an answer that lands after it ended is shown nowhere.
+   */
+  watchSession: () => () => boolean;
+};
+
+/** The open draft and what edits and sends it, carried by `useComposer` alone: it moves on every keystroke. */
+export type Composer = {
+  draft: ComposeDraft | null;
   /** Another device moved this draft on while it was open here; nothing is written until resolved. */
   draftConflict: DraftHandle | null;
   /** Set while the newest text has not reached the vault. */
@@ -106,25 +125,20 @@ export type Composer = {
   sendAgain: () => Promise<void>;
   /** Puts the unconfirmed send aside so the draft can be written again. Discard stays refused. */
   backToEditing: () => Promise<void>;
+  /**
+   * `?compose=` decides whether the composer is on screen; this follows it. A device-stored draft
+   * for the same intent wins over the seed.
+   */
   seedDraft: (
     intent: ComposeIntent | undefined,
     seed: Partial<ComposeDraft>,
   ) => ComposeDraft | null;
   updateDraft: (changes: Partial<ComposeDraft>) => void;
-  /** Writes a draft record from outside the composer (agent tools). Refused while the composer holds that draft. */
-  writeDraft: (input: {
-    readonly draftId?: string;
-    readonly content: DraftContent;
-  }) => Promise<SaveOutcome | { readonly ok: false; readonly reason: 'busy' | 'locked' | 'ended' }>;
   /**
    * Throws the open draft away before anything awaits, so the caller closes the composer straight
    * after; the promise is the vault's answer, which arrives with the composer gone.
    */
   discardDraft: () => Promise<DeleteOutcome | SessionEnded>;
-  /** Tombstones a draft record from outside the composer, and expunges its IMAP copy. */
-  removeDraft: (
-    draftId: string,
-  ) => Promise<DeleteOutcome | SessionEnded | { readonly outcome: 'busy' | 'locked' }>;
   /**
    * Sends the draft over its identity's SMTP. Resolves at the claim, where the bytes are frozen
    * into the record; a refusal before then is an error the composer shows, and everything after is
@@ -132,16 +146,11 @@ export type Composer = {
    * `ended`.
    */
   send: () => Promise<Result<{ readonly settled: Promise<SendReport> }, MailConnectionFailure>>;
-  /**
-   * Taken before a caller's own await: whether the session it was taken in is still open. The
-   * composer outlives the session, so an answer that lands after it ended is shown nowhere.
-   */
-  watchSession: () => () => boolean;
   attach: (attachments: readonly Attachment[]) => void;
   detach: (name: string) => void;
 };
 
-export const useComposer = ({
+export const useComposerStore = ({
   session,
   identities,
   accounts,
@@ -927,17 +936,60 @@ export const useComposer = ({
     clearDraft(userId);
   }, []);
 
-  const slice = useMemo<Composer>(
+  const writeDraft = useCallback<ComposerShared['writeDraft']>(async ({ draftId, content }) => {
+    const session = sessionRef.current;
+    if (session === null || isDemo()) return { ok: false, reason: 'locked' };
+    if (draftId !== undefined && draftRef.current?.draftId !== undefined) {
+      const open = parseDraftId(draftId)?.key;
+      if (open !== undefined && open === draftRef.current.draftKey) {
+        return { ok: false, reason: 'busy' };
+      }
+    }
+    const isCurrent = watchSession(sessionGeneration);
+    const { createDraft, listDrafts, replaceDraft } = await import('../compose/draft-vault');
+    if (!isCurrent()) return { ok: false, reason: 'ended' };
+    const outcome =
+      draftId === undefined
+        ? await createDraft(session.store, content, Date.now())
+        : await replaceDraft(session.store, draftId, content, Date.now());
+    if (!isCurrent()) return { ok: false, reason: 'ended' };
+    if (!outcome.ok) return outcome;
+    const live = await listDrafts(session.store);
+    if (!isCurrent()) return { ok: false, reason: 'ended' };
+    setDrafts(live);
+    return outcome;
+  }, []);
+
+  const removeDraft = useCallback<ComposerShared['removeDraft']>(
+    async draftId => {
+      const session = sessionRef.current;
+      if (session === null || isDemo()) return { outcome: 'locked' };
+      const key = parseDraftId(draftId)?.key;
+      if (key === undefined) return { outcome: 'absent' };
+      if (key === draftRef.current?.draftKey) return { outcome: 'busy' };
+      return dropDraft(session.store, key, ({ deleteDraft }) =>
+        deleteDraft(session.store, draftId, Date.now()),
+      );
+    },
+    [dropDraft],
+  );
+
+  const watchOpenSession = useCallback(() => watchSession(sessionGeneration), []);
+
+  const shared = useMemo<ComposerShared>(
+    () => ({ drafts, sentCopyError, writeDraft, removeDraft, watchSession: watchOpenSession }),
+    [drafts, sentCopyError, writeDraft, removeDraft, watchOpenSession],
+  );
+
+  const composer = useMemo<Composer>(
     () => ({
       draft,
-      drafts,
       draftConflict,
       draftError,
       resolveDraftConflict,
       openSendState,
       sendAgain,
       backToEditing,
-      sentCopyError,
       seedDraft: (intent, seed) => {
         const userId = userIdRef.current;
         if (intent === undefined) {
@@ -1093,29 +1145,6 @@ export const useComposer = ({
       },
       updateDraft: changes =>
         setDraft(current => (current === null ? current : { ...current, ...changes })),
-      writeDraft: async ({ draftId, content }) => {
-        const session = sessionRef.current;
-        if (session === null || isDemo()) return { ok: false, reason: 'locked' };
-        if (draftId !== undefined && draftRef.current?.draftId !== undefined) {
-          const open = parseDraftId(draftId)?.key;
-          if (open !== undefined && open === draftRef.current.draftKey) {
-            return { ok: false, reason: 'busy' };
-          }
-        }
-        const isCurrent = watchSession(sessionGeneration);
-        const { createDraft, listDrafts, replaceDraft } = await import('../compose/draft-vault');
-        if (!isCurrent()) return { ok: false, reason: 'ended' };
-        const outcome =
-          draftId === undefined
-            ? await createDraft(session.store, content, Date.now())
-            : await replaceDraft(session.store, draftId, content, Date.now());
-        if (!isCurrent()) return { ok: false, reason: 'ended' };
-        if (!outcome.ok) return outcome;
-        const live = await listDrafts(session.store);
-        if (!isCurrent()) return { ok: false, reason: 'ended' };
-        setDrafts(live);
-        return outcome;
-      },
       discardDraft: async () => {
         // Read before anything awaits: closing follows immediately and clears both.
         const open = draftRef.current;
@@ -1150,18 +1179,7 @@ export const useComposer = ({
           },
         );
       },
-      removeDraft: async draftId => {
-        const session = sessionRef.current;
-        if (session === null || isDemo()) return { outcome: 'locked' };
-        const key = parseDraftId(draftId)?.key;
-        if (key === undefined) return { outcome: 'absent' };
-        if (key === draftRef.current?.draftKey) return { outcome: 'busy' };
-        return dropDraft(session.store, key, ({ deleteDraft }) =>
-          deleteDraft(session.store, draftId, Date.now()),
-        );
-      },
       send,
-      watchSession: () => watchSession(sessionGeneration),
       attach: added =>
         setDraft(current =>
           current === null
@@ -1184,14 +1202,12 @@ export const useComposer = ({
     }),
     [
       draft,
-      drafts,
       draftConflict,
       draftError,
       resolveDraftConflict,
       openSendState,
       sendAgain,
       backToEditing,
-      sentCopyError,
       send,
       demo,
       identities,
@@ -1206,5 +1222,5 @@ export const useComposer = ({
   // One list for the thread graph: either kind collapses into a server copy by fingerprint.
   const sentHere = useMemo(() => [...vaultSent, ...justSent], [vaultSent, justSent]);
 
-  return { slice, load, reset, drafts, vaultSent: sentHere };
+  return { composer, shared, load, reset, vaultSent: sentHere };
 };

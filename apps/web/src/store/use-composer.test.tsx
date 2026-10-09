@@ -19,7 +19,7 @@ import { threadsFromAccounts } from '../threads/summaries';
 import { isOnServer } from '../threads/thread';
 import { fakeRecordStore } from '../vault/fake-record-store';
 import type { RecordStore } from '../vault/record-store';
-import { useComposer } from './use-composer';
+import { useComposerStore } from './use-composer';
 
 /** A point work stops at: `reached` once something waits there, which waits until `open`. */
 type Gate = {
@@ -136,7 +136,7 @@ const vaultOver = (store: RecordStore) => {
   };
 };
 
-type Props = Parameters<typeof useComposer>[0];
+type Props = Parameters<typeof useComposerStore>[0];
 
 const roots: Array<ReturnType<typeof createRoot>> = [];
 
@@ -169,9 +169,9 @@ const render = async (store: RecordStore) => {
     baseByAccount: {},
     demo: false,
   };
-  const latest: { current: ReturnType<typeof useComposer> | null } = { current: null };
+  const latest: { current: ReturnType<typeof useComposerStore> | null } = { current: null };
   const Probe = (probed: Props) => {
-    latest.current = useComposer(probed);
+    latest.current = useComposerStore(probed);
     return null;
   };
   const root = createRoot(document.createElement('div'));
@@ -258,17 +258,17 @@ describe('discarding a draft from the Drafts list', () => {
     const created = await createDraft(vault.store, content(), 0);
     if (!created.ok) throw new Error('no draft to discard');
     const { hook } = await mount(vault.store);
-    expect(hook().drafts.map(draft => draft.draftKey)).toEqual([created.handle.draftKey]);
+    expect(hook().shared.drafts.map(draft => draft.draftKey)).toEqual([created.handle.draftKey]);
 
     vault.hold();
     const { answer } = await act(async () => ({
-      answer: hook().slice.removeDraft(created.handle.draftId),
+      answer: hook().shared.removeDraft(created.handle.draftId),
     }));
-    expect(hook().drafts).toEqual([]);
+    expect(hook().shared.drafts).toEqual([]);
 
     vault.release();
     await act(async () => expect(await answer).toMatchObject({ outcome: 'deleted' }));
-    expect(hook().drafts).toEqual([]);
+    expect(hook().shared.drafts).toEqual([]);
     expect(await listDrafts(vault.store)).toEqual([]);
   });
 
@@ -279,9 +279,9 @@ describe('discarding a draft from the Drafts list', () => {
     const { hook } = await mount(vault.store);
 
     vault.goOffline();
-    const outcome = await act(() => hook().slice.removeDraft(created.handle.draftId));
+    const outcome = await act(() => hook().shared.removeDraft(created.handle.draftId));
     expect(outcome).toEqual({ outcome: 'offline' });
-    expect(hook().drafts).toEqual([created.handle]);
+    expect(hook().shared.drafts).toEqual([created.handle]);
   });
 });
 
@@ -292,7 +292,7 @@ const openInComposer = async (body = 'Hello') => {
   if (!created.ok) throw new Error('no draft to open');
   const mounted = await mount(vault.store);
   await act(async () => {
-    mounted.hook().slice.seedDraft(`draft:${created.handle.draftKey}`, {});
+    mounted.hook().composer.seedDraft(`draft:${created.handle.draftKey}`, {});
   });
   return { ...mounted, vault, created: created.handle };
 };
@@ -301,8 +301,8 @@ describe('discarding the draft open in the composer', () => {
   it('lets go of it at once, and the tombstone lands after', async () => {
     const { hook, vault } = await openInComposer();
     vault.hold();
-    const { discarded } = await act(async () => ({ discarded: hook().slice.discardDraft() }));
-    expect(hook().drafts).toEqual([]);
+    const { discarded } = await act(async () => ({ discarded: hook().composer.discardDraft() }));
+    expect(hook().shared.drafts).toEqual([]);
 
     vault.release();
     await act(async () => expect(await discarded).toMatchObject({ outcome: 'deleted' }));
@@ -314,7 +314,7 @@ describe('discarding the draft open in the composer', () => {
     // The autosave in flight when Discard was confirmed: the text on screen, one version on.
     await replaceDraft(vault.store, created.draftId, content(), 0);
 
-    const outcome = await act(() => hook().slice.discardDraft());
+    const outcome = await act(() => hook().composer.discardDraft());
     expect(outcome).toMatchObject({ outcome: 'deleted' });
     expect(await listDrafts(vault.store)).toEqual([]);
   });
@@ -323,9 +323,9 @@ describe('discarding the draft open in the composer', () => {
     const { hook, vault, created } = await openInComposer();
     await replaceDraft(vault.store, created.draftId, content({ body: 'Theirs' }), 0);
 
-    const outcome = await act(() => hook().slice.discardDraft());
+    const outcome = await act(() => hook().composer.discardDraft());
     expect(outcome).toMatchObject({ outcome: 'conflict' });
-    expect(hook().drafts.map(draft => draft.draftKey)).toEqual([created.draftKey]);
+    expect(hook().shared.drafts.map(draft => draft.draftKey)).toEqual([created.draftKey]);
     expect((await listDrafts(vault.store)).map(draft => draft.record.body)).toEqual(['Theirs']);
   });
 });
@@ -335,7 +335,7 @@ const composeOne = async () => {
   const vault = vaultOver(fakeRecordStore().store);
   const mounted = await mount(vault.store);
   await act(async () => {
-    mounted.hook().slice.seedDraft('new', {
+    mounted.hook().composer.seedDraft('new', {
       identityId: ACCOUNT.address,
       to: 'you@x.test',
       // Encoded on the wire, decoded by IMAP: the fingerprint must survive both.
@@ -350,7 +350,7 @@ const composeOne = async () => {
 const claimOne = async () => {
   const mounted = await composeOne();
   const { settled } = await act(async () => {
-    const claimed = await mounted.hook().slice.send();
+    const claimed = await mounted.hook().composer.send();
     if (!claimed.ok) throw new Error('the send was refused at the claim');
     return { settled: claimed.value.settled };
   });
@@ -369,7 +369,7 @@ describe('a message just sent from an address with a mailbox', () => {
   it('is in its conversation and in Sent before any sync, and nothing is left in Drafts', async () => {
     const { hook, report } = await sendOne();
     expect(report).toEqual({ state: 'sent' });
-    expect(hook().drafts).toEqual([]);
+    expect(hook().shared.drafts).toEqual([]);
     const [thread] = threadsFromAccounts({}, hook().vaultSent);
     expect(thread?.folders).toEqual(['sent']);
     expect(thread?.messages.map(message => message.body)).toEqual([['See you there.']]);
@@ -418,20 +418,20 @@ describe('a send and the autosave it overtakes', () => {
   /** Lets a send past its claim and through the network: it went out once, and Drafts kept nothing. */
   const sentOnce = async (
     { hook, vault }: Pick<Awaited<ReturnType<typeof composeOne>>, 'hook' | 'vault'>,
-    claimed: ReturnType<ReturnType<typeof useComposer>['slice']['send']>,
+    claimed: ReturnType<ReturnType<typeof useComposerStore>['composer']['send']>,
   ) => {
     const answer = await act(() => claimed);
     if (!answer.ok) throw new Error('the send was refused at the claim');
     expect(await act(() => answer.value.settled)).toEqual({ state: 'sent' });
     expect(network.submitted).toHaveLength(1);
-    expect(hook().drafts).toEqual([]);
+    expect(hook().shared.drafts).toEqual([]);
     expect(await listDrafts(vault.store)).toEqual([]);
   };
 
   it('mints one record when the debounce ends while the send is minting', async () => {
     const composed = await composeOne();
     const minting = composed.vault.holdNextPut();
-    const { claimed } = await act(async () => ({ claimed: composed.hook().slice.send() }));
+    const { claimed } = await act(async () => ({ claimed: composed.hook().composer.send() }));
     await minting.reached;
 
     await act(async () => vi.advanceTimersByTime(2_000));
@@ -445,16 +445,16 @@ describe('a send and the autosave it overtakes', () => {
     await act(async () => vi.advanceTimersByTime(2_000));
     await minting.reached;
 
-    const { claimed } = await act(async () => ({ claimed: composed.hook().slice.send() }));
+    const { claimed } = await act(async () => ({ claimed: composed.hook().composer.send() }));
     minting.open();
     await sentOnce(composed, claimed);
   });
 
   it('is not refused as edited elsewhere when the debounce ends under its claim', async () => {
     const opened = await openInComposer();
-    await act(async () => opened.hook().slice.updateDraft({ body: 'Hello again' }));
+    await act(async () => opened.hook().composer.updateDraft({ body: 'Hello again' }));
     const claiming = opened.vault.holdNextPut();
-    const { claimed } = await act(async () => ({ claimed: opened.hook().slice.send() }));
+    const { claimed } = await act(async () => ({ claimed: opened.hook().composer.send() }));
     await claiming.reached;
 
     await act(async () => vi.advanceTimersByTime(2_000));
@@ -466,15 +466,15 @@ describe('a send and the autosave it overtakes', () => {
 describe('a send and the close that overtakes it', () => {
   const close = ({ hook }: Pick<Mounted, 'hook'>) =>
     act(async () => {
-      hook().slice.seedDraft(undefined, {});
+      hook().composer.seedDraft(undefined, {});
     });
 
   it('mints one record when the composer closes while the send is minting', async () => {
     const composed = await composeOne();
     // Written into, so the close files it rather than dropping it.
-    await act(async () => composed.hook().slice.updateDraft({ body: 'See you at noon.' }));
+    await act(async () => composed.hook().composer.updateDraft({ body: 'See you at noon.' }));
     const minting = composed.vault.holdNextPut();
-    const { claimed } = await act(async () => ({ claimed: composed.hook().slice.send() }));
+    const { claimed } = await act(async () => ({ claimed: composed.hook().composer.send() }));
     await minting.reached;
 
     await close(composed);
@@ -483,15 +483,15 @@ describe('a send and the close that overtakes it', () => {
     if (!answer.ok) throw new Error('the send was refused at the claim');
     expect(await act(() => answer.value.settled)).toEqual({ state: 'sent' });
     expect(network.submitted).toHaveLength(1);
-    expect(composed.hook().drafts).toEqual([]);
+    expect(composed.hook().shared.drafts).toEqual([]);
     expect(await listDrafts(composed.vault.store)).toEqual([]);
   });
 
   it('files nothing over the claim when the composer closes under it', async () => {
     const opened = await openInComposer();
-    await act(async () => opened.hook().slice.updateDraft({ body: 'Hello again' }));
+    await act(async () => opened.hook().composer.updateDraft({ body: 'Hello again' }));
     const claiming = opened.vault.holdNextPut();
-    const { claimed } = await act(async () => ({ claimed: opened.hook().slice.send() }));
+    const { claimed } = await act(async () => ({ claimed: opened.hook().composer.send() }));
     await claiming.reached;
 
     await close(opened);
@@ -504,9 +504,9 @@ describe('a send and the close that overtakes it', () => {
 
   it("leaves the next session's device copy alone when its claim lands after a lock", async () => {
     const opened = await openInComposer();
-    await act(async () => opened.hook().slice.updateDraft({ body: 'Hello again' }));
+    await act(async () => opened.hook().composer.updateDraft({ body: 'Hello again' }));
     const claiming = opened.vault.holdNextPut();
-    const { claimed } = await act(async () => ({ claimed: opened.hook().slice.send() }));
+    const { claimed } = await act(async () => ({ claimed: opened.hook().composer.send() }));
     await claiming.reached;
     await close(opened);
     await SESSION_ENDINGS.lock(opened);
@@ -515,7 +515,7 @@ describe('a send and the close that overtakes it', () => {
     await opened.rerender({});
     await act(() => opened.hook().load(opened.vault.store, [ACCOUNT], () => false));
     await act(async () => {
-      opened.hook().slice.seedDraft('new', { identityId: ACCOUNT.address, body: 'Next' });
+      opened.hook().composer.seedDraft('new', { identityId: ACCOUNT.address, body: 'Next' });
     });
     expect(storage.has('yozz:draft:user-1')).toBe(true);
 
@@ -540,22 +540,22 @@ describe('an autosave refused as a conflict', () => {
     const opened = await openInComposer();
     // Another device moves the record on, so this tab's next save is refused.
     await replaceDraft(opened.vault.store, opened.created.draftId, content({ body: 'Theirs' }), 0);
-    await act(async () => opened.hook().slice.updateDraft({ body: 'Mine' }));
+    await act(async () => opened.hook().composer.updateDraft({ body: 'Mine' }));
     const reread = opened.vault.holdNextRead();
     await act(async () => vi.advanceTimersByTime(2_000));
     await act(() => reread.reached);
 
     await act(async () => {
-      opened.hook().slice.seedDraft(undefined, {});
+      opened.hook().composer.seedDraft(undefined, {});
     });
     await act(async () => {
-      opened.hook().slice.seedDraft('new', { identityId: ACCOUNT.address });
+      opened.hook().composer.seedDraft('new', { identityId: ACCOUNT.address });
     });
     reread.open();
     vi.useRealTimers();
     await act(() => new Promise(resolve => setTimeout(resolve, 20)));
-    expect(opened.hook().drafts.map(draft => draft.record.body)).toEqual(['Theirs']);
-    expect(opened.hook().slice.draftConflict).toBeNull();
+    expect(opened.hook().shared.drafts.map(draft => draft.record.body)).toEqual(['Theirs']);
+    expect(opened.hook().composer.draftConflict).toBeNull();
   });
 });
 
@@ -573,9 +573,9 @@ describe('a first autosave still minting when its composer closes', () => {
     const minting = composed.vault.holdNextPut();
     await act(async () => vi.advanceTimersByTime(2_000));
     await minting.reached;
-    await act(async () => composed.hook().slice.updateDraft({ body: 'See you at noon.' }));
+    await act(async () => composed.hook().composer.updateDraft({ body: 'See you at noon.' }));
     await act(async () => {
-      composed.hook().slice.seedDraft(undefined, {});
+      composed.hook().composer.seedDraft(undefined, {});
     });
 
     minting.open();
@@ -586,7 +586,7 @@ describe('a first autosave still minting when its composer closes', () => {
         ]),
       ),
     );
-    expect(composed.hook().drafts).toHaveLength(1);
+    expect(composed.hook().shared.drafts).toHaveLength(1);
   });
 
   it('names its record in no other compose', async () => {
@@ -595,10 +595,10 @@ describe('a first autosave still minting when its composer closes', () => {
     await act(async () => vi.advanceTimersByTime(2_000));
     await minting.reached;
     await act(async () => {
-      composed.hook().slice.seedDraft(undefined, {});
+      composed.hook().composer.seedDraft(undefined, {});
     });
     await act(async () => {
-      composed.hook().slice.seedDraft('reply:<lunch@x.test>', {
+      composed.hook().composer.seedDraft('reply:<lunch@x.test>', {
         identityId: ACCOUNT.address,
         to: 'them@x.test',
         subject: 'Re: Lunch',
@@ -611,9 +611,9 @@ describe('a first autosave still minting when its composer closes', () => {
     );
     const [minted] = await listDrafts(composed.vault.store);
     expect(minted?.record.subject).toBe('Re: Café plans');
-    expect(composed.hook().slice.draft).toMatchObject({ subject: 'Re: Lunch' });
-    expect(composed.hook().slice.draft?.draftKey).toBeUndefined();
-    expect(composed.hook().drafts.map(draft => draft.draftKey)).toEqual([minted?.draftKey]);
+    expect(composed.hook().composer.draft).toMatchObject({ subject: 'Re: Lunch' });
+    expect(composed.hook().composer.draft?.draftKey).toBeUndefined();
+    expect(composed.hook().shared.drafts.map(draft => draft.draftKey)).toEqual([minted?.draftKey]);
   });
 });
 
@@ -627,7 +627,7 @@ describe('a write whose session ends before it reaches the vault', () => {
   });
 
   it.each([
-    ['a send', ({ hook }: Mounted) => void hook().slice.send()],
+    ['a send', ({ hook }: Mounted) => void hook().composer.send()],
     ['an autosave', () => vi.advanceTimersByTime(2_000)],
   ])('%s mints nothing when its session ends while it loads the vault', async (_, start) => {
     const mounted = await composeOne();
@@ -654,7 +654,7 @@ describe('an answer that lands after its session ended', () => {
       smtp.resolve();
       expect(await act(() => mounted.settled)).toEqual({ state: 'ended' });
       expect(mounted.hook().vaultSent).toEqual([]);
-      expect(mounted.hook().drafts).toEqual(next);
+      expect(mounted.hook().shared.drafts).toEqual(next);
     },
   );
 
@@ -667,14 +667,14 @@ describe('an answer that lands after its session ended', () => {
       const mounted = await mount(vault.store);
       vault.hold();
       const { answer } = await act(async () => ({
-        answer: mounted.hook().slice.removeDraft(created.handle.draftId),
+        answer: mounted.hook().shared.removeDraft(created.handle.draftId),
       }));
       const next = await end(mounted);
 
       vault.goOffline();
       vault.release();
       expect(await act(() => answer)).toEqual({ outcome: 'ended' });
-      expect(mounted.hook().drafts).toEqual(next);
+      expect(mounted.hook().shared.drafts).toEqual(next);
     },
   );
 
@@ -683,9 +683,9 @@ describe('an answer that lands after its session ended', () => {
     async (_, end) => {
       const mounted = await openInComposer('See you there.');
       // What the composer takes before its own await on the claim.
-      const isComposerCurrent = mounted.hook().slice.watchSession();
+      const isComposerCurrent = mounted.hook().shared.watchSession();
       mounted.vault.hold();
-      const { claimed } = await act(async () => ({ claimed: mounted.hook().slice.send() }));
+      const { claimed } = await act(async () => ({ claimed: mounted.hook().composer.send() }));
       const next = await end(mounted);
 
       mounted.vault.release();
@@ -695,8 +695,8 @@ describe('an answer that lands after its session ended', () => {
       expect(network.submitted).toHaveLength(1);
       expect(isComposerCurrent()).toBe(false);
       expect(mounted.hook().vaultSent).toEqual([]);
-      expect(mounted.hook().slice.sentCopyError).toBeNull();
-      expect(mounted.hook().drafts).toEqual(next);
+      expect(mounted.hook().shared.sentCopyError).toBeNull();
+      expect(mounted.hook().shared.drafts).toEqual(next);
     },
   );
 
@@ -706,7 +706,7 @@ describe('an answer that lands after its session ended', () => {
       const mounted = await composeOne();
       // Its record is still being minted.
       mounted.vault.hold();
-      const { claimed } = await act(async () => ({ claimed: mounted.hook().slice.send() }));
+      const { claimed } = await act(async () => ({ claimed: mounted.hook().composer.send() }));
       await end(mounted);
 
       mounted.vault.release();
@@ -756,7 +756,7 @@ describe('an answer that lands after its session ended', () => {
 
       finalRead.open();
       await act(() => unlocked);
-      expect(mounted.hook().drafts).toEqual(next);
+      expect(mounted.hook().shared.drafts).toEqual(next);
     },
   );
 
@@ -767,13 +767,13 @@ describe('an answer that lands after its session ended', () => {
       const mounted = await mount(vault.store);
       vault.hold();
       const { answer } = await act(async () => ({
-        answer: mounted.hook().slice.writeDraft({ content: content() }),
+        answer: mounted.hook().shared.writeDraft({ content: content() }),
       }));
       const next = await end(mounted);
 
       vault.release();
       expect(await act(() => answer)).toEqual({ ok: false, reason: 'ended' });
-      expect(mounted.hook().drafts).toEqual(next);
+      expect(mounted.hook().shared.drafts).toEqual(next);
     },
   );
 
@@ -785,7 +785,7 @@ describe('an answer that lands after its session ended', () => {
       // Its own autosave moved the record on, so the first tombstone is refused and re-read.
       await replaceDraft(vault.store, created.draftId, content(), 0);
       const reread = vault.holdNextRead();
-      const { discarded } = await act(async () => ({ discarded: hook().slice.discardDraft() }));
+      const { discarded } = await act(async () => ({ discarded: hook().composer.discardDraft() }));
       await act(() => reread.reached);
       await end(opened);
 

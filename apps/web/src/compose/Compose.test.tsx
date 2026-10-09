@@ -40,17 +40,13 @@ vi.mock('./draft', async importOriginal => ({
   readAttachments: () => reading.files?.promise,
 }));
 vi.mock('../store/MailProvider', () => ({
-  useMail: () => ({
+  useComposer: () => ({
     draft: DRAFT,
     seedDraft: () => DRAFT,
     updateDraft: vi.fn(),
     send: mail.send,
     attach: mail.attach,
     detach: vi.fn(),
-    threads: [],
-    identities: [],
-    ownedAddresses: [],
-    drafts: [],
     draftConflict: null,
     draftError: null,
     resolveDraftConflict: vi.fn(),
@@ -58,6 +54,12 @@ vi.mock('../store/MailProvider', () => ({
     sendAgain: vi.fn(),
     backToEditing: vi.fn(),
     discardDraft: vi.fn(),
+  }),
+  useMail: () => ({
+    threads: [],
+    identities: [],
+    ownedAddresses: [],
+    drafts: [],
     watchSession: () => {
       const taken = mail.generation;
       return () => mail.generation === taken;

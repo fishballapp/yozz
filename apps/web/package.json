@@ -23,6 +23,7 @@
     "@phosphor-icons/react": "catalog:",
     "@tanstack/markdown": "catalog:",
     "@tanstack/react-router": "catalog:",
+    "@tanstack/react-virtual": "catalog:",
     "@yozz.app/imap": "workspace:*",
     "@yozz.app/smtp": "workspace:*",
     "@yozz.app/tls": "workspace:*",

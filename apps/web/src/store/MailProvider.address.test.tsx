@@ -26,16 +26,16 @@ const mocks = vi.hoisted(() => ({
   reportState: [] as ((address: string, state: LiveState) => void)[],
   closeLive: vi.fn(async (_manager: number, _address: string) => {}),
   composer: {
-    slice: {},
+    composer: {},
+    shared: { drafts: [] },
     load: async () => {},
     reset: () => {},
-    drafts: [],
     vaultSent: [],
   },
 }));
 
 vi.mock('../vault/session', () => ({ useVault: () => ({ session: mocks.session }) }));
-vi.mock('./use-composer', () => ({ useComposer: () => mocks.composer }));
+vi.mock('./use-composer', () => ({ useComposerStore: () => mocks.composer }));
 vi.mock('../relay/live', () => ({
   createLiveManager: ({ onState }: { onState: (address: string, state: LiveState) => void }) => {
     mocks.managers += 1;

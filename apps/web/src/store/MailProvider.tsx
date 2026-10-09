@@ -46,7 +46,7 @@ import { isDemo } from '../ui/chrome';
 import { toast } from '../ui/Toast';
 import { vaultErrorMessage } from '../vault/screen-policy';
 import { useVault } from '../vault/session';
-import { type Composer, useComposer } from './use-composer';
+import { type Composer, type ComposerShared, useComposerStore } from './use-composer';
 
 /**
  * Threads are held in memory only: a lock drops them. The contexts' IO modules are reached through
@@ -58,7 +58,7 @@ type InboundAddress = AddressRecord & { imap: NonNullable<AddressRecord['imap']>
 /** Hears why a move was refused, on the spot or once the server answers: once, however many accounts refused it. */
 type OnRefused = (reason: string) => void;
 
-type MailContextValue = Composer & {
+type MailContextValue = ComposerShared & {
   accounts: readonly InboundAddress[];
   identities: readonly AddressRecord[];
   /** Every address you own, inbound or send-only. */
@@ -94,6 +94,7 @@ type MailContextValue = Composer & {
 };
 
 const MailContext = createContext<MailContextValue | null>(null);
+const ComposerContext = createContext<Composer | null>(null);
 
 /** What a runner answers once its session has ended, or before the session's manager exists. */
 const VAULT_LOCKED = {
@@ -473,7 +474,7 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
 
   /** Read by the draft writes, which run outside a render. */
   const threadsRef = useRef<readonly ThreadState[]>([]);
-  const { slice, load, reset, drafts, vaultSent } = useComposer({
+  const { composer, shared, load, reset, vaultSent } = useComposerStore({
     session,
     identities,
     accounts,
@@ -483,6 +484,7 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
     baseByAccount,
     demo,
   });
+  const { drafts } = shared;
 
   // Keyed on the store, not the session object: a mode switch in Settings hands out a new session
   // over the same store and user, and that must not restart the mail session or clear its cache.
@@ -1100,7 +1102,7 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
       identities,
       ownedAddresses,
       threads,
-      ...slice,
+      ...shared,
       isDemo: demo,
       recordsError,
       mailError,
@@ -1121,7 +1123,6 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
       restoreThread,
     }),
     [
-      slice,
       accounts,
       identities,
       ownedAddresses,
@@ -1144,14 +1145,26 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
       toggleArchive,
       trashThread,
       restoreThread,
+      shared,
     ],
   );
 
-  return <MailContext value={value}>{children}</MailContext>;
+  return (
+    <MailContext value={value}>
+      <ComposerContext value={composer}>{children}</ComposerContext>
+    </MailContext>
+  );
 };
 
 export const useMail = () => {
   const value = use(MailContext);
   if (value === null) throw new Error('useMail must be used inside <MailProvider>');
+  return value;
+};
+
+/** The open draft: only the composer reads it, so a keystroke re-renders nothing else. */
+export const useComposer = () => {
+  const value = use(ComposerContext);
+  if (value === null) throw new Error('useComposer must be used inside <MailProvider>');
   return value;
 };
