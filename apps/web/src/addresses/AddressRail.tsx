@@ -16,7 +16,6 @@ import { useMail } from '../store/MailProvider';
 import { type MailboxId, unreadCount } from '../threads/views';
 import { buttonClass } from '../ui/Button';
 import { Wordmark } from '../ui/Wordmark';
-import { markOf } from './record';
 
 /**
  * Address-first (PRODUCT.md principle 2), so connecting an account lives in Settings. The Inbox
@@ -64,7 +63,8 @@ const RailRow = ({
   onNavigate,
 }: {
   mailbox: MailboxId;
-  mark: ReactNode;
+  /** A view's icon. An address row has none: the address is its own label. */
+  mark?: ReactNode;
   label: string;
   count?: number;
   onNavigate?: () => void;
@@ -85,20 +85,20 @@ const RailRow = ({
         isActive ? 'bg-ink-hover text-paper' : 'text-paper-dim hover:bg-ink-hover/60',
       )}
     >
-      {/* One signal hit per active row: the edge bar. The mark stays neutral — spending the
-          accent on bar + mark + count at once is how an accent stops meaning anything. */}
+      {/* One signal hit per active row: the edge bar. The icon stays neutral — spending the
+          accent on bar + icon + count at once is how an accent stops meaning anything. */}
       {isActive && <span className="absolute inset-y-0 left-0 w-0.5 bg-signal" />}
-      {/* The mark is a visual key to the list gutter, not a word: screen readers would otherwise
-          announce this row as "J jason at jyu dot example 2". */}
-      <span
-        aria-hidden
-        className={cn(
-          'flex w-4 shrink-0 justify-center font-mono text-2xs',
-          isActive ? 'text-paper' : 'text-paper-faint',
-        )}
-      >
-        {mark}
-      </span>
+      {mark !== undefined && (
+        <span
+          aria-hidden
+          className={cn(
+            'flex w-4 shrink-0 justify-center',
+            isActive ? 'text-paper' : 'text-paper-faint',
+          )}
+        >
+          {mark}
+        </span>
+      )}
       <span className="min-w-0 flex-1">
         <span className="block truncate">{label}</span>
       </span>
@@ -154,7 +154,6 @@ export const AddressRail = ({ onNavigate }: { onNavigate?: () => void }) => {
           <RailRow
             key={account.address}
             mailbox={account.address}
-            mark={markOf(account.address)}
             label={account.address}
             count={unreadCount(threads, account.address)}
             onNavigate={onNavigate}

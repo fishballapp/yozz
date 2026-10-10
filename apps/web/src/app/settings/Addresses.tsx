@@ -1,7 +1,7 @@
 import { cn } from '@fishballapps/cn';
 import { CaretRightIcon, PlusIcon } from '@phosphor-icons/react';
 import { Link } from '@tanstack/react-router';
-import { type AddressRecord, isInbound, markOf } from '../../addresses/record';
+import { type AddressRecord, isInbound } from '../../addresses/record';
 import { keepCompose } from '../../compose/intent';
 import { useMail } from '../../store/MailProvider';
 import { buttonClass } from '../../ui/Button';
@@ -24,8 +24,8 @@ export const Addresses = () => {
     <>
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <p className="max-w-xl text-base leading-relaxed text-paper-dim">
-          Every address you read from or send as. A reading address feeds the inbox and marks its
-          mail with the letter shown; a send-only address only ever appears as a From.
+          Every address you read from or send as. A reading address feeds the inbox; a send-only
+          address only ever appears as a From.
         </p>
         <Link
           to="/connect"
@@ -52,14 +52,8 @@ export const Addresses = () => {
                 to="/settings/a/$address"
                 params={{ address: record.address }}
                 search={keepCompose}
-                className="group grid grid-cols-[1.25rem_minmax(0,1fr)_auto_1rem] items-center gap-x-3 border-b border-rule-soft py-3 transition-colors hover:bg-ink-hover"
+                className="group grid grid-cols-[minmax(0,1fr)_auto_1rem] items-center gap-x-3 border-b border-rule-soft py-3 transition-colors hover:bg-ink-hover"
               >
-                <span
-                  aria-hidden
-                  className="flex justify-center font-mono text-2xs text-paper-faint"
-                >
-                  {isInbound(record) ? markOf(record.address) : ''}
-                </span>
                 <span className="min-w-0">
                   <span className="block truncate text-base text-paper">{record.address}</span>
                   <span className="mt-0.5 block truncate font-mono text-2xs text-paper-faint">

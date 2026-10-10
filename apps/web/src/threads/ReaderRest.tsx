@@ -1,4 +1,3 @@
-import { markOf } from '../addresses/record';
 import { useMail } from '../store/MailProvider';
 import { Wordmark } from '../ui/Wordmark';
 import { unreadCount } from './views';
@@ -34,9 +33,6 @@ export const ReaderRest = () => {
                   key={account.address}
                   className="flex items-center gap-3 border-b border-rule-soft py-2"
                 >
-                  <span className="flex w-4 shrink-0 justify-center font-mono text-2xs text-paper-faint">
-                    {markOf(account.address)}
-                  </span>
                   <span className="min-w-0 flex-1 truncate font-mono text-2xs text-paper-dim">
                     {account.address}
                   </span>

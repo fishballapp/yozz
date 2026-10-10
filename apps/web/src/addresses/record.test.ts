@@ -1,6 +1,6 @@
 /** @vitest-environment node */
 import { describe, expect, it } from 'vitest';
-import { addressRecordSchema, isInbound, markOf, parseAddressRecord } from './record';
+import { addressRecordSchema, isInbound, parseAddressRecord } from './record';
 
 const inbound = {
   address: 'jason@jyu.example',
@@ -65,13 +65,6 @@ describe('parseAddressRecord', () => {
 
   it('parses a valid record', () => {
     expect(parseAddressRecord(JSON.stringify(sendOnly))).toEqual(sendOnly);
-  });
-});
-
-describe('markOf', () => {
-  it('takes the first character of the local part', () => {
-    expect(markOf('jason@x.y')).toBe('J');
-    expect(markOf('@x')).toBe('?');
   });
 });
 

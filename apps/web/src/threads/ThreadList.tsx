@@ -8,27 +8,12 @@ import { useMail } from '../store/MailProvider';
 import { buttonClass } from '../ui/Button';
 import { useChromePref } from '../ui/chrome';
 import { IconSwitch } from '../ui/IconSwitch';
-import { ColumnsRow, DESKTOP_COLUMNS, StackedRow } from './ThreadRow';
+import { ColumnsRow, StackedRow } from './ThreadRow';
 import { type ThreadState, threadByHandle } from './thread';
 import { isViewId, type MailboxId, olderAvailable, syncProgressIn } from './views';
 
 /** The list over a mailbox: search, the layout switch, the rows, the empty states and Older mail. */
 type Layout = 'columns' | 'stacked';
-
-/** Above `lg` only: the folded column record has no columns to head. */
-const ColumnHeader = () => (
-  <div
-    className={cn(
-      'hidden shrink-0 items-center border-b border-rule-soft py-1.5 pr-2 pl-1 lg:grid',
-      DESKTOP_COLUMNS,
-    )}
-  >
-    <span className="label-rule col-start-2">to</span>
-    <span className="label-rule col-start-3">from</span>
-    <span className="label-rule col-start-4">subject</span>
-    <span className="label-rule col-start-7 text-right">time</span>
-  </div>
-);
 
 const LAYOUTS = [
   { id: 'columns', Icon: TableIcon, label: 'Column layout' },
@@ -271,17 +256,14 @@ export const ThreadList = ({
       {threads.length === 0 ? (
         empty
       ) : (
-        <>
-          {!isStacked && <ColumnHeader />}
-          <ThreadRows
-            // A switch starts from fresh measurements: the other shape's heights mean nothing here.
-            key={layout}
-            threads={threads}
-            mailbox={mailbox}
-            openId={openId}
-            isStacked={isStacked}
-          />
-        </>
+        <ThreadRows
+          // A switch starts from fresh measurements: the other shape's heights mean nothing here.
+          key={layout}
+          threads={threads}
+          mailbox={mailbox}
+          openId={openId}
+          isStacked={isStacked}
+        />
       )}
       {/* Hidden, not disabled, once every account shown has its folder's start cached: a
           control that stays on screen implies there is more mail behind it. Search reads what

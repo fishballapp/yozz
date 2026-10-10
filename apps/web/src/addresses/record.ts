@@ -35,14 +35,3 @@ export type InboundAddress = AddressRecord & { imap: NonNullable<AddressRecord['
 
 export const isInbound = (record: AddressRecord): record is InboundAddress =>
   record.imap !== undefined;
-
-/** One letter per account holding some of the thread, in address order; two accounts sharing a letter collapse to one mark. */
-export const marksOf = (addresses: readonly string[]): string =>
-  [...new Set(addresses.map(markOf))].join('');
-
-/** First character of the local part, upper-cased; `?` for an empty local part. */
-export const markOf = (address: string): string => {
-  const local = address.slice(0, address.indexOf('@'));
-  const first = local[0];
-  return first === undefined ? '?' : first.toUpperCase();
-};

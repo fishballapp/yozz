@@ -18,7 +18,6 @@ import {
 } from '@phosphor-icons/react';
 import { Link, useParams } from '@tanstack/react-router';
 import { Fragment, type ReactNode, useState } from 'react';
-import { marksOf } from '../addresses/record';
 import { replyAllCc, withCompose } from '../compose/intent';
 import { useMail } from '../store/MailProvider';
 import { Button, buttonClass } from '../ui/Button';
@@ -435,14 +434,10 @@ export const ThreadReader = ({
             </h1>
             {/* The same count the list row carries, on the same rule: only above one, because "1
                 message" on a single message is a label for nothing. It says how far down the
-                stack goes before you start, beside the marks of every account the conversation
-                spans; each message's own IN line says where that one landed. */}
+                stack goes before you start; each message's own IN line says where that one landed. */}
             {thread.messages.length > 1 && (
-              <p className="mt-1.5 flex items-center gap-1.5 font-mono text-2xs text-paper-faint">
-                <span aria-hidden className="text-paper-dim">
-                  {marksOf(thread.accounts)}
-                </span>
-                <span>{thread.messages.length} messages</span>
+              <p className="mt-1.5 font-mono text-2xs text-paper-faint">
+                {thread.messages.length} messages
               </p>
             )}
           </div>

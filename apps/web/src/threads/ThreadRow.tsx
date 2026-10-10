@@ -8,7 +8,6 @@ import {
   TrashIcon,
 } from '@phosphor-icons/react';
 import { Link } from '@tanstack/react-router';
-import { marksOf } from '../addresses/record';
 import { DISCARD_WARNING } from '../compose/intent';
 import { useMail } from '../store/MailProvider';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
@@ -21,13 +20,25 @@ import { useAdvancePast } from './use-advance';
 import { latestOf, type MailboxId, previewOf } from './views';
 
 /**
- * Two layouts over one record, the reader's choice kept across reloads: columns (one 34px line,
- * address as a gutter letter) and stacked (subject, `from → to`, three lines of body). Contrast
- * figures and rationale are in DESIGN.md.
+ * Two layouts over one record, the reader's choice kept across reloads: columns (one 34px line)
+ * and stacked (subject, `from → to`, three lines of body). Contrast figures and rationale are in
+ * DESIGN.md.
  */
 
-export const DESKTOP_COLUMNS =
-  'lg:grid-cols-[1.5rem_1.75rem_9.375rem_minmax(0,1fr)_1rem_3rem_2.75rem]';
+/**
+ * The row's triage is revealed while the pointer is on the row, while anything in it has keyboard
+ * focus, and while one of its confirm sheets is up — or the trigger would vanish under its own
+ * dialog (Base UI's trigger sets `aria-expanded`, not `data-popup-open`).
+ */
+const REVEALED = {
+  shown:
+    'group-hover:opacity-100 group-has-[:focus-visible]:opacity-100 group-has-[[aria-expanded=true]]:opacity-100',
+  /** The column record's time, which gives its place to the triage. */
+  gone: 'lg:group-hover:hidden lg:group-has-[:focus-visible]:hidden lg:group-has-[[aria-expanded=true]]:hidden',
+  /** The column record's triage: no width until revealed, yet still in the tab order. */
+  opened:
+    'w-0 overflow-hidden group-hover:w-12 group-has-[:focus-visible]:w-12 group-has-[[aria-expanded=true]]:w-12',
+};
 
 export type RowProps = { thread: ThreadState; mailbox: MailboxId; isSelected: boolean };
 
@@ -103,7 +114,13 @@ const StarButton = ({
       aria-label={`Star ${thread.subject}`}
       aria-pressed={thread.isStarred}
     >
-      <StarIcon size={13} weight={thread.isStarred ? 'fill' : 'regular'} />
+      {/* A star's mass sits below the middle of its box, so centred on a line it reads low beside the
+          capitals; a pixel up puts it level with them. */}
+      <StarIcon
+        size={13}
+        weight={thread.isStarred ? 'fill' : 'regular'}
+        className="-translate-y-px"
+      />
     </button>
   );
 };
@@ -123,7 +140,6 @@ const DISCARD_REFUSALS: Record<DiscardOutcome, string> = {
   offline: 'The vault could not be reached.',
 };
 
-/** Revealed by hover and by keyboard focus. Archive and delete for server messages; undo in Trash; discard in Drafts. */
 /** One mark in the hover cluster. `confirm` present means it asks before it acts. */
 type RowAction = {
   readonly icon: Icon;
@@ -137,12 +153,8 @@ type RowAction = {
   };
 };
 
-const RowTriage = ({
-  thread,
-  mailbox,
-  isSelected,
-  className,
-}: RowProps & { className: string }) => {
+/** Archive and delete for server messages; undo in Trash; discard in Drafts; nothing otherwise. */
+const useRowActions = ({ thread, mailbox, isSelected }: RowProps): readonly RowAction[] => {
   const { toggleArchive, trashThread, restoreThread, removeDraft } = useMail();
   const advancePast = useAdvancePast();
   // Filing the open thread from its row moves the reader on, as the reader's own buttons do; a
@@ -156,7 +168,7 @@ const RowTriage = ({
     };
   // A draft has no IMAP copy, so archive and delete can do nothing to it.
   const draftId = thread.messages.find(message => message.isDraft === true)?.draftId;
-  const actions = ((): readonly RowAction[] => {
+  return (() => {
     if (mailbox === 'drafts' && draftId !== undefined) {
       return [
         {
@@ -216,8 +228,19 @@ const RowTriage = ({
         : []),
     ];
   })();
+};
 
-  return (
+/** Desktop only: on touch, the reader carries triage. */
+const RowTriage = ({
+  actions,
+  isSelected,
+  className,
+}: {
+  actions: readonly RowAction[];
+  isSelected: boolean;
+  className: string;
+}) =>
+  actions.length === 0 ? null : (
     <span className={cn('relative z-10 hidden items-center justify-end lg:flex', className)}>
       {actions.map(({ icon: Mark, label, act, confirm }) => {
         const mark = (
@@ -225,10 +248,8 @@ const RowTriage = ({
             type="button"
             {...(confirm === undefined ? { onClick: () => void act() } : {})}
             className={cn(
-              'flex w-6 justify-center -outline-offset-2 opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100',
-              // Stays visible while its sheet is up, or the trigger vanishes under its own dialog. Keyed on
-              // `aria-expanded`, which is what Base UI's trigger sets (it emits no `data-popup-open`).
-              confirm === undefined ? '' : 'aria-expanded:opacity-100',
+              'flex w-6 justify-center -outline-offset-2 opacity-0 transition-opacity',
+              REVEALED.shown,
               isSelected
                 ? 'text-ink/60 hover:text-ink focus-visible:outline-ink'
                 : 'text-paper-faint hover:text-paper',
@@ -251,7 +272,6 @@ const RowTriage = ({
       })}
     </span>
   );
-};
 
 /**
  * One grid, two shapes. Below `lg` the record folds onto two lines rather than truncating every
@@ -260,19 +280,14 @@ const RowTriage = ({
 export const ColumnsRow = ({ thread, mailbox, isSelected }: RowProps) => {
   const isUnread = thread.isUnread;
   const { latest, inbound, attachments } = useRecord(thread);
-  const marksTone = (() => {
-    if (isSelected) return 'text-ink/60';
-    if (isUnread) return 'text-signal';
-    return 'text-paper-faint';
-  })();
+  const actions = useRowActions({ thread, mailbox, isSelected });
 
   return (
     <div
       className={cn(
         'group relative grid items-center gap-x-2 py-2 pr-2 pl-1 text-base',
-        'grid-cols-[2.75rem_1.75rem_minmax(0,1fr)_auto_2.75rem]',
-        'lg:h-8.5 lg:gap-x-0 lg:py-0',
-        DESKTOP_COLUMNS,
+        'grid-cols-[2.75rem_minmax(0,1fr)_auto_2.75rem]',
+        'lg:h-8.5 lg:grid-cols-[1.875rem_9.375rem_minmax(0,1fr)_auto_auto_auto] lg:gap-x-0 lg:py-0',
         isSelected ? 'bg-select text-ink' : 'hover:bg-ink-hover',
       )}
     >
@@ -281,24 +296,14 @@ export const ColumnsRow = ({ thread, mailbox, isSelected }: RowProps) => {
       <StarButton
         thread={thread}
         isSelected={isSelected}
-        className="col-start-1 row-span-2 row-start-1 size-11 lg:row-span-1 lg:size-6"
+        className="col-start-1 row-span-2 row-start-1 size-11 lg:row-span-1 lg:h-6 lg:w-full"
       />
-
-      <span
-        aria-hidden
-        className={cn(
-          'pointer-events-none col-start-2 row-start-1 flex justify-center font-mono text-2xs',
-          marksTone,
-        )}
-      >
-        {marksOf(thread.accounts)}
-      </span>
 
       <span
         dir="auto"
         aria-hidden
         className={cn(
-          'pointer-events-none col-start-3 row-start-1 truncate lg:pr-3',
+          'pointer-events-none col-start-2 row-start-1 truncate lg:pr-3',
           isUnread && !isSelected && 'font-semibold text-paper',
           !isUnread && !isSelected && 'text-paper-dim',
           isSelected && 'font-medium',
@@ -309,7 +314,7 @@ export const ColumnsRow = ({ thread, mailbox, isSelected }: RowProps) => {
 
       <span
         aria-hidden
-        className="pointer-events-none col-start-3 col-end-6 row-start-2 min-w-0 truncate lg:col-start-4 lg:col-end-5 lg:row-start-1 lg:pr-3"
+        className="pointer-events-none col-start-2 col-end-5 row-start-2 min-w-0 truncate lg:col-start-3 lg:col-end-4 lg:row-start-1 lg:pr-3"
       >
         <span dir="auto" className={cn(isUnread && !isSelected && 'font-medium text-paper')}>
           {thread.subject}
@@ -329,31 +334,34 @@ export const ColumnsRow = ({ thread, mailbox, isSelected }: RowProps) => {
         </span>
       </span>
 
-      <span
-        aria-hidden
-        className="pointer-events-none col-start-4 row-start-1 flex w-4 justify-center lg:col-start-5"
-      >
-        {attachments.length > 0 && (
+      {/* Everything right of the subject is as wide as what it holds, so the subject runs up to
+          the time. As in Gmail, the time gives its place to the triage while the actions are out,
+          and the subject gives up only the difference. A row with nothing to do keeps its time. */}
+      {attachments.length > 0 && (
+        <span
+          aria-hidden
+          className="pointer-events-none col-start-3 row-start-1 flex w-4 justify-center lg:col-start-4 lg:mr-1.5"
+        >
           <PaperclipIcon size={12} className={isSelected ? 'text-ink/60' : 'text-paper-faint'} />
-        )}
-      </span>
-
-      <RowTriage
-        thread={thread}
-        mailbox={mailbox}
-        isSelected={isSelected}
-        className="col-start-6 row-start-1 w-12"
-      />
+        </span>
+      )}
 
       <span
         aria-hidden
         className={cn(
-          'pointer-events-none col-start-5 row-start-1 text-right font-mono text-2xs lg:col-start-7',
+          'pointer-events-none col-start-4 row-start-1 text-right font-mono text-2xs lg:col-start-5',
           isSelected ? 'text-ink/60' : 'text-paper-faint',
+          actions.length > 0 && REVEALED.gone,
         )}
       >
         {listTime(latest.at)}
       </span>
+
+      <RowTriage
+        actions={actions}
+        isSelected={isSelected}
+        className={cn('col-start-6 row-start-1', REVEALED.opened)}
+      />
     </div>
   );
 };
@@ -362,6 +370,7 @@ export const ColumnsRow = ({ thread, mailbox, isSelected }: RowProps) => {
 export const StackedRow = ({ thread, mailbox, isSelected }: RowProps) => {
   const isUnread = thread.isUnread;
   const { latest, inbound, attachments } = useRecord(thread);
+  const actions = useRowActions({ thread, mailbox, isSelected });
   const dim = isSelected ? 'text-ink/60' : 'text-paper-faint';
   const senderTone = (() => {
     if (isSelected) return 'text-ink/60';
@@ -373,7 +382,7 @@ export const StackedRow = ({ thread, mailbox, isSelected }: RowProps) => {
     <div
       className={cn(
         'group relative grid items-start gap-x-2 py-2.5 pr-3 pl-1 text-base',
-        'grid-cols-[2.75rem_1.75rem_minmax(0,1fr)_auto] lg:grid-cols-[1.5rem_1.75rem_minmax(0,1fr)_auto]',
+        'grid-cols-[2.75rem_1.75rem_minmax(0,1fr)_auto] lg:grid-cols-[1.875rem_1.75rem_minmax(0,1fr)_auto]',
         isSelected ? 'bg-select text-ink' : 'hover:bg-ink-hover',
       )}
     >
@@ -385,12 +394,11 @@ export const StackedRow = ({ thread, mailbox, isSelected }: RowProps) => {
       <StarButton
         thread={thread}
         isSelected={isSelected}
-        className="col-start-1 row-span-3 row-start-1 size-11 items-start self-start pt-0.5 lg:h-4.5 lg:w-6 lg:items-center lg:pt-0"
+        className="col-start-1 row-span-3 row-start-1 size-11 items-start self-start pt-0.5 lg:h-4.5 lg:w-full lg:items-center lg:pt-0"
       />
 
-      {/* Unread, in the column the letter mark holds in the other layout, so switching layouts
-          never moves it. A square, because nothing in this system is round, and solid, because
-          here it has no glyph to lean on. */}
+      {/* Unread, beside the star. A square, because nothing in this system is round, and solid,
+          because here it has no glyph to lean on. */}
       <span
         aria-hidden
         className="pointer-events-none col-start-2 row-start-1 flex h-4.5 items-center justify-center"
@@ -440,8 +448,7 @@ export const StackedRow = ({ thread, mailbox, isSelected }: RowProps) => {
       </span>
 
       <RowTriage
-        thread={thread}
-        mailbox={mailbox}
+        actions={actions}
         isSelected={isSelected}
         className="col-start-4 row-start-1 h-4.5 w-12 self-start justify-self-end"
       />
