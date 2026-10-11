@@ -381,7 +381,7 @@ export const ThreadReader = ({
     markUnread,
     loadBody,
   } = useMail();
-  // One choice for every HTML body, kept across reloads like the pane widths.
+  // One choice for every HTML body, kept like the list layout.
   const [mode, setMode] = useChromePref<ReadingMode>('yozz:reading-mode', 'html', raw =>
     raw === 'text' ? 'text' : 'html',
   );
@@ -542,7 +542,7 @@ export const ThreadReader = ({
                       value={mode}
                       onChange={setMode}
                       // A 32px box on a phone, its 44px targets reaching past it into the row's air.
-                      cellClassName="relative h-8 w-11 after:absolute after:inset-x-0 after:-inset-y-1.5 lg:size-7 lg:after:hidden"
+                      cellClassName="relative h-8 w-10 after:absolute after:inset-x-0 after:-inset-y-1.5 lg:size-7 lg:after:hidden"
                     />
                   </div>
                 )}

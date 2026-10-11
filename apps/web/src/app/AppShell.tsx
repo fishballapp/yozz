@@ -52,7 +52,7 @@ const AppShellSkeleton = () => {
           <div className="h-11 border-b border-rule-soft" />
         </div>
         <div className="hidden w-px shrink-0 bg-rule-soft lg:block" />
-        <div className="hidden min-w-0 flex-1 bg-ink-sunken lg:block lg:min-w-80" />
+        <div className="hidden min-w-0 flex-1 bg-ink-sunken lg:block lg:min-w-96" />
       </div>
       <div className="h-7 shrink-0 border-t border-rule-soft bg-ink-raised" />
     </div>

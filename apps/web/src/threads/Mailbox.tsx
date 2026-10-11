@@ -7,7 +7,7 @@ import { visibleThreads } from './views';
 
 /**
  * The rail and status line are `AppShell`'s. The list never tracks the viewport; the reader keeps a
- * `20rem` floor and CSS arbitrates. Below `lg` the panes show one at a time.
+ * `24rem` floor and CSS arbitrates. Below `lg` the panes show one at a time.
  */
 
 export const Mailbox = () => {
@@ -62,7 +62,7 @@ export const Mailbox = () => {
       />
 
       <section
-        className={cn('min-w-0 flex-1 lg:min-w-80', isReading ? 'block' : 'hidden lg:block')}
+        className={cn('min-w-0 flex-1 lg:min-w-96', isReading ? 'block' : 'hidden lg:block')}
       >
         <Outlet />
       </section>

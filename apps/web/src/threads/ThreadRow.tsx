@@ -12,14 +12,18 @@ import { DISCARD_WARNING } from '../compose/intent';
 import { useMail } from '../store/MailProvider';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
 import { reportProblem } from '../ui/Toast';
-import { listTime } from '../ui/time';
+import { listTime, stackTime } from '../ui/time';
 import { canMoveTo } from './reconcile';
 import type { ThreadState } from './thread';
 import { attachmentsOf, isArchived, isOnServer, newestInbound } from './thread';
 import { useAdvancePast } from './use-advance';
 import { latestOf, type MailboxId, previewOf } from './views';
 
-/** One record in columns: a 34px line above `lg`, two lines below. Contrast figures and rationale are in DESIGN.md. */
+/**
+ * Two layouts over one record, the reader's choice kept across reloads: columns (one 34px line)
+ * and stacked (subject, `from → to`, three lines of body). Contrast figures and rationale are in
+ * DESIGN.md.
+ */
 
 /**
  * The row's triage is revealed while the pointer is on the row, while anything in it has keyboard
@@ -29,9 +33,9 @@ import { latestOf, type MailboxId, previewOf } from './views';
 const REVEALED = {
   shown:
     'group-hover:opacity-100 group-has-[:focus-visible]:opacity-100 group-has-[[aria-expanded=true]]:opacity-100',
-  /** The time, which gives its place to the triage. */
+  /** The column record's time, which gives its place to the triage. */
   gone: 'lg:group-hover:hidden lg:group-has-[:focus-visible]:hidden lg:group-has-[[aria-expanded=true]]:hidden',
-  /** The triage: no width until revealed, yet still in the tab order. */
+  /** The column record's triage: no width until revealed, yet still in the tab order. */
   opened:
     'w-0 overflow-hidden group-hover:w-12 group-has-[:focus-visible]:w-12 group-has-[[aria-expanded=true]]:w-12',
 };
@@ -39,9 +43,9 @@ const REVEALED = {
 export type RowProps = { thread: ThreadState; mailbox: MailboxId; isSelected: boolean };
 
 /**
- * Derived in one place so the row and its link's accessible name cannot disagree. `latest` decides
- * where the thread sits and its time; `inbound` decides everything the row says about
- * correspondence (on a thread you replied to, `latest` is your own reply).
+ * Derived in one place so the two shapes cannot disagree. `latest` decides where the thread sits
+ * and its time; `inbound` decides everything the row says about correspondence (on a thread you
+ * replied to, `latest` is your own reply).
  */
 const useRecord = (thread: ThreadState) => {
   const { ownedAddresses } = useMail();
@@ -273,7 +277,7 @@ const RowTriage = ({
  * One grid, two shapes. Below `lg` the record folds onto two lines rather than truncating every
  * subject, and the star spans both lines so its 44px touch target is a real cell.
  */
-export const ThreadRow = ({ thread, mailbox, isSelected }: RowProps) => {
+export const ColumnsRow = ({ thread, mailbox, isSelected }: RowProps) => {
   const isUnread = thread.isUnread;
   const { latest, inbound, attachments } = useRecord(thread);
   const actions = useRowActions({ thread, mailbox, isSelected });
@@ -358,6 +362,106 @@ export const ThreadRow = ({ thread, mailbox, isSelected }: RowProps) => {
         isSelected={isSelected}
         className={cn('col-start-6 row-start-1', REVEALED.opened)}
       />
+    </div>
+  );
+};
+
+/** Subject first and alone at the base step; `from → to` under it; three lines of body; date level with the last line. */
+export const StackedRow = ({ thread, mailbox, isSelected }: RowProps) => {
+  const isUnread = thread.isUnread;
+  const { latest, inbound, attachments } = useRecord(thread);
+  const actions = useRowActions({ thread, mailbox, isSelected });
+  const dim = isSelected ? 'text-ink/60' : 'text-paper-faint';
+  const senderTone = (() => {
+    if (isSelected) return 'text-ink/60';
+    if (isUnread) return 'text-paper';
+    return 'text-paper-dim';
+  })();
+
+  return (
+    <div
+      className={cn(
+        'group relative grid items-start gap-x-2 py-2.5 pr-3 pl-1 text-base',
+        'grid-cols-[2.75rem_1.75rem_minmax(0,1fr)_auto] lg:grid-cols-[1.875rem_1.75rem_minmax(0,1fr)_auto]',
+        isSelected ? 'bg-select text-ink' : 'hover:bg-ink-hover',
+      )}
+    >
+      <RowLink thread={thread} mailbox={mailbox} isSelected={isSelected} />
+
+      {/* The 44px touch target still spans the record, but the GLYPH is pinned to the subject line
+          rather than centred in the target — a star floating beside the body text belongs to
+          nothing. Above `lg` the box simply is that line. */}
+      <StarButton
+        thread={thread}
+        isSelected={isSelected}
+        className="col-start-1 row-span-3 row-start-1 size-11 items-start self-start pt-0.5 lg:h-4.5 lg:w-full lg:items-center lg:pt-0"
+      />
+
+      {/* Unread, beside the star. A square, because nothing in this system is round, and solid,
+          because here it has no glyph to lean on. */}
+      <span
+        aria-hidden
+        className="pointer-events-none col-start-2 row-start-1 flex h-4.5 items-center justify-center"
+      >
+        {isUnread && <span className={cn('size-1.5', isSelected ? 'bg-ink' : 'bg-signal')} />}
+      </span>
+
+      <span
+        aria-hidden
+        className="pointer-events-none col-start-3 row-start-1 flex min-w-0 items-baseline gap-1.5"
+      >
+        <span dir="auto" className={cn('truncate', isUnread ? 'font-semibold' : 'font-medium')}>
+          {thread.subject}
+        </span>
+        {thread.messages.length > 1 && (
+          <span className={cn('shrink-0 font-mono text-2xs', dim)}>{thread.messages.length}</span>
+        )}
+        {attachments.length > 0 && (
+          <PaperclipIcon size={12} className={cn('shrink-0 self-center', dim)} />
+        )}
+      </span>
+
+      {/* Sender in sans because a person's name is not a machine value; their address is, and so
+          is the arrow between them. The two faces are metrically matched, which is why they can
+          share a line at one size. Tight to the subject — this is its attribution, not a band of
+          its own. */}
+      <span
+        aria-hidden
+        className="pointer-events-none col-start-3 row-start-2 flex min-w-0 items-baseline gap-1.5 text-2xs"
+      >
+        <span dir="auto" className={cn('max-w-[50%] shrink-0 truncate', senderTone)}>
+          {inbound.fromName}
+        </span>
+        <span className={cn('shrink-0 font-mono', dim)}>→</span>
+        <span className={cn('min-w-0 truncate font-mono', dim)}>{inbound.toAddress}</span>
+      </span>
+
+      <span
+        dir="auto"
+        aria-hidden
+        className={cn(
+          'pointer-events-none col-start-3 row-start-3 mt-1.5 line-clamp-3 leading-[1.4]',
+          dim,
+        )}
+      >
+        {previewOf(thread)}
+      </span>
+
+      <RowTriage
+        actions={actions}
+        isSelected={isSelected}
+        className="col-start-4 row-start-1 h-4.5 w-12 self-start justify-self-end"
+      />
+
+      <span
+        aria-hidden
+        className={cn(
+          'pointer-events-none col-start-4 row-start-3 self-end text-right font-mono text-2xs',
+          dim,
+        )}
+      >
+        {stackTime(latest.at)}
+      </span>
     </div>
   );
 };
