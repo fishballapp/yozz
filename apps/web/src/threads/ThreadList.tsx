@@ -1,24 +1,16 @@
 import { cn } from '@fishballapps/cn';
-import { type Icon, MagnifyingGlassIcon, RowsIcon, TableIcon } from '@phosphor-icons/react';
+import { MagnifyingGlassIcon } from '@phosphor-icons/react';
 import { Link, useParams } from '@tanstack/react-router';
 import { defaultRangeExtractor, useVirtualizer } from '@tanstack/react-virtual';
 import { type ReactNode, useEffect, useEffectEvent, useRef, useState } from 'react';
 import { describeMailFailure } from '../relay/describe-failure';
 import { useMail } from '../store/MailProvider';
 import { buttonClass } from '../ui/Button';
-import { useChromePref } from '../ui/chrome';
-import { IconSwitch } from '../ui/IconSwitch';
-import { ColumnsRow, StackedRow } from './ThreadRow';
+import { ThreadRow } from './ThreadRow';
 import { type ThreadState, threadByHandle } from './thread';
 import { isViewId, type MailboxId, olderAvailable, syncProgressIn } from './views';
 
-/** The list over a mailbox: search, the layout switch, the rows, the empty states and Older mail. */
-type Layout = 'columns' | 'stacked';
-
-const LAYOUTS = [
-  { id: 'columns', Icon: TableIcon, label: 'Column layout' },
-  { id: 'stacked', Icon: RowsIcon, label: 'Stacked layout' },
-] as const satisfies readonly { id: Layout; Icon: Icon; label: string }[];
+/** The list over a mailbox: search, the rows, the empty states and Older mail. */
 
 const EmptyState = ({
   title,
@@ -38,18 +30,16 @@ const EmptyState = ({
 
 /**
  * Only the rows in view, and a few either side, are in the DOM, so a mailbox of thousands renders
- * like one of thirty. Each row is measured: a folded or stacked record is as tall as its content.
+ * like one of thirty. Each row is measured: below `lg` a record folds to two lines.
  */
 const ThreadRows = ({
   threads,
   mailbox,
   openId,
-  isStacked,
 }: {
   threads: readonly ThreadState[];
   mailbox: MailboxId;
   openId: string | undefined;
-  isStacked: boolean;
 }) => {
   const scrollRef = useRef<HTMLDivElement>(null);
   // The row holding focus stays mounted when it scrolls away, or focus would fall to the page.
@@ -59,7 +49,7 @@ const ThreadRows = ({
     count: threads.length,
     getScrollElement: () => scrollRef.current,
     // A typical record's measured height, so the scrollbar is close to right before rows are drawn.
-    estimateSize: () => (isStacked ? 104 : 34),
+    estimateSize: () => 34,
     getItemKey: index => threads[index]?.id ?? index,
     overscan: 5,
     rangeExtractor: range => {
@@ -78,7 +68,6 @@ const ThreadRows = ({
   });
   useEffect(() => showOpen(openId), [openId]);
 
-  const Row = isStacked ? StackedRow : ColumnsRow;
   return (
     <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto">
       <ul
@@ -100,16 +89,14 @@ const ThreadRows = ({
               aria-setsize={threads.length}
               aria-posinset={index + 1}
               onFocus={() => setFocusedId(thread.id)}
-              // Stacked records have no columns to carry the structure, so they keep their dividers
-              // at every width; column records drop them at `lg`, where the columns do that job.
+              // A folded record needs a divider; at `lg` the columns do that job.
               className={cn(
                 'absolute inset-x-0 top-0',
-                index > 0 && 'border-t border-rule-soft',
-                !isStacked && 'lg:border-t-0',
+                index > 0 && 'border-t border-rule-soft lg:border-t-0',
               )}
               style={{ transform: `translateY(${start}px)` }}
             >
-              <Row thread={thread} mailbox={mailbox} isSelected={thread.id === openId} />
+              <ThreadRow thread={thread} mailbox={mailbox} isSelected={thread.id === openId} />
             </li>
           );
         })}
@@ -134,10 +121,6 @@ export const ThreadList = ({
   const { _splat: handle } = useParams({ strict: false });
   const openId = handle === undefined ? undefined : threadByHandle(threads, handle)?.id;
   const { accounts, recordsError, syncStates, sync, loadOlder, isLoadingOlder, isDemo } = useMail();
-  const [layout, setLayout] = useChromePref<Layout>('yozz:list-layout', 'columns', raw =>
-    raw === 'stacked' ? 'stacked' : 'columns',
-  );
-  const isStacked = layout === 'stacked';
 
   const empty = (() => {
     if (query.trim() !== '') {
@@ -248,20 +231,12 @@ export const ThreadList = ({
           aria-label="Search mail"
           className="h-full w-full min-w-0 bg-transparent text-base text-paper outline-none placeholder:text-paper-faint"
         />
-        <IconSwitch label="List layout" options={LAYOUTS} value={layout} onChange={setLayout} />
       </div>
 
       {threads.length === 0 ? (
         empty
       ) : (
-        <ThreadRows
-          // A switch starts from fresh measurements: the other shape's heights mean nothing here.
-          key={layout}
-          threads={threads}
-          mailbox={mailbox}
-          openId={openId}
-          isStacked={isStacked}
-        />
+        <ThreadRows threads={threads} mailbox={mailbox} openId={openId} />
       )}
       {/* Hidden, not disabled, once every account shown has its folder's start cached: a
           control that stays on screen implies there is more mail behind it. Search reads what

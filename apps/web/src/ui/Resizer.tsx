@@ -10,11 +10,14 @@ import { useMediaQuery, usePaneWidth } from './chrome';
  */
 
 /** Here rather than in either shell, because the mailbox and the page shell must agree on the rail. */
-/** 304, not 320: at exactly 1024px a 320px rail overflows the list and reader floors by 2px. */
-export const RAIL_WIDTH = { min: 176, max: 304, base: 224 };
+export const RAIL_WIDTH = { min: 176, max: 320, base: 224 };
 
-/** The designed list widths, and what double-clicking the hairline returns to. */
-export const LIST_WIDTH = { min: 320, max: 720, wide: 528, base: 432 };
+/**
+ * The designed list widths, and what double-clicking the hairline returns to. The list may grow
+ * until the reader is down to its own floor: `max` leaves a 2560px screen's reader its `20rem`,
+ * and on anything narrower CSS stops the drag there first.
+ */
+export const LIST_WIDTH = { min: 320, max: 2048, wide: 528, base: 432 };
 
 /** The stored widths, read by the panes and by the startup skeleton that stands in for them. */
 export const useRailWidth = () =>

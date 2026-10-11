@@ -14,20 +14,6 @@ export const listTime = (at: number, now = Date.now()) => {
   return new Date(at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
 };
 
-/** Middle form for the stacked record: relative while useful, then a clock, a weekday, a date. Never wider than nine characters. */
-export const stackTime = (at: number, now = Date.now()) => {
-  const elapsed = now - at;
-  if (elapsed < MINUTE) return 'now';
-  if (elapsed < HOUR) return `${Math.floor(elapsed / MINUTE)}m ago`;
-  const date = new Date(at);
-  const clock = date.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
-  if (elapsed < DAY) return clock;
-  if (elapsed < 7 * DAY) {
-    return `${date.toLocaleDateString('en-GB', { weekday: 'short' })} ${clock}`;
-  }
-  return date.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
-};
-
 /** Long form for the reader's message header: `Sun 13 Oct 2026, 09:42`. */
 export const fullTime = (at: number) =>
   new Date(at).toLocaleString('en-GB', {

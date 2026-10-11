@@ -1,7 +1,7 @@
 import { useMemo, useState, useSyncExternalStore } from 'react';
 
 /**
- * Shape survives a reload (pane widths, list layout); content does not. Read in the initialiser,
+ * Shape survives a reload (pane widths, reading mode); content does not. Read in the initialiser,
  * not an effect, so the first frame is the stored one. Every write is guarded: storage can be
  * denied. Dev-only: `localStorage.setItem('yozz:demo','1')` turns on the fixture inbox.
  */

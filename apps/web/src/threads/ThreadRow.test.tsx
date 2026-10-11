@@ -3,7 +3,7 @@ import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { toast } from '../ui/Toast';
-import { ColumnsRow } from './ThreadRow';
+import { ThreadRow } from './ThreadRow';
 import { type Folder, type ThreadState, VAULT_UID_VALIDITY } from './thread';
 import type { MailboxId } from './views';
 
@@ -53,7 +53,7 @@ const root = createRoot(host);
 const showRow = async (mailbox: MailboxId, folders: readonly Folder[], uidValidity = 1) => {
   await act(async () =>
     root.render(
-      <ColumnsRow thread={threadIn(folders, uidValidity)} mailbox={mailbox} isSelected={false} />,
+      <ThreadRow thread={threadIn(folders, uidValidity)} mailbox={mailbox} isSelected={false} />,
     ),
   );
   return [...host.querySelectorAll('button')].flatMap(button => button.ariaLabel ?? []);
