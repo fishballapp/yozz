@@ -523,32 +523,29 @@ export const ThreadReader = ({
             >
               {thread.subject}
             </h1>
-            {/* How the thread is shown, not something done to it, so it sits with the facts about
-                it rather than on the bar. The count follows the list row's rule: only above one,
-                because "1 message" on a single message labels nothing. The switch appears once a
-                message has an HTML body to switch away from. */}
-            {(thread.messages.length > 1 || hasHtml) && (
-              <div className="mt-2 flex items-center gap-3">
-                {thread.messages.length > 1 && (
-                  <p className="font-mono text-2xs text-paper-faint">
-                    {thread.messages.length} messages
-                  </p>
-                )}
-                {hasHtml && (
-                  <div className="ml-auto">
-                    <IconSwitch
-                      label="Reading mode"
-                      options={READING_MODES}
-                      value={mode}
-                      onChange={setMode}
-                      // A 32px box on a phone, its 44px targets reaching past it into the row's air.
-                      cellClassName="relative h-8 w-11 after:absolute after:inset-x-0 after:-inset-y-1.5 lg:size-7 lg:after:hidden"
-                    />
-                  </div>
-                )}
-              </div>
+            {/* The count follows the list row's rule: only above one, because "1 message" on a
+                single message labels nothing. */}
+            {thread.messages.length > 1 && (
+              <p className="mt-2 font-mono text-2xs text-paper-faint">
+                {thread.messages.length} messages
+              </p>
             )}
           </div>
+          {/* How the thread is shown, not something done to it, so it sits with the subject rather
+              than on the bar: level with its first line, which wraps beside it. It appears once a
+              message has an HTML body to switch away from. */}
+          {hasHtml && (
+            <div className="mt-1.5 ml-3 lg:mt-0">
+              <IconSwitch
+                label="Reading mode"
+                options={READING_MODES}
+                value={mode}
+                onChange={setMode}
+                // A 32px box on a phone, its 44px targets reaching past it into the header's air.
+                cellClassName="relative h-8 w-11 after:absolute after:inset-x-0 after:-inset-y-1.5 lg:size-7 lg:after:hidden"
+              />
+            </div>
+          )}
         </div>
       </header>
 
