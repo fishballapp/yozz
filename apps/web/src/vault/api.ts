@@ -46,6 +46,12 @@ export type AccountVaultApi = VaultApi & {
     readonly wrappedDek: string;
     readonly authValue: string;
   }) => Promise<void>;
+  /** `currentAuthValue` proves the current password; the Worker changes the credential and the wrap together. */
+  readonly changePassword: (input: {
+    readonly currentAuthValue: string;
+    readonly newAuthValue: string;
+    readonly wrappedDek: string;
+  }) => Promise<void>;
   readonly finalizePasskeyUnlock: (input: {
     readonly isNewVault: boolean;
     readonly credentialId: string;
@@ -200,6 +206,16 @@ const createAccountVaultApi = (
     }
   };
 
+  const changePassword: AccountVaultApi['changePassword'] = async input => {
+    const res = await request('/api/v1/vault/unlock/password', {
+      method: 'PUT',
+      body: JSON.stringify(input),
+    });
+    if (!res.ok) {
+      throw await parseErrorResponse(res);
+    }
+  };
+
   const finalizePasskeyUnlock: AccountVaultApi['finalizePasskeyUnlock'] = async input => {
     const res = await request('/api/v1/vault/unlock', {
       method: 'PUT',
@@ -232,6 +248,7 @@ const createAccountVaultApi = (
     getUnlockStatus,
     getPasskeyWrap,
     finalizePasswordUnlock,
+    changePassword,
     finalizePasskeyUnlock,
     resetVault,
     deleteAccount,

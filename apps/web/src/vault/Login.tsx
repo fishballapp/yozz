@@ -8,7 +8,7 @@ import { vaultErrorMessage } from './screen-policy';
 import { useVault } from './session';
 import { loginWithPasskey, loginWithPassword } from './unlock';
 
-export const Login = () => {
+export const Login = ({ isAccountDeleted = false }: { isAccountDeleted?: boolean }) => {
   const navigate = useNavigate();
   const { session, isResuming, setSession } = useVault();
 
@@ -145,6 +145,11 @@ export const Login = () => {
 
   return (
     <AuthColumn title="Log in" footer={footer}>
+      {isAccountDeleted && (
+        <p role="status" aria-live="polite" className="mb-6 text-base text-paper">
+          Your account was deleted.
+        </p>
+      )}
       <div className="space-y-4">
         <p className="text-base leading-relaxed text-paper-dim">
           If you enrolled a passkey, this is the whole login.

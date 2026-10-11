@@ -60,6 +60,7 @@ export const ApiErrorCodeSchema = z.enum([
   'INTERNAL_ERROR',
   'INVALID_MODE',
   'SESSION_NOT_FRESH',
+  'WRONG_PASSWORD',
   'ACCOUNT_MISMATCH',
   'UPGRADE_REQUIRED',
   'RATE_LIMITED',
@@ -149,6 +150,19 @@ export const FinalizePasskeyUnlockRequestSchema = z
     wrappedDek: WrappedDekSchema,
   })
   .strict();
+
+/**
+ * PUT /api/v1/vault/unlock/password. `currentAuthValue` proves the current password; `wrappedDek` is
+ * the same DEK under the keys the new password derives, so no record changes.
+ */
+export const ChangePasswordRequestSchema = z
+  .object({
+    currentAuthValue: AuthValueSchema,
+    newAuthValue: AuthValueSchema,
+    wrappedDek: WrappedDekSchema,
+  })
+  .strict();
+export type ChangePasswordRequest = z.infer<typeof ChangePasswordRequestSchema>;
 
 export const FinalizeUnlockRequestSchema = z.discriminatedUnion('mode', [
   FinalizePasswordUnlockRequestSchema,

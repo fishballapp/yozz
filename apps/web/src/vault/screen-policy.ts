@@ -12,11 +12,11 @@ export const PASSKEY_OFFER: Record<
   supported: { canOffer: true, note: null },
   unknown: {
     canOffer: true,
-    note: 'This browser does not report whether a passkey can derive a vault key. You can still try; if the authenticator cannot, set a password instead.',
+    note: 'This browser does not report whether a passkey can open your data. You can still try; if the authenticator cannot, use a password instead.',
   },
   unsupported: {
     canOffer: false,
-    note: 'This browser cannot derive a vault key from a passkey. Use a password instead.',
+    note: 'This browser cannot use a passkey to open your data. Use a password instead.',
   },
 };
 
@@ -25,14 +25,15 @@ const API_ERROR_MESSAGES: Record<ApiErrorCode | 'NETWORK_ERROR', string> = {
   UNAUTHORIZED: 'Your sign-in has expired. Request a new link.',
   FORBIDDEN: 'The server refused that request.',
   NOT_FOUND:
-    'This passkey has no key wrap on your account. Log in on a device that already works, then add this one from Settings.',
+    'This passkey is not set up for your account. Sign in on a device that already works, then add this one from Settings.',
   CONFLICT:
-    'Another tab or device created this vault first. Log in to it instead of creating a second one.',
+    'Another tab or device set up your account first. Sign in there instead of setting it up again.',
   BAD_REQUEST: 'The server rejected that request as malformed.',
   PAYLOAD_TOO_LARGE: 'That was too large to store.',
   INTERNAL_ERROR: 'The server failed on that request. Try again.',
   INVALID_MODE: 'This account is not in that login method.',
-  SESSION_NOT_FRESH: 'Sign in again to change how this vault opens.',
+  SESSION_NOT_FRESH: 'Sign in again to change how you sign in.',
+  WRONG_PASSWORD: 'That is not your current password.',
   ACCOUNT_MISMATCH:
     'This browser signed in to another account since this page opened, so nothing was changed. Sign in again to go on.',
   UPGRADE_REQUIRED: 'A WebSocket connection is required.',
@@ -42,7 +43,7 @@ const API_ERROR_MESSAGES: Record<ApiErrorCode | 'NETWORK_ERROR', string> = {
 
 const VAULT_ERROR_MESSAGES: Record<VaultFailureCode, string> = {
   unreadable:
-    'That did not open the vault. In password mode that means the passphrase was wrong; the stored data itself cannot say more than that it failed to authenticate.',
+    'That did not open your data. With a password, that usually means the password was wrong; the stored data itself cannot say more than that it failed to authenticate.',
   malformed: 'A stored value was not the shape it should be.',
   stale:
     'The server answered with an older version of a record than this device has already seen. Nothing was read.',

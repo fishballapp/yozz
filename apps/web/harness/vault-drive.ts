@@ -217,6 +217,100 @@ const passwordMode = async (page: Page) => {
   await persistedUnlock(page, 'password', userId);
 };
 
+/**
+ * A password change from one device: the data is still there under the new password, and the old
+ * password and every other device are shut out.
+ */
+const passwordChange = async (page: Page) => {
+  const email = `drive-change-${Date.now()}@example.com`;
+  const account = await signUp(page, email);
+  await page.evaluate(
+    async ({ account, record, UNLOCK }) => {
+      const u = (await import(UNLOCK)) as UnlockModule;
+      const s = await u.createPasswordVault({ account, password: 'correct horse' });
+      await s.store.put(record);
+    },
+    { account, record: RECORD, UNLOCK },
+  );
+
+  const otherDevice = await openPage();
+  await otherDevice.goto(`${WEB}/`);
+  const before = await otherDevice.evaluate(
+    async ({ e, record, UNLOCK }) => {
+      const u = (await import(UNLOCK)) as UnlockModule;
+      const s = await u.loginWithPassword({ email: e, password: 'correct horse' });
+      return await s.store.get(record.type, record.naturalKey);
+    },
+    { e: email, record: RECORD, UNLOCK },
+  );
+  assertEqual('password change: another device signs in and reads', before, {
+    revision: 1,
+    plaintext: RECORD.plaintext,
+  });
+
+  const changed = await page.evaluate(
+    async ({ e, record, UNLOCK, KEYS }) => {
+      const u = (await import(UNLOCK)) as UnlockModule;
+      const k = (await import(KEYS)) as KeysModule;
+      const s = await u.loginWithPassword({ email: e, password: 'correct horse' });
+      const result = await u.changePasswordOfSession({
+        currentSession: s,
+        isCurrent: () => true,
+        currentPassword: 'correct horse',
+        newPassword: 'battery staple',
+      });
+      if (result.outcome !== 'changed') throw new Error('the change ended');
+      await k.saveUnlockKeys(await u.unlockKeysOf(result.session));
+      return await result.session.store.get(record.type, record.naturalKey);
+    },
+    { e: email, record: RECORD, UNLOCK, KEYS },
+  );
+  assertEqual('password change: changed here, the same session still reads', changed, {
+    revision: 1,
+    plaintext: RECORD.plaintext,
+  });
+
+  const otherSession = await otherDevice.evaluate(
+    async ({ AUTH }) => {
+      const auth = (await import(AUTH)) as AuthModule;
+      return (await auth.getSession()).data === null ? 'signed out' : 'signed in';
+    },
+    { AUTH },
+  );
+  assertEqual('password change: the other device is signed out', otherSession, 'signed out');
+  await otherDevice.close();
+
+  const fresh = await openPage();
+  await fresh.goto(`${WEB}/`);
+  const attempt = (password: string) =>
+    fresh.evaluate(
+      async ({ e, password, record, UNLOCK }) => {
+        const u = (await import(UNLOCK)) as UnlockModule;
+        try {
+          const s = await u.loginWithPassword({ email: e, password });
+          return await s.store.get(record.type, record.naturalKey);
+        } catch {
+          return 'refused';
+        }
+      },
+      { e: email, password, record: RECORD, UNLOCK },
+    );
+  assertEqual(
+    'password change: the old password is refused',
+    await attempt('correct horse'),
+    'refused',
+  );
+  assertEqual(
+    'password change: a fresh browser signs in with the new one and reads',
+    await attempt('battery staple'),
+    { revision: 1, plaintext: RECORD.plaintext },
+  );
+  await fresh.close();
+
+  await page.reload();
+  await persistedUnlock(page, 'password changed', account.userId);
+};
+
 const passkeyMode = async (page: Page) => {
   const cdp = await page.context().newCDPSession(page);
   await cdp.send('WebAuthn.enable');
@@ -281,6 +375,27 @@ const passkeyMode = async (page: Page) => {
 
 const browser = await chromium.launch();
 
+/** The Worker only accepts a change to how the vault opens from a sign-in under a day old. */
+const ageSessions = () => {
+  const twoDaysAgo = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString();
+  execFileSync(
+    'pnpm',
+    [
+      '-F',
+      '@yozz.app/worker-api',
+      'exec',
+      'wrangler',
+      'd1',
+      'execute',
+      'yozz',
+      '--local',
+      '--command',
+      `UPDATE session SET createdAt = '${twoDaysAgo}'`,
+    ],
+    { encoding: 'utf8' },
+  );
+};
+
 /**
  * Through the real Settings screen: a session older than a day may not change how the vault opens,
  * so the switch asks for the current password and then goes through.
@@ -302,23 +417,23 @@ const staleSession = async (page: Page) => {
   await page.getByRole('button', { name: 'Log in', exact: true }).click();
   await page.waitForURL(`${WEB}/m/unified`);
 
-  const twoDaysAgo = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString();
-  execFileSync(
-    'pnpm',
-    [
-      '-F',
-      '@yozz.app/worker-api',
-      'exec',
-      'wrangler',
-      'd1',
-      'execute',
-      'yozz',
-      '--local',
-      '--command',
-      `UPDATE session SET createdAt = '${twoDaysAgo}'`,
-    ],
-    { encoding: 'utf8' },
-  );
+  ageSessions();
+
+  // Through the real screen: changing the password from a day-old sign-in asks to confirm first.
+  await page.goto(`${WEB}/settings/account/password`);
+  await page.getByLabel('Current password').fill('correct horse');
+  await page.getByLabel('New password', { exact: true }).fill('battery staple');
+  await page.getByLabel('Confirm new password').fill('battery staple');
+  await page.getByRole('button', { name: 'Save' }).click();
+  await page.getByRole('heading', { name: 'Confirm it’s you' }).waitFor({ timeout: 30_000 });
+  assertEqual('stale session: Settings asks to confirm before changing the password', true, true);
+  await page.getByLabel('Current password').last().fill('correct horse');
+  await page.getByRole('button', { name: 'Confirm', exact: true }).click();
+  const changed = page.getByText('Password changed.', { exact: true });
+  await changed.waitFor({ timeout: 30_000 });
+  assertEqual('stale session: confirmed, then the password changed', await changed.count(), 1);
+  // The change signed every other session out and the confirmation made a fresh one: age it again.
+  ageSessions();
 
   const cdp = await page.context().newCDPSession(page);
   await cdp.send('WebAuthn.enable');
@@ -334,21 +449,85 @@ const staleSession = async (page: Page) => {
     },
   });
 
-  await page.goto(`${WEB}/settings/account`);
+  await page.goto(`${WEB}/settings/account/passkey`);
   await page.getByRole('button', { name: 'Switch to a passkey' }).click();
   await page.getByRole('heading', { name: 'Confirm it’s you' }).waitFor();
   assertEqual('stale session: Settings asks to confirm before switching', true, true);
 
-  await page.getByLabel('Current password').fill('correct horse');
+  await page.getByLabel('Current password').fill('battery staple');
   await page.getByRole('button', { name: 'Confirm', exact: true }).click();
   // Derivation, then the passkey's create and PRF assertion: the switch lands after the panel goes.
-  const method = page.locator('dt:text-is("Method") + dd');
-  await method.filter({ hasText: 'passkey' }).waitFor({ timeout: 30_000 });
-  assertEqual(
-    'stale session: confirmed, then switched to a passkey',
-    await method.textContent(),
-    'passkey',
+  const opens = page.getByText('You sign in with a passkey.', { exact: true });
+  await opens.waitFor({ timeout: 30_000 });
+  assertEqual('stale session: confirmed, then switched to a passkey', await opens.count(), 1);
+};
+
+/**
+ * Through the real Settings screen: deleting an account signs the person out with a line saying so,
+ * the old password opens nothing, and the same address registers again as a new account with none of
+ * the old data.
+ */
+const accountDeletion = async (page: Page) => {
+  const email = `drive-delete-${Date.now()}@example.com`;
+  const account = await signUp(page, email);
+  await page.evaluate(
+    async ({ account, record, UNLOCK }) => {
+      const u = (await import(UNLOCK)) as UnlockModule;
+      const s = await u.createPasswordVault({ account, password: 'correct horse' });
+      await s.store.put(record);
+    },
+    { account, record: RECORD, UNLOCK },
   );
+
+  await page.goto(`${WEB}/login`);
+  await page.getByLabel('Email address').fill(email);
+  await page.getByLabel('Password', { exact: true }).fill('correct horse');
+  await page.getByRole('button', { name: 'Log in', exact: true }).click();
+  await page.waitForURL(`${WEB}/m/unified`);
+
+  // In the app, not a reload: the keys that resume a reload are saved a moment after the login.
+  await page.getByRole('link', { name: 'Settings', exact: true }).click();
+  await page.getByRole('link', { name: /^Sign-in/ }).click();
+  await page.getByRole('button', { name: 'Delete account', exact: true }).click();
+  const confirm = page.getByRole('alertdialog').getByRole('button', { name: 'Delete account' });
+  assertEqual('delete: Delete account waits for the word', await confirm.isDisabled(), true);
+  await page.getByLabel('Type DELETE to confirm').fill('DELETE');
+  await confirm.click();
+  await page.waitForURL(/\/login\?deleted=true/, { timeout: 30_000 });
+  const line = page.getByText('Your account was deleted.', { exact: true });
+  await line.waitFor();
+  assertEqual('delete: signed out, saying so', await line.count(), 1);
+
+  const attempt = (password: string) =>
+    page.evaluate(
+      async ({ e, password, UNLOCK }) => {
+        const u = (await import(UNLOCK)) as UnlockModule;
+        try {
+          await u.loginWithPassword({ email: e, password });
+          return 'opened';
+        } catch {
+          return 'refused';
+        }
+      },
+      { e: email, password, UNLOCK },
+    );
+  assertEqual('delete: the old password opens nothing', await attempt('correct horse'), 'refused');
+
+  const again = await signUp(page, email);
+  assertEqual(
+    'delete: the same address registers as a new account',
+    again.userId !== account.userId,
+    true,
+  );
+  const fresh = await page.evaluate(
+    async ({ account, record, UNLOCK }) => {
+      const u = (await import(UNLOCK)) as UnlockModule;
+      const s = await u.createPasswordVault({ account, password: 'correct horse' });
+      return await s.store.get(record.type, record.naturalKey);
+    },
+    { account: again, record: RECORD, UNLOCK },
+  );
+  assertEqual('delete: and none of the old data is in it', fresh, null);
 };
 
 /** `newPage` gives each call its own context. */
@@ -362,7 +541,7 @@ const openPage = async (): Promise<Page> => {
 };
 
 try {
-  for (const mode of [passwordMode, passkeyMode, staleSession]) {
+  for (const mode of [passwordMode, passwordChange, passkeyMode, staleSession, accountDeletion]) {
     const page = await openPage();
     await mode(page);
     await page.close();

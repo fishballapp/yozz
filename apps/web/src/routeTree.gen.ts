@@ -18,9 +18,12 @@ import { Route as AppSettingsRouteImport } from './routes/_app.settings'
 import { Route as AppMMailboxRouteImport } from './routes/_app.m.$mailbox'
 import { Route as AppSettingsIndexRouteImport } from './routes/_app.settings.index'
 import { Route as AppSettingsAccountRouteImport } from './routes/_app.settings.account'
+import { Route as AppSettingsAdvancedRouteImport } from './routes/_app.settings.advanced'
 import { Route as AppSettingsNewRouteImport } from './routes/_app.settings.new'
 import { Route as AppMMailboxIndexRouteImport } from './routes/_app.m.$mailbox.index'
 import { Route as AppSettingsAAddressRouteImport } from './routes/_app.settings.a.$address'
+import { Route as AppSettingsAccountPasskeyRouteImport } from './routes/_app.settings.account_.passkey'
+import { Route as AppSettingsAccountPasswordRouteImport } from './routes/_app.settings.account_.password'
 import { Route as AppMMailboxTSplatRouteImport } from './routes/_app.m.$mailbox.t.$'
 
 const IndexRoute = IndexRouteImport.update({
@@ -67,6 +70,11 @@ const AppSettingsAccountRoute = AppSettingsAccountRouteImport.update({
   path: '/account',
   getParentRoute: () => AppSettingsRoute,
 } as any)
+const AppSettingsAdvancedRoute = AppSettingsAdvancedRouteImport.update({
+  id: '/advanced',
+  path: '/advanced',
+  getParentRoute: () => AppSettingsRoute,
+} as any)
 const AppSettingsNewRoute = AppSettingsNewRouteImport.update({
   id: '/new',
   path: '/new',
@@ -82,6 +90,18 @@ const AppSettingsAAddressRoute = AppSettingsAAddressRouteImport.update({
   path: '/a/$address',
   getParentRoute: () => AppSettingsRoute,
 } as any)
+const AppSettingsAccountPasskeyRoute =
+  AppSettingsAccountPasskeyRouteImport.update({
+    id: '/account_/passkey',
+    path: '/account/passkey',
+    getParentRoute: () => AppSettingsRoute,
+  } as any)
+const AppSettingsAccountPasswordRoute =
+  AppSettingsAccountPasswordRouteImport.update({
+    id: '/account_/password',
+    path: '/account/password',
+    getParentRoute: () => AppSettingsRoute,
+  } as any)
 const AppMMailboxTSplatRoute = AppMMailboxTSplatRouteImport.update({
   id: '/t/$',
   path: '/t/$',
@@ -96,9 +116,12 @@ export interface FileRoutesByFullPath {
   '/settings': typeof AppSettingsRouteWithChildren
   '/m/$mailbox': typeof AppMMailboxRouteWithChildren
   '/settings/account': typeof AppSettingsAccountRoute
+  '/settings/advanced': typeof AppSettingsAdvancedRoute
   '/settings/new': typeof AppSettingsNewRoute
   '/settings/': typeof AppSettingsIndexRoute
   '/settings/a/$address': typeof AppSettingsAAddressRoute
+  '/settings/account/passkey': typeof AppSettingsAccountPasskeyRoute
+  '/settings/account/password': typeof AppSettingsAccountPasswordRoute
   '/m/$mailbox/': typeof AppMMailboxIndexRoute
   '/m/$mailbox/t/$': typeof AppMMailboxTSplatRoute
 }
@@ -108,9 +131,12 @@ export interface FileRoutesByTo {
   '/login': typeof LoginRoute
   '/welcome': typeof WelcomeRoute
   '/settings/account': typeof AppSettingsAccountRoute
+  '/settings/advanced': typeof AppSettingsAdvancedRoute
   '/settings/new': typeof AppSettingsNewRoute
   '/settings': typeof AppSettingsIndexRoute
   '/settings/a/$address': typeof AppSettingsAAddressRoute
+  '/settings/account/passkey': typeof AppSettingsAccountPasskeyRoute
+  '/settings/account/password': typeof AppSettingsAccountPasswordRoute
   '/m/$mailbox': typeof AppMMailboxIndexRoute
   '/m/$mailbox/t/$': typeof AppMMailboxTSplatRoute
 }
@@ -124,9 +150,12 @@ export interface FileRoutesById {
   '/_app/settings': typeof AppSettingsRouteWithChildren
   '/_app/m/$mailbox': typeof AppMMailboxRouteWithChildren
   '/_app/settings/account': typeof AppSettingsAccountRoute
+  '/_app/settings/advanced': typeof AppSettingsAdvancedRoute
   '/_app/settings/new': typeof AppSettingsNewRoute
   '/_app/settings/': typeof AppSettingsIndexRoute
   '/_app/settings/a/$address': typeof AppSettingsAAddressRoute
+  '/_app/settings/account_/passkey': typeof AppSettingsAccountPasskeyRoute
+  '/_app/settings/account_/password': typeof AppSettingsAccountPasswordRoute
   '/_app/m/$mailbox/': typeof AppMMailboxIndexRoute
   '/_app/m/$mailbox/t/$': typeof AppMMailboxTSplatRoute
 }
@@ -140,9 +169,12 @@ export interface FileRouteTypes {
     | '/settings'
     | '/m/$mailbox'
     | '/settings/account'
+    | '/settings/advanced'
     | '/settings/new'
     | '/settings/'
     | '/settings/a/$address'
+    | '/settings/account/passkey'
+    | '/settings/account/password'
     | '/m/$mailbox/'
     | '/m/$mailbox/t/$'
   fileRoutesByTo: FileRoutesByTo
@@ -152,9 +184,12 @@ export interface FileRouteTypes {
     | '/login'
     | '/welcome'
     | '/settings/account'
+    | '/settings/advanced'
     | '/settings/new'
     | '/settings'
     | '/settings/a/$address'
+    | '/settings/account/passkey'
+    | '/settings/account/password'
     | '/m/$mailbox'
     | '/m/$mailbox/t/$'
   id:
@@ -167,9 +202,12 @@ export interface FileRouteTypes {
     | '/_app/settings'
     | '/_app/m/$mailbox'
     | '/_app/settings/account'
+    | '/_app/settings/advanced'
     | '/_app/settings/new'
     | '/_app/settings/'
     | '/_app/settings/a/$address'
+    | '/_app/settings/account_/passkey'
+    | '/_app/settings/account_/password'
     | '/_app/m/$mailbox/'
     | '/_app/m/$mailbox/t/$'
   fileRoutesById: FileRoutesById
@@ -247,6 +285,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppSettingsAccountRouteImport
       parentRoute: typeof AppSettingsRoute
     }
+    '/_app/settings/advanced': {
+      id: '/_app/settings/advanced'
+      path: '/advanced'
+      fullPath: '/settings/advanced'
+      preLoaderRoute: typeof AppSettingsAdvancedRouteImport
+      parentRoute: typeof AppSettingsRoute
+    }
     '/_app/settings/new': {
       id: '/_app/settings/new'
       path: '/new'
@@ -268,6 +313,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppSettingsAAddressRouteImport
       parentRoute: typeof AppSettingsRoute
     }
+    '/_app/settings/account_/passkey': {
+      id: '/_app/settings/account_/passkey'
+      path: '/account/passkey'
+      fullPath: '/settings/account/passkey'
+      preLoaderRoute: typeof AppSettingsAccountPasskeyRouteImport
+      parentRoute: typeof AppSettingsRoute
+    }
+    '/_app/settings/account_/password': {
+      id: '/_app/settings/account_/password'
+      path: '/account/password'
+      fullPath: '/settings/account/password'
+      preLoaderRoute: typeof AppSettingsAccountPasswordRouteImport
+      parentRoute: typeof AppSettingsRoute
+    }
     '/_app/m/$mailbox/t/$': {
       id: '/_app/m/$mailbox/t/$'
       path: '/t/$'
@@ -280,16 +339,22 @@ declare module '@tanstack/react-router' {
 
 interface AppSettingsRouteChildren {
   AppSettingsAccountRoute: typeof AppSettingsAccountRoute
+  AppSettingsAdvancedRoute: typeof AppSettingsAdvancedRoute
   AppSettingsNewRoute: typeof AppSettingsNewRoute
   AppSettingsIndexRoute: typeof AppSettingsIndexRoute
   AppSettingsAAddressRoute: typeof AppSettingsAAddressRoute
+  AppSettingsAccountPasskeyRoute: typeof AppSettingsAccountPasskeyRoute
+  AppSettingsAccountPasswordRoute: typeof AppSettingsAccountPasswordRoute
 }
 
 const AppSettingsRouteChildren: AppSettingsRouteChildren = {
   AppSettingsAccountRoute: AppSettingsAccountRoute,
+  AppSettingsAdvancedRoute: AppSettingsAdvancedRoute,
   AppSettingsNewRoute: AppSettingsNewRoute,
   AppSettingsIndexRoute: AppSettingsIndexRoute,
   AppSettingsAAddressRoute: AppSettingsAAddressRoute,
+  AppSettingsAccountPasskeyRoute: AppSettingsAccountPasskeyRoute,
+  AppSettingsAccountPasswordRoute: AppSettingsAccountPasswordRoute,
 }
 
 const AppSettingsRouteWithChildren = AppSettingsRoute._addFileChildren(

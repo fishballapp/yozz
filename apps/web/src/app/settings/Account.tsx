@@ -1,80 +1,50 @@
 import { Link, useNavigate } from '@tanstack/react-router';
-import { useEffect, useState } from 'react';
-import { ServerKeysSection } from '../../relay/ServerKeysSection';
-import { useMail } from '../../store/MailProvider';
+import { useState } from 'react';
 import { Button, buttonClass } from '../../ui/Button';
 import { ConfirmDialog } from '../../ui/ConfirmDialog';
 import { FieldRow, Input } from '../../ui/Field';
-import { Definition, PageSection } from '../../ui/PageSection';
+import { PageSection } from '../../ui/PageSection';
 import { getApiBaseUrl, isApiConfigured } from '../../vault/api-base-url';
 import { signOut } from '../../vault/auth-client';
-import { checkPasskeyPrfCapability, type PrfCapability } from '../../vault/passkey-prf';
 import type { RecordStore } from '../../vault/record-store';
-import { PASSKEY_OFFER, vaultErrorMessage } from '../../vault/screen-policy';
 import { useVault } from '../../vault/session';
-import {
-  addPasskeyToSession,
-  confirmIdentity,
-  MIN_PASSWORD_LENGTH,
-  needsFreshSession,
-  resetVaultAccount,
-  switchModeToPasskey,
-  switchModeToPassword,
-} from '../../vault/unlock';
+import { addPasskeyToSession, deleteAccount } from '../../vault/unlock';
 import { SettingsPane } from './SettingsPane';
+import { usePasskeyOffer, useSignInChange } from './SignInChange';
 
-/** Handed whether the session it started in is still open, checked after each of its awaits. */
-type Action = (isCurrent: () => boolean) => Promise<void>;
+/** The sections that run an action here, each with its own place for a failure. */
+type Area = 'passkeys' | 'session' | 'delete';
 
-/**
- * A change the server refused for want of a fresh session, run again once the person confirms. It
- * keeps the guard of the session it was refused in, and only that session's screen shows it.
- */
-type PendingConfirmation = {
-  readonly action: Action;
-  readonly isCurrent: () => boolean;
-  readonly store: RecordStore;
+/** Typed to confirm: a word autofill cannot supply and a thumb will not type by accident. */
+const DELETE_WORD = 'DELETE';
+
+/** The notice a change leaves behind, read from the URL the change returns to. */
+export type SignInNotice = 'switched' | 'changed';
+
+const NOTICE_TEXT: Record<SignInNotice, string> = {
+  switched: 'Switched.',
+  changed: 'Password changed.',
 };
 
-/** One section per thing you might come here to do. */
-export const Account = () => {
+export const Account = ({ notice }: { notice?: SignInNotice }) => {
   const navigate = useNavigate();
-  const { session, setSession, lock } = useVault();
-  const { watchSession } = useMail();
-
-  const [error, setError] = useState<string | null>(null);
-  const [isBusy, setIsBusy] = useState(false);
-  const [prf, setPrf] = useState<PrfCapability | null>(null);
-
-  const [isSwitchingToPassword, setIsSwitchingToPassword] = useState(false);
-  const [password, setPassword] = useState('');
-  const [confirmPassword, setConfirmPassword] = useState('');
+  const { session, lock } = useVault();
+  const offer = usePasskeyOffer();
+  const { busy, errors, run, confirmDialog } = useSignInChange<Area>();
   const [addedPasskeyNote, setAddedPasskeyNote] = useState(false);
-  const [awaitingConfirmation, setAwaitingConfirmation] = useState<PendingConfirmation | null>(
-    null,
-  );
-  const [currentPassword, setCurrentPassword] = useState('');
-
-  useEffect(() => {
-    if (session === null) return;
-    void (async () => {
-      try {
-        setPrf(await checkPasskeyPrfCapability());
-      } catch {
-        setPrf('unknown');
-      }
-    })();
-  }, [session]);
+  // The delete question belongs to the session that opened it: a pane that outlives its session
+  // (a sign-in as someone else in this tab) finds it closed and empty, never ready to delete them.
+  const [deletion, setDeletion] = useState<{ store: RecordStore; typed: string } | null>(null);
 
   if (!isApiConfigured()) {
     return (
-      <SettingsPane title="Account">
+      <SettingsPane title="Sign-in">
         <div className="border-y border-rule bg-ink-raised px-4 py-3.5">
           <p className="label-rule">No backend configured</p>
           <p className="mt-2 max-w-xl text-base leading-relaxed text-paper-dim">
-            The vault needs the YOZZ API worker, and no address for it was supplied at build time.
-            Set <span className="font-mono text-2xs text-paper">VITE_API_URL</span> before starting
-            the app. Nothing on this screen will work until then.
+            The YOZZ API worker is needed to sign in, and no address for it was supplied at build
+            time. Set <span className="font-mono text-2xs text-paper">VITE_API_URL</span> before
+            starting the app. Nothing on this screen will work until then.
           </p>
           <p className="mt-3 font-mono text-2xs text-paper-faint">Would call {getApiBaseUrl()}</p>
         </div>
@@ -84,10 +54,10 @@ export const Account = () => {
 
   if (session === null) {
     return (
-      <SettingsPane title="Account">
+      <SettingsPane title="Sign-in">
         <PageSection
-          label="Vault"
-          note="Zero-knowledge applies to YOZZ: your addresses and passwords live in an encrypted store only you can open. Your existing mail provider remains unchanged. This device stays unlocked until you sign out."
+          label="Not signed in"
+          note="Your addresses and passwords are encrypted, and only you can open them. Your existing mail provider stays as it is. This device stays signed in until you sign out."
         >
           <div className="flex flex-wrap items-center gap-2">
             <Link
@@ -106,333 +76,178 @@ export const Account = () => {
             </Link>
           </div>
         </PageSection>
-        <ServerKeysSection />
       </SettingsPane>
     );
   }
 
-  /**
-   * An action that outlives its session (a lock, a sign-in as someone else) shows nothing in the
-   * next one, and neither reopens the session it ended with nor locks the one after.
-   */
-  const run = async (action: Action, isCurrent = watchSession()) => {
-    setIsBusy(true);
-    setError(null);
-    try {
-      await action(isCurrent);
-    } catch (err) {
-      if (!isCurrent()) return;
-      if (needsFreshSession(err)) {
-        setCurrentPassword('');
-        setAwaitingConfirmation({ action, isCurrent, store: session.store });
-      } else {
-        setError(vaultErrorMessage(err));
-      }
-    } finally {
-      setIsBusy(false);
-    }
-  };
-
-  // A sign-in that replaced this session brings another store: the confirmation is not its to answer.
-  const pending = awaitingConfirmation?.store === session.store ? awaitingConfirmation : null;
-
-  const canOfferPasskey = prf !== null && PASSKEY_OFFER[prf].canOffer;
-
-  const confirmLabel = (() => {
-    if (isBusy) {
-      return session.mode === 'passkey' ? 'Waiting for your authenticator…' : 'Deriving keys…';
-    }
-    return session.mode === 'passkey' ? 'Confirm with your passkey' : 'Confirm';
-  })();
-
-  /** Under the refused session's guard: a confirmation that outlives it signs nobody in and retries nothing. */
-  const confirmAndRetry = ({ action, isCurrent }: PendingConfirmation) => {
-    if (!isCurrent()) {
-      setAwaitingConfirmation(null);
-      return;
-    }
-    return run(async () => {
-      await confirmIdentity({ currentSession: session, password: currentPassword });
-      if (!isCurrent()) return;
-      setAwaitingConfirmation(null);
-      setCurrentPassword('');
-      await action(isCurrent);
-    }, isCurrent);
-  };
+  const canOfferPasskey = offer?.canOffer === true;
+  const openDeletion = deletion !== null && deletion.store === session.store ? deletion : null;
+  const typed = openDeletion?.typed ?? '';
 
   return (
-    <SettingsPane title="Account">
-      {error !== null && (
-        <p role="alert" className="mb-6 text-base text-danger">
-          {error}
+    <SettingsPane title="Sign-in" subline={session.email}>
+      <PageSection label="Method">
+        <p className="text-base text-paper">
+          You sign in with a {session.mode === 'passkey' ? 'passkey' : 'password'}.
         </p>
-      )}
-
-      {pending !== null && (
-        <section
-          aria-labelledby="vault-confirm-heading"
-          className="mb-8 border-y border-rule bg-ink-raised px-4 py-3.5"
-        >
-          <h2 id="vault-confirm-heading" className="label-rule">
-            Confirm it’s you
-          </h2>
-          <p className="mt-2 max-w-xl text-base leading-relaxed text-paper-dim">
-            You signed in more than a day ago.{' '}
-            <span className="text-paper">Changing how this vault opens needs a fresh sign-in</span>,
-            so a session someone else got hold of cannot do it. Your change goes through right
-            after.
+        {notice !== undefined && (
+          <p role="status" aria-live="polite" className="mt-1.5 text-base text-paper-dim">
+            {NOTICE_TEXT[notice]}
           </p>
-          <form
-            className="mt-4 flex flex-wrap items-end gap-2"
-            onSubmit={event => {
-              event.preventDefault();
-              void confirmAndRetry(pending);
-            }}
-          >
-            {session.mode === 'password' && (
-              <FieldRow label="Current password" htmlFor="vault-confirm-password">
-                <Input
-                  id="vault-confirm-password"
-                  type="password"
-                  autoComplete="current-password"
-                  // Moves focus, and with it the scroll, to the question the page is now asking.
-                  autoFocus
-                  value={currentPassword}
-                  onChange={event => setCurrentPassword(event.target.value)}
-                  disabled={isBusy}
-                />
-              </FieldRow>
-            )}
-            <Button
-              type="submit"
-              variant="secondary"
-              disabled={isBusy}
-              autoFocus={session.mode === 'passkey'}
-            >
-              {confirmLabel}
-            </Button>
-            <Button
-              variant="ghost"
-              disabled={isBusy}
-              onClick={() => {
-                setAwaitingConfirmation(null);
-                setCurrentPassword('');
-              }}
-            >
-              Cancel
-            </Button>
-          </form>
-        </section>
-      )}
-
-      <PageSection
-        label="Sign-in"
-        note="A vault has exactly one sign-in method. Switching retires the other one and rewraps the same key, so nothing is re-encrypted."
-      >
-        <dl>
-          <Definition term="Method">{session.mode}</Definition>
-          <Definition term="Address">{session.email}</Definition>
-        </dl>
-        <p className="mt-3 text-2xs text-paper-faint">
-          The address is fixed. It is part of how the key is derived.
-        </p>
-
-        {session.mode === 'passkey' && (
-          <div className="mt-4">
-            {!isSwitchingToPassword ? (
-              <Button
-                variant="secondary"
-                disabled={isBusy}
-                onClick={() => setIsSwitchingToPassword(true)}
-              >
-                Switch to a password
-              </Button>
-            ) : (
-              <div className="max-w-xs space-y-3">
-                <FieldRow label="Password" htmlFor="vault-switch-password">
-                  <Input
-                    id="vault-switch-password"
-                    type="password"
-                    autoComplete="new-password"
-                    value={password}
-                    onChange={event => setPassword(event.target.value)}
-                    disabled={isBusy}
-                  />
-                </FieldRow>
-                <FieldRow label="Confirm password" htmlFor="vault-switch-confirm">
-                  <Input
-                    id="vault-switch-confirm"
-                    type="password"
-                    autoComplete="new-password"
-                    value={confirmPassword}
-                    onChange={event => setConfirmPassword(event.target.value)}
-                    disabled={isBusy}
-                  />
-                </FieldRow>
-                <div className="flex flex-wrap items-center gap-2">
-                  <Button
-                    variant="secondary"
-                    disabled={isBusy}
-                    onClick={() =>
-                      void run(async isCurrent => {
-                        if (password.length < MIN_PASSWORD_LENGTH) {
-                          setError(`Use at least ${MIN_PASSWORD_LENGTH} characters.`);
-                          return;
-                        }
-                        if (password !== confirmPassword) {
-                          setError('The two passwords do not match.');
-                          return;
-                        }
-                        const switched = await switchModeToPassword({
-                          currentSession: session,
-                          isCurrent,
-                          password,
-                        });
-                        // Switched on the server; the next unlock of that vault takes the password.
-                        if (switched.outcome === 'ended') return;
-                        setSession(switched.session);
-                        setIsSwitchingToPassword(false);
-                        setPassword('');
-                        setConfirmPassword('');
-                      })
-                    }
-                  >
-                    {isBusy ? 'Deriving keys…' : 'Switch to a password'}
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    disabled={isBusy}
-                    onClick={() => {
-                      setIsSwitchingToPassword(false);
-                      setPassword('');
-                      setConfirmPassword('');
-                    }}
-                  >
-                    Cancel
-                  </Button>
-                </div>
-                {isBusy && (
-                  <p className="text-2xs text-paper-faint">
-                    650,000 PBKDF2 rounds, in this tab. The browser cannot report progress on it.
-                  </p>
-                )}
-              </div>
-            )}
-          </div>
         )}
-
-        {session.mode === 'password' && (
-          <div className="mt-4 space-y-3">
-            {canOfferPasskey ? (
-              <Button
-                variant="secondary"
-                disabled={isBusy}
-                onClick={() =>
-                  void run(async isCurrent => {
-                    const switched = await switchModeToPasskey({
-                      currentSession: session,
-                      isCurrent,
-                    });
-                    if (switched.outcome === 'switched') setSession(switched.session);
-                  })
-                }
-              >
-                {isBusy ? 'Waiting for your authenticator…' : 'Switch to a passkey'}
-              </Button>
-            ) : (
-              prf !== null &&
-              PASSKEY_OFFER[prf].note !== null && (
-                <p className="text-2xs text-paper-faint">{PASSKEY_OFFER[prf].note}</p>
-              )
-            )}
-          </div>
-        )}
+        <div className="mt-4 flex flex-wrap items-center gap-2">
+          {session.mode === 'password' && (
+            <Link
+              to="/settings/account/password"
+              search={previous => previous}
+              className={buttonClass({ variant: 'secondary' })}
+            >
+              Change password
+            </Link>
+          )}
+          {session.mode === 'password' && canOfferPasskey && (
+            <Link
+              to="/settings/account/passkey"
+              search={previous => previous}
+              className={buttonClass({ variant: 'secondary' })}
+            >
+              Switch to a passkey
+            </Link>
+          )}
+          {session.mode === 'passkey' && (
+            <Link
+              to="/settings/account/password"
+              search={previous => previous}
+              className={buttonClass({ variant: 'secondary' })}
+            >
+              Switch to a password
+            </Link>
+          )}
+        </div>
+        {session.mode === 'password' &&
+          offer !== null &&
+          !canOfferPasskey &&
+          offer.note !== null && <p className="mt-3 text-2xs text-paper-faint">{offer.note}</p>}
       </PageSection>
 
       {session.mode === 'passkey' && canOfferPasskey && (
         <PageSection
           label="Passkeys"
-          note="Each authenticator gets its own wrap of the same key. Add one from a device before you need to log in on it."
+          note="Each passkey you add can sign you in on its own. Add one from a device before you need it."
+          error={errors.passkeys}
         >
           <div className="space-y-3">
             <Button
               variant="secondary"
-              disabled={isBusy}
-              onClick={() =>
-                void run(async isCurrent => {
+              disabled={busy !== null}
+              onClick={() => {
+                setAddedPasskeyNote(false);
+                void run('passkeys', async isCurrent => {
                   const added = await addPasskeyToSession({ currentSession: session, isCurrent });
                   if (added.outcome === 'added') setAddedPasskeyNote(true);
-                })
-              }
+                });
+              }}
             >
-              {isBusy ? 'Waiting for your authenticator…' : 'Add passkey'}
+              {busy === 'passkeys' ? 'Waiting for your authenticator…' : 'Add passkey'}
             </Button>
             {addedPasskeyNote && (
-              <p className="text-base text-paper-dim">
-                Added. That authenticator can now open this vault.
+              <p role="status" className="text-base text-paper-dim">
+                Added. That passkey can now sign you in.
               </p>
             )}
           </div>
         </PageSection>
       )}
 
-      <ServerKeysSection />
-
       <PageSection
-        label="Reset"
-        note="Every stored record is deleted and a new key is made. Your addresses have to be added again, with a fresh password from each provider. Nothing else about your YOZZ account changes."
+        label="Session"
+        note="Signing out keeps your data as it is. Sign in again to open it."
+        error={errors.session}
       >
-        <ConfirmDialog
-          trigger={<Button variant="danger" disabled={isBusy} />}
-          triggerLabel="Reset vault"
-          title="Reset this vault?"
-          description="Every stored record is deleted and a new key is made. Your addresses have to be added again, with a fresh password from each provider."
-          confirmLabel="Reset vault"
-          busyLabel="Resetting…"
-          onConfirm={() =>
-            run(async isCurrent => {
-              await resetVaultAccount(session.userId);
-              if (!isCurrent()) return;
-              // Before the lock's first await: the next session can open while the keys are being
-              // forgotten, and this reset has nowhere to send it.
-              void navigate({ to: '/enrol', search: previous => previous });
-              await lock();
-            })
-          }
-        />
-      </PageSection>
-
-      <PageSection label="Session" note="This device stays unlocked until you sign out.">
         <Button
           variant="ghost"
-          disabled={isBusy}
-          onClick={() => {
-            const isCurrent = watchSession();
-            void (async () => {
-              setIsBusy(true);
-              setError(null);
+          className="-ml-3"
+          disabled={busy !== null}
+          onClick={() =>
+            void run('session', async isCurrent => {
               try {
-                // Better Auth reports a refused sign-out as `{ error }`; the local vault is closed either way.
+                // Better Auth reports a refused sign-out as `{ error }`; this device is locked either way.
                 const res = await signOut(session.userId);
                 if (!isCurrent()) return;
-                if (res.error) {
-                  setError(res.error.message || 'Signing out failed.');
-                  return;
-                }
+                if (res.error) throw new Error(res.error.message || 'Signing out failed.');
                 void navigate({ to: '/login', search: previous => previous });
-              } catch (err) {
-                if (isCurrent()) setError(vaultErrorMessage(err));
               } finally {
                 // The session after this one is not this button's to lock.
                 if (isCurrent()) await lock();
-                setIsBusy(false);
               }
-            })();
-          }}
+            })
+          }
         >
-          Sign out
+          {busy === 'session' ? 'Signing out…' : 'Sign out'}
         </Button>
       </PageSection>
+
+      <PageSection
+        label="Delete account"
+        note="Deletes your YOZZ account, your saved addresses and their passwords, your drafts, and everything else stored here. It cannot reach your mail: what is at your providers, including the Sent copies and draft copies YOZZ put in your mailboxes, stays there."
+        error={openDeletion !== null ? null : errors.delete}
+      >
+        <Button
+          variant="danger"
+          className="-ml-3"
+          disabled={busy !== null}
+          onClick={() => {
+            setDeletion({ store: session.store, typed: '' });
+          }}
+        >
+          Delete account
+        </Button>
+        <ConfirmDialog
+          open={openDeletion !== null}
+          onOpenChange={isOpen => setDeletion(isOpen ? { store: session.store, typed: '' } : null)}
+          title="Delete your account?"
+          description={`This cannot be undone. ${session.email} and everything stored for it are deleted, and you are signed out.`}
+          confirmLabel="Delete account"
+          busyLabel="Deleting…"
+          isConfirmEnabled={typed.trim() === DELETE_WORD}
+          onConfirm={async () => {
+            // A dialog that closes on a refusal would hide it; one asking for a fresh sign-in closes.
+            const failure = await run('delete', async isCurrent => {
+              // Still the session the word was typed in.
+              if (!isCurrent()) return;
+              await deleteAccount(session.userId);
+              if (!isCurrent()) return;
+              // Navigating is last: locking drops the session and the shell sends a signed-out
+              // visitor to a bare Log in, which would take the notice's place if it came first.
+              await lock();
+              void navigate({ to: '/login', search: { deleted: true } });
+            });
+            if (failure !== null) throw new Error(failure);
+          }}
+        >
+          <div className="mt-4">
+            <FieldRow label={`Type ${DELETE_WORD} to confirm`} htmlFor="delete-account-confirm">
+              <Input
+                id="delete-account-confirm"
+                autoComplete="off"
+                autoCapitalize="off"
+                spellCheck={false}
+                autoFocus
+                value={typed}
+                onChange={event => setDeletion({ store: session.store, typed: event.target.value })}
+                disabled={busy !== null}
+              />
+            </FieldRow>
+          </div>
+          {errors.delete !== undefined && (
+            <p role="alert" className="mt-3 text-base text-danger">
+              {errors.delete}
+            </p>
+          )}
+        </ConfirmDialog>
+      </PageSection>
+
+      {confirmDialog}
     </SettingsPane>
   );
 };

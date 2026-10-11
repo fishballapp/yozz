@@ -49,6 +49,14 @@ export class UnlockError extends Error {
   }
 }
 
+/** The current password of a password account was not the one typed: from the keys it derives, or from the Worker. */
+export class WrongPasswordError extends UnlockError {
+  constructor() {
+    super('That is not your current password.');
+    this.name = 'WrongPasswordError';
+  }
+}
+
 /** Who a vault belongs to; every request names `userId`, so the Worker refuses it for anyone else. */
 export type VaultAccount = {
   readonly userId: string;
@@ -250,7 +258,9 @@ const readCeremony = (result: unknown): PasskeyCeremony => {
 /** `create()` associates the PRF key but does not reliably return PRF output; `derivePasskeyKey` gets it. */
 const registerPrfPasskey = async (userId: string): Promise<PasskeyCeremony> => {
   if ((await checkPasskeyPrfCapability()) === 'unsupported') {
-    throw new PasskeyPrfError('This browser cannot use the WebAuthn PRF extension');
+    throw new PasskeyPrfError(
+      'This browser cannot use a passkey to open your data. Use a password instead.',
+    );
   }
 
   const regRes = await authAddPasskey({ userId, extensions: getPrfEnableInput() });
@@ -273,7 +283,9 @@ const derivePasskeyKey = async (
 ): Promise<CryptoKey> => {
   try {
     if (!isPrfEnabled(clientExtensionResults)) {
-      throw new PasskeyPrfError('This authenticator cannot use the WebAuthn PRF extension');
+      throw new PasskeyPrfError(
+        'This passkey cannot open your data. Try another one, or use a password instead.',
+      );
     }
     return await derivePasskeyEncKey(await evaluatePrfForCredential(credentialId));
   } catch (err) {
@@ -444,6 +456,67 @@ export const switchModeToPassword = async ({
   };
 };
 
+/** The session as it opens after the change: the same DEK, the same store, the new password's keys. */
+type PasswordChanged = { readonly outcome: 'changed'; readonly session: UnlockedVaultSession };
+
+/**
+ * The DEK stays, so no record is re-encrypted: it is unwrapped under the current password's keys
+ * (which a wrong password cannot do) and wrapped under the new one's. The Worker changes the
+ * credential and the wrap in one batch and signs every other device out.
+ */
+export const changePasswordOfSession = async ({
+  currentSession,
+  isCurrent,
+  currentPassword,
+  newPassword,
+  api = vaultApi,
+}: SessionChange & {
+  readonly currentPassword: string;
+  readonly newPassword: string;
+}): Promise<PasswordChanged | SessionEnded> => {
+  if (currentSession.mode !== 'password') {
+    throw new UnlockError('This account signs in with a passkey, so it has no password to change.');
+  }
+  refuseShortPassword(newPassword);
+
+  const { email, userId } = currentSession;
+  const currentKeys = await deriveAccountKeys({ email, password: currentPassword });
+  const newKeys = await deriveAccountKeys({ email, password: newPassword });
+  if (!isCurrent()) return SESSION_ENDED;
+
+  const wrappedDek = await rewrapDek(currentKeys, newKeys, currentSession.wrappedDek).catch(
+    (error: unknown) => {
+      if (error instanceof VaultError && error.code === 'unreadable') {
+        throw new WrongPasswordError();
+      }
+      throw error;
+    },
+  );
+  try {
+    await api.forAccount(userId).changePassword({
+      currentAuthValue: currentKeys.authValue,
+      newAuthValue: newKeys.authValue,
+      wrappedDek,
+    });
+  } catch (error) {
+    if (error instanceof VaultApiError && error.code === 'WRONG_PASSWORD') {
+      throw new WrongPasswordError();
+    }
+    if (error instanceof VaultApiError && error.code === 'CONFLICT') {
+      throw new UnlockError(
+        'Your password was changed somewhere else a moment ago. Reload this page and try again.',
+      );
+    }
+    throw error;
+  }
+  if (!isCurrent()) return SESSION_ENDED;
+
+  return {
+    outcome: 'changed',
+    session: { ...currentSession, encKey: newKeys.encKey, wrappedDek },
+  };
+};
+
 export const switchModeToPasskey = async (
   change: SessionChange,
 ): Promise<ModeSwitched | SessionEnded> => {
@@ -484,7 +557,7 @@ const signInAgain = async (
   }
   const keys = await deriveAccountKeys({ email, password });
   const res = await authSignInPassword(email, keys.authValue);
-  if (res.error) throw new UnlockError('That is not the password this vault opens with.');
+  if (res.error) throw new UnlockError('That is not your current password.');
   return accountOf(res.data.user);
 };
 

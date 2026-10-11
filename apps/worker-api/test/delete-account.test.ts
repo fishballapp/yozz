@@ -378,20 +378,18 @@ describe('DELETE /api/v1/account', () => {
       await expect(
         putRecord(env.DB, alice.userId, 'draft', 'late', 'Y2lwaGVy', 1, 1000),
       ).rejects.toThrow(REFUSED);
-      await expect(
-        finalizePasswordUnlock(env.DB, alice.userId, {
-          isNewVault: true,
-          wrappedDek: 'wrap',
-          now: 1000,
-        }),
-      ).rejects.toThrow(REFUSED);
-      await expect(
-        finalizePasswordUnlock(env.DB, alice.userId, {
-          isNewVault: false,
-          wrappedDek: 'wrap',
-          now: 1000,
-        }),
-      ).rejects.toThrow(REFUSED);
+      // The session went with the account, so the guarded batch writes nothing at all.
+      for (const isNewVault of [true, false]) {
+        expect(
+          await finalizePasswordUnlock(env.DB, alice.userId, {
+            isNewVault,
+            wrappedDek: 'wrap',
+            passwordHash: 'hash',
+            sessionId: 'a-session-that-went-with-the-account',
+            now: 1000,
+          }),
+        ).toBe(false);
+      }
       await expect(
         env.DB.prepare(
           `INSERT INTO vault_passkey_wrap (user_id, passkey_id, wrapped_dek, created_at, updated_at)

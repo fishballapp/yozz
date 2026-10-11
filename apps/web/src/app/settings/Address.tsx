@@ -513,7 +513,7 @@ const RemoveSection = ({
         trigger={<Button variant="danger" className="-ml-3" />}
         triggerLabel="Remove address"
         title={`Remove ${record.address}?`}
-        description="Its stored password is deleted from the vault. Adding it back takes a minute and a password from the provider; nothing else changes."
+        description="Its stored password is deleted from YOZZ. Adding it back takes a minute and a password from the provider; nothing else changes."
         confirmLabel="Remove address"
         busyLabel="Removing…"
         onConfirm={remove}

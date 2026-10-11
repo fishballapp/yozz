@@ -153,6 +153,22 @@ describe('Vault API client', () => {
     });
   });
 
+  it('puts a password change to its own route, with the three fields and the account', async () => {
+    const mockFetch = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>
+      Response.json({ ok: true }),
+    );
+    const client = createVaultApiClient('https://api.test', mockFetch).forAccount('user-123');
+    const input = { currentAuthValue: 'a', newAuthValue: 'b', wrappedDek: 'c' };
+
+    await client.changePassword(input);
+
+    const [url, init] = mockFetch.mock.calls[0] ?? [];
+    expect(url).toBe('https://api.test/api/v1/vault/unlock/password');
+    expect(init?.method).toBe('PUT');
+    expect(JSON.parse(String(init?.body))).toEqual(input);
+    expect(new Headers(init?.headers).get(ACCOUNT_HEADER)).toBe('user-123');
+  });
+
   it('names its account on every request', async () => {
     const mockFetch = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>
       Response.json({ ok: true }),

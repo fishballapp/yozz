@@ -58,10 +58,10 @@ describe('vaultErrorMessage', () => {
       'The server refused that request.',
     );
     expect(vaultErrorMessage(new VaultApiError('NOT_FOUND', 'x'))).toBe(
-      'This passkey has no key wrap on your account. Log in on a device that already works, then add this one from Settings.',
+      'This passkey is not set up for your account. Sign in on a device that already works, then add this one from Settings.',
     );
     expect(vaultErrorMessage(new VaultApiError('CONFLICT', 'x'))).toBe(
-      'Another tab or device created this vault first. Log in to it instead of creating a second one.',
+      'Another tab or device set up your account first. Sign in there instead of setting it up again.',
     );
     expect(vaultErrorMessage(new VaultApiError('BAD_REQUEST', 'x'))).toBe(
       'The server rejected that request as malformed.',
@@ -77,7 +77,7 @@ describe('vaultErrorMessage', () => {
     );
 
     expect(vaultErrorMessage(new VaultError('unreadable', 'x'))).toBe(
-      'That did not open the vault. In password mode that means the passphrase was wrong; the stored data itself cannot say more than that it failed to authenticate.',
+      'That did not open your data. With a password, that usually means the password was wrong; the stored data itself cannot say more than that it failed to authenticate.',
     );
     expect(vaultErrorMessage(new VaultError('malformed', 'x'))).toBe(
       'A stored value was not the shape it should be.',

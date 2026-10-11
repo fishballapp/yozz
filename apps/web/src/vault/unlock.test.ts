@@ -1,4 +1,5 @@
 import 'fake-indexeddb/auto';
+import { deriveAccountKeys } from '@yozz.app/vault';
 import type { UnlockStatusResponse } from '@yozz.app/vault-contract';
 import { IDBFactory } from 'fake-indexeddb';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -6,6 +7,7 @@ import { type AccountVaultApi, type VaultApiClient, VaultApiError } from './api'
 import { createIndexedDbRevisionMarks } from './revision-marks';
 import {
   addPasskeyToSession,
+  changePasswordOfSession,
   confirmIdentity,
   createPasskeyVault,
   createPasswordVault,
@@ -18,6 +20,7 @@ import {
   switchModeToPasskey,
   switchModeToPassword,
   unlockKeysOf,
+  WrongPasswordError,
 } from './unlock';
 import { loadUnlockKeys, saveUnlockKeys } from './unlock-keys';
 
@@ -63,6 +66,9 @@ const createMockWorker = () => {
   const createVault = (account: typeof ALICE): AccountVaultApi => {
     let mode: 'password' | 'passkey' | null = null;
     let wrappedDek = '';
+    let authValue = '';
+    /** The server's clock for the vault row: it moves on every change, as `updated_at` does. */
+    let updatedAt = 1000;
     const passkeyWraps = new Map<string, string>();
 
     const answer = async <T>(call: AccountCall, run: () => T): Promise<T> => {
@@ -82,7 +88,7 @@ const createMockWorker = () => {
       remove: vi.fn(async () => answer('remove', () => undefined)),
       getUnlockStatus: vi.fn(async () =>
         answer('getUnlockStatus', (): UnlockStatusResponse => {
-          if (mode === 'password') return { mode: 'password', wrappedDek, updatedAt: 1000 };
+          if (mode === 'password') return { mode: 'password', wrappedDek, updatedAt };
           if (mode === 'passkey') {
             return {
               mode: 'passkey',
@@ -100,13 +106,28 @@ const createMockWorker = () => {
           return wrap;
         }),
       ),
-      finalizePasswordUnlock: vi.fn(async (input: { isNewVault: boolean; wrappedDek: string }) =>
-        answer('finalizePasswordUnlock', () => {
-          if (input.isNewVault && mode !== null) throw new Error('409 CONFLICT');
-          mode = 'password';
-          wrappedDek = input.wrappedDek;
-          passkeyWraps.clear();
-        }),
+      finalizePasswordUnlock: vi.fn(
+        async (input: { isNewVault: boolean; wrappedDek: string; authValue: string }) =>
+          answer('finalizePasswordUnlock', () => {
+            if (input.isNewVault && mode !== null) throw new Error('409 CONFLICT');
+            mode = 'password';
+            wrappedDek = input.wrappedDek;
+            authValue = input.authValue;
+            updatedAt += 1;
+            passkeyWraps.clear();
+          }),
+      ),
+      changePassword: vi.fn(
+        async (input: { currentAuthValue: string; newAuthValue: string; wrappedDek: string }) =>
+          answer('changePassword', () => {
+            if (mode !== 'password') throw new VaultApiError('INVALID_MODE', 'Not a password', 403);
+            if (input.currentAuthValue !== authValue) {
+              throw new VaultApiError('WRONG_PASSWORD', 'Not the current password', 403);
+            }
+            authValue = input.newAuthValue;
+            wrappedDek = input.wrappedDek;
+            updatedAt += 1;
+          }),
       ),
       finalizePasskeyUnlock: vi.fn(
         async (input: { isNewVault: boolean; credentialId: string; wrappedDek: string }) =>
@@ -508,7 +529,7 @@ describe('Vault unlock and session orchestration', () => {
     mocks.signInEmail.mockResolvedValueOnce({ error: { message: 'Invalid password' } });
     await expect(
       confirmIdentity({ currentSession: pw, password: 'wrong-password-1' }),
-    ).rejects.toThrow(/not the password this vault opens with/);
+    ).rejects.toThrow(/not your current password/);
 
     const asPasskey = { ...pw, mode: 'passkey' as const };
     mocks.signInPasskey.mockResolvedValue({ data: { session: {}, user: userOf(ALICE) } });
@@ -541,6 +562,163 @@ describe('Vault unlock and session orchestration', () => {
         response: { id: 'pk-added-key' },
         clientExtensionResults: { prf: { enabled: true } },
       },
+    });
+
+    describe('changing the password', () => {
+      const change = (
+        pw: Awaited<ReturnType<typeof passwordSession>>,
+        overrides: Partial<Parameters<typeof changePasswordOfSession>[0]> = {},
+      ) =>
+        changePasswordOfSession({
+          currentSession: pw,
+          isCurrent: () => true,
+          currentPassword: 'password123456',
+          newPassword: 'newpassword456789',
+          api,
+          ...overrides,
+        });
+
+      it('wraps the same DEK under the new password, so the new one opens it and the old one does not', async () => {
+        const pw = await passwordSession();
+        const changed = await change(pw);
+        if (changed.outcome !== 'changed') throw new Error('the change ended');
+
+        expect(changed.session.mode).toBe('password');
+        expect(changed.session.wrappedDek).not.toBe(pw.wrappedDek);
+        expect(changed.session.store).toBe(pw.store);
+
+        const reopened = await loginWithPassword({
+          email: ALICE.email,
+          password: 'newpassword456789',
+          api,
+          idbFactory,
+        });
+        // Record ids come off the DEK: the same ids mean no record needs re-encrypting.
+        expect(await reopened.vault.recordId('account', 'x')).toBe(
+          await pw.vault.recordId('account', 'x'),
+        );
+        await expect(
+          loginWithPassword({ email: ALICE.email, password: 'password123456', api, idbFactory }),
+        ).rejects.toThrow();
+        pw.store.close();
+        reopened.store.close();
+      });
+
+      it('refuses a wrong current password before the server is asked, and says so as that', async () => {
+        const pw = await passwordSession();
+
+        await expect(change(pw, { currentPassword: 'not-the-password-1' })).rejects.toBeInstanceOf(
+          WrongPasswordError,
+        );
+        expect(alice.changePassword).not.toHaveBeenCalled();
+        pw.store.close();
+      });
+
+      it('sends the current password’s authValue, which is what the server checks it by', async () => {
+        const pw = await passwordSession();
+        const keys = await deriveAccountKeys({ email: ALICE.email, password: 'password123456' });
+
+        await change(pw);
+
+        expect(alice.changePassword).toHaveBeenCalledWith(
+          expect.objectContaining({ currentAuthValue: keys.authValue }),
+        );
+        pw.store.close();
+      });
+
+      it('hears the server say the current password is wrong, as the same thing', async () => {
+        const pw = await passwordSession();
+        vi.mocked(alice.changePassword).mockRejectedValueOnce(
+          new VaultApiError('WRONG_PASSWORD', 'Not the current password', 403),
+        );
+
+        await expect(change(pw)).rejects.toBeInstanceOf(WrongPasswordError);
+        pw.store.close();
+      });
+
+      it('says a password changed elsewhere first as that, not as a failed setup', async () => {
+        const pw = await passwordSession();
+        vi.mocked(alice.changePassword).mockRejectedValueOnce(
+          new VaultApiError('CONFLICT', 'The password changed somewhere else first', 409),
+        );
+
+        await expect(change(pw)).rejects.toThrow(/changed somewhere else/);
+        pw.store.close();
+      });
+
+      it('lets a stale session through to the confirmation, which asks for a fresh one', async () => {
+        const pw = await passwordSession();
+        vi.mocked(alice.changePassword).mockRejectedValueOnce(
+          new VaultApiError('SESSION_NOT_FRESH', 'Sign in again', 403),
+        );
+
+        const refused = await change(pw).catch((error: unknown) => error);
+
+        expect(needsFreshSession(refused)).toBe(true);
+        pw.store.close();
+      });
+
+      it('refuses a short new password before deriving anything', async () => {
+        const pw = await passwordSession();
+
+        await expect(change(pw, { newPassword: 'short' })).rejects.toThrow(/at least 12/);
+        expect(alice.changePassword).not.toHaveBeenCalled();
+        pw.store.close();
+      });
+
+      it('writes nothing once the session ended under the key derivation', async () => {
+        const pw = await passwordSession();
+        let isOpen = true;
+
+        const changing = change(pw, { isCurrent: () => isOpen });
+        isOpen = false;
+
+        expect(await changing).toEqual({ outcome: 'ended' });
+        expect(alice.changePassword).not.toHaveBeenCalled();
+        pw.store.close();
+      });
+
+      it('hands back no session once its own ended under the write', async () => {
+        const pw = await passwordSession();
+        let isOpen = true;
+        vi.mocked(alice.changePassword).mockImplementationOnce(async () => {
+          isOpen = false;
+        });
+
+        expect(await change(pw, { isCurrent: () => isOpen })).toEqual({ outcome: 'ended' });
+        pw.store.close();
+      });
+
+      it('has no password to change for a passkey session', async () => {
+        const pw = await passwordSession();
+
+        await expect(change({ ...pw, mode: 'passkey' })).rejects.toThrow(/passkey/);
+        expect(alice.changePassword).not.toHaveBeenCalled();
+        pw.store.close();
+      });
+
+      it('resumes after a reload from the new wrap, because the saved keys carry the new stamp', async () => {
+        const pw = await passwordSession();
+        const changed = await change(pw);
+        if (changed.outcome !== 'changed') throw new Error('the change ended');
+        await saveUnlockKeys(await unlockKeysOf(changed.session, api), idbFactory);
+        pw.store.close();
+
+        const resumed = await resumeSession({ api, idbFactory });
+
+        expect(resumed?.wrappedDek).toBe(changed.session.wrappedDek);
+        resumed?.store.close();
+      });
+
+      it('leaves a device that saved its keys before the change with nothing to resume from', async () => {
+        const pw = await passwordSession();
+        await saveUnlockKeys(await unlockKeysOf(pw, api), idbFactory);
+        await change(pw);
+        pw.store.close();
+
+        expect(await resumeSession({ api, idbFactory })).toBeNull();
+        expect(await loadUnlockKeys(ALICE.userId, idbFactory)).toBeNull();
+      });
     });
 
     it('names the session’s account on every write it makes', async () => {
