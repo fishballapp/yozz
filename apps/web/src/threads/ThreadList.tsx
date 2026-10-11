@@ -248,9 +248,7 @@ export const ThreadList = ({
           aria-label="Search mail"
           className="h-full w-full min-w-0 bg-transparent text-base text-paper outline-none placeholder:text-paper-faint"
         />
-        <div className="-mr-1">
-          <IconSwitch label="List layout" options={LAYOUTS} value={layout} onChange={setLayout} />
-        </div>
+        <IconSwitch label="List layout" options={LAYOUTS} value={layout} onChange={setLayout} />
       </div>
 
       {threads.length === 0 ? (

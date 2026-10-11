@@ -4,8 +4,9 @@ import { cn } from '@fishballapps/cn';
 import type { Icon } from '@phosphor-icons/react';
 
 /**
- * Base UI's Toggle Group, so the row is one labelled control with arrow-key movement. The pressed
- * cell takes the rail's active ground, not a list row's inversion.
+ * Base UI's Toggle Group, so the row is one labelled control with arrow-key movement. Ruled as one
+ * box, cell from cell, so it reads as a choice of one rather than a row of separate buttons. The
+ * pressed cell takes the rail's active ground, not a list row's inversion.
  */
 export const IconSwitch = <T extends string>({
   label,
@@ -28,7 +29,7 @@ export const IconSwitch = <T extends string>({
       const chosen = options.find(option => option.id === next);
       if (chosen !== undefined) onChange(chosen.id);
     }}
-    className="flex shrink-0 items-center"
+    className="flex shrink-0 items-center divide-x divide-rule border border-rule"
   >
     {options.map(({ id, Icon, label: optionLabel }) => (
       <Toggle

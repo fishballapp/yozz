@@ -3,10 +3,11 @@ import { cn } from '@fishballapps/cn';
 import {
   ArchiveIcon,
   ArrowCounterClockwiseIcon,
+  ArrowLeftIcon,
   ArrowUUpLeftIcon,
   ArrowUUpRightIcon,
-  BrowserIcon,
   CaretDownIcon,
+  CodeIcon,
   DownloadSimpleIcon,
   EnvelopeSimpleIcon,
   type Icon,
@@ -357,7 +358,7 @@ const MessageBody = ({
 };
 
 const READING_MODES = [
-  { id: 'html', Icon: BrowserIcon, label: 'HTML' },
+  { id: 'html', Icon: CodeIcon, label: 'HTML' },
   { id: 'text', Icon: TextAlignLeftIcon, label: 'Plain text' },
 ] as const satisfies readonly { id: ReadingMode; Icon: Icon; label: string }[];
 
@@ -400,76 +401,34 @@ export const ThreadReader = ({
     };
   // A star, an unread mark and a move all act on server copies, so a conversation with none offers none.
   const canMark = isOnServer(thread);
+  const hasHtml = thread.messages.some(message => message.html !== undefined);
 
   return (
     <article className="flex h-full flex-col bg-ink-sunken">
-      <header className="shrink-0 border-b border-rule-soft px-5 pt-4 pb-3">
-        {/* Below `lg` the toolbar takes its own row under the subject: its six 44px targets left
-            the subject a few characters on a phone. Wrapping rather than reordering keeps the
-            focus order the same as the reading order. */}
-        <div className="flex flex-wrap items-start gap-x-2 gap-y-1 lg:flex-nowrap">
+      <header className="shrink-0 border-b border-rule-soft">
+        {/* What you do to the thread, on a bar of its own: level with the list's search bar above
+            `lg`, an app bar under the shell's on a phone. Back leads on a phone, where the reader
+            replaces the list; a pane closes from its far corner. Filing a thread moves the reader
+            on to the next in the list — the one you just filed is not the one you are reading —
+            while marking unread closes it, since it would be read again the moment it stayed
+            open. Opened from Trash, a thread offers the one move that gets it out — the row it
+            came from offered the same, and a conversation only half in the bin must not lose it.
+            A move with nothing in its source folders is not offered at all, nor is any mark on a
+            conversation no server holds a copy of. */}
+        <div className="flex h-11 items-center border-b border-rule-soft px-5">
+          <Button
+            variant="ghost"
+            size="icon"
+            className="-ml-3.5 size-11 lg:hidden"
+            onClick={onClose}
+            aria-label="Back to the list"
+          >
+            <ArrowLeftIcon size={15} />
+          </Button>
           {canMark && (
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => toggleStar(thread.id)}
-              // Same mark, same colour as the list.
-              className={cn(
-                '-ml-1.5 size-11 shrink-0 lg:size-7',
-                thread.isStarred && 'text-signal hover:text-signal',
-              )}
-              aria-label="Star thread"
-              aria-pressed={thread.isStarred}
-            >
-              <StarIcon size={15} weight={thread.isStarred ? 'fill' : 'regular'} />
-            </Button>
-          )}
-          {/* The first line centres on the star's 44px touch target, and on its 28px one above `lg`. */}
-          <div className="min-w-0 flex-1 pt-2.5 lg:pt-0.5">
-            <h1
-              dir="auto"
-              className="text-[17px] leading-snug font-medium tracking-[-0.01em] text-paper"
-            >
-              {thread.subject}
-            </h1>
-            {/* The same count the list row carries, on the same rule: only above one, because "1
-                message" on a single message is a label for nothing. It says how far down the
-                stack goes before you start; each message's own IN line says where that one landed. */}
-            {thread.messages.length > 1 && (
-              <p className="mt-1.5 font-mono text-2xs text-paper-faint">
-                {thread.messages.length} messages
-              </p>
-            )}
-          </div>
-          <div className="-mr-1.5 flex w-full shrink-0 items-center justify-end gap-0.5 lg:mr-0 lg:w-auto">
-            <IconSwitch
-              label="Reading mode"
-              options={READING_MODES}
-              value={mode}
-              onChange={setMode}
-              cellClassName="size-11 lg:size-7"
-            />
-            {/* Filing a thread moves the reader on to the next in the list — the one you just
-                filed is not the one you are reading — while marking unread closes it, since it
-                would be read again the moment it stayed open. Opened from Trash, a thread offers
-                the one move that gets it out — the row it came from offered the same, and a
-                conversation only half in the bin must not lose it. A move with nothing in its
-                source folders is not offered at all, nor is any mark on a conversation no server
-                holds a copy of. */}
-            {canMark && (
-              <>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="size-11 lg:size-7"
-                  onClick={() => {
-                    markUnread(thread.id);
-                    onClose();
-                  }}
-                  aria-label="Mark as unread"
-                >
-                  <EnvelopeSimpleIcon size={15} />
-                </Button>
+            <>
+              <span aria-hidden className="mx-1.5 h-5 w-px bg-rule lg:hidden" />
+              <div className="flex items-center gap-0.5 lg:-ml-1.5">
                 {mailbox === 'trash' ? (
                   canMoveTo(thread.folders, 'inbox') && (
                     <Button
@@ -511,17 +470,84 @@ export const ThreadReader = ({
                     )}
                   </>
                 )}
-              </>
-            )}
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="size-11 lg:size-7"
+                  onClick={() => {
+                    markUnread(thread.id);
+                    onClose();
+                  }}
+                  aria-label="Mark as unread"
+                >
+                  <EnvelopeSimpleIcon size={15} />
+                </Button>
+              </div>
+            </>
+          )}
+          <Button
+            variant="ghost"
+            size="icon"
+            className="-mr-1.5 ml-auto hidden lg:inline-flex"
+            onClick={onClose}
+            aria-label="Close message"
+          >
+            <XIcon size={15} />
+          </Button>
+        </div>
+
+        <div className="flex items-start px-5 pb-3 lg:gap-x-2 lg:pt-2">
+          {canMark && (
             <Button
               variant="ghost"
               size="icon"
-              className="size-11 lg:size-7"
-              onClick={onClose}
-              aria-label="Close message"
+              onClick={() => toggleStar(thread.id)}
+              // The glyph sits on the content edge, under the bar's first glyph; on a phone its
+              // 44px target reaches into the margin. Same mark, same colour as the list.
+              className={cn(
+                '-mr-1 -ml-3.5 size-11 shrink-0 lg:mr-0 lg:-ml-1.5 lg:size-7',
+                thread.isStarred && 'text-signal hover:text-signal',
+              )}
+              aria-label="Star thread"
+              aria-pressed={thread.isStarred}
             >
-              <XIcon size={15} />
+              <StarIcon size={15} weight={thread.isStarred ? 'fill' : 'regular'} />
             </Button>
+          )}
+          {/* The first line's capitals centre on the star glyph, in its 44px touch target and in
+              its 28px one above `lg`. */}
+          <div className="min-w-0 flex-1 pt-3 lg:pt-1">
+            <h1
+              dir="auto"
+              className="text-[17px] leading-snug font-medium tracking-[-0.01em] text-paper"
+            >
+              {thread.subject}
+            </h1>
+            {/* How the thread is shown, not something done to it, so it sits with the facts about
+                it rather than on the bar. The count follows the list row's rule: only above one,
+                because "1 message" on a single message labels nothing. The switch appears once a
+                message has an HTML body to switch away from. */}
+            {(thread.messages.length > 1 || hasHtml) && (
+              <div className="mt-2 flex items-center gap-3">
+                {thread.messages.length > 1 && (
+                  <p className="font-mono text-2xs text-paper-faint">
+                    {thread.messages.length} messages
+                  </p>
+                )}
+                {hasHtml && (
+                  <div className="ml-auto">
+                    <IconSwitch
+                      label="Reading mode"
+                      options={READING_MODES}
+                      value={mode}
+                      onChange={setMode}
+                      // A 32px box on a phone, its 44px targets reaching past it into the row's air.
+                      cellClassName="relative h-8 w-10 after:absolute after:inset-x-0 after:-inset-y-1.5 lg:size-7 lg:after:hidden"
+                    />
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         </div>
       </header>
