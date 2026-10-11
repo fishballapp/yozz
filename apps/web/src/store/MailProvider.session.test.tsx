@@ -60,6 +60,13 @@ const mocks = vi.hoisted(() => ({
   answer: null as unknown,
   /** The next body written to the device cache waits here. */
   bodyWrite: null as Gate | null,
+  /**
+   * Whether a sync lands (as failed, asking for no task) instead of never landing. A sync that never
+   * lands is how most tests keep tasks out of the way, but an edit's teardown waits for the old
+   * sync to end, as the real one does once it is stale, so a test that edits an address needs one
+   * that ends. Without it the test races whether the sync had started when the edit came.
+   */
+  syncLands: false as boolean,
 }));
 
 vi.mock('@tanstack/react-router', () => ({
@@ -117,7 +124,13 @@ vi.mock('../threads/hydrate', () => ({
 // A sync that never lands and asks for no task, so every task a test sees is the one under test.
 vi.mock('../threads/sync', async importOriginal => ({
   ...(await importOriginal<typeof import('../threads/sync')>()),
-  syncAccount: () => new Promise(() => {}),
+  syncAccount: () =>
+    mocks.syncLands
+      ? Promise.resolve({
+          byFolder: {},
+          state: { status: 'failed', failure: { kind: 'error', detail: 'offline' }, at: 0 },
+        })
+      : new Promise(() => {}),
   prefetchBodies: () => {},
 }));
 vi.mock('../threads/summaries', async importOriginal => ({
@@ -319,6 +332,7 @@ beforeEach(() => {
   mocks.navigation = null;
   mocks.answer = null;
   mocks.bodyWrite = null;
+  mocks.syncLands = false;
   storage.clear();
 });
 
@@ -521,6 +535,10 @@ describe("an ended session's answers", () => {
 });
 
 describe('an edited address', () => {
+  beforeEach(() => {
+    mocks.syncLands = true;
+  });
+
   const lunchBody = () => {
     const [message] = LUNCH.messages;
     if (message === undefined) throw new Error('no message');
@@ -583,6 +601,10 @@ describe('an edited address', () => {
 });
 
 describe('a send already claimed when its address is edited or removed', () => {
+  beforeEach(() => {
+    mocks.syncLands = true;
+  });
+
   const sendHeldInSmtp = async () => {
     const theirs = await vault();
     const mounted = await mount(theirs.store);

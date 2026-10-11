@@ -446,6 +446,15 @@ describe('removeAddress', () => {
 });
 
 describe('replaceAddress', () => {
+  /**
+   * A removal's teardown (close, the old sync's end, the cache clear) runs on after the call
+   * returns. A test that removes waits for its clear, so it cannot land in the next test's events.
+   */
+  const removalTeardown = async () => {
+    await act(async () => mocks.syncs[0]?.finish());
+    await vi.waitFor(() => expect(mocks.events).toContain(`clear user-1 ${ALICE.address}`));
+  };
+
   const edited = (imap: Parameters<typeof record>[2], smtp?: Parameters<typeof record>[3]) =>
     record(ALICE.address, 'Alice', imap, smtp);
 
@@ -577,6 +586,7 @@ describe('replaceAddress', () => {
       await removing;
     });
     expect(storedNames(await store.list(ADDRESS_RECORD_TYPE))).toEqual(['Bob']);
+    await removalTeardown();
   });
 
   it('refuses an edit of an address that has been removed', async () => {
@@ -589,6 +599,7 @@ describe('replaceAddress', () => {
     });
     expect(mocks.events).not.toContain(`put ${ALICE.address}`);
     expect(storedNames(await store.list(ADDRESS_RECORD_TYPE))).toEqual(['Bob']);
+    await removalTeardown();
   });
 
   it('a removal begun while an edit is being written is deleted after the write, so the address stays gone', async () => {
@@ -629,5 +640,6 @@ describe('replaceAddress', () => {
     ]);
     expect(addressesOf(mail())).toEqual([BOB.address]);
     expect(storedNames(await store.list(ADDRESS_RECORD_TYPE))).toEqual(['Bob']);
+    await removalTeardown();
   });
 });
