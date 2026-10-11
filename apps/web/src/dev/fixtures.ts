@@ -3,6 +3,8 @@
  * offsets from module load.
  */
 
+import { MailAutoconfigSchema } from '@yozz.app/vault-contract';
+import type { AutoconfigLookup } from '../addresses/autoconfig';
 import type { AddressRecord } from '../addresses/record';
 
 const NOW = Date.now();
@@ -582,3 +584,28 @@ const filed = (thread: Thread): Thread => ({
 });
 
 export const THREADS: readonly Thread[] = AUTHORED.map(filed);
+
+/**
+ * Demo mode's server lookup. A `.example` domain with a Fastmail fixture address answers with that
+ * address's servers, as a provider that publishes them would; any other domain answers unavailable.
+ */
+export const demoAutoconfig = (domain: string): AutoconfigLookup => {
+  const fastmail = DEMO_ADDRESSES.find(
+    record =>
+      record.address.endsWith(`@${domain}`) &&
+      record.imap?.host === 'imap.fastmail.com' &&
+      record.smtp.host === 'smtp.fastmail.com',
+  );
+  if (!domain.endsWith('.example') || fastmail === undefined) return { status: 'unavailable' };
+  // Parsed, so the fixture obeys the same contract as a real answer (implicit TLS ports only).
+  return {
+    status: 'found',
+    config: MailAutoconfigSchema.parse({
+      imap: fastmail.imap ? { host: fastmail.imap.host, port: fastmail.imap.port } : null,
+      smtp: { host: fastmail.smtp.host, port: fastmail.smtp.port },
+      username: 'address',
+      source: 'provider',
+      sourceDomain: domain,
+    }),
+  };
+};
