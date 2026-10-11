@@ -3,15 +3,20 @@ import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AddressRecord } from '../../addresses/record';
+import type { MailConnectionFailure, Result } from '../../relay/connection';
 import { Address } from './Address';
 
 // @ts-expect-error React reads it off the global
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
-const ALICE: AddressRecord = {
+const SEND_ONLY: AddressRecord = {
   address: 'alice@example.com',
   senderName: 'Alice',
   smtp: { host: 'smtp.example.com', port: 465, username: 'alice', password: 'pw' },
+};
+const INBOUND: AddressRecord = {
+  ...SEND_ONLY,
+  imap: { host: 'imap.example.com', port: 993, username: 'alice', password: 'pw' },
 };
 
 /**
@@ -20,11 +25,17 @@ const ALICE: AddressRecord = {
  */
 const mocks = vi.hoisted(() => ({
   generation: 0,
+  address: 'alice@example.com',
   identities: [] as readonly AddressRecord[],
   listeners: new Set<() => void>(),
   removeAddress: vi.fn<(address: string) => Promise<void>>(),
+  replaceAddress: vi.fn<(record: AddressRecord) => Promise<void>>(),
   setSenderName: vi.fn<(address: string, senderName: string) => Promise<void>>(),
   navigate: vi.fn(async (_options: unknown) => {}),
+  testImap: vi.fn<(imap: unknown) => Promise<Result<void, MailConnectionFailure>>>(),
+  testSmtp: vi.fn<(smtp: unknown) => Promise<Result<void, MailConnectionFailure>>>(),
+  pins: new Map<string, string>(),
+  forgetPin: vi.fn<(peer: string) => Promise<void>>(),
 }));
 
 const setIdentities = (identities: readonly AddressRecord[]) => {
@@ -43,7 +54,9 @@ vi.mock('../../store/MailProvider', async () => {
         },
         () => mocks.identities,
       ),
+      isDemo: false,
       removeAddress: mocks.removeAddress,
+      replaceAddress: mocks.replaceAddress,
       setSenderName: mocks.setSenderName,
       watchSession: () => {
         const taken = mocks.generation;
@@ -54,10 +67,21 @@ vi.mock('../../store/MailProvider', async () => {
 });
 
 vi.mock('@tanstack/react-router', () => ({
-  useParams: () => ({ address: ALICE.address }),
+  useParams: () => ({ address: mocks.address }),
   useNavigate: () => mocks.navigate,
   Link: ({ children }: { children: React.ReactNode }) => <a href="/">{children}</a>,
 }));
+
+vi.mock('../../threads/sync', () => ({ testImap: mocks.testImap }));
+vi.mock('../../compose/send', () => ({ testSmtp: mocks.testSmtp }));
+vi.mock('../../relay/peer-store', () => ({
+  peerKey: (host: string, port: number) => `${host}:${port}`,
+  loadPin: async (peer: string) => mocks.pins.get(peer) ?? null,
+  forgetPin: mocks.forgetPin,
+}));
+
+const OK = { ok: true, value: undefined } as const;
+const REFUSED = (error: MailConnectionFailure) => ({ ok: false, error }) as const;
 
 const unmounts: (() => Promise<void>)[] = [];
 
@@ -81,13 +105,55 @@ const button = (label: string) => {
   return found;
 };
 
+const section = (label: string) => {
+  const found = [...document.body.querySelectorAll('section')].find(
+    candidate => candidate.querySelector('h3')?.textContent === label,
+  );
+  if (found === undefined) throw new Error(`no "${label}" section`);
+  return found;
+};
+
+const field = (id: string) => {
+  const found = document.getElementById(id);
+  if (!(found instanceof HTMLInputElement)) throw new Error(`no #${id} field`);
+  return found;
+};
+
+const typeInto = async (input: HTMLInputElement, value: string) => {
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set?.call(input, value);
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+};
+
+const displayName = () => {
+  const found = document.querySelector<HTMLInputElement>(
+    'input[aria-labelledby="address-display-name"]',
+  );
+  if (found === null) throw new Error('no display name field');
+  return found;
+};
+
+const submit = async (form: Element | null) => {
+  await act(async () =>
+    form?.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })),
+  );
+};
+
 const confirmRemoval = async () => {
   await act(async () => button('Remove address').click());
   await act(async () => button('Remove address').click());
 };
 
 beforeEach(() => {
-  setIdentities([ALICE]);
+  mocks.address = SEND_ONLY.address;
+  mocks.pins.clear();
+  mocks.testImap.mockResolvedValue(OK);
+  mocks.testSmtp.mockResolvedValue(OK);
+  mocks.replaceAddress.mockResolvedValue();
+  mocks.setSenderName.mockResolvedValue();
+  mocks.forgetPin.mockResolvedValue();
+  setIdentities([SEND_ONLY]);
 });
 
 afterEach(async () => {
@@ -95,24 +161,294 @@ afterEach(async () => {
   vi.clearAllMocks();
 });
 
-describe('Address', () => {
-  it('saves the display name on blur and shows a refusal', async () => {
-    mocks.setSenderName.mockRejectedValue(new Error('The vault refused'));
-    const page = await mount();
-    const input = page.querySelector<HTMLInputElement>('#address-sender-name');
-    if (input === null) throw new Error('no display name field');
+describe('Address header', () => {
+  it('says what the address does', async () => {
+    const send = await mount();
+    expect(send.querySelector('header p')?.textContent).toBe('Sends only');
+    expect(send.querySelector('header')?.textContent).toContain('send-only');
 
-    await act(async () => {
-      input.focus();
-      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set?.call(input, 'Al');
-      input.dispatchEvent(new Event('input', { bubbles: true }));
-      input.blur();
-    });
+    await act(async () => setIdentities([INBOUND]));
+    expect(send.querySelector('header p')?.textContent).toBe('Reads and sends');
+  });
+});
 
-    expect(mocks.setSenderName).toHaveBeenCalledWith(ALICE.address, 'Al');
-    expect(page.querySelector('[role="alert"]')?.textContent).toBe('The vault refused');
+describe('Display name', () => {
+  it('saves on blur and says Saved beside the field, which fades', async () => {
+    vi.useFakeTimers();
+    try {
+      const page = await mount();
+      await act(async () => {
+        displayName().focus();
+      });
+      await typeInto(displayName(), 'Al');
+      await act(async () => displayName().blur());
+
+      expect(mocks.setSenderName).toHaveBeenCalledWith(SEND_ONLY.address, 'Al');
+      const saved = page.querySelector('[aria-live="polite"]');
+      expect(saved?.textContent).toBe('Saved');
+      expect(saved?.className).toContain('opacity-100');
+
+      await act(async () => vi.advanceTimersByTime(2000));
+      expect(saved?.className).toContain('opacity-0');
+      await act(async () => vi.advanceTimersByTime(300));
+      expect(saved?.textContent).toBe('');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
+  it('saves on Enter', async () => {
+    const page = await mount();
+    await typeInto(displayName(), 'Ally');
+    await submit(page.querySelector('form'));
+    expect(mocks.setSenderName).toHaveBeenCalledWith(SEND_ONLY.address, 'Ally');
+  });
+
+  it('saves nothing when nothing changed', async () => {
+    await mount();
+    await act(async () => displayName().focus());
+    await act(async () => displayName().blur());
+    expect(mocks.setSenderName).not.toHaveBeenCalled();
+  });
+
+  it('previews the From line under the field', async () => {
+    const page = await mount();
+    expect(page.textContent).toContain('Recipients see Alice <alice@example.com>.');
+    await typeInto(displayName(), '');
+    expect(page.textContent).toContain('Recipients see alice@example.com.');
+  });
+
+  it('shows a refusal under the field, in its own section, and no Saved', async () => {
+    mocks.setSenderName.mockRejectedValue(new Error('The vault refused'));
+    const page = await mount();
+    await act(async () => displayName().focus());
+    await typeInto(displayName(), 'Al');
+    await act(async () => displayName().blur());
+
+    expect(section('Display name').querySelector('[role="alert"]')?.textContent).toBe(
+      'The vault refused',
+    );
+    expect(page.querySelector('[aria-live="polite"]')?.textContent).toBe('');
+  });
+});
+
+describe('Servers', () => {
+  beforeEach(() => {
+    setIdentities([INBOUND]);
+    mocks.address = INBOUND.address;
+  });
+
+  it('lists the servers and the one login as facts', async () => {
+    await mount();
+    const text = section('Servers').textContent;
+    expect(text).toContain('imap.example.com:993');
+    expect(text).toContain('smtp.example.com:465');
+    expect(text).toContain('Username');
+    expect(section('Servers').querySelector('form')).toBeNull();
+  });
+
+  it('shows each server whose key this device has pinned, and the ones it has not', async () => {
+    mocks.pins.set('imap.example.com:993', 'AbCdEfGhIjKlMnOpQrSt');
+    await mount();
+    const text = section('Servers').textContent;
+    expect(text).toContain('Key sha256/AbCdEfGhIjKl…');
+    expect(text).toContain('No key yet; pinned on first connection');
+    expect(button('Forget key')).toBeDefined();
+  });
+
+  it('forgets a pinned key only after the question is answered', async () => {
+    mocks.pins.set('imap.example.com:993', 'AbCdEfGhIjKlMnOpQrSt');
+    await mount();
+
+    await act(async () => button('Forget key').click());
+    expect(mocks.forgetPin).not.toHaveBeenCalled();
+    expect(document.body.textContent).toContain('trusts whatever key the server proves');
+
+    await act(async () => button('Forget key').click());
+    expect(mocks.forgetPin).toHaveBeenCalledWith('imap.example.com:993');
+    expect(section('Servers').textContent).not.toContain('sha256/');
+  });
+
+  it('Edit turns the section into a form, and Cancel restores the facts untouched', async () => {
+    await mount();
+    await act(async () => button('Edit').click());
+    expect(field('address-imap-host').value).toBe('imap.example.com');
+    expect(field('address-smtp-port').value).toBe('465');
+    expect(field('address-password').value).toBe('');
+
+    await typeInto(field('address-imap-host'), 'imap.other.example');
+    await act(async () => button('Cancel').click());
+    expect(section('Servers').querySelector('form')).toBeNull();
+    expect(section('Servers').textContent).toContain('imap.example.com:993');
+
+    await act(async () => button('Edit').click());
+    expect(field('address-imap-host').value).toBe('imap.example.com');
+  });
+
+  it('returns the keyboard to Edit once the facts are back', async () => {
+    await mount();
+    await act(async () => button('Edit').click());
+    await act(async () => button('Cancel').click());
+    expect(document.activeElement).toBe(button('Edit'));
+  });
+
+  it('tests both servers, naming each, then stores the record, keeping a blank password', async () => {
+    const imap = Promise.withResolvers<Result<void, MailConnectionFailure>>();
+    mocks.testImap.mockReturnValue(imap.promise);
+    await mount();
+    await act(async () => button('Edit').click());
+    await typeInto(field('address-imap-host'), 'imap.other.example');
+    await typeInto(field('address-username'), 'alice2');
+    await submit(section('Servers').querySelector('form'));
+
+    expect(button('Testing imap.other.example…').disabled).toBe(true);
+    expect(button('Cancel').disabled).toBe(true);
+    expect(mocks.replaceAddress).not.toHaveBeenCalled();
+
+    await act(async () => imap.resolve(OK));
+    expect(mocks.testSmtp).toHaveBeenCalled();
+    expect(mocks.replaceAddress).toHaveBeenCalledWith({
+      ...INBOUND,
+      imap: { host: 'imap.other.example', port: 993, username: 'alice2', password: 'pw' },
+      smtp: { ...INBOUND.smtp, username: 'alice2' },
+    });
+    expect(section('Servers').querySelector('form')).toBeNull();
+  });
+
+  it('a new password goes to both servers', async () => {
+    await mount();
+    await act(async () => button('Edit').click());
+    await typeInto(field('address-password'), 'fresh');
+    await submit(section('Servers').querySelector('form'));
+
+    expect(mocks.testImap).toHaveBeenCalledWith(expect.objectContaining({ password: 'fresh' }));
+    expect(mocks.testSmtp).toHaveBeenCalledWith(expect.objectContaining({ password: 'fresh' }));
+  });
+
+  it('locks every field while the tests run, so nothing typed meanwhile is dropped', async () => {
+    const imap = Promise.withResolvers<Result<void, MailConnectionFailure>>();
+    mocks.testImap.mockReturnValue(imap.promise);
+    await mount();
+    await act(async () => button('Edit').click());
+    await typeInto(field('address-password'), 'fresh');
+    await submit(section('Servers').querySelector('form'));
+
+    for (const id of [
+      'address-imap-host',
+      'address-smtp-port',
+      'address-username',
+      'address-password',
+    ]) {
+      expect(field(id).matches(':disabled')).toBe(true);
+    }
+    await act(async () => imap.resolve(OK));
+    expect(section('Servers').querySelector('form')).toBeNull();
+  });
+
+  it('stores nothing and tests nothing when nothing was edited', async () => {
+    await mount();
+    await act(async () => button('Edit').click());
+    await submit(section('Servers').querySelector('form'));
+
+    expect(mocks.testImap).not.toHaveBeenCalled();
+    expect(mocks.replaceAddress).not.toHaveBeenCalled();
+    expect(section('Servers').querySelector('form')).toBeNull();
+  });
+
+  it('keeps a failed IMAP test in the form, under the IMAP server, and stores nothing', async () => {
+    mocks.testImap.mockResolvedValue(REFUSED({ kind: 'auth', text: 'AUTHENTICATIONFAILED' }));
+    await mount();
+    await act(async () => button('Edit').click());
+    await typeInto(field('address-password'), 'wrong');
+    await submit(section('Servers').querySelector('form'));
+
+    const alert = section('Servers').querySelector('[role="alert"]');
+    expect(alert?.textContent).toBe('imap.example.com rejected the username or password');
+    expect(alert?.previousElementSibling?.contains(field('address-imap-host'))).toBe(true);
+    expect(mocks.testSmtp).not.toHaveBeenCalled();
+    expect(mocks.replaceAddress).not.toHaveBeenCalled();
+    expect(button('Save').disabled).toBe(false);
+    expect(field('address-password').value).toBe('wrong');
+  });
+
+  it('keeps a failed SMTP test under the SMTP server', async () => {
+    mocks.testSmtp.mockResolvedValue(REFUSED({ kind: 'auth', text: 'AUTHENTICATIONFAILED' }));
+    await mount();
+    await act(async () => button('Edit').click());
+    await typeInto(field('address-smtp-host'), 'smtp.other.example');
+    await submit(section('Servers').querySelector('form'));
+
+    expect(section('Servers').querySelector('[role="alert"]')?.textContent).toBe(
+      'smtp.other.example rejected the username or password',
+    );
+    expect(mocks.replaceAddress).not.toHaveBeenCalled();
+  });
+
+  it('refuses a port that is not a port before testing anything', async () => {
+    await mount();
+    await act(async () => button('Edit').click());
+    await typeInto(field('address-smtp-port'), '99999');
+    await submit(section('Servers').querySelector('form'));
+
+    expect(section('Servers').querySelector('[role="alert"]')?.textContent).toContain('SMTP host');
+    expect(mocks.testImap).not.toHaveBeenCalled();
+  });
+
+  it("shows the vault's refusal in the Servers section and stays in the form", async () => {
+    mocks.replaceAddress.mockRejectedValue(new Error('The vault refused'));
+    await mount();
+    await act(async () => button('Edit').click());
+    await typeInto(field('address-password'), 'fresh');
+    await submit(section('Servers').querySelector('form'));
+
+    expect(section('Servers').querySelector('[role="alert"]')?.textContent).toBe(
+      'The vault refused',
+    );
+    expect(section('Servers').querySelector('form')).not.toBeNull();
+  });
+
+  it('stores nothing and shows nothing once the session ended under the tests', async () => {
+    const imap = Promise.withResolvers<Result<void, MailConnectionFailure>>();
+    mocks.testImap.mockReturnValue(imap.promise);
+    await mount();
+    await act(async () => button('Edit').click());
+    await typeInto(field('address-password'), 'fresh');
+    await submit(section('Servers').querySelector('form'));
+
+    mocks.generation += 1;
+    await act(async () => imap.resolve(OK));
+    expect(mocks.testSmtp).not.toHaveBeenCalled();
+    expect(mocks.replaceAddress).not.toHaveBeenCalled();
+  });
+
+  it('asks for the two usernames when the address has two', async () => {
+    setIdentities([{ ...INBOUND, smtp: { ...INBOUND.smtp, username: 'alice-out' } }]);
+    await mount();
+    expect(section('Servers').textContent).toContain('IMAP user');
+    await act(async () => button('Edit').click());
+    expect(field('address-imap-username').value).toBe('alice');
+    expect(field('address-smtp-username').value).toBe('alice-out');
+  });
+
+  it('edits a send-only address without an IMAP server', async () => {
+    mocks.address = SEND_ONLY.address;
+    setIdentities([SEND_ONLY]);
+    await mount();
+    expect(section('Servers').textContent).not.toContain('IMAP');
+    await act(async () => button('Edit').click());
+    expect(document.getElementById('address-imap-host')).toBeNull();
+    await typeInto(field('address-smtp-host'), 'smtp.other.example');
+    await submit(section('Servers').querySelector('form'));
+
+    expect(mocks.testImap).not.toHaveBeenCalled();
+    expect(mocks.replaceAddress).toHaveBeenCalledWith({
+      ...SEND_ONLY,
+      smtp: { ...SEND_ONLY.smtp, host: 'smtp.other.example' },
+    });
+  });
+});
+
+describe('Remove', () => {
   it('keeps the page while the vault deletes the address, then leaves for the list', async () => {
     const vaultDelete = Promise.withResolvers<void>();
     mocks.removeAddress.mockImplementation(async () => {
@@ -127,7 +463,7 @@ describe('Address', () => {
 
     await act(async () => vaultDelete.resolve());
     // The store has dropped the address; the page still shows it as it leaves.
-    expect(page.textContent).toContain(ALICE.address);
+    expect(page.textContent).toContain(SEND_ONLY.address);
     expect(page.textContent).not.toContain('Not one of your addresses');
     expect(mocks.navigate).toHaveBeenCalledWith(expect.objectContaining({ to: '/settings' }));
   });
@@ -154,13 +490,16 @@ describe('Address', () => {
     expect(page.querySelector('[role="alert"]')).toBeNull();
   });
 
-  it('stays on the page with the refusal when the vault keeps the address', async () => {
+  it('stays on the page with the refusal inside the Remove section when the vault keeps the address', async () => {
     mocks.removeAddress.mockRejectedValue(new Error('The vault refused'));
     const page = await mount();
 
     await confirmRemoval();
     expect(mocks.navigate).not.toHaveBeenCalled();
-    expect(page.querySelector('[role="alert"]')?.textContent).toBe('The vault refused');
+    expect(section('Remove').querySelector('[role="alert"]')?.textContent).toBe(
+      'The vault refused',
+    );
+    expect(page.querySelectorAll('[role="alert"]')).toHaveLength(1);
     expect(button('Remove address').disabled).toBe(false);
   });
 });

@@ -155,6 +155,7 @@ export const useComposerStore = ({
   identities,
   accounts,
   bindRunOn,
+  currentAccount,
   sync,
   threadsRef,
   baseByAccount,
@@ -168,6 +169,12 @@ export const useComposerStore = ({
    * Taken with `watchSession`, before the first await, and carried through the work it starts.
    */
   bindRunOn: () => RunOn;
+  /**
+   * The inbound record an address has right now, or none once it was removed. A send already
+   * claimed files its Sent copy through this, not the record it was composed from, which an edit
+   * may have replaced.
+   */
+  currentAccount: (address: string) => InboundAddress | undefined;
   sync: (address?: string) => Promise<void>;
   /** The threads as rendered; read by the draft writes, which run outside a render. */
   threadsRef: RefObject<readonly ThreadState[]>;
@@ -259,8 +266,6 @@ export const useComposerStore = ({
    */
   const sessionGeneration = useRef(0);
   /** Read by the mirror's erase after its awaits; a later session's list is harmless there, since the runner it is handed refuses once its own session has ended. */
-  const accountsRef = useRef(accounts);
-  accountsRef.current = accounts;
 
   // A pasted `?compose=` URL seeds the draft before the vault has answered, so heal the sender
   // once identities exist without touching anything else typed.
@@ -296,22 +301,30 @@ export const useComposerStore = ({
         import('../compose/draft-mirror'),
       ]);
       const mirror = await readMirror(store, draftKey);
-      const account = accountsRef.current.find(
-        candidate => candidate.address === mirror?.mirror.locator?.account,
-      );
+      const address = mirror?.mirror.locator?.account;
+      const account = address === undefined ? undefined : currentAccount(address);
       if (account === undefined) return;
       await expungeMirror(runOn(account), store, draftKey);
     },
-    [],
+    [currentAccount],
   );
 
   /** One implementation of each phase for a live send and a resumed one, in the session it began in. */
   const sendEffectsFor = useCallback(
-    (store: RecordStore, runOn: RunOn, identity: AddressRecord): SendEffects => ({
+    (
+      store: RecordStore,
+      runOn: RunOn,
+      /** None when the address was removed after the send was claimed. */
+      identity: AddressRecord | undefined,
+    ): SendEffects => ({
       store,
       submit: async (bytes, handle) => {
         const { envelopeRecipients, submitBytes } = await import('../compose/send');
         const { record } = handle;
+        // Only a resumed send can lack it, and resume never submits.
+        if (identity === undefined) {
+          return { ok: false, error: { kind: 'error', detail: 'That address was removed' } };
+        }
         return submitBytes(
           identity,
           bytes,
@@ -324,13 +337,17 @@ export const useComposerStore = ({
       },
       copyToSent: async (target, bytes, handle) => {
         const messageId = handle.record.send?.messageId ?? '';
-        if (target === 'vault' || !isInbound(identity)) {
+        if (target === 'vault' || (identity !== undefined && !isInbound(identity))) {
           const { sentRecordFrom, storeSentRecord } = await import('../compose/sent-vault');
           await storeSentRecord(store, sentRecordFrom(handle.record, messageId, bytes, Date.now()));
           return { ok: true, value: null };
         }
+        // The record the address has now: an edit since the claim may have changed its login, and
+        // a removal means the person dropped that mailbox, so the send finishes without a copy in it.
+        const mailbox = currentAccount(handle.record.from);
+        if (mailbox === undefined) return { ok: true, value: null };
         const { storeSentCopy } = await import('../compose/send');
-        const copied = await storeSentCopy(runOn(identity), bytes, messageId);
+        const copied = await storeSentCopy(runOn(mailbox), bytes, messageId);
         if (!copied.ok) return copied;
         // The locator says which account and folder, so a later expunge or open needs no guessing.
         return {
@@ -342,7 +359,7 @@ export const useComposerStore = ({
       expungeMirror: handle => expungeMirrorCopy(store, runOn, handle.draftKey),
       now: Date.now,
     }),
-    [expungeMirrorCopy],
+    [expungeMirrorCopy, currentAccount],
   );
 
   /** Sends past their claim and still on the network; the browser asks before unloading. */
@@ -868,7 +885,8 @@ export const useComposerStore = ({
       await resumeSends(drafts, handle => {
         if (isCancelled()) return null;
         const identity = records.find(record => record.address === handle.record.from);
-        return identity === undefined ? null : sendEffectsFor(store, runOn, identity);
+        // An address removed since the claim still gets its send finished, without a copy.
+        return sendEffectsFor(store, runOn, identity);
       });
       // Checked after the read: one that spans a lock holds this user's drafts.
       const live = await listDrafts(store);

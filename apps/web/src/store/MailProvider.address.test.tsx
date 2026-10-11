@@ -77,11 +77,16 @@ vi.mock('../threads/sync', () => ({
     }),
 }));
 
-const record = (address: string, senderName: string): AddressRecord => ({
+const record = (
+  address: string,
+  senderName: string,
+  imap: Partial<NonNullable<AddressRecord['imap']>> = {},
+  smtp: Partial<AddressRecord['smtp']> = {},
+): AddressRecord => ({
   address,
   senderName,
-  imap: { host: 'imap.example.com', port: 993, username: address, password: 'pw' },
-  smtp: { host: 'smtp.example.com', port: 465, username: address, password: 'pw' },
+  imap: { host: 'imap.example.com', port: 993, username: address, password: 'pw', ...imap },
+  smtp: { host: 'smtp.example.com', port: 465, username: address, password: 'pw', ...smtp },
 });
 const ALICE = record('alice@example.com', 'Alice');
 const BOB = record('bob@example.com', 'Bob');
@@ -437,5 +442,192 @@ describe('removeAddress', () => {
     });
     expect(mocks.events).toEqual([`clear user-1 ${ALICE.address}`]);
     expect(addressesOf(mail())).toEqual([BOB.address]);
+  });
+});
+
+describe('replaceAddress', () => {
+  const edited = (imap: Parameters<typeof record>[2], smtp?: Parameters<typeof record>[3]) =>
+    record(ALICE.address, 'Alice', imap, smtp);
+
+  it('a new password closes the connection and keeps the cache, and syncs again once the old run has ended', async () => {
+    const store = await vaultWith([ALICE]);
+    const { mail } = await mount(store);
+    await vi.waitFor(() => expect(mocks.syncs).toHaveLength(1));
+    const [running] = mocks.syncs;
+    const next = edited({ password: 'new' });
+
+    await act(() => mail().replaceAddress(next));
+    expect(mail().identities).toEqual([next]);
+    expect((await store.list(ADDRESS_RECORD_TYPE)).map(row => row.plaintext)).toEqual([
+      JSON.stringify(next),
+    ]);
+    // The old run logs in as the old record no more, and the new one waits for it to end.
+    expect(running?.isStale()).toBe(true);
+    expect(mocks.closeLive).toHaveBeenCalledWith(1, ALICE.address);
+    expect(mocks.syncs).toHaveLength(1);
+
+    await act(async () => running?.finish());
+    await vi.waitFor(() => expect(mocks.syncs).toHaveLength(2));
+    expect(mocks.syncs[1]?.isStale()).toBe(false);
+    expect(mocks.events).toEqual([]);
+  });
+
+  it('a new IMAP host clears what was cached for the address, once the old run has ended and before the next sync', async () => {
+    const { mail } = await mount(await vaultWith([ALICE, BOB]));
+    await vi.waitFor(() => expect(mocks.syncs).toHaveLength(2));
+    const [running] = mocks.syncs;
+
+    await act(() => mail().replaceAddress(edited({ host: 'imap.other.example' })));
+    expect(mocks.closeLive).toHaveBeenCalledWith(1, ALICE.address);
+    expect(mocks.events).toEqual([]);
+    expect(mocks.syncs).toHaveLength(2);
+
+    await act(async () => running?.finish());
+    await vi.waitFor(() => expect(mocks.syncs).toHaveLength(3));
+    expect(mocks.events).toEqual([`clear user-1 ${ALICE.address}`]);
+    expect(mocks.syncs[2]?.isStale()).toBe(false);
+    // Bob's mail is another address's, and stays.
+    expect(mocks.syncs[1]?.isStale()).toBe(false);
+  });
+
+  it('a new login clears the cache as a new host does', async () => {
+    const { mail } = await mount(await vaultWith([ALICE]));
+    await vi.waitFor(() => expect(mocks.syncs).toHaveLength(1));
+
+    await act(() => mail().replaceAddress(edited({ username: 'someone-else' })));
+    await act(async () => mocks.syncs[0]?.finish());
+    await vi.waitFor(() => expect(mocks.events).toEqual([`clear user-1 ${ALICE.address}`]));
+  });
+
+  it('a new SMTP server leaves the connection and the cache alone', async () => {
+    const { mail } = await mount(await vaultWith([ALICE]));
+    await vi.waitFor(() => expect(mocks.syncs).toHaveLength(1));
+    const next = edited({}, { host: 'smtp.other.example' });
+
+    await act(() => mail().replaceAddress(next));
+    expect(mail().identities).toEqual([next]);
+    expect(mocks.syncs[0]?.isStale()).toBe(false);
+    expect(mocks.closeLive).not.toHaveBeenCalled();
+    expect(mocks.events).toEqual([]);
+  });
+
+  it('a refusal by the vault changes nothing', async () => {
+    const put = held();
+    const { mail } = await mount({ ...(await vaultWith([ALICE])), put: put.call });
+    await vi.waitFor(() => expect(mocks.syncs).toHaveLength(1));
+
+    let replacing = Promise.resolve();
+    act(() => {
+      replacing = mail().replaceAddress(edited({ host: 'imap.other.example' }));
+    });
+    // Nothing shows before the vault has it.
+    expect(mail().identities).toEqual([ALICE]);
+
+    await act(async () => {
+      put.calls[0]?.reject(new Error('offline'));
+      await expect(replacing).rejects.toThrow('offline');
+    });
+    expect(mail().identities).toEqual([ALICE]);
+    expect(mocks.syncs[0]?.isStale()).toBe(false);
+    expect(mocks.closeLive).not.toHaveBeenCalled();
+    expect(mocks.events).toEqual([]);
+  });
+
+  it('a lock while the vault writes shows and clears nothing in the next session', async () => {
+    const put = held();
+    const { mail, replaceSession } = await mount({
+      ...(await vaultWith([ALICE])),
+      put: put.call,
+    });
+    await vi.waitFor(() => expect(mocks.syncs).toHaveLength(1));
+
+    let replacing = Promise.resolve();
+    act(() => {
+      replacing = mail().replaceAddress(edited({ host: 'imap.other.example' }));
+    });
+    await replaceSession({ userId: 'user-2', store: await vaultWith([ALICE]) });
+    await vi.waitFor(() => expect(mocks.syncs).toHaveLength(2));
+
+    await act(async () => {
+      put.calls[0]?.resolve();
+      await replacing;
+    });
+    expect(mail().identities).toEqual([ALICE]);
+    expect(mocks.syncs[1]?.isStale()).toBe(false);
+    expect(mocks.closeLive).not.toHaveBeenCalled();
+    expect(mocks.events).toEqual([]);
+  });
+
+  it('refuses an edit once the removal of the address has begun, before writing anything', async () => {
+    const store = await vaultWith([ALICE, BOB]);
+    const remove = held();
+    const { mail } = await mount({ ...store, ...logged(store, remove.call) });
+
+    let removing = Promise.resolve();
+    act(() => {
+      removing = mail().removeAddress(ALICE.address);
+    });
+    await act(async () => {
+      await expect(mail().replaceAddress(edited({ password: 'new' }))).rejects.toThrow('removed');
+    });
+    expect(mocks.events).toEqual([]);
+
+    await act(async () => {
+      remove.calls[0]?.resolve();
+      await removing;
+    });
+    expect(storedNames(await store.list(ADDRESS_RECORD_TYPE))).toEqual(['Bob']);
+  });
+
+  it('refuses an edit of an address that has been removed', async () => {
+    const store = await vaultWith([ALICE, BOB]);
+    const { mail } = await mount({ ...store, put: logged(store).put });
+
+    await act(() => mail().removeAddress(ALICE.address));
+    await act(async () => {
+      await expect(mail().replaceAddress(edited({ password: 'new' }))).rejects.toThrow('removed');
+    });
+    expect(mocks.events).not.toContain(`put ${ALICE.address}`);
+    expect(storedNames(await store.list(ADDRESS_RECORD_TYPE))).toEqual(['Bob']);
+  });
+
+  it('a removal begun while an edit is being written is deleted after the write, so the address stays gone', async () => {
+    const store = await vaultWith([ALICE, BOB]);
+    const put = held();
+    const { mail } = await mount({
+      ...store,
+      put: async input => {
+        mocks.events.push(`put ${input.naturalKey}`);
+        await put.call();
+        await store.put(input);
+      },
+      remove: async (type: string, key: string) => {
+        mocks.events.push(`remove ${key}`);
+        await store.remove(type, key);
+      },
+    });
+
+    let replacing = Promise.resolve();
+    let removing = Promise.resolve();
+    act(() => {
+      replacing = mail().replaceAddress(edited({ password: 'new' }));
+    });
+    act(() => {
+      removing = mail().removeAddress(ALICE.address);
+    });
+    await act(async () => {});
+    expect(mocks.events).toEqual([`put ${ALICE.address}`]);
+
+    await act(async () => {
+      put.calls[0]?.resolve();
+      await replacing;
+      await removing;
+    });
+    expect(mocks.events.filter(event => !event.startsWith('clear'))).toEqual([
+      `put ${ALICE.address}`,
+      `remove ${ALICE.address}`,
+    ]);
+    expect(addressesOf(mail())).toEqual([BOB.address]);
+    expect(storedNames(await store.list(ADDRESS_RECORD_TYPE))).toEqual(['Bob']);
   });
 });

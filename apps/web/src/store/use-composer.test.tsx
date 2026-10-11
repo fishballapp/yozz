@@ -164,6 +164,7 @@ const render = async (store: RecordStore) => {
       ok: false,
       error: { kind: 'error', detail: 'no IMAP here' },
     }),
+    currentAccount: address => (address === ACCOUNT.address ? ACCOUNT : undefined),
     sync: async () => {},
     threadsRef: { current: [] },
     baseByAccount: {},

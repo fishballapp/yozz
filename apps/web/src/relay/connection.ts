@@ -28,7 +28,7 @@ export type MailConnectionFailure =
   /** Something threw outside the protocol layers. */
   | { readonly kind: 'error'; readonly detail: string }
   | { readonly kind: 'tls'; readonly detail: string }
-  /** The host proved a key other than the one pinned; Settings → Server keys accepts it. */
+  /** The host proved a key other than the one pinned; forgetting its pin, on the address's page in Settings, accepts it. */
   | { readonly kind: 'pin-mismatch'; readonly peer: string }
   | { readonly kind: 'imap'; readonly reason: ImapFailure }
   | { readonly kind: 'smtp'; readonly reason: SmtpFailure }

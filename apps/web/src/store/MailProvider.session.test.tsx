@@ -47,6 +47,8 @@ const mocks = vi.hoisted(() => ({
   managers: 0,
   /** Every IMAP task that reached a manager: which session's, and for which address. */
   runs: [] as { manager: number; account: string }[],
+  /** The IMAP password each of those tasks would have logged in with. */
+  logins: [] as string[],
   threads: [] as ThreadState[],
   /** Held SMTP: the send waits here before its `submitted` phase is written. */
   smtp: null as PromiseWithResolvers<void> | null,
@@ -77,6 +79,7 @@ vi.mock('../relay/live', () => ({
     return {
       run: async (account: AddressRecord) => {
         mocks.runs.push({ manager, account: account.address });
+        mocks.logins.push(account.imap?.password ?? '');
         return mocks.answer ?? { ok: false, error: { kind: 'error', detail: 'offline' } };
       },
       close: async () => {},
@@ -309,6 +312,7 @@ const agentTools = () => {
 beforeEach(() => {
   mocks.managers = 0;
   mocks.runs.length = 0;
+  mocks.logins.length = 0;
   mocks.threads = [];
   mocks.smtp = null;
   mocks.markRead = null;
@@ -513,5 +517,117 @@ describe("an ended session's answers", () => {
     ourPage.open();
     await settle();
     expect(mail().isLoadingOlder(ALICE.address)).toBe(false);
+  });
+});
+
+describe('an edited address', () => {
+  const lunchBody = () => {
+    const [message] = LUNCH.messages;
+    if (message === undefined) throw new Error('no message');
+    mocks.threads = [{ ...LUNCH, messages: [{ ...message, bodyStatus: 'pending', rawSize: 64 }] }];
+    mocks.answer = {
+      ok: true,
+      value: {
+        paragraphs: ['The code is 4417.'],
+        html: null,
+        hasTextPart: true,
+        inlineImagesTruncated: false,
+        attachments: [],
+      },
+    };
+  };
+
+  it('is never logged into again with the credentials it had, by work that began before the edit', async () => {
+    lunchBody();
+    const { mail } = await mount((await vault()).store);
+    const markRead = gate();
+    mocks.markRead = markRead;
+    const loaded = mail().loadBody('t1', 'm1');
+    await act(() => markRead.reached);
+
+    await act(() =>
+      mail().replaceAddress({
+        ...ALICE,
+        imap: { ...ALICE.imap, password: 'new-pw' },
+      } as AddressRecord),
+    );
+    markRead.open();
+    expect(await act(() => loaded)).toEqual({ status: 'failed' });
+    expect(mocks.logins).not.toContain('pw');
+
+    // Not left loading: back to pending, which the thread page fetches, now as the new record.
+    expect(mail().threads[0]?.messages[0]?.bodyStatus).toBe('pending');
+    const again = await act(() => mail().loadBody('t1', 'm1'));
+    expect(again.status).toBe('loaded');
+    expect(mocks.logins).toEqual(['new-pw']);
+  });
+
+  it('shows no body fetched for the mailbox it had once another host or login replaced it', async () => {
+    lunchBody();
+    const { mail } = await mount((await vault()).store);
+    const bodyWrite = gate();
+    mocks.bodyWrite = bodyWrite;
+    const loaded = mail().loadBody('t1', 'm1');
+    await act(() => bodyWrite.reached);
+
+    await act(() =>
+      mail().replaceAddress({
+        ...ALICE,
+        imap: { ...ALICE.imap, host: 'imap.other.example' },
+      } as AddressRecord),
+    );
+    bodyWrite.open();
+    expect(await act(() => loaded)).toEqual({ status: 'failed' });
+    expect(mail().threads[0]?.messages[0]?.body).toEqual([]);
+  });
+});
+
+describe('a send already claimed when its address is edited or removed', () => {
+  const sendHeldInSmtp = async () => {
+    const theirs = await vault();
+    const mounted = await mount(theirs.store);
+    await act(async () => {
+      mounted.composer().seedDraft('new', {
+        identityId: ALICE.address,
+        to: 'bob@example.org',
+        subject: 'Plans',
+        body: 'See you there.',
+      });
+    });
+    mocks.smtp = Promise.withResolvers();
+    const { settled } = await act(async () => {
+      const claimed = await mounted.composer().send();
+      if (!claimed.ok) throw new Error('the send was refused at the claim');
+      return { settled: claimed.value.settled };
+    });
+    return { ...mounted, store: theirs.store, settled };
+  };
+
+  it('files its Sent copy through the record the address has now, and completes', async () => {
+    mocks.answer = { ok: true, value: null };
+    const { mail, store, settled } = await sendHeldInSmtp();
+
+    await act(() =>
+      mail().replaceAddress({
+        ...ALICE,
+        imap: { ...ALICE.imap, password: 'new-pw' },
+      } as AddressRecord),
+    );
+    mocks.smtp?.resolve();
+    expect(await act(() => settled)).toEqual({ state: 'sent' });
+
+    expect(mocks.logins).toEqual(['new-pw']);
+    expect(await sendPhases(store)).toEqual([]);
+  });
+
+  it('finishes without a copy, and without an error, once the address was removed', async () => {
+    const { mail, store, settled } = await sendHeldInSmtp();
+
+    await act(() => mail().removeAddress(ALICE.address));
+    mocks.smtp?.resolve();
+    expect(await act(() => settled)).toEqual({ state: 'sent' });
+
+    expect(mocks.runs).toEqual([]);
+    expect(await sendPhases(store)).toEqual([]);
   });
 });

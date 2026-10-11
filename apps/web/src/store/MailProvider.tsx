@@ -88,6 +88,8 @@ type MailContextValue = ComposerShared & {
   /** Brings a thread back to the inbox from Trash or Archive. */
   restoreThread: (threadId: string, onRefused?: OnRefused) => boolean;
   putAddress: (record: AddressRecord) => Promise<void>;
+  /** Stores an edit of a stored address, tested by the caller, and makes the running app use it. */
+  replaceAddress: (record: AddressRecord) => Promise<void>;
   removeAddress: (address: string) => Promise<void>;
   /** Sets or clears the From display name; an empty string clears it. */
   setSenderName: (address: string, senderName: string) => Promise<void>;
@@ -102,10 +104,36 @@ const VAULT_LOCKED = {
   error: { kind: 'error', detail: 'The vault is locked' },
 } as const satisfies Result<never, MailConnectionFailure>;
 
+/** What a task answers when the record it was made for has been edited or removed since. */
+const ADDRESS_CHANGED = {
+  ok: false,
+  error: { kind: 'error', detail: 'This address was edited or removed while that was running' },
+} as const satisfies Result<never, MailConnectionFailure>;
+
 const upsertRecord = (current: readonly AddressRecord[], record: AddressRecord) => [
   ...current.filter(candidate => candidate.address !== record.address),
   record,
 ];
+
+/** Whether two records reach the same IMAP server with the same login. */
+const sameImap = (a: AddressRecord['imap'], b: AddressRecord['imap']): boolean =>
+  a === b ||
+  (a !== undefined &&
+    b !== undefined &&
+    a.host === b.host &&
+    a.port === b.port &&
+    a.username === b.username &&
+    a.password === b.password);
+
+/**
+ * Whether `before` and `after` may be different mailboxes. A new password or port reaches the same
+ * one; a new host or login may not, and its mail must not be shown under this address.
+ */
+const mayBeAnotherMailbox = (before: AddressRecord, after: AddressRecord): boolean =>
+  before.imap !== undefined &&
+  (after.imap === undefined ||
+    after.imap.host !== before.imap.host ||
+    after.imap.username !== before.imap.username);
 
 /**
  * Resolves in the task after the next frame is drawn, so state set before the call is on screen
@@ -189,6 +217,27 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
    * outlived the PUT would clear the new address's cache.
    */
   const removalsRef = useRef<Map<string, Promise<void>>>(new Map());
+  /**
+   * Replacements from the moment the edited record is stored until the old connection and cache are
+   * gone. The address does not sync again before then, or its first sync would write into a cache
+   * the teardown is about to clear.
+   */
+  const replacementsRef = useRef<Map<string, Promise<void>>>(new Map());
+  /** An edit's vault write in flight: a removal of that address waits for it, so the delete lands last. */
+  const editsRef = useRef<Map<string, Promise<void>>>(new Map());
+  const recordsRef = useRef(records);
+  recordsRef.current = records;
+  /** The inbound records as last rendered, or as an edit or a removal has just left them. */
+  const accountsRef = useRef<readonly InboundAddress[]>([]);
+  /** Whether `account` is still the record of its address: not edited, not removed. */
+  const isCurrentAccount = useCallback(
+    (account: InboundAddress) =>
+      accountsRef.current.some(
+        candidate =>
+          candidate.address === account.address && sameImap(candidate.imap, account.imap),
+      ),
+    [],
+  );
 
   const storeAddress = useCallback(
     async (record: AddressRecord) => {
@@ -216,6 +265,7 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
       // Stored in the vault the call began in, whose next unlock lists it. Shown in the session
       // after it, it would sync that person's mailbox over this one's connections.
       if (generation !== sessionGeneration.current) return;
+      accountsRef.current = upsertRecord(recordsRef.current, record).filter(isInbound);
       setRecords(current => upsertRecord(current, record));
     },
     [storeAddress],
@@ -244,6 +294,9 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
           removal.resolve();
         };
         try {
+          // An edit's write that is already on its way lands first, or it would bring the record back.
+          const editing = editsRef.current.get(address);
+          if (editing !== undefined) await editing;
           await store.remove(ADDRESS_RECORD_TYPE, address);
         } catch (err) {
           settle();
@@ -294,6 +347,99 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
     [session],
   );
 
+  /**
+   * The vault write is the commit point and a refusal changes nothing. After it the running app
+   * uses the new record at once: a sync begun for the old one goes stale, and the slow half runs
+   * off the caller, as a removal's does. The connection closes so the next task logs in with the
+   * new credentials. A host or login that may name another mailbox also sends the old one's mail
+   * off the screen and out of the cache, so it syncs fresh. The address syncs again only after.
+   */
+  const replaceAddress = useCallback(
+    async (record: AddressRecord) => {
+      const generation = sessionGeneration.current;
+      const { address } = record;
+      // A removal that has begun or finished owns the address: writing now would bring it back.
+      if (
+        removalsRef.current.has(address) ||
+        !recordsRef.current.some(r => r.address === address)
+      ) {
+        throw new Error('That address has been removed; nothing was stored.');
+      }
+      const write = Promise.withResolvers<void>();
+      editsRef.current.set(address, write.promise);
+      try {
+        await storeAddress(record);
+      } finally {
+        if (editsRef.current.get(address) === write.promise) editsRef.current.delete(address);
+        write.resolve();
+      }
+      // Stored in the vault the call began in, whose next unlock lists it; nothing of it is shown
+      // in the session after.
+      if (generation !== sessionGeneration.current) return;
+      const previous = recordsRef.current.find(candidate => candidate.address === address);
+      // Removed while the vault wrote; the removal's teardown stands.
+      if (previous === undefined) return;
+      const swap = (current: readonly AddressRecord[]) =>
+        current.map(candidate => (candidate.address === address ? record : candidate));
+      if (sameImap(previous.imap, record.imap)) {
+        setRecords(swap);
+        return;
+      }
+
+      const isAnotherMailbox = mayBeAnotherMailbox(previous, record);
+      const userId = userIdRef.current;
+      const manager = liveManagerRef.current;
+      const running = syncRunsRef.current.get(address)?.promise;
+      const replacement = Promise.withResolvers<void>();
+      replacementsRef.current.set(address, replacement.promise);
+      // Read by `isStale`, so a sync of the old record stops writing now, not at the next render.
+      accountsRef.current = swap(recordsRef.current).filter(isInbound);
+      // The next request starts a run of its own, with the new record, instead of joining that one.
+      syncRunsRef.current.delete(address);
+      if (isAnotherMailbox) {
+        hydratedRef.current.delete(address);
+        for (const key of movedRef.current.keys()) {
+          if (key.startsWith(`${address}/`)) movedRef.current.delete(key);
+        }
+        setBaseByAccount(current => {
+          const { [address]: _, ...rest } = current;
+          return rest;
+        });
+        setOps(current => current.filter(op => op.account !== address));
+        // All of them, as a removal does: an id carries no account.
+        inFlightBodiesRef.current.clear();
+        setBodiesById({});
+        setPreviews(current => withoutAccountPreviews(current, address));
+      }
+      setRecords(swap);
+
+      void (async () => {
+        await manager?.close(address);
+        await running;
+        if (isAnotherMailbox && userId !== null) {
+          const { createMailCache } = await import('../threads/cache');
+          // A clear that fails is finished by the lock's, which empties every account of this user.
+          await createMailCache(userId, address)
+            .clear()
+            .catch(() => {});
+        }
+        // The next session's state for an address of the same name is not this one's to drop.
+        if (isAnotherMailbox && generation === sessionGeneration.current) {
+          setSyncStates(current => {
+            const { [address]: _, ...rest } = current;
+            return rest;
+          });
+        }
+      })().finally(() => {
+        if (replacementsRef.current.get(address) === replacement.promise) {
+          replacementsRef.current.delete(address);
+        }
+        replacement.resolve();
+      });
+    },
+    [storeAddress],
+  );
+
   /** A name touches no connection, so it shows before the vault has it. */
   const setSenderName = useCallback(
     async (address: string, senderName: string) => {
@@ -320,21 +466,41 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
    */
   const bindRunOn = useCallback((): RunOn => {
     const generation = sessionGeneration.current;
-    return account => task => {
-      const manager = liveManagerRef.current;
-      if (generation !== sessionGeneration.current || manager === null) {
-        return Promise.resolve(VAULT_LOCKED);
+    /**
+     * A task is made for one record. Once that address has been edited or removed it is refused
+     * rather than run: `manager.run` logs in with whatever account it is handed, so old credentials
+     * would go back on the connection an edit just closed, and a draft or a Sent copy would land in
+     * the old mailbox. A task submitted before the edit is not interrupted: it finishes on the
+     * socket it started on (`live.ts`), which is how a send already past SMTP still files its copy.
+     * One submitted after waits for the edit's teardown, then runs as the new record.
+     */
+    return account => async task => {
+      if (generation !== sessionGeneration.current || liveManagerRef.current === null) {
+        return VAULT_LOCKED;
       }
+      if (!isCurrentAccount(account)) return ADDRESS_CHANGED;
+      const teardown = replacementsRef.current.get(account.address);
+      if (teardown !== undefined) {
+        await teardown;
+        if (generation !== sessionGeneration.current) return VAULT_LOCKED;
+        if (!isCurrentAccount(account)) return ADDRESS_CHANGED;
+      }
+      const manager = liveManagerRef.current;
+      if (manager === null) return VAULT_LOCKED;
       return manager.run(account, task);
     };
-  }, []);
+  }, [isCurrentAccount]);
 
   const identities = records;
+  /** The inbound record an address has now: what a send already claimed files its copy through. */
+  const currentAccount = useCallback(
+    (address: string) => accountsRef.current.find(account => account.address === address),
+    [],
+  );
 
   const accounts = useMemo(() => records.filter(isInbound), [records]);
   const ownedAddresses = useMemo(() => records.map(record => record.address), [records]);
 
-  const accountsRef = useRef(accounts);
   accountsRef.current = accounts;
 
   /** A write landed between a running sync's folders; see `isTorn`. */
@@ -359,11 +525,12 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
       const entry = { dirty: false, isTorn: false, promise: Promise.resolve() };
       entry.promise = (async () => {
         try {
+          // A replaced record's old connection and cache are gone before this address syncs again.
+          await replacementsRef.current.get(address);
           const { createMailCache } = await import('../threads/cache');
           const cache = createMailCache(userId, address);
           const isStale = () =>
-            generation !== sessionGeneration.current ||
-            !accountsRef.current.some(a => a.address === address);
+            generation !== sessionGeneration.current || !isCurrentAccount(account);
           // The next session's hydrated set is not this run's to mark.
           if (isStale()) return;
           // The cache is the list until the server answers.
@@ -385,9 +552,10 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
             if (isStale()) return;
           }
           const { syncAccount, prefetchBodies } = await import('../threads/sync');
-          // The first one fetches the TLS stack, long enough for a lock to land under it.
-          if (isStale()) return;
           do {
+            // The first pass fetched the TLS stack, long enough for a lock to land under it; a later
+            // one may belong to a record that has since been replaced, and would log in as it.
+            if (isStale()) return;
             entry.dirty = false;
             entry.isTorn = false;
             syncSeqRef.current += 1;
@@ -452,7 +620,7 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
       syncRunsRef.current.set(address, entry);
       return entry.promise;
     },
-    [bindRunOn],
+    [bindRunOn, isCurrentAccount],
   );
 
   const sync = useCallback(
@@ -479,6 +647,7 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
     identities,
     accounts,
     bindRunOn,
+    currentAccount,
     sync,
     threadsRef,
     baseByAccount,
@@ -562,6 +731,8 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
           }
           return [record];
         });
+        // Read by the runner, which would otherwise refuse the resumed work this load starts.
+        accountsRef.current = parsed.filter(isInbound);
         setRecords(parsed);
         await load(store, parsed, () => cancelled);
       } catch (err) {
@@ -629,8 +800,7 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
             ]);
           const cache = createMailCache(userId, account.address);
           const isStale = () =>
-            generation !== sessionGeneration.current ||
-            !accountsRef.current.some(a => a.address === account.address);
+            generation !== sessionGeneration.current || !isCurrentAccount(account);
           const res = await loadOlderPage(runOn(account), cache.folder(folder), isStale);
           if (generation !== sessionGeneration.current) return;
           if (!res.ok) {
@@ -669,7 +839,7 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
       inFlightOlderRef.current.set(key, promise);
       return promise;
     },
-    [bindRunOn, tearRunningSync],
+    [bindRunOn, isCurrentAccount, tearRunningSync],
   );
 
   const loadOlder = useCallback(
@@ -960,7 +1130,29 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
 
       const setEntry = (entry: BodyEntry) =>
         setBodiesById(current => ({ ...current, [messageId]: entry }));
+      /** The entry this fetch set, so retiring it never undoes a newer fetch's. */
+      const loadingEntry: BodyEntry = { status: 'loading' };
       const generation = sessionGeneration.current;
+      // What was fetched belongs to this record's mailbox: an edit that may name another one
+      // clears the bodies, and a late answer must not fill them again under an id that carries no account.
+      const isStale = () => generation !== sessionGeneration.current || !isCurrentAccount(account);
+      /**
+       * Retires this fetch if its record has moved on. The body goes back to `pending`, which is
+       * what loads it again with the current credentials: left `loading`, a password or port edit
+       * (which keeps the bodies) would leave the spinner up for ever, since only `pending` is fetched
+       * and only `failed` offers Retry.
+       */
+      const isRetired = () => {
+        if (!isStale()) return false;
+        if (generation === sessionGeneration.current) {
+          setBodiesById(current => {
+            if (current[messageId] !== loadingEntry) return current;
+            const { [messageId]: _, ...rest } = current;
+            return rest;
+          });
+        }
+        return true;
+      };
       const runOn = bindRunOn();
       const promise = (async (): Promise<BodyOutcome> => {
         try {
@@ -970,10 +1162,10 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
           ]);
           const cache = createMailCache(userId, accountAddress).folder(folder);
           const cached = await cache.getBody(uid);
-          if (generation !== sessionGeneration.current) return failed;
+          if (isRetired()) return failed;
           const fetchFresh = async () => {
             // Only the network says "Loading…": a body on the device replaces `pending` directly.
-            setEntry({ status: 'loading' });
+            setEntry(loadingEntry);
             const mark = await cache.getSync();
             if (mark === null) throw new Error(`${folder} has not synced`);
             // Same guard as the writes: a stale uid would fetch whatever now holds that number.
@@ -981,7 +1173,7 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
             return fetchBody(runOn(account), mark.name, uid, message.rawSize);
           };
           const res = cached !== null ? { ok: true as const, value: cached } : await fetchFresh();
-          if (generation !== sessionGeneration.current) return failed;
+          if (isRetired()) return failed;
           if (!res.ok) {
             setEntry(failed);
             setMailError(
@@ -995,7 +1187,7 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
           ) {
             // Best effort: a body that did not cache is fetched again next time.
             await cache.putBody(uid, res.value).catch(() => {});
-            if (generation !== sessionGeneration.current) return failed;
+            if (isRetired()) return failed;
           }
           const loaded: BodyOutcome = {
             status: 'loaded',
@@ -1009,7 +1201,7 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
           setMailError(null);
           return loaded;
         } catch (err) {
-          if (generation !== sessionGeneration.current) return failed;
+          if (isRetired()) return failed;
           setEntry(failed);
           setMailError(
             `message not loaded · ${describeMailFailure(
@@ -1018,14 +1210,18 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
             )}`,
           );
           return failed;
-        } finally {
-          inFlightBodiesRef.current.delete(messageId);
         }
       })();
       inFlightBodiesRef.current.set(messageId, promise);
+      // By identity: an edit may have cleared this fetch's slot for a newer one.
+      void promise.finally(() => {
+        if (inFlightBodiesRef.current.get(messageId) === promise) {
+          inFlightBodiesRef.current.delete(messageId);
+        }
+      });
       return promise;
     },
-    [bindRunOn, threads],
+    [bindRunOn, isCurrentAccount, threads],
   );
 
   const markRead = useCallback(
@@ -1112,6 +1308,7 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
       loadOlder,
       isLoadingOlder: mailbox => olderInFlight[mailbox] === true,
       putAddress,
+      replaceAddress,
       removeAddress,
       setSenderName,
       markRead,
@@ -1136,6 +1333,7 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
       loadOlder,
       olderInFlight,
       putAddress,
+      replaceAddress,
       removeAddress,
       setSenderName,
       markRead,
