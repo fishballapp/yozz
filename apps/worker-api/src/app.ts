@@ -3,7 +3,8 @@ import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { type CreateAuthOverrides, createAuth } from './auth.ts';
 import { getWebOrigin } from './env.ts';
-import { type AppEnv, apiError, jsonBodyLimit } from './http.ts';
+import { type AppEnv, apiError, isForeignKeyViolation, jsonBodyLimit } from './http.ts';
+import { accountRoute } from './routes/account.ts';
 import { autoconfigRoute } from './routes/autoconfig.ts';
 import { recordsRoute } from './routes/records.ts';
 import { relayRoute } from './routes/relay.ts';
@@ -32,6 +33,7 @@ export const createApp = (overrides?: CreateAuthOverrides) => {
     return auth.handler(c.req.raw);
   });
 
+  app.route('/api/v1/account', accountRoute);
   app.route('/api/v1/vault/records', recordsRoute);
   app.route('/api/v1/vault', unlockRoute);
   app.route('/api/v1/relay', relayRoute);
@@ -39,7 +41,10 @@ export const createApp = (overrides?: CreateAuthOverrides) => {
 
   app.notFound(c => apiError(c, 404, 'NOT_FOUND', 'Not found'));
 
-  app.onError((_err, c) => {
+  app.onError((err, c) => {
+    if (isForeignKeyViolation(err)) {
+      return apiError(c, 401, 'UNAUTHORIZED', 'This account no longer exists');
+    }
     return apiError(c, 500, 'INTERNAL_ERROR', 'Internal server error');
   });
 

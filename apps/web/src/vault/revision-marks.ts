@@ -13,6 +13,23 @@ export type PersistentRevisionMarks = RevisionMarks & {
   readonly close: () => void;
 };
 
+/** Every mark this device holds for `userId`. */
+export const forgetRevisionMarks = async (
+  userId: string,
+  idbFactory?: IDBFactory,
+): Promise<void> => {
+  const db = await openDeviceDb(getIdbFactory(idbFactory));
+  try {
+    await runTransaction<void>(db, STORES.marks.name, 'readwrite', (store, done) => {
+      // Arrays sort after strings, so `[userId, []]` closes the range over every `[userId, recordId]`.
+      store.delete(IDBKeyRange.bound([userId], [userId, []]));
+      done();
+    });
+  } finally {
+    db.close();
+  }
+};
+
 export const createIndexedDbRevisionMarks = (
   userId: string,
   idbFactory?: IDBFactory,

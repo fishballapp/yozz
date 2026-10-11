@@ -106,6 +106,7 @@ const ENDPOINTS: readonly {
     accepted: 200,
   },
   { name: 'reset the vault', path: '/api/v1/vault', method: 'DELETE', accepted: 200 },
+  { name: 'delete the account', path: '/api/v1/account', method: 'DELETE', accepted: 200 },
   {
     name: 'read a record',
     path: '/api/v1/vault/records/address/rec-1',

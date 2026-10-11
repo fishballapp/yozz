@@ -163,7 +163,33 @@ describe('Vault API client', () => {
 
     await client.resetVault();
     await client.remove('account', 'acc-1');
+    await client.deleteAccount();
 
-    expect(sentAccounts()).toEqual(['user-123', 'user-123']);
+    expect(sentAccounts()).toEqual(['user-123', 'user-123', 'user-123']);
+  });
+
+  it('deletes the account with one credentialed DELETE, and reports a stale session as such', async () => {
+    const mockFetch = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(Response.json({ ok: true }))
+      .mockResolvedValueOnce(
+        Response.json(
+          { error: { code: 'SESSION_NOT_FRESH', message: 'Sign in again to make this change' } },
+          { status: 403 },
+        ),
+      );
+    const client = createVaultApiClient('https://api.test', mockFetch).forAccount('user-123');
+
+    await client.deleteAccount();
+    expect(mockFetch).toHaveBeenCalledWith(
+      'https://api.test/api/v1/account',
+      expect.objectContaining({ method: 'DELETE', credentials: 'include' }),
+    );
+
+    await expect(client.deleteAccount()).rejects.toMatchObject({
+      name: 'VaultApiError',
+      code: 'SESSION_NOT_FRESH',
+      status: 403,
+    });
   });
 });

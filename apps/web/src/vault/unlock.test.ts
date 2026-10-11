@@ -3,11 +3,13 @@ import type { UnlockStatusResponse } from '@yozz.app/vault-contract';
 import { IDBFactory } from 'fake-indexeddb';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { type AccountVaultApi, type VaultApiClient, VaultApiError } from './api';
+import { createIndexedDbRevisionMarks } from './revision-marks';
 import {
   addPasskeyToSession,
   confirmIdentity,
   createPasskeyVault,
   createPasswordVault,
+  deleteAccount,
   loginWithPasskey,
   loginWithPassword,
   needsFreshSession,
@@ -117,6 +119,13 @@ const createMockWorker = () => {
       ),
       resetVault: vi.fn(async () =>
         answer('resetVault', () => {
+          mode = null;
+          wrappedDek = '';
+          passkeyWraps.clear();
+        }),
+      ),
+      deleteAccount: vi.fn(async () =>
+        answer('deleteAccount', () => {
           mode = null;
           wrappedDek = '';
           passkeyWraps.clear();
@@ -690,6 +699,82 @@ describe('Vault unlock and session orchestration', () => {
     worker.signInAs(null);
     expect(await resumeSession({ api, idbFactory })).toBeNull();
     expect(api.forAccount).not.toHaveBeenCalled();
+  });
+});
+
+describe('deleteAccount', () => {
+  let idbFactory: IDBFactory;
+
+  beforeEach(() => {
+    idbFactory = new IDBFactory();
+  });
+
+  /** What this device keeps for `account`: persisted unlock keys and a revision mark. */
+  const keepOnDevice = async (account: typeof ALICE) => {
+    await saveUnlockKeys(
+      {
+        userId: account.userId,
+        mode: 'password',
+        encKey: await crypto.subtle.generateKey({ name: 'AES-GCM', length: 256 }, false, [
+          'wrapKey',
+          'unwrapKey',
+        ]),
+        wrappedDek: 'wrap',
+        stamp: 'password:1000',
+      },
+      idbFactory,
+    );
+    const marks = createIndexedDbRevisionMarks(account.userId, idbFactory);
+    await marks.raiseTo('rec-1', 7);
+    marks.close();
+  };
+
+  const markOf = async (account: typeof ALICE) => {
+    const marks = createIndexedDbRevisionMarks(account.userId, idbFactory);
+    const mark = await marks.highWaterMark('rec-1');
+    marks.close();
+    return mark;
+  };
+
+  it('asks the server for the signed-in account, then forgets only that account’s keys and marks', async () => {
+    const { api, vaultOf } = createMockWorker();
+    await keepOnDevice(ALICE);
+    await keepOnDevice(BOB);
+
+    await deleteAccount(ALICE.userId, { api, idbFactory });
+
+    expect(vaultOf(ALICE.userId).deleteAccount).toHaveBeenCalledTimes(1);
+    expect(await loadUnlockKeys(ALICE.userId, idbFactory)).toBeNull();
+    expect(await markOf(ALICE)).toBeUndefined();
+    expect(await loadUnlockKeys(BOB.userId, idbFactory)).not.toBeNull();
+    expect(await markOf(BOB)).toBe(7);
+  });
+
+  it('forgets nothing while the server has not deleted the account, and says the session needs confirming', async () => {
+    const { api, vaultOf } = createMockWorker();
+    await keepOnDevice(ALICE);
+    vi.mocked(vaultOf(ALICE.userId).deleteAccount).mockRejectedValueOnce(
+      new VaultApiError('SESSION_NOT_FRESH', 'Sign in again to make this change', 403),
+    );
+
+    const refused = await deleteAccount(ALICE.userId, { api, idbFactory }).catch(
+      (error: unknown) => error,
+    );
+
+    expect(needsFreshSession(refused)).toBe(true);
+    expect(await loadUnlockKeys(ALICE.userId, idbFactory)).not.toBeNull();
+    expect(await markOf(ALICE)).toBe(7);
+  });
+
+  it('is refused under another account’s session', async () => {
+    const { api, signInAs } = createMockWorker();
+    await keepOnDevice(ALICE);
+    signInAs(BOB);
+
+    await expect(deleteAccount(ALICE.userId, { api, idbFactory })).rejects.toMatchObject({
+      code: 'ACCOUNT_MISMATCH',
+    });
+    expect(await loadUnlockKeys(ALICE.userId, idbFactory)).not.toBeNull();
   });
 });
 

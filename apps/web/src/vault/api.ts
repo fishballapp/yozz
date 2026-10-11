@@ -52,6 +52,8 @@ export type AccountVaultApi = VaultApi & {
     readonly wrappedDek: string;
   }) => Promise<void>;
   readonly resetVault: () => Promise<void>;
+  /** The signed-in user and everything stored for them; needs a fresh session. */
+  readonly deleteAccount: () => Promise<void>;
 };
 
 /** Names no account, so all it can do is hand out a client that does. */
@@ -215,6 +217,13 @@ const createAccountVaultApi = (
     }
   };
 
+  const deleteAccount = async (): Promise<void> => {
+    const res = await request('/api/v1/account', { method: 'DELETE' });
+    if (!res.ok) {
+      throw await parseErrorResponse(res);
+    }
+  };
+
   return {
     get,
     list,
@@ -225,6 +234,7 @@ const createAccountVaultApi = (
     finalizePasswordUnlock,
     finalizePasskeyUnlock,
     resetVault,
+    deleteAccount,
   };
 };
 

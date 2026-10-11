@@ -26,6 +26,7 @@ import {
   PasskeyPrfError,
 } from './passkey-prf';
 import { createRecordStore, type RecordStore } from './record-store';
+import { forgetRevisionMarks } from './revision-marks';
 import { forgetUnlockKeys, loadUnlockKeys, type UnlockKeys } from './unlock-keys';
 
 /**
@@ -577,4 +578,25 @@ export const resetVaultAccount = async (
   api: VaultApiClient = vaultApi,
 ): Promise<void> => {
   await api.forAccount(userId).resetVault();
+};
+
+/**
+ * Deletes the account on the server, then forgets what this device keeps for it. The session dies
+ * with the account (the response expires its cookies), so there is no Better Auth sign-out to make:
+ * it would be refused. Needs a fresh session; `needsFreshSession` recognises the refusal. Once the
+ * server has answered the account is gone, so a device that cannot forget is not an error: the
+ * leftovers belong to a user id no sign-in will ever have again.
+ */
+export const deleteAccount = async (
+  userId: string,
+  {
+    api = vaultApi,
+    idbFactory,
+  }: { readonly api?: VaultApiClient; readonly idbFactory?: IDBFactory } = {},
+): Promise<void> => {
+  await api.forAccount(userId).deleteAccount();
+  await Promise.allSettled([
+    forgetUnlockKeys(userId, idbFactory),
+    forgetRevisionMarks(userId, idbFactory),
+  ]);
 };

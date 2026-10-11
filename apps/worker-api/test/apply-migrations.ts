@@ -5,6 +5,7 @@ import migration0003 from '../migrations/0003_immutable_email.sql?raw';
 import migration0004 from '../migrations/0004_better_auth_account_issuer.sql?raw';
 import migration0005 from '../migrations/0005_vault_record_revision.sql?raw';
 import migration0006 from '../migrations/0006_remove_better_auth_account_issuer.sql?raw';
+import migration0007 from '../migrations/0007_vault_user_foreign_keys.sql?raw';
 
 const splitSql = (sql: string): string[] => {
   const statements: string[] = [];
@@ -41,33 +42,46 @@ const splitSql = (sql: string): string[] => {
   return statements;
 };
 
-export const applyMigrations = async (db: D1Database): Promise<void> => {
+const MIGRATIONS = [
+  {
+    name: '0001_app_tables.sql',
+    queries: splitSql(migration0001),
+  },
+  {
+    name: '0002_better_auth.sql',
+    queries: splitSql(migration0002),
+  },
+  {
+    name: '0003_immutable_email.sql',
+    queries: splitSql(migration0003),
+  },
+  {
+    name: '0004_better_auth_account_issuer.sql',
+    queries: splitSql(migration0004),
+  },
+  {
+    name: '0005_vault_record_revision.sql',
+    queries: splitSql(migration0005),
+  },
+  {
+    name: '0006_remove_better_auth_account_issuer.sql',
+    queries: splitSql(migration0006),
+  },
+  {
+    name: '0007_vault_user_foreign_keys.sql',
+    queries: splitSql(migration0007),
+  },
+];
+
+/** `through` stops after that many migrations, to seed the data an upgrade has to carry over. */
+export const applyMigrations = async (
+  db: D1Database,
+  { through = MIGRATIONS.length }: { readonly through?: number } = {},
+): Promise<void> => {
   await reset();
-  const migrations = [
-    {
-      name: '0001_app_tables.sql',
-      queries: splitSql(migration0001),
-    },
-    {
-      name: '0002_better_auth.sql',
-      queries: splitSql(migration0002),
-    },
-    {
-      name: '0003_immutable_email.sql',
-      queries: splitSql(migration0003),
-    },
-    {
-      name: '0004_better_auth_account_issuer.sql',
-      queries: splitSql(migration0004),
-    },
-    {
-      name: '0005_vault_record_revision.sql',
-      queries: splitSql(migration0005),
-    },
-    {
-      name: '0006_remove_better_auth_account_issuer.sql',
-      queries: splitSql(migration0006),
-    },
-  ];
-  await applyD1Migrations(db, migrations);
+  await applyD1Migrations(db, MIGRATIONS.slice(0, through));
 };
+
+/** The migrations `applyMigrations({ through })` left out. */
+export const applyPendingMigrations = (db: D1Database): Promise<void> =>
+  applyD1Migrations(db, MIGRATIONS);

@@ -11,8 +11,8 @@ import { getBaseUrl, getWebOrigin, type RuntimeEnv } from './env.ts';
 
 /**
  * Changing how a vault opens needs a session this young: Better Auth's passkey registration, our
- * `PUT /unlock` and vault reset (`requireFreshSession`). A stolen older cookie can read ciphertext
- * but cannot plant a credential that outlives it.
+ * `PUT /unlock`, vault reset and account deletion (`requireFreshSession`). A stolen older cookie can
+ * read ciphertext but cannot plant a credential that outlives it, or delete the account.
  */
 export const SESSION_FRESH_AGE_SECONDS = 60 * 60 * 24;
 

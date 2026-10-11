@@ -2,7 +2,7 @@ import 'fake-indexeddb/auto';
 import { IDBFactory } from 'fake-indexeddb';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { DeviceDbError } from './device-db';
-import { createIndexedDbRevisionMarks } from './revision-marks';
+import { createIndexedDbRevisionMarks, forgetRevisionMarks } from './revision-marks';
 
 describe('IndexedDB RevisionMarks implementation', () => {
   let idbFactory: IDBFactory;
@@ -46,6 +46,22 @@ describe('IndexedDB RevisionMarks implementation', () => {
 
     marksUser1.close();
     marksUser2.close();
+  });
+
+  it('forgets every mark of one user and no one else’s', async () => {
+    const user1 = createIndexedDbRevisionMarks('user-1', idbFactory);
+    const user2 = createIndexedDbRevisionMarks('user-2', idbFactory);
+    await user1.raiseTo('rec-a', 3);
+    await user1.raiseTo('rec-b', 4);
+    await user2.raiseTo('rec-a', 5);
+
+    await forgetRevisionMarks('user-1', idbFactory);
+
+    expect(await user1.highWaterMark('rec-a')).toBeUndefined();
+    expect(await user1.highWaterMark('rec-b')).toBeUndefined();
+    expect(await user2.highWaterMark('rec-a')).toBe(5);
+    user1.close();
+    user2.close();
   });
 
   it('persists marks across separate instance handles', async () => {

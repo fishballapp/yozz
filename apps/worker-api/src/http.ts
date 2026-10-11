@@ -61,14 +61,21 @@ export const requireNamedAccount = createMiddleware<AppEnv>(async (c, next) => {
   return next();
 });
 
-/** After `requireSession`: the same age rule Better Auth applies to passkey registration. */
+/** After `requireSession`: the same age rule Better Auth applies to passkey registration. It guards what a stolen cookie must not do: change how the vault opens, or delete the account. */
 export const requireFreshSession = createMiddleware<AppEnv>(async (c, next) => {
   const age = Date.now() - new Date(c.get('session').createdAt).getTime();
   if (age >= SESSION_FRESH_AGE_SECONDS * 1000) {
-    return apiError(c, 403, 'SESSION_NOT_FRESH', 'Sign in again to change how this vault opens');
+    return apiError(c, 403, 'SESSION_NOT_FRESH', 'Sign in again to make this change');
   }
   return next();
 });
+
+/**
+ * The vault tables reference `user`, so a write that passed its session check and then lost a race
+ * with account deletion fails here, not as a row under a dead user id.
+ */
+export const isForeignKeyViolation = (err: unknown): boolean =>
+  err instanceof Error && /FOREIGN KEY constraint failed/.test(err.message);
 
 export const jsonBodyLimit = bodyLimit({
   maxSize: 2 * 1024 * 1024,
