@@ -8,7 +8,7 @@ import {
   resetVaultAccount,
   switchModeToPasskey,
 } from '../../vault/unlock';
-import { Vault } from './Vault';
+import { Account } from './Account';
 
 // @ts-expect-error React reads it off the global
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
@@ -78,7 +78,7 @@ const mount = async () => {
   const host = document.createElement('div');
   document.body.append(host);
   const root = createRoot(host);
-  rerender = () => act(async () => root.render(<Vault />));
+  rerender = () => act(async () => root.render(<Account />));
   await rerender();
   unmounts.push(async () => {
     await act(async () => root.unmount());
@@ -112,7 +112,7 @@ afterEach(async () => {
   vi.resetAllMocks();
 });
 
-describe('Vault', () => {
+describe('Account', () => {
   it('hands a mode switch the guard of the session it started in, and opens nothing once it ended', async () => {
     const switching = Promise.withResolvers<{ outcome: 'ended' }>();
     vi.mocked(switchModeToPasskey).mockReturnValueOnce(switching.promise);

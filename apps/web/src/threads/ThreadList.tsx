@@ -150,7 +150,7 @@ export const ThreadList = ({
             body={`Nothing is connected at ${mailbox}.`}
             action={
               <Link
-                to="/connect"
+                to="/settings/new"
                 search={previous => previous}
                 className={buttonClass({ variant: 'secondary' })}
               >
@@ -168,7 +168,7 @@ export const ThreadList = ({
           body="YOZZ reads mail you already own. Connect an address and it appears here."
           action={
             <Link
-              to="/connect"
+              to="/settings/new"
               search={previous => previous}
               className={buttonClass({ variant: 'primary' })}
             >

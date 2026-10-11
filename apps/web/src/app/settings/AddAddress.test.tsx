@@ -2,8 +2,8 @@
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { AddressRecord } from '../addresses/record';
-import { Connect } from './Connect';
+import type { AddressRecord } from '../../addresses/record';
+import { AddAddress } from './AddAddress';
 
 // @ts-expect-error React reads it off the global
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
@@ -17,7 +17,7 @@ const mocks = vi.hoisted(() => ({
   imapTest: null as PromiseWithResolvers<void> | null,
 }));
 
-vi.mock('../store/MailProvider', () => ({
+vi.mock('../../store/MailProvider', () => ({
   useMail: () => ({
     identities: [],
     putAddress: mocks.putAddress,
@@ -29,10 +29,13 @@ vi.mock('../store/MailProvider', () => ({
   }),
 }));
 
-vi.mock('@tanstack/react-router', () => ({ useNavigate: () => mocks.navigate }));
+vi.mock('@tanstack/react-router', () => ({
+  useNavigate: () => mocks.navigate,
+  Link: ({ children }: { children: React.ReactNode }) => <a href="/">{children}</a>,
+}));
 
-vi.mock('../addresses/autoconfig', async importOriginal => ({
-  ...(await importOriginal<typeof import('../addresses/autoconfig')>()),
+vi.mock('../../addresses/autoconfig', async importOriginal => ({
+  ...(await importOriginal<typeof import('../../addresses/autoconfig')>()),
   lookupMailServers: async () => ({
     status: 'found',
     config: {
@@ -44,13 +47,13 @@ vi.mock('../addresses/autoconfig', async importOriginal => ({
     },
   }),
 }));
-vi.mock('../threads/sync', () => ({
+vi.mock('../../threads/sync', () => ({
   testImap: async () => {
     await mocks.imapTest?.promise;
     return { ok: true, value: undefined };
   },
 }));
-vi.mock('../compose/send', () => ({ testSmtp: async () => ({ ok: true, value: undefined }) }));
+vi.mock('../../compose/send', () => ({ testSmtp: async () => ({ ok: true, value: undefined }) }));
 
 const endSession = () => {
   mocks.generation += 1;
@@ -62,7 +65,7 @@ const mount = async () => {
   const host = document.createElement('div');
   document.body.append(host);
   const root = createRoot(host);
-  await act(async () => root.render(<Connect />));
+  await act(async () => root.render(<AddAddress />));
   unmounts.push(async () => {
     await act(async () => root.unmount());
     host.remove();
@@ -97,7 +100,7 @@ afterEach(async () => {
   vi.clearAllMocks();
 });
 
-describe('Connect', () => {
+describe('AddAddress', () => {
   it('stores a tested address and opens its mailbox', async () => {
     await submit(await mount());
     await vi.waitFor(() =>

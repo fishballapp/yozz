@@ -9,7 +9,7 @@ import {
   StarIcon,
   TrashIcon,
 } from '@phosphor-icons/react';
-import { Link, useParams } from '@tanstack/react-router';
+import { Link, useLocation, useParams } from '@tanstack/react-router';
 import type { ReactNode } from 'react';
 import { keepCompose, withCompose } from '../compose/intent';
 import { useMail } from '../store/MailProvider';
@@ -118,6 +118,7 @@ const SectionLabel = ({ children }: { children: ReactNode }) => (
 
 export const AddressRail = ({ onNavigate }: { onNavigate?: () => void }) => {
   const { accounts, threads } = useMail();
+  const isSettings = useLocation({ select: location => location.pathname.startsWith('/settings') });
 
   return (
     <nav className="flex h-full flex-col bg-ink-raised" aria-label="Mailboxes">
@@ -197,9 +198,21 @@ export const AddressRail = ({ onNavigate }: { onNavigate?: () => void }) => {
           to="/settings"
           search={keepCompose}
           onClick={onNavigate}
-          className="flex h-9 items-center gap-2.5 pr-2.5 pl-3 text-base text-paper-dim transition-colors hover:bg-ink-hover/60 hover:text-paper"
+          aria-current={isSettings ? 'page' : undefined}
+          className={cn(
+            'relative flex h-9 items-center gap-2.5 pr-2.5 pl-3 text-base transition-colors',
+            isSettings
+              ? 'bg-ink-hover text-paper'
+              : 'text-paper-dim hover:bg-ink-hover/60 hover:text-paper',
+          )}
         >
-          <span className="flex w-4 shrink-0 justify-center">
+          {isSettings && <span className="absolute inset-y-0 left-0 w-0.5 bg-signal" />}
+          <span
+            className={cn(
+              'flex w-4 shrink-0 justify-center',
+              isSettings ? 'text-paper' : 'text-paper-faint',
+            )}
+          >
             <GearIcon size={13} />
           </span>
           <span>Settings</span>

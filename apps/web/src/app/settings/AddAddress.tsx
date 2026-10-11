@@ -8,14 +8,15 @@ import {
   domainOf,
   lookupMailServers,
   usernameFor,
-} from '../addresses/autoconfig';
-import { type AddressRecord, addressRecordSchema, isInbound } from '../addresses/record';
-import { describeMailFailure } from '../relay/describe-failure';
-import { useMail } from '../store/MailProvider';
-import { Button } from '../ui/Button';
-import { FieldRow, Input } from '../ui/Field';
-import { Definition, PageColumn } from '../ui/PageColumn';
-import { vaultErrorMessage } from '../vault/screen-policy';
+} from '../../addresses/autoconfig';
+import { type AddressRecord, addressRecordSchema, isInbound } from '../../addresses/record';
+import { describeMailFailure } from '../../relay/describe-failure';
+import { useMail } from '../../store/MailProvider';
+import { Button } from '../../ui/Button';
+import { FieldRow, Input } from '../../ui/Field';
+import { Definition } from '../../ui/PageSection';
+import { vaultErrorMessage } from '../../vault/screen-policy';
+import { SettingsPane } from './SettingsPane';
 
 /**
  * The domain is looked up the way Thunderbird looks it up (autoconfig, ISPDB, the MX host's
@@ -50,7 +51,7 @@ const serversWith = (config: MailAutoconfig | null, isEditing: boolean, typed: S
         smtpPort: config.smtp === null ? typed.smtpPort : String(config.smtp.port),
       };
 
-export const Connect = () => {
+export const AddAddress = () => {
   const navigate = useNavigate();
   const { identities, putAddress, watchSession, isDemo: demo } = useMail();
 
@@ -184,7 +185,7 @@ export const Connect = () => {
         if (!demo) {
           // Both tried before anything is stored. The TLS stack loads on demand.
           if (isInbound(record)) {
-            const { testImap } = await import('../threads/sync');
+            const { testImap } = await import('../../threads/sync');
             if (!isCurrent()) return;
             const test = await testImap(record.imap);
             if (!isCurrent()) return;
@@ -193,7 +194,7 @@ export const Connect = () => {
               return;
             }
           }
-          const { testSmtp } = await import('../compose/send');
+          const { testSmtp } = await import('../../compose/send');
           if (!isCurrent()) return;
           const test = await testSmtp(record.smtp);
           if (!isCurrent()) return;
@@ -253,9 +254,9 @@ export const Connect = () => {
     setServers(current => ({ ...current, [key]: value }));
 
   return (
-    <PageColumn
+    <SettingsPane
       title="Add an address"
-      description="A reading address joins the inbox as its own view; a send-only address only ever appears as a From. The password is tried against each server first, then encrypted with a key only your devices hold."
+      subline="A reading address joins the inbox as its own view; a send-only address only ever appears as a From. The password is tried against each server first, then encrypted with a key only your devices hold."
     >
       <form onSubmit={submit} className="max-w-xl space-y-6">
         <FieldRow label="Email address" htmlFor="connect-address">
@@ -409,7 +410,7 @@ export const Connect = () => {
           {isBusy ? 'Checking…' : 'Add address'}
         </Button>
       </form>
-    </PageColumn>
+    </SettingsPane>
   );
 };
 

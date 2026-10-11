@@ -14,11 +14,11 @@ import { Route as AppRouteImport } from './routes/_app'
 import { Route as EnrolRouteImport } from './routes/enrol'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as WelcomeRouteImport } from './routes/welcome'
-import { Route as AppConnectRouteImport } from './routes/_app.connect'
 import { Route as AppSettingsRouteImport } from './routes/_app.settings'
 import { Route as AppMMailboxRouteImport } from './routes/_app.m.$mailbox'
 import { Route as AppSettingsIndexRouteImport } from './routes/_app.settings.index'
-import { Route as AppSettingsVaultRouteImport } from './routes/_app.settings.vault'
+import { Route as AppSettingsAccountRouteImport } from './routes/_app.settings.account'
+import { Route as AppSettingsNewRouteImport } from './routes/_app.settings.new'
 import { Route as AppMMailboxIndexRouteImport } from './routes/_app.m.$mailbox.index'
 import { Route as AppSettingsAAddressRouteImport } from './routes/_app.settings.a.$address'
 import { Route as AppMMailboxTSplatRouteImport } from './routes/_app.m.$mailbox.t.$'
@@ -47,11 +47,6 @@ const WelcomeRoute = WelcomeRouteImport.update({
   path: '/welcome',
   getParentRoute: () => rootRouteImport,
 } as any)
-const AppConnectRoute = AppConnectRouteImport.update({
-  id: '/connect',
-  path: '/connect',
-  getParentRoute: () => AppRoute,
-} as any)
 const AppSettingsRoute = AppSettingsRouteImport.update({
   id: '/settings',
   path: '/settings',
@@ -67,9 +62,14 @@ const AppSettingsIndexRoute = AppSettingsIndexRouteImport.update({
   path: '/',
   getParentRoute: () => AppSettingsRoute,
 } as any)
-const AppSettingsVaultRoute = AppSettingsVaultRouteImport.update({
-  id: '/vault',
-  path: '/vault',
+const AppSettingsAccountRoute = AppSettingsAccountRouteImport.update({
+  id: '/account',
+  path: '/account',
+  getParentRoute: () => AppSettingsRoute,
+} as any)
+const AppSettingsNewRoute = AppSettingsNewRouteImport.update({
+  id: '/new',
+  path: '/new',
   getParentRoute: () => AppSettingsRoute,
 } as any)
 const AppMMailboxIndexRoute = AppMMailboxIndexRouteImport.update({
@@ -93,10 +93,10 @@ export interface FileRoutesByFullPath {
   '/enrol': typeof EnrolRoute
   '/login': typeof LoginRoute
   '/welcome': typeof WelcomeRoute
-  '/connect': typeof AppConnectRoute
   '/settings': typeof AppSettingsRouteWithChildren
   '/m/$mailbox': typeof AppMMailboxRouteWithChildren
-  '/settings/vault': typeof AppSettingsVaultRoute
+  '/settings/account': typeof AppSettingsAccountRoute
+  '/settings/new': typeof AppSettingsNewRoute
   '/settings/': typeof AppSettingsIndexRoute
   '/settings/a/$address': typeof AppSettingsAAddressRoute
   '/m/$mailbox/': typeof AppMMailboxIndexRoute
@@ -107,8 +107,8 @@ export interface FileRoutesByTo {
   '/enrol': typeof EnrolRoute
   '/login': typeof LoginRoute
   '/welcome': typeof WelcomeRoute
-  '/connect': typeof AppConnectRoute
-  '/settings/vault': typeof AppSettingsVaultRoute
+  '/settings/account': typeof AppSettingsAccountRoute
+  '/settings/new': typeof AppSettingsNewRoute
   '/settings': typeof AppSettingsIndexRoute
   '/settings/a/$address': typeof AppSettingsAAddressRoute
   '/m/$mailbox': typeof AppMMailboxIndexRoute
@@ -121,10 +121,10 @@ export interface FileRoutesById {
   '/enrol': typeof EnrolRoute
   '/login': typeof LoginRoute
   '/welcome': typeof WelcomeRoute
-  '/_app/connect': typeof AppConnectRoute
   '/_app/settings': typeof AppSettingsRouteWithChildren
   '/_app/m/$mailbox': typeof AppMMailboxRouteWithChildren
-  '/_app/settings/vault': typeof AppSettingsVaultRoute
+  '/_app/settings/account': typeof AppSettingsAccountRoute
+  '/_app/settings/new': typeof AppSettingsNewRoute
   '/_app/settings/': typeof AppSettingsIndexRoute
   '/_app/settings/a/$address': typeof AppSettingsAAddressRoute
   '/_app/m/$mailbox/': typeof AppMMailboxIndexRoute
@@ -137,10 +137,10 @@ export interface FileRouteTypes {
     | '/enrol'
     | '/login'
     | '/welcome'
-    | '/connect'
     | '/settings'
     | '/m/$mailbox'
-    | '/settings/vault'
+    | '/settings/account'
+    | '/settings/new'
     | '/settings/'
     | '/settings/a/$address'
     | '/m/$mailbox/'
@@ -151,8 +151,8 @@ export interface FileRouteTypes {
     | '/enrol'
     | '/login'
     | '/welcome'
-    | '/connect'
-    | '/settings/vault'
+    | '/settings/account'
+    | '/settings/new'
     | '/settings'
     | '/settings/a/$address'
     | '/m/$mailbox'
@@ -164,10 +164,10 @@ export interface FileRouteTypes {
     | '/enrol'
     | '/login'
     | '/welcome'
-    | '/_app/connect'
     | '/_app/settings'
     | '/_app/m/$mailbox'
-    | '/_app/settings/vault'
+    | '/_app/settings/account'
+    | '/_app/settings/new'
     | '/_app/settings/'
     | '/_app/settings/a/$address'
     | '/_app/m/$mailbox/'
@@ -219,13 +219,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof WelcomeRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/_app/connect': {
-      id: '/_app/connect'
-      path: '/connect'
-      fullPath: '/connect'
-      preLoaderRoute: typeof AppConnectRouteImport
-      parentRoute: typeof AppRoute
-    }
     '/_app/settings': {
       id: '/_app/settings'
       path: '/settings'
@@ -247,11 +240,18 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppSettingsIndexRouteImport
       parentRoute: typeof AppSettingsRoute
     }
-    '/_app/settings/vault': {
-      id: '/_app/settings/vault'
-      path: '/vault'
-      fullPath: '/settings/vault'
-      preLoaderRoute: typeof AppSettingsVaultRouteImport
+    '/_app/settings/account': {
+      id: '/_app/settings/account'
+      path: '/account'
+      fullPath: '/settings/account'
+      preLoaderRoute: typeof AppSettingsAccountRouteImport
+      parentRoute: typeof AppSettingsRoute
+    }
+    '/_app/settings/new': {
+      id: '/_app/settings/new'
+      path: '/new'
+      fullPath: '/settings/new'
+      preLoaderRoute: typeof AppSettingsNewRouteImport
       parentRoute: typeof AppSettingsRoute
     }
     '/_app/m/$mailbox/': {
@@ -279,13 +279,15 @@ declare module '@tanstack/react-router' {
 }
 
 interface AppSettingsRouteChildren {
-  AppSettingsVaultRoute: typeof AppSettingsVaultRoute
+  AppSettingsAccountRoute: typeof AppSettingsAccountRoute
+  AppSettingsNewRoute: typeof AppSettingsNewRoute
   AppSettingsIndexRoute: typeof AppSettingsIndexRoute
   AppSettingsAAddressRoute: typeof AppSettingsAAddressRoute
 }
 
 const AppSettingsRouteChildren: AppSettingsRouteChildren = {
-  AppSettingsVaultRoute: AppSettingsVaultRoute,
+  AppSettingsAccountRoute: AppSettingsAccountRoute,
+  AppSettingsNewRoute: AppSettingsNewRoute,
   AppSettingsIndexRoute: AppSettingsIndexRoute,
   AppSettingsAAddressRoute: AppSettingsAAddressRoute,
 }
@@ -309,13 +311,11 @@ const AppMMailboxRouteWithChildren = AppMMailboxRoute._addFileChildren(
 )
 
 interface AppRouteChildren {
-  AppConnectRoute: typeof AppConnectRoute
   AppSettingsRoute: typeof AppSettingsRouteWithChildren
   AppMMailboxRoute: typeof AppMMailboxRouteWithChildren
 }
 
 const AppRouteChildren: AppRouteChildren = {
-  AppConnectRoute: AppConnectRoute,
   AppSettingsRoute: AppSettingsRouteWithChildren,
   AppMMailboxRoute: AppMMailboxRouteWithChildren,
 }

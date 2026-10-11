@@ -334,7 +334,7 @@ const staleSession = async (page: Page) => {
     },
   });
 
-  await page.goto(`${WEB}/settings/vault`);
+  await page.goto(`${WEB}/settings/account`);
   await page.getByRole('button', { name: 'Switch to a passkey' }).click();
   await page.getByRole('heading', { name: 'Confirm it’s you' }).waitFor();
   assertEqual('stale session: Settings asks to confirm before switching', true, true);

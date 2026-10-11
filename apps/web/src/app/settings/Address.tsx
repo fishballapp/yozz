@@ -1,5 +1,4 @@
 import { cn } from '@fishballapps/cn';
-import { CaretLeftIcon } from '@phosphor-icons/react';
 import { Link, useNavigate, useParams } from '@tanstack/react-router';
 import { useEffect, useState } from 'react';
 import { type AddressRecord, isInbound } from '../../addresses/record';
@@ -8,9 +7,10 @@ import { useMail } from '../../store/MailProvider';
 import { Button, buttonClass } from '../../ui/Button';
 import { ConfirmDialog } from '../../ui/ConfirmDialog';
 import { FieldRow, Input } from '../../ui/Field';
-import { Definition, PageSection } from '../../ui/PageColumn';
+import { Definition, PageSection } from '../../ui/PageSection';
 import { SendOnlyTag } from '../../ui/SendOnlyTag';
 import { vaultErrorMessage } from '../../vault/screen-policy';
+import { SettingsPane } from './SettingsPane';
 
 /**
  * Servers and the password are read-only on purpose: the record is re-tested end to end when it is
@@ -61,25 +61,14 @@ export const Address = () => {
   const sameUsername = !isInbound(record) || record.imap.username === record.smtp.username;
 
   return (
-    <>
-      <Link
-        to="/settings"
-        search={keepCompose}
-        className={cn(buttonClass({ variant: 'ghost', size: 'sm' }), '-ml-2.5')}
-      >
-        <CaretLeftIcon size={12} />
-        Addresses
-      </Link>
-
-      <div className="mt-4 mb-8">
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-          <h2 className="min-w-0 truncate text-[17px] leading-snug font-medium tracking-[-0.01em] text-paper">
-            {record.address}
-          </h2>
+    <SettingsPane
+      title={
+        <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
+          <span className="min-w-0 truncate">{record.address}</span>
           {!isInbound(record) && <SendOnlyTag />}
-        </div>
-      </div>
-
+        </span>
+      }
+    >
       {error !== null && (
         <p role="alert" className="mb-6 text-base text-danger">
           {error}
@@ -168,6 +157,6 @@ export const Address = () => {
           }
         />
       </PageSection>
-    </>
+    </SettingsPane>
   );
 };

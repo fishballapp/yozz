@@ -1,4 +1,4 @@
 import { createFileRoute } from '@tanstack/react-router';
-import { Addresses } from '../app/settings/Addresses';
+import { SettingsHome } from '../app/settings/SettingsHome';
 
-export const Route = createFileRoute('/_app/settings/')({ component: Addresses });
+export const Route = createFileRoute('/_app/settings/')({ component: SettingsHome });

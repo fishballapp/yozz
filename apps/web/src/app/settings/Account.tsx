@@ -5,7 +5,7 @@ import { useMail } from '../../store/MailProvider';
 import { Button, buttonClass } from '../../ui/Button';
 import { ConfirmDialog } from '../../ui/ConfirmDialog';
 import { FieldRow, Input } from '../../ui/Field';
-import { Definition, PageSection } from '../../ui/PageColumn';
+import { Definition, PageSection } from '../../ui/PageSection';
 import { getApiBaseUrl, isApiConfigured } from '../../vault/api-base-url';
 import { signOut } from '../../vault/auth-client';
 import { checkPasskeyPrfCapability, type PrfCapability } from '../../vault/passkey-prf';
@@ -21,6 +21,7 @@ import {
   switchModeToPasskey,
   switchModeToPassword,
 } from '../../vault/unlock';
+import { SettingsPane } from './SettingsPane';
 
 /** Handed whether the session it started in is still open, checked after each of its awaits. */
 type Action = (isCurrent: () => boolean) => Promise<void>;
@@ -36,7 +37,7 @@ type PendingConfirmation = {
 };
 
 /** One section per thing you might come here to do. */
-export const Vault = () => {
+export const Account = () => {
   const navigate = useNavigate();
   const { session, setSession, lock } = useVault();
   const { watchSession } = useMail();
@@ -67,21 +68,23 @@ export const Vault = () => {
 
   if (!isApiConfigured()) {
     return (
-      <div className="border-y border-rule bg-ink-raised px-4 py-3.5">
-        <p className="label-rule">No backend configured</p>
-        <p className="mt-2 max-w-xl text-base leading-relaxed text-paper-dim">
-          The vault needs the YOZZ API worker, and no address for it was supplied at build time. Set{' '}
-          <span className="font-mono text-2xs text-paper">VITE_API_URL</span> before starting the
-          app. Nothing on this screen will work until then.
-        </p>
-        <p className="mt-3 font-mono text-2xs text-paper-faint">Would call {getApiBaseUrl()}</p>
-      </div>
+      <SettingsPane title="Account">
+        <div className="border-y border-rule bg-ink-raised px-4 py-3.5">
+          <p className="label-rule">No backend configured</p>
+          <p className="mt-2 max-w-xl text-base leading-relaxed text-paper-dim">
+            The vault needs the YOZZ API worker, and no address for it was supplied at build time.
+            Set <span className="font-mono text-2xs text-paper">VITE_API_URL</span> before starting
+            the app. Nothing on this screen will work until then.
+          </p>
+          <p className="mt-3 font-mono text-2xs text-paper-faint">Would call {getApiBaseUrl()}</p>
+        </div>
+      </SettingsPane>
     );
   }
 
   if (session === null) {
     return (
-      <>
+      <SettingsPane title="Account">
         <PageSection
           label="Vault"
           note="Zero-knowledge applies to YOZZ: your addresses and passwords live in an encrypted store only you can open. Your existing mail provider remains unchanged. This device stays unlocked until you sign out."
@@ -104,7 +107,7 @@ export const Vault = () => {
           </div>
         </PageSection>
         <ServerKeysSection />
-      </>
+      </SettingsPane>
     );
   }
 
@@ -158,7 +161,7 @@ export const Vault = () => {
   };
 
   return (
-    <>
+    <SettingsPane title="Account">
       {error !== null && (
         <p role="alert" className="mb-6 text-base text-danger">
           {error}
@@ -430,6 +433,6 @@ export const Vault = () => {
           Sign out
         </Button>
       </PageSection>
-    </>
+    </SettingsPane>
   );
 };

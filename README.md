@@ -115,7 +115,7 @@ VITE_API_URL=http://localhost:8177 pnpm -F @yozz.app/web dev     # http://localh
 ```
 
 Open `/welcome`, enter an address, paste the magic link printed in the wrangler terminal into the
-same tab, pick an unlock mode, then add a mail address under `/connect`. Passkey unlock needs a
+same tab, pick an unlock mode, then add a mail address under `/settings/new`. Passkey unlock needs a
 PRF-capable authenticator (Chrome with Google Password Manager, or Safari with iCloud Keychain).
 
 ## Checks

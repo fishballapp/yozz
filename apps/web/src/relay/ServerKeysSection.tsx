@@ -1,7 +1,7 @@
 import { TrashIcon } from '@phosphor-icons/react';
 import { useCallback, useEffect, useState } from 'react';
 import { Button } from '../ui/Button';
-import { PageSection } from '../ui/PageColumn';
+import { PageSection } from '../ui/PageSection';
 import { forgetPin, listPins, type PinnedPeer } from './peer-store';
 
 /**
