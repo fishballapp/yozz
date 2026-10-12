@@ -14,6 +14,8 @@ import {
   getPasskeyWrap,
   getPasswordHash,
   getUnlockStatus,
+  hasPasskey,
+  removePasskeyUnlock,
   resetVault,
   sessionExists,
   VaultAlreadyExistsError,
@@ -130,6 +132,28 @@ export const unlockRoute = new Hono<AppEnv>()
       return refusedBatch(c, keepSessionId, 'The password changed somewhere else first');
     }
     return c.json({ ok: true as const }, 200);
+  })
+  .delete('/unlock/passkey/:credentialId', requireFreshSession, async c => {
+    const user = c.get('user');
+    const credentialId = c.req.param('credentialId');
+    const sessionId = c.get('session').id;
+
+    const isRemoved = await removePasskeyUnlock(c.env.DB, user.id, { credentialId, sessionId });
+    if (isRemoved) return c.json({ ok: true as const }, 200);
+
+    // Nothing applied: the session ended, the passkey is not this account's, or it is the last one.
+    if (!(await sessionExists(c.env.DB, sessionId, user.id))) {
+      return apiError(c, 401, 'UNAUTHORIZED', 'This session ended while the change was being made');
+    }
+    if (!(await hasPasskey(c.env.DB, user.id, credentialId))) {
+      return apiError(c, 404, 'NOT_FOUND', 'Passkey not found');
+    }
+    return apiError(
+      c,
+      409,
+      'CONFLICT',
+      'This is the last passkey that can sign in; add another first',
+    );
   })
   .delete('/', requireFreshSession, async c => {
     const user = c.get('user');

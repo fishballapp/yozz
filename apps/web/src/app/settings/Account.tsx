@@ -8,7 +8,8 @@ import { getApiBaseUrl, isApiConfigured } from '../../vault/api-base-url';
 import { signOut } from '../../vault/auth-client';
 import type { RecordStore } from '../../vault/record-store';
 import { useVault } from '../../vault/session';
-import { addPasskeyToSession, deleteAccount } from '../../vault/unlock';
+import { deleteAccount } from '../../vault/unlock';
+import { PasskeysSection } from './Passkeys';
 import { SettingsPane } from './SettingsPane';
 import { usePasskeyOffer, useSignInChange } from './SignInChange';
 
@@ -31,7 +32,6 @@ export const Account = ({ notice }: { notice?: SignInNotice }) => {
   const { session, lock } = useVault();
   const offer = usePasskeyOffer();
   const { busy, errors, run, confirmDialog } = useSignInChange<Area>();
-  const [addedPasskeyNote, setAddedPasskeyNote] = useState(false);
   // The delete question belongs to the session that opened it: a pane that outlives its session
   // (a sign-in as someone else in this tab) finds it closed and empty, never ready to delete them.
   const [deletion, setDeletion] = useState<{ store: RecordStore; typed: string } | null>(null);
@@ -131,32 +131,12 @@ export const Account = ({ notice }: { notice?: SignInNotice }) => {
       </PageSection>
 
       {session.mode === 'passkey' && canOfferPasskey && (
-        <PageSection
-          label="Passkeys"
-          note="Each passkey you add can sign you in on its own. Add one from a device before you need it."
+        <PasskeysSection
+          session={session}
+          isBusy={busy !== null}
           error={errors.passkeys}
-        >
-          <div className="space-y-3">
-            <Button
-              variant="secondary"
-              disabled={busy !== null}
-              onClick={() => {
-                setAddedPasskeyNote(false);
-                void run('passkeys', async isCurrent => {
-                  const added = await addPasskeyToSession({ currentSession: session, isCurrent });
-                  if (added.outcome === 'added') setAddedPasskeyNote(true);
-                });
-              }}
-            >
-              {busy === 'passkeys' ? 'Waiting for your authenticator…' : 'Add passkey'}
-            </Button>
-            {addedPasskeyNote && (
-              <p role="status" className="text-base text-paper-dim">
-                Added. That passkey can now sign you in.
-              </p>
-            )}
-          </div>
-        </PageSection>
+          run={run}
+        />
       )}
 
       <PageSection

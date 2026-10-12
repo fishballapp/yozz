@@ -15,7 +15,10 @@ import {
   signInWithPassword as authSignInPassword,
   deletePasskeyAuthenticator,
   getSession,
+  listPasskeyAuthenticators,
+  renamePasskeyAuthenticator,
 } from './auth-client';
+import { automaticPasskeyName, normalizePasskeyName } from './passkey-name';
 import {
   checkPasskeyPrfCapability,
   evaluatePrfForCredential,
@@ -194,7 +197,7 @@ const refuseIfAlreadyEnrolled = async (api: AccountVaultApi): Promise<void> => {
   const status = await api.getUnlockStatus();
   if (status.mode !== null) {
     throw new UnlockError(
-      `This account already has a ${status.mode} vault. Switch modes to keep it, or reset the vault first — creating one now would mint a new key and strand every existing record.`,
+      `This account already has a ${status.mode} sign-in. Switch modes to keep it, or start again first — creating one now would leave every saved record unreadable.`,
     );
   }
 };
@@ -259,7 +262,7 @@ const readCeremony = (result: unknown): PasskeyCeremony => {
 const registerPrfPasskey = async (userId: string): Promise<PasskeyCeremony> => {
   if ((await checkPasskeyPrfCapability()) === 'unsupported') {
     throw new PasskeyPrfError(
-      'This browser cannot use a passkey to open your data. Use a password instead.',
+      'This browser cannot use a passkey to unlock your saved addresses. Use a password instead.',
     );
   }
 
@@ -284,7 +287,7 @@ const derivePasskeyKey = async (
   try {
     if (!isPrfEnabled(clientExtensionResults)) {
       throw new PasskeyPrfError(
-        'This passkey cannot open your data. Try another one, or use a password instead.',
+        'This passkey cannot unlock your saved addresses. Try another one, or use a password instead.',
       );
     }
     return await derivePasskeyEncKey(await evaluatePrfForCredential(credentialId));
@@ -324,11 +327,12 @@ export const createPasskeyVault = async ({
     });
   }
 
+  await nameNewPasskey(account.userId, passkey.rowId);
   return openSession({ account, mode: 'passkey', encKey, wrappedDek, vault, api, idbFactory });
 };
 
 export const PASSKEY_DERIVES_ANOTHER_KEY =
-  'This passkey signed you in, but on this device it derives a different vault key from the one it was set up with, which synced passkeys can do. Log in on a device where it works, or with your password, then add a passkey on this device from Settings.';
+  'This passkey signed you in, but on this device it derives a different key from the one it was set up with, which synced passkeys can do. Log in on a device where it works, or with your password, then add a passkey on this device from Settings.';
 
 export const loginWithPasskey = async ({
   api = vaultApi,
@@ -384,7 +388,13 @@ const wrapUnderNewPasskey = async ({
   isCurrent,
   api = vaultApi,
 }: SessionChange): Promise<
-  | { readonly outcome: 'wrapped'; readonly encKey: CryptoKey; readonly wrappedDek: string }
+  | {
+      readonly outcome: 'wrapped';
+      readonly encKey: CryptoKey;
+      readonly wrappedDek: string;
+      readonly passkeyId: string;
+      readonly name: string;
+    }
   | SessionEnded
 > => {
   const { userId } = currentSession;
@@ -405,12 +415,23 @@ const wrapUnderNewPasskey = async ({
     return discardProvisionalPasskey({ userId, passkeyId: passkey.rowId, cause: err });
   }
   if (!isCurrent()) return SESSION_ENDED;
-  return { outcome: 'wrapped', encKey, wrappedDek };
+  const name = await nameNewPasskey(userId, passkey.rowId);
+  // The tab may have signed out or moved to another account while the name was being written.
+  if (!isCurrent()) return SESSION_ENDED;
+  return { outcome: 'wrapped', encKey, wrappedDek, passkeyId: passkey.rowId, name };
 };
 
 export const addPasskeyToSession = async (
   change: SessionChange,
-): Promise<{ readonly outcome: 'added' } | SessionEnded> => {
+): Promise<
+  | {
+      readonly outcome: 'added';
+      /** The row id and the automatic name it already carries, for the dialog that offers a better one. */
+      readonly passkeyId: string;
+      readonly name: string;
+    }
+  | SessionEnded
+> => {
   // Not a mode switch: the finalisation sets `unlock_mode = 'passkey'` and deletes the
   // password credential. `switchModeToPasskey` is the deliberate version.
   if (change.currentSession.mode !== 'passkey') {
@@ -420,7 +441,99 @@ export const addPasskeyToSession = async (
   }
 
   const wrapped = await wrapUnderNewPasskey(change);
-  return wrapped.outcome === 'ended' ? wrapped : { outcome: 'added' };
+  if (wrapped.outcome === 'ended') return wrapped;
+  return { outcome: 'added', passkeyId: wrapped.passkeyId, name: wrapped.name };
+};
+
+/** One of this account's passkeys, as Settings lists it. */
+export type AccountPasskey = {
+  /** Better Auth's row id, which `renamePasskey` takes. */
+  readonly id: string;
+  /** The WebAuthn credential id, which `removePasskey` takes. */
+  readonly credentialId: string;
+  /** What the passkey was named when it was added; most are not named. */
+  readonly name: string | null;
+  /** Epoch ms. */
+  readonly addedAt: number;
+};
+
+/** This account's passkeys, oldest first. A passkey the Worker lists is not necessarily one that signs in; see `removePasskey`. */
+export const listPasskeys = async (userId: string): Promise<readonly AccountPasskey[]> => {
+  const res = await listPasskeyAuthenticators(userId);
+  if (res.error || !res.data) {
+    const code = res.error && 'code' in res.error ? res.error.code : undefined;
+    if (code === 'ACCOUNT_MISMATCH') {
+      throw new VaultApiError(code, res.error?.message ?? code, 403);
+    }
+    throw new UnlockError('Your passkeys could not be listed. Reload the page to try again.');
+  }
+  return res.data
+    .map(({ id, credentialID, name, createdAt }) => ({
+      id,
+      credentialId: credentialID,
+      name: name?.trim() || null,
+      addedAt: new Date(createdAt).getTime(),
+    }))
+    .toSorted((a, b) => a.addedAt - b.addedAt);
+};
+
+/** The name goes in our own row; the Worker refuses a longer one and one that is not this account's. */
+export const renamePasskey = async ({
+  userId,
+  passkeyId,
+  name,
+}: {
+  readonly userId: string;
+  readonly passkeyId: string;
+  readonly name: string;
+}): Promise<void> => {
+  const res = await renamePasskeyAuthenticator({
+    userId,
+    passkeyId,
+    name: normalizePasskeyName(name),
+  });
+  if (!res.error) return;
+  const code = 'code' in res.error ? res.error.code : undefined;
+  if (code === 'ACCOUNT_MISMATCH') throw new VaultApiError(code, res.error.message ?? code, 403);
+  throw new UnlockError('That name could not be saved. Try again.');
+};
+
+/**
+ * A passkey is never left nameless, so the list can tell them apart: it gets this browser's name as
+ * soon as it can sign in. A failure leaves it nameless for **Rename**, which is rare and harmless.
+ */
+const nameNewPasskey = async (userId: string, passkeyId: string): Promise<string> => {
+  const name = automaticPasskeyName();
+  if (passkeyId) await renamePasskey({ userId, passkeyId, name }).catch(() => {});
+  return name;
+};
+
+/**
+ * The Worker deletes the passkey with its wrap and keeps the last one that can sign in. The DEK
+ * does not rotate, so this device (even one that signed in with this passkey) carries on unchanged.
+ */
+export const removePasskey = async ({
+  userId,
+  credentialId,
+  api = vaultApi,
+}: {
+  readonly userId: string;
+  readonly credentialId: string;
+  readonly api?: VaultApiClient;
+}): Promise<void> => {
+  try {
+    await api.forAccount(userId).removePasskey(credentialId);
+  } catch (error) {
+    if (error instanceof VaultApiError && error.code === 'CONFLICT') {
+      throw new UnlockError(
+        'This is the only passkey that can sign in. Add another before you remove it.',
+      );
+    }
+    if (error instanceof VaultApiError && error.code === 'NOT_FOUND') {
+      throw new UnlockError('That passkey is already gone.');
+    }
+    throw error;
+  }
 };
 
 /** The session as it opens after the switch, over the same store. */

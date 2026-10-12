@@ -34,6 +34,9 @@ export const CiphertextSchema = z
   .max(MAX_CIPHERTEXT_BYTES, 'Ciphertext exceeds maximum permitted size')
   .regex(/^[A-Za-z0-9+/=_-]+$/, 'Ciphertext must be valid base64/base64url');
 
+/** What a person may call a passkey; the Worker refuses a longer one and the web app never sends it. */
+export const PASSKEY_NAME_MAX_LENGTH = 60;
+
 export const UnlockModeSchema = z.enum(['password', 'passkey']);
 export type UnlockMode = z.infer<typeof UnlockModeSchema>;
 

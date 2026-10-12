@@ -169,6 +169,33 @@ describe('Vault API client', () => {
     expect(new Headers(init?.headers).get(ACCOUNT_HEADER)).toBe('user-123');
   });
 
+  it('removes a passkey by its credential id, URL-encoded, naming the account', async () => {
+    const mockFetch = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>
+      Response.json({ ok: true }),
+    );
+    const client = createVaultApiClient('https://api.test', mockFetch).forAccount('user-123');
+
+    await client.removePasskey('cred/with+odd=chars');
+
+    const [url, init] = mockFetch.mock.calls[0] ?? [];
+    expect(url).toBe('https://api.test/api/v1/vault/unlock/passkey/cred%2Fwith%2Bodd%3Dchars');
+    expect(init?.method).toBe('DELETE');
+    expect(init?.credentials).toBe('include');
+    expect(new Headers(init?.headers).get(ACCOUNT_HEADER)).toBe('user-123');
+  });
+
+  it('reports the last passkey as a conflict', async () => {
+    const mockFetch = vi.fn(async () =>
+      Response.json({ error: { code: 'CONFLICT', message: 'last' } }, { status: 409 }),
+    );
+    const client = createVaultApiClient('https://api.test', mockFetch).forAccount('user-123');
+
+    await expect(client.removePasskey('cred-1')).rejects.toMatchObject({
+      code: 'CONFLICT',
+      status: 409,
+    });
+  });
+
   it('names its account on every request', async () => {
     const mockFetch = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>
       Response.json({ ok: true }),
@@ -180,8 +207,9 @@ describe('Vault API client', () => {
     await client.resetVault();
     await client.remove('account', 'acc-1');
     await client.deleteAccount();
+    await client.removePasskey('cred-1');
 
-    expect(sentAccounts()).toEqual(['user-123', 'user-123', 'user-123']);
+    expect(sentAccounts()).toEqual(['user-123', 'user-123', 'user-123', 'user-123']);
   });
 
   it('deletes the account with one credentialed DELETE, and reports a stale session as such', async () => {

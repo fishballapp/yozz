@@ -150,7 +150,7 @@ const fitting = <T>(items: readonly T[], budget: number): readonly T[] => {
 
 /** What a tool read belongs to a session that has ended, and what it would do next to the session after it. */
 const SESSION_ENDED =
-  'The vault locked before this finished; try again once the user has unlocked it.';
+  'You were signed out before this finished; try again once the user has signed in again.';
 
 const NOT_ON_SERVER =
   'no copy of this conversation is on a mail server to change; a message just sent has one once its Sent copy syncs';
@@ -331,11 +331,11 @@ const saved = (outcome: Awaited<ReturnType<AgentPort['writeDraft']>>, threadId?:
           : ''
       }. Read it again with get_threads before writing.`;
     }
-    if (outcome.reason === 'locked') return 'The vault is locked, so nothing can be written.';
+    if (outcome.reason === 'locked') return "You're signed out, so nothing can be written.";
     if (outcome.reason === 'ended') {
-      return 'The vault locked before it answered; the draft may or may not be saved.';
+      return 'You were signed out before it answered; the draft may or may not be saved.';
     }
-    return 'The draft could not be saved; the vault could not be reached.';
+    return 'The draft could not be saved; YOZZ could not be reached.';
   })();
   return { error };
 };
@@ -344,7 +344,7 @@ export const buildAgentTools = (port: () => AgentPort): readonly AgentTool[] => 
   tool({
     name: 'get_addresses',
     description:
-      "The email addresses in the user's YOZZ vault. Inbound addresses have mail to read; every address can send.",
+      "The email addresses in the user's YOZZ account. Inbound addresses have mail to read; every address can send.",
     input: z.object({}),
     annotations: { readOnlyHint: true },
     run: () => ({ addresses: port().addresses }),
@@ -544,7 +544,7 @@ export const buildAgentTools = (port: () => AgentPort): readonly AgentTool[] => 
     run: async ({ draftId, threadId, replyToMessageId, from, to, cc, bcc, subject, body }) => {
       if (draftId !== undefined) {
         const handle = handleFor(port(), draftId);
-        if (handle === null) return { error: `No draft ${draftId} is in this vault.` };
+        if (handle === null) return { error: `No draft ${draftId} was found.` };
         const identity = identityFor(port(), from, handle.record.from);
         if (identity === null) {
           return { error: `${from} is not one of the user's addresses; see get_addresses.` };
@@ -660,13 +660,13 @@ export const buildAgentTools = (port: () => AgentPort): readonly AgentTool[] => 
             error: `That draft was changed since you read it; its current draftId is ${outcome.currentDraftId}.`,
           };
         case 'locked':
-          return { error: 'The vault is locked, so nothing can be deleted.' };
+          return { error: "You're signed out, so nothing can be deleted." };
         case 'ended':
           return {
-            error: 'The vault locked before it answered; the draft may or may not be gone.',
+            error: 'You were signed out before it answered; the draft may or may not be gone.',
           };
         default:
-          return { error: 'The draft could not be deleted; the vault could not be reached.' };
+          return { error: 'The draft could not be deleted; YOZZ could not be reached.' };
       }
     },
   }),
@@ -684,7 +684,7 @@ export const buildAgentTools = (port: () => AgentPort): readonly AgentTool[] => 
       const isCurrent = port().watchSession();
       if (input.target === 'composer') {
         const handle = port().drafts.find(candidate => candidate.draftKey === input.draftKey);
-        if (handle === undefined) return { error: `No draft ${input.draftKey} is in this vault.` };
+        if (handle === undefined) return { error: `No draft ${input.draftKey} was found.` };
         await port().openDraft(input.draftKey);
         if (!isCurrent()) return { error: SESSION_ENDED };
         return { ok: true, showing: 'composer', draftId: handle.draftId };

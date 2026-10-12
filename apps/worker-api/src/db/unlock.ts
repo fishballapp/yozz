@@ -299,6 +299,57 @@ export const resetVault = async (db: D1Database, userId: string): Promise<void> 
   ]);
 };
 
+/**
+ * A passkey and its wrap of the DEK, deleted together, never the last one that can sign in. Every
+ * statement carries the same guard, read from server state the client cannot write: the caller's
+ * session row is still there, the credential is this user's, and another passkey of theirs still
+ * has a wrap (one without a wrap cannot sign in, so it does not count as left). The passkey row goes
+ * last, so every statement reads the same rows; the other sessions go with it, never on a guess:
+ * the guard is what proves the removal applies. Two removals racing
+ * on the last two passkeys run one after the other, and the second finds one left and applies
+ * nothing (`false`).
+ */
+export const removePasskeyUnlock = async (
+  db: D1Database,
+  userId: string,
+  { credentialId, sessionId }: { credentialId: string; sessionId: string },
+): Promise<boolean> => {
+  const guard = `${SESSION_EXISTS}
+    AND EXISTS (SELECT 1 FROM passkey WHERE userId = ? AND credentialID = ?)
+    AND EXISTS (SELECT 1 FROM vault_passkey_wrap w
+                JOIN passkey p ON p.id = w.passkey_id AND p.userId = w.user_id
+                WHERE w.user_id = ? AND p.credentialID <> ?)`;
+  const expected = [sessionId, userId, userId, credentialId, userId, credentialId];
+  const results = await db.batch([
+    db
+      .prepare(
+        `DELETE FROM vault_passkey_wrap
+         WHERE user_id = ? AND passkey_id = (SELECT id FROM passkey WHERE userId = ? AND credentialID = ?)
+           AND ${guard}`,
+      )
+      .bind(userId, userId, credentialId, ...expected),
+    // Whoever held the removed passkey, a lost laptop included, is signed out; the caller is not.
+    db
+      .prepare(`DELETE FROM session WHERE userId = ? AND id <> ? AND ${guard}`)
+      .bind(userId, sessionId, ...expected),
+    db
+      .prepare(`DELETE FROM passkey WHERE userId = ? AND credentialID = ? AND ${guard}`)
+      .bind(userId, credentialId, ...expected),
+  ]);
+  return results[2]?.meta.changes === 1;
+};
+
+/** Whether the passkey is this user's, by the WebAuthn credential id the remove route is given. */
+export const hasPasskey = async (
+  db: D1Database,
+  userId: string,
+  credentialId: string,
+): Promise<boolean> =>
+  (await db
+    .prepare('SELECT 1 AS found FROM passkey WHERE userId = ? AND credentialID = ?')
+    .bind(userId, credentialId)
+    .first()) !== null;
+
 /** By the ROW id, which is what the delete endpoint addresses. */
 export const isPasskeyWrapped = async (
   db: D1Database,

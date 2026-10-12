@@ -28,3 +28,7 @@ export const fullTime = (at: number) =>
 /** 24-hour clock time: `14:09`. */
 export const clockTime = (at: number) =>
   new Date(at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+
+/** A calendar day, for a fact about the past with no clock time worth reading: `13 Oct 2026`. */
+export const fullDate = (at: number) =>
+  new Date(at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });

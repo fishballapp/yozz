@@ -92,6 +92,12 @@ const ENDPOINTS: readonly {
     accepted: 200,
   },
   {
+    name: 'remove a passkey',
+    path: '/api/v1/vault/unlock/passkey/cred-loose',
+    method: 'DELETE',
+    accepted: 200,
+  },
+  {
     name: 'switch to a password, deleting every passkey',
     path: '/api/v1/vault/unlock',
     method: 'PUT',
@@ -137,6 +143,19 @@ const ENDPOINTS: readonly {
     path: '/api/auth/passkey/delete-passkey',
     method: 'POST',
     body: { id: 'pk-loose' },
+    accepted: 200,
+  },
+  {
+    name: 'rename a passkey',
+    path: '/api/auth/passkey/update-passkey',
+    method: 'POST',
+    body: { id: 'pk-wrapped', name: 'Work laptop' },
+    accepted: 200,
+  },
+  {
+    name: 'list the passkeys',
+    path: '/api/auth/passkey/list-user-passkeys',
+    method: 'GET',
     accepted: 200,
   },
   {

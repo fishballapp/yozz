@@ -57,6 +57,8 @@ export type AccountVaultApi = VaultApi & {
     readonly credentialId: string;
     readonly wrappedDek: string;
   }) => Promise<void>;
+  /** The passkey and its wrap of the DEK, together; refused for the last passkey that can sign in. Needs a fresh session. */
+  readonly removePasskey: (credentialId: string) => Promise<void>;
   readonly resetVault: () => Promise<void>;
   /** The signed-in user and everything stored for them; needs a fresh session. */
   readonly deleteAccount: () => Promise<void>;
@@ -226,6 +228,15 @@ const createAccountVaultApi = (
     }
   };
 
+  const removePasskey = async (credentialId: string): Promise<void> => {
+    const res = await request(`/api/v1/vault/unlock/passkey/${encodeURIComponent(credentialId)}`, {
+      method: 'DELETE',
+    });
+    if (!res.ok) {
+      throw await parseErrorResponse(res);
+    }
+  };
+
   const resetVault = async (): Promise<void> => {
     const res = await request('/api/v1/vault', { method: 'DELETE' });
     if (!res.ok) {
@@ -250,6 +261,7 @@ const createAccountVaultApi = (
     finalizePasswordUnlock,
     changePassword,
     finalizePasskeyUnlock,
+    removePasskey,
     resetVault,
     deleteAccount,
   };

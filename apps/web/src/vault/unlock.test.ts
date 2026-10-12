@@ -12,10 +12,13 @@ import {
   createPasskeyVault,
   createPasswordVault,
   deleteAccount,
+  listPasskeys,
   loginWithPasskey,
   loginWithPassword,
   needsFreshSession,
   PASSKEY_DERIVES_ANOTHER_KEY,
+  removePasskey,
+  renamePasskey,
   resumeSession,
   switchModeToPasskey,
   switchModeToPassword,
@@ -29,6 +32,8 @@ const mocks = vi.hoisted(() => ({
   signInPasskey: vi.fn(),
   addPasskey: vi.fn(),
   deletePasskey: vi.fn(),
+  listPasskeys: vi.fn(),
+  renamePasskey: vi.fn(),
   getSession: vi.fn(),
 }));
 
@@ -37,6 +42,8 @@ vi.mock('./auth-client', () => ({
   signInWithPasskey: mocks.signInPasskey,
   addPasskeyAuthenticator: mocks.addPasskey,
   deletePasskeyAuthenticator: mocks.deletePasskey,
+  listPasskeyAuthenticators: mocks.listPasskeys,
+  renamePasskeyAuthenticator: mocks.renamePasskey,
   getSession: mocks.getSession,
 }));
 
@@ -138,6 +145,17 @@ const createMockWorker = () => {
             passkeyWraps.set(input.credentialId, input.wrappedDek);
           }),
       ),
+      removePasskey: vi.fn(async (credentialId: string) =>
+        answer('removePasskey', () => {
+          if (!passkeyWraps.has(credentialId)) {
+            throw new VaultApiError('NOT_FOUND', 'Passkey not found', 404);
+          }
+          if (passkeyWraps.size === 1) {
+            throw new VaultApiError('CONFLICT', 'The last passkey that can sign in', 409);
+          }
+          passkeyWraps.delete(credentialId);
+        }),
+      ),
       resetVault: vi.fn(async () =>
         answer('resetVault', () => {
           mode = null;
@@ -206,6 +224,7 @@ describe('Vault unlock and session orchestration', () => {
     api = worker.api;
     alice = worker.vaultOf(ALICE.userId);
     vi.clearAllMocks();
+    mocks.renamePasskey.mockResolvedValue({ data: {}, error: null });
 
     mocks.getSession.mockImplementation(async () => worker.session());
     mocks.signInEmail.mockImplementation(async (email: string) => {
@@ -271,6 +290,12 @@ describe('Vault unlock and session orchestration', () => {
 
     expect(session.mode).toBe('passkey');
     expect(prfGet).toHaveBeenCalledTimes(1);
+    // The first passkey is named too, by the row id (not the credential id), once it can sign in.
+    expect(mocks.renamePasskey).toHaveBeenCalledWith({
+      userId: 'user-123',
+      passkeyId: 'pk-row-id',
+      name: 'Passkey',
+    });
     expect(alice.finalizePasskeyUnlock).toHaveBeenCalledWith({
       isNewVault: true,
       credentialId: 'pk-registered-id',
@@ -420,7 +445,7 @@ describe('Vault unlock and session orchestration', () => {
     });
 
     await expect(createPasskeyVault({ account: ALICE, api, idbFactory })).rejects.toThrow(
-      /already has a password vault/,
+      /already has a password sign-in/,
     );
     // Before registering anything.
     expect(mocks.addPasskey).not.toHaveBeenCalled();
@@ -488,6 +513,99 @@ describe('Vault unlock and session orchestration', () => {
     expect(alice.finalizePasswordUnlock).toHaveBeenCalled();
 
     pwSession.store.close();
+  });
+
+  it('names a passkey it adds to an open session, and hands back what it called it', async () => {
+    mocks.addPasskey.mockResolvedValueOnce({
+      data: { id: 'pk-first-row' },
+      webauthn: {
+        response: { id: 'firstcred123' },
+        clientExtensionResults: { prf: { enabled: true } },
+      },
+    });
+    mockPrfAssertion('firstcred123', new Uint8Array(32).fill(1));
+    const session = await createPasskeyVault({ account: ALICE, api, idbFactory });
+    mocks.renamePasskey.mockClear();
+
+    mocks.addPasskey.mockResolvedValueOnce({
+      data: { id: 'pk-second-row' },
+      webauthn: {
+        response: { id: 'secondcred12' },
+        clientExtensionResults: { prf: { enabled: true } },
+      },
+    });
+    mockPrfAssertion('secondcred12', new Uint8Array(32).fill(2));
+    const added = await addPasskeyToSession({
+      currentSession: session,
+      isCurrent: () => true,
+      api,
+    });
+
+    expect(added).toEqual({ outcome: 'added', passkeyId: 'pk-second-row', name: 'Passkey' });
+    expect(mocks.renamePasskey).toHaveBeenCalledTimes(1);
+    expect(mocks.renamePasskey).toHaveBeenCalledWith({
+      userId: 'user-123',
+      passkeyId: 'pk-second-row',
+      name: 'Passkey',
+    });
+    session.store.close();
+  });
+
+  it.each([
+    ['adding a passkey', 'add'],
+    ['switching to a passkey', 'switch'],
+  ] as const)(
+    'reports the session as ended when it ended while %s was being named',
+    async (_label, flow) => {
+      const password = await createPasswordVault({
+        account: ALICE,
+        password: 'password123456',
+        api,
+        idbFactory,
+      });
+      const passkeySession: Awaited<ReturnType<typeof createPasswordVault>> = {
+        ...password,
+        mode: flow === 'add' ? 'passkey' : 'password',
+      };
+      mocks.addPasskey.mockResolvedValue({
+        data: { id: 'pk-row' },
+        webauthn: {
+          response: { id: 'oncecred1234' },
+          clientExtensionResults: { prf: { enabled: true } },
+        },
+      });
+      mockPrfAssertion('oncecred1234', new Uint8Array(32).fill(4));
+      // The naming request is held; the tab moves to another account while it is pending.
+      const naming = Promise.withResolvers<{ data: object; error: null }>();
+      mocks.renamePasskey.mockReturnValue(naming.promise);
+      let isCurrent = true;
+      const change = { currentSession: passkeySession, isCurrent: () => isCurrent, api };
+
+      const outcome = flow === 'add' ? addPasskeyToSession(change) : switchModeToPasskey(change);
+      await vi.waitFor(() => expect(mocks.renamePasskey).toHaveBeenCalled());
+      isCurrent = false;
+      naming.resolve({ data: {}, error: null });
+
+      expect(await outcome).toEqual({ outcome: 'ended' });
+      password.store.close();
+    },
+  );
+
+  it('adds the passkey even when the automatic name could not be saved', async () => {
+    mocks.renamePasskey.mockRejectedValue(new Error('offline'));
+    mocks.addPasskey.mockResolvedValue({
+      data: { id: 'pk-row' },
+      webauthn: {
+        response: { id: 'oncecred1234' },
+        clientExtensionResults: { prf: { enabled: true } },
+      },
+    });
+    mockPrfAssertion('oncecred1234', new Uint8Array(32).fill(3));
+
+    const session = await createPasskeyVault({ account: ALICE, api, idbFactory });
+
+    expect(session.mode).toBe('passkey');
+    session.store.close();
   });
 
   it('reports a refused passkey registration from an old session as the one that needs confirming', async () => {
@@ -956,6 +1074,152 @@ describe('deleteAccount', () => {
   });
 });
 
+describe('this account’s passkeys', () => {
+  /** A passkey as Better Auth lists it: `createdAt` arrives as an ISO string, not a `Date`. */
+  const listed = (credentialID: string, createdAt: string, name?: string) => ({
+    id: `row-${credentialID}`,
+    credentialID,
+    createdAt,
+    ...(name === undefined ? {} : { name }),
+  });
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('lists them oldest first, an unnamed one without a name', async () => {
+    mocks.listPasskeys.mockResolvedValue({
+      data: [
+        listed('cred-new', '2026-10-11T09:00:00.000Z', 'YubiKey'),
+        listed('cred-old', '2026-09-01T09:00:00.000Z'),
+        listed('cred-blank', '2026-10-01T09:00:00.000Z', '  '),
+      ],
+      error: null,
+    });
+
+    expect(await listPasskeys(ALICE.userId)).toEqual([
+      {
+        id: 'row-cred-old',
+        credentialId: 'cred-old',
+        name: null,
+        addedAt: Date.parse('2026-09-01T09:00:00.000Z'),
+      },
+      {
+        id: 'row-cred-blank',
+        credentialId: 'cred-blank',
+        name: null,
+        addedAt: Date.parse('2026-10-01T09:00:00.000Z'),
+      },
+      {
+        id: 'row-cred-new',
+        credentialId: 'cred-new',
+        name: 'YubiKey',
+        addedAt: Date.parse('2026-10-11T09:00:00.000Z'),
+      },
+    ]);
+    expect(mocks.listPasskeys).toHaveBeenCalledWith(ALICE.userId);
+  });
+
+  it('says another sign-in replaced the account as that, and any other refusal as a sentence', async () => {
+    mocks.listPasskeys.mockResolvedValueOnce({
+      data: null,
+      error: {
+        code: 'ACCOUNT_MISMATCH',
+        message: 'This browser is signed in to another account now',
+      },
+    });
+    await expect(listPasskeys(ALICE.userId)).rejects.toMatchObject({ code: 'ACCOUNT_MISMATCH' });
+
+    mocks.listPasskeys.mockResolvedValueOnce({ data: null, error: { message: 'boom' } });
+    await expect(listPasskeys(ALICE.userId)).rejects.toThrow('Your passkeys could not be listed');
+  });
+
+  describe('naming one', () => {
+    it('trims and caps the name, and sends it for the passkey row', async () => {
+      mocks.renamePasskey.mockResolvedValue({ data: {}, error: null });
+
+      await renamePasskey({
+        userId: ALICE.userId,
+        passkeyId: 'pk-row',
+        name: `  ${'x'.repeat(80)} `,
+      });
+
+      expect(mocks.renamePasskey).toHaveBeenCalledWith({
+        userId: ALICE.userId,
+        passkeyId: 'pk-row',
+        name: 'x'.repeat(60),
+      });
+    });
+
+    it('says another sign-in replaced the account as that, and any other refusal as a sentence', async () => {
+      mocks.renamePasskey.mockResolvedValueOnce({
+        data: null,
+        error: {
+          code: 'ACCOUNT_MISMATCH',
+          message: 'This browser is signed in to another account now',
+        },
+      });
+      await expect(
+        renamePasskey({ userId: ALICE.userId, passkeyId: 'pk-row', name: 'x' }),
+      ).rejects.toMatchObject({ code: 'ACCOUNT_MISMATCH' });
+
+      mocks.renamePasskey.mockResolvedValueOnce({ data: null, error: { message: 'boom' } });
+      await expect(
+        renamePasskey({ userId: ALICE.userId, passkeyId: 'pk-row', name: 'x' }),
+      ).rejects.toThrow('That name could not be saved');
+    });
+  });
+
+  describe('removing one', () => {
+    const accountWith = async (...credentialIds: string[]) => {
+      const { api, vaultOf } = createMockWorker();
+      for (const credentialId of credentialIds) {
+        await vaultOf(ALICE.userId).finalizePasskeyUnlock({
+          isNewVault: false,
+          credentialId,
+          wrappedDek: `wrap-${credentialId}`,
+        });
+      }
+      return { api, vaultOf };
+    };
+
+    it('asks the Worker to remove it, for the account it names', async () => {
+      const { api, vaultOf } = await accountWith('cred-1', 'cred-2');
+
+      await removePasskey({ userId: ALICE.userId, credentialId: 'cred-1', api });
+
+      expect(vaultOf(ALICE.userId).removePasskey).toHaveBeenCalledWith('cred-1');
+      expect(api.forAccount).toHaveBeenCalledWith(ALICE.userId);
+    });
+
+    it('says the last passkey cannot go, and that one already gone is gone', async () => {
+      const { api } = await accountWith('cred-1');
+
+      await expect(
+        removePasskey({ userId: ALICE.userId, credentialId: 'cred-1', api }),
+      ).rejects.toThrow('only passkey that can sign in');
+      await expect(
+        removePasskey({ userId: ALICE.userId, credentialId: 'cred-none', api }),
+      ).rejects.toThrow('already gone');
+    });
+
+    it('leaves a stale session for the caller to confirm', async () => {
+      const { api, vaultOf } = await accountWith('cred-1', 'cred-2');
+      vi.mocked(vaultOf(ALICE.userId).removePasskey).mockRejectedValueOnce(
+        new VaultApiError('SESSION_NOT_FRESH', 'Sign in again to make this change', 403),
+      );
+
+      const refused = await removePasskey({
+        userId: ALICE.userId,
+        credentialId: 'cred-1',
+        api,
+      }).catch((error: unknown) => error);
+
+      expect(needsFreshSession(refused)).toBe(true);
+    });
+  });
+});
+
 describe('createPasswordVault with a short password', () => {
   it('refuses before touching the server or the key schedule', async () => {
     const { api, vaultOf } = createMockWorker();
@@ -994,7 +1258,7 @@ describe('createPasswordVault over an enrolled account', () => {
         api,
         idbFactory,
       }),
-    ).rejects.toThrow(/already has a password vault/);
+    ).rejects.toThrow(/already has a password sign-in/);
     expect(alice.finalizePasswordUnlock).toHaveBeenCalledTimes(1);
   });
 });

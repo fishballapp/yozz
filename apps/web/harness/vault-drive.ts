@@ -530,6 +530,196 @@ const accountDeletion = async (page: Page) => {
   assertEqual('delete: and none of the old data is in it', fresh, null);
 };
 
+/**
+ * Through the real Settings screen, with two authenticators (one passkey per authenticator, as a
+ * second device would be): the list shows each passkey, the only one has no Remove, a removed
+ * passkey can no longer sign in, and the last one cannot be removed.
+ */
+const passkeyRemoval = async (page: Page) => {
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send('WebAuthn.enable');
+  const options = {
+    protocol: 'ctap2',
+    ctap2Version: 'ctap2_1',
+    transport: 'internal',
+    hasResidentKey: true,
+    hasUserVerification: true,
+    isUserVerified: true,
+    hasPrf: true,
+  } as const;
+  const first = (await cdp.send('WebAuthn.addVirtualAuthenticator', { options })).authenticatorId;
+  const credentialsOn = async (authenticatorId: string) =>
+    (await cdp.send('WebAuthn.getCredentials', { authenticatorId })).credentials;
+
+  const account = await signUp(page, `drive-remove-${Date.now()}@example.com`);
+  await page.evaluate(
+    async ({ account, record, UNLOCK, KEYS }) => {
+      const u = (await import(UNLOCK)) as UnlockModule;
+      const k = (await import(KEYS)) as KeysModule;
+      const s = await u.createPasskeyVault({ account });
+      await s.store.put(record);
+      await k.saveUnlockKeys(await u.unlockKeysOf(s));
+    },
+    { account, record: RECORD, UNLOCK, KEYS },
+  );
+
+  await page.goto(`${WEB}/settings/account`);
+  const section = page.locator('section:not(:has(section))', {
+    has: page.getByRole('heading', { name: 'Passkeys', exact: true }),
+  });
+  const rows = section.getByRole('listitem');
+  await rows.first().waitFor({ timeout: 30_000 });
+  assertEqual('remove: the only passkey is listed', await rows.count(), 1);
+  assertEqual(
+    'remove: and has no Remove, only the line saying to add another',
+    [
+      await section.getByRole('button', { name: /^Remove/ }).count(),
+      await section
+        .getByText('This is your only passkey. Add another before you can remove it.')
+        .count(),
+    ],
+    [0, 1],
+  );
+
+  // The first authenticator holds this account's passkey, so a second device is a second authenticator.
+  const second = (
+    await cdp.send('WebAuthn.addVirtualAuthenticator', {
+      options: { ...options, transport: 'usb' },
+    })
+  ).authenticatorId;
+  await page.getByRole('button', { name: 'Add passkey' }).click();
+  await page.getByText('Added. That passkey can now sign you in.').waitFor({ timeout: 30_000 });
+  // The name dialog opens at once, prefilled with this browser's name and selected.
+  const nameDialog = page.getByRole('alertdialog', { name: 'Name this passkey' });
+  const nameField = nameDialog.getByLabel('Name');
+  await nameField.waitFor();
+  const automatic = await nameField.inputValue();
+  const selection = await nameField.evaluate((input: HTMLInputElement) => [
+    input.selectionStart,
+    input.selectionEnd,
+  ]);
+  assertEqual('remove: the new passkey asks for a name, selected', selection, [
+    0,
+    automatic.length,
+  ]);
+  assertEqual(
+    'remove: prefilled with the browser and system',
+    /^[A-Za-z]+ on [A-Za-z]+$/.test(automatic),
+    true,
+  );
+  await nameField.fill('Work laptop');
+  await nameField.press('Enter');
+  await nameDialog.waitFor({ state: 'detached', timeout: 30_000 });
+  await rows.filter({ hasText: 'Work laptop' }).waitFor();
+  const names = await page.evaluate(
+    async ({ UNLOCK, userId }) => {
+      const u = (await import(UNLOCK)) as UnlockModule;
+      return (await u.listPasskeys(userId)).map(passkey => passkey.name);
+    },
+    { UNLOCK, userId: account.userId },
+  );
+  assertEqual('remove: Enter saved the name; the first passkey has the automatic one', names, [
+    automatic,
+    'Work laptop',
+  ]);
+  assertEqual('remove: after adding one, the list shows two', await rows.count(), 2);
+  assertEqual(
+    'remove: each with a Remove',
+    await section.getByRole('button', { name: /^Remove/ }).count(),
+    2,
+  );
+  assertEqual(
+    'remove: the second device holds the new passkey',
+    (await credentialsOn(second)).length,
+    1,
+  );
+
+  // The oldest is the one the vault was created with. Removing it asks first, then it is gone.
+  await rows
+    .first()
+    .getByRole('button', { name: /^Remove/ })
+    .click();
+  const dialog = page.getByRole('alertdialog');
+  await dialog.getByText('Your other passkeys still work.').waitFor();
+  await dialog.getByRole('button', { name: 'Remove passkey', exact: true }).click();
+  await dialog.waitFor({ state: 'detached', timeout: 30_000 });
+  await page.waitForFunction(() => document.querySelectorAll('section li').length === 1);
+  assertEqual(
+    'remove: the first passkey is gone, the last one has no Remove',
+    [
+      await rows.count(),
+      await section.getByRole('button', { name: /^Remove/ }).count(),
+      await section
+        .getByText('This is your only passkey. Add another before you can remove it.')
+        .count(),
+    ],
+    [1, 0, 1],
+  );
+
+  // Removing the passkey this device opened with leaves the device signed in, even across a reload.
+  await page.reload();
+  await rows.first().waitFor({ timeout: 30_000 });
+  assertEqual('remove: a reload still resumes the session', await rows.count(), 1);
+
+  const attempt = async (enabled: string, disabled: string) => {
+    await cdp.send('WebAuthn.setAutomaticPresenceSimulation', {
+      authenticatorId: disabled,
+      enabled: false,
+    });
+    await cdp.send('WebAuthn.setAutomaticPresenceSimulation', {
+      authenticatorId: enabled,
+      enabled: true,
+    });
+    return page.evaluate(
+      async ({ record, UNLOCK, AUTH, userId }) => {
+        const u = (await import(UNLOCK)) as UnlockModule;
+        const auth = (await import(AUTH)) as AuthModule;
+        await auth.signOut(userId);
+        try {
+          const s = await u.loginWithPasskey();
+          return await s.store.get(record.type, record.naturalKey);
+        } catch (error) {
+          return `refused: ${error instanceof Error ? error.message : String(error)}`;
+        }
+      },
+      { record: RECORD, UNLOCK, AUTH, userId: account.userId },
+    );
+  };
+  assertEqual(
+    'remove: the removed passkey can no longer sign in',
+    await attempt(first, second),
+    'refused: Passkey not found',
+  );
+  assertEqual(
+    'remove: the one that is left signs in and opens the data',
+    await attempt(second, first),
+    {
+      revision: 1,
+      plaintext: RECORD.plaintext,
+    },
+  );
+
+  const lastRefused = await page.evaluate(
+    async ({ UNLOCK, userId }) => {
+      const u = (await import(UNLOCK)) as UnlockModule;
+      const [last] = await u.listPasskeys(userId);
+      if (last === undefined) throw new Error('no passkey left');
+      try {
+        await u.removePasskey({ userId, credentialId: last.credentialId });
+        return 'removed';
+      } catch (error) {
+        return error instanceof Error ? error.message : String(error);
+      }
+    },
+    { UNLOCK, userId: account.userId },
+  );
+  assertEqual(
+    'remove: the last passkey is refused by the Worker, and still there',
+    lastRefused,
+    'This is the only passkey that can sign in. Add another before you remove it.',
+  );
+};
+
 /** `newPage` gives each call its own context. */
 const openPage = async (): Promise<Page> => {
   const page = await browser.newPage();
@@ -541,7 +731,14 @@ const openPage = async (): Promise<Page> => {
 };
 
 try {
-  for (const mode of [passwordMode, passwordChange, passkeyMode, staleSession, accountDeletion]) {
+  for (const mode of [
+    passwordMode,
+    passwordChange,
+    passkeyMode,
+    staleSession,
+    accountDeletion,
+    passkeyRemoval,
+  ]) {
     const page = await openPage();
     await mode(page);
     await page.close();

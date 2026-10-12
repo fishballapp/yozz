@@ -2,7 +2,11 @@ import { env } from 'cloudflare:test';
 import { ACCOUNT_HEADER } from '@yozz.app/vault-contract';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { createApp } from '../src/app.ts';
-import { changePasswordUnlock, finalizePasswordUnlock } from '../src/db/unlock.ts';
+import {
+  changePasswordUnlock,
+  finalizePasswordUnlock,
+  removePasskeyUnlock,
+} from '../src/db/unlock.ts';
 import { applyMigrations } from './apply-migrations.ts';
 
 /** base64 of 32 bytes, the shape of `authValue`. */
@@ -750,5 +754,315 @@ describe('Worker unlock and finalisation routes', () => {
     expect(wraps.results.map(r => r.passkey_id)).toEqual(['pk-a']);
 
     expect((await finalise('cred-b', false)).status).toBe(200);
+  });
+  describe('a passkey account', () => {
+    const UNLOCK = 'http://localhost/api/v1/vault/unlock';
+    const LIST = 'http://localhost/api/auth/passkey/list-user-passkeys';
+
+    /** A passkey vault whose passkeys `pk-<name>` are wrapped, plus any `loose` ones that are not. */
+    const passkeyVault = async (
+      email: string,
+      { wrapped, loose = [] }: { wrapped: readonly string[]; loose?: readonly string[] },
+    ) => {
+      const account = await loginWithMagicLink(email);
+      await env.DB.batch([
+        env.DB.prepare(
+          "INSERT INTO vault_account (user_id, unlock_mode, password_wrapped_dek, created_at, updated_at) VALUES (?, 'passkey', NULL, 1000, 1000)",
+        ).bind(account.userId),
+        ...[...wrapped, ...loose].map(name =>
+          env.DB.prepare(
+            "INSERT INTO passkey (id, name, publicKey, userId, credentialID, counter, deviceType, backedUp, createdAt) VALUES (?, ?, 'pub', ?, ?, 0, 'platform', 1, 1000)",
+          ).bind(`pk-${name}`, name, account.userId, `cred-${name}`),
+        ),
+        ...wrapped.map(name =>
+          env.DB.prepare(
+            'INSERT INTO vault_passkey_wrap (user_id, passkey_id, wrapped_dek, created_at, updated_at) VALUES (?, ?, ?, 1000, 1000)',
+          ).bind(account.userId, `pk-${name}`, `wrap-${name}`),
+        ),
+      ]);
+      return account;
+    };
+
+    const storedPasskeys = async (userId: string) => ({
+      passkeys: (
+        await env.DB.prepare('SELECT id FROM passkey WHERE userId = ? ORDER BY id')
+          .bind(userId)
+          .all<{ id: string }>()
+      ).results.map(row => row.id),
+      wraps: (
+        await env.DB.prepare(
+          'SELECT passkey_id FROM vault_passkey_wrap WHERE user_id = ? ORDER BY passkey_id',
+        )
+          .bind(userId)
+          .all<{ passkey_id: string }>()
+      ).results.map(row => row.passkey_id),
+    });
+
+    /** The session behind a device's cookie. */
+    const callerSession = async ({ headers }: { headers: Record<string, string> }) => {
+      const token = decodeURIComponent(headers.Cookie ?? '').match(/session_token=([^.;]+)/)?.[1];
+      const row = await env.DB.prepare('SELECT id FROM session WHERE token = ?')
+        .bind(token ?? '')
+        .first<{ id: string }>();
+      return row?.id ?? '';
+    };
+
+    const remove = (headers: Record<string, string>, credentialId: string) =>
+      createApp().request(`${UNLOCK}/passkey/${credentialId}`, { method: 'DELETE', headers }, env);
+
+    const list = (headers: Record<string, string>) =>
+      createApp().request(LIST, { method: 'GET', headers }, env);
+
+    const sessionIdOf = async (userId: string) =>
+      (
+        await env.DB.prepare('SELECT id FROM session WHERE userId = ? LIMIT 1')
+          .bind(userId)
+          .first<{ id: string }>()
+      )?.id ?? '';
+
+    it("lists this account's passkeys and no one else's", async () => {
+      const alice = await passkeyVault('list-alice@example.com', { wrapped: ['a1', 'a2'] });
+      await passkeyVault('list-bob@example.com', { wrapped: ['b1'] });
+
+      const res = await list(alice.headers);
+
+      expect(res.status).toBe(200);
+      const names = (await res.json<{ name: string }[]>()).map(passkey => passkey.name).toSorted();
+      expect(names).toEqual(['a1', 'a2']);
+    });
+
+    it("refuses another account's session, and an unnamed request, with nothing listed", async () => {
+      await passkeyVault('list-alice2@example.com', { wrapped: ['a1'] });
+      const bob = await passkeyVault('list-bob2@example.com', { wrapped: ['b1'] });
+      const alice = await env.DB.prepare('SELECT id FROM "user" WHERE email = ?')
+        .bind('list-alice2@example.com')
+        .first<{ id: string }>();
+
+      // Bob's cookie, a request made for Alice: the cookie is the browser's, the name is the tab's.
+      const asAlice = await list({ ...bob.headers, [ACCOUNT_HEADER]: alice?.id ?? '' });
+      const unnamed = await list({ ...bob.headers, [ACCOUNT_HEADER]: '' });
+
+      for (const res of [asAlice, unnamed]) {
+        expect(res.status).toBe(403);
+        expect(await res.json()).toMatchObject({ code: 'ACCOUNT_MISMATCH' });
+      }
+    });
+
+    it('removes a passkey and its wrap, and leaves the others signing in', async () => {
+      const account = await passkeyVault('remove-ok@example.com', { wrapped: ['one', 'two'] });
+
+      const res = await remove(account.headers, 'cred-one');
+
+      expect(res.status).toBe(200);
+      expect(await storedPasskeys(account.userId)).toEqual({
+        passkeys: ['pk-two'],
+        wraps: ['pk-two'],
+      });
+      const status = await createApp().request(
+        UNLOCK,
+        { method: 'GET', headers: account.headers },
+        env,
+      );
+      expect(await status.json()).toMatchObject({
+        mode: 'passkey',
+        passkeys: [{ passkeyId: 'pk-two' }],
+      });
+    });
+
+    /** Another device signed in to the same account, and the sessions of both. */
+    const withOtherDevice = async (
+      account: Awaited<ReturnType<typeof passkeyVault>>,
+      email: string,
+    ) => {
+      const otherDevice = await loginWithMagicLink(email);
+      const sessions = async () =>
+        (
+          await env.DB.prepare('SELECT id FROM session WHERE userId = ? ORDER BY id')
+            .bind(account.userId)
+            .all<{ id: string }>()
+        ).results.map(row => row.id);
+      return { otherDevice, sessions, before: await sessions() };
+    };
+
+    it('signs every other device out and keeps the one that removed the passkey', async () => {
+      const email = 'remove-sessions@example.com';
+      const account = await passkeyVault(email, { wrapped: ['one', 'two'] });
+      const { otherDevice, sessions, before } = await withOtherDevice(account, email);
+      expect(before).toHaveLength(2);
+
+      expect((await remove(account.headers, 'cred-one')).status).toBe(200);
+
+      expect(await sessions()).toEqual([await callerSession(account)]);
+      const status = (headers: Record<string, string>) =>
+        createApp().request(UNLOCK, { method: 'GET', headers }, env);
+      expect((await status(account.headers)).status).toBe(200);
+      expect((await status(otherDevice.headers)).status).toBe(401);
+    });
+
+    it.each([
+      ['the last passkey', 'cred-only'],
+      ['a passkey that is not there', 'cred-nothing'],
+    ])('signs no one out for a refused removal of %s', async (_label, credentialId) => {
+      const email = `remove-refused-${credentialId}@example.com`;
+      const account = await passkeyVault(email, { wrapped: ['only'] });
+      const { sessions, before } = await withOtherDevice(account, email);
+
+      expect((await remove(account.headers, credentialId)).status).not.toBe(200);
+
+      expect(await sessions()).toEqual(before);
+    });
+
+    it("signs no one out for another user's passkey", async () => {
+      const alice = await passkeyVault('remove-sessions-a@example.com', { wrapped: ['a1', 'a2'] });
+      await passkeyVault('remove-sessions-b@example.com', { wrapped: ['b1', 'b2'] });
+      const { sessions, before } = await withOtherDevice(alice, 'remove-sessions-a@example.com');
+
+      expect((await remove(alice.headers, 'cred-b1')).status).toBe(404);
+
+      expect(await sessions()).toEqual(before);
+    });
+
+    const rename = (headers: Record<string, string>, body: Record<string, unknown>) =>
+      createApp().request(
+        'http://localhost/api/auth/passkey/update-passkey',
+        { method: 'POST', headers, body: JSON.stringify(body) },
+        env,
+      );
+
+    const rowOf = (id: string) =>
+      env.DB.prepare(
+        'SELECT name, userId, credentialID, publicKey, counter FROM passkey WHERE id = ?',
+      )
+        .bind(id)
+        .first<Record<string, unknown>>();
+
+    it('renames the account’s own passkey, and changes nothing else about it', async () => {
+      const account = await passkeyVault('rename-ok@example.com', { wrapped: ['one', 'two'] });
+      const other = await passkeyVault('rename-ok-other@example.com', { wrapped: ['x'] });
+      const before = await rowOf('pk-one');
+
+      // Fields beyond the name are not the endpoint's to change, whoever asks.
+      const res = await rename(account.headers, {
+        id: 'pk-one',
+        name: '  Work laptop ',
+        userId: other.userId,
+        credentialID: 'cred-other',
+        publicKey: 'another key',
+        counter: 99,
+      });
+
+      expect(res.status).toBe(200);
+      expect(await rowOf('pk-one')).toEqual({ ...before, name: 'Work laptop' });
+    });
+
+    it('refuses to rename another account’s passkey, and leaves its name', async () => {
+      const alice = await passkeyVault('rename-alice@example.com', { wrapped: ['a1'] });
+      await passkeyVault('rename-bob@example.com', { wrapped: ['b1'] });
+      const before = await rowOf('pk-b1');
+
+      const res = await rename(alice.headers, { id: 'pk-b1', name: 'Mine now' });
+
+      expect(res.status).toBe(404);
+      expect(await rowOf('pk-b1')).toEqual(before);
+    });
+
+    it('refuses a name longer than the screen allows, and a body it does not understand', async () => {
+      const account = await passkeyVault('rename-long@example.com', { wrapped: ['one'] });
+      const before = await rowOf('pk-one');
+
+      const tooLong = await rename(account.headers, { id: 'pk-one', name: 'x'.repeat(61) });
+      const noName = await rename(account.headers, { id: 'pk-one' });
+      const justRight = await rename(account.headers, { id: 'pk-one', name: 'x'.repeat(60) });
+
+      expect([tooLong.status, noName.status, justRight.status]).toEqual([400, 400, 200]);
+      expect(before?.name).toBe('one');
+      expect((await rowOf('pk-one'))?.name).toBe('x'.repeat(60));
+    });
+
+    it('refuses the last passkey and changes nothing', async () => {
+      const account = await passkeyVault('remove-last@example.com', { wrapped: ['only'] });
+      const before = await storedPasskeys(account.userId);
+
+      const res = await remove(account.headers, 'cred-only');
+
+      expect(res.status).toBe(409);
+      expect(await res.json()).toMatchObject({ error: { code: 'CONFLICT' } });
+      expect(await storedPasskeys(account.userId)).toEqual(before);
+    });
+
+    it('does not count a passkey that has no wrap as one left', async () => {
+      const account = await passkeyVault('remove-loose@example.com', {
+        wrapped: ['only'],
+        loose: ['loose'],
+      });
+      const before = await storedPasskeys(account.userId);
+
+      const res = await remove(account.headers, 'cred-only');
+
+      expect(res.status).toBe(409);
+      expect(await storedPasskeys(account.userId)).toEqual(before);
+    });
+
+    it('leaves one of two passkeys when both are removed at once', async () => {
+      const account = await passkeyVault('remove-race@example.com', { wrapped: ['one', 'two'] });
+
+      const answers = await Promise.all([
+        remove(account.headers, 'cred-one'),
+        remove(account.headers, 'cred-two'),
+      ]);
+
+      expect(answers.map(res => res.status).toSorted()).toEqual([200, 409]);
+      const left = await storedPasskeys(account.userId);
+      expect(left.passkeys).toHaveLength(1);
+      expect(left.wraps).toEqual(left.passkeys);
+    });
+
+    it("refuses another user's passkey, and answers as if it were not there", async () => {
+      const alice = await passkeyVault('remove-alice@example.com', { wrapped: ['a1', 'a2'] });
+      const bob = await passkeyVault('remove-bob@example.com', { wrapped: ['b1', 'b2'] });
+      const bobBefore = await storedPasskeys(bob.userId);
+      const aliceBefore = await storedPasskeys(alice.userId);
+
+      const res = await remove(alice.headers, 'cred-b1');
+
+      expect(res.status).toBe(404);
+      expect(await storedPasskeys(bob.userId)).toEqual(bobBefore);
+      expect(await storedPasskeys(alice.userId)).toEqual(aliceBefore);
+    });
+
+    it('answers 404 for a passkey that is not there', async () => {
+      const account = await passkeyVault('remove-gone@example.com', { wrapped: ['one', 'two'] });
+
+      expect((await remove(account.headers, 'cred-nothing')).status).toBe(404);
+    });
+
+    it('applies nothing for a session that was signed out while the request was in flight', async () => {
+      const account = await passkeyVault('remove-revoked@example.com', { wrapped: ['one', 'two'] });
+      const sessionId = await sessionIdOf(account.userId);
+      await env.DB.prepare('DELETE FROM session WHERE id = ?').bind(sessionId).run();
+      const before = await storedPasskeys(account.userId);
+
+      const isRemoved = await removePasskeyUnlock(env.DB, account.userId, {
+        credentialId: 'cred-one',
+        sessionId,
+      });
+
+      expect(isRemoved).toBe(false);
+      expect(await storedPasskeys(account.userId)).toEqual(before);
+    });
+
+    it('refuses a session older than a day', async () => {
+      const account = await passkeyVault('remove-stale@example.com', { wrapped: ['one', 'two'] });
+      await env.DB.prepare('UPDATE session SET createdAt = ? WHERE userId = ?')
+        .bind(new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(), account.userId)
+        .run();
+      const before = await storedPasskeys(account.userId);
+
+      const res = await remove(account.headers, 'cred-one');
+
+      expect(res.status).toBe(403);
+      expect(await res.json()).toMatchObject({ error: { code: 'SESSION_NOT_FRESH' } });
+      expect(await storedPasskeys(account.userId)).toEqual(before);
+    });
   });
 });

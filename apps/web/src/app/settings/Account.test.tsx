@@ -2,7 +2,15 @@
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { addPasskeyToSession, confirmIdentity, deleteAccount } from '../../vault/unlock';
+import {
+  type AccountPasskey,
+  addPasskeyToSession,
+  confirmIdentity,
+  deleteAccount,
+  listPasskeys,
+  removePasskey,
+  renamePasskey,
+} from '../../vault/unlock';
 import { Account } from './Account';
 
 // @ts-expect-error React reads it off the global
@@ -61,6 +69,9 @@ vi.mock('../../vault/unlock', () => ({
   addPasskeyToSession: vi.fn(),
   confirmIdentity: vi.fn(async () => {}),
   deleteAccount: vi.fn(async () => {}),
+  listPasskeys: vi.fn(async () => []),
+  removePasskey: vi.fn(async () => {}),
+  renamePasskey: vi.fn(async () => {}),
 }));
 vi.mock('../../vault/auth-client', () => ({ signOut: () => mocks.signingOut.promise }));
 vi.mock('../../vault/passkey-prf', () => ({
@@ -80,6 +91,7 @@ vi.mock('../../ui/ConfirmDialog', async () => {
       description,
       children,
       confirmLabel,
+      cancelLabel = 'Cancel',
       triggerLabel,
       trigger,
       open,
@@ -91,6 +103,7 @@ vi.mock('../../ui/ConfirmDialog', async () => {
       description: string;
       children?: React.ReactNode;
       confirmLabel: string;
+      cancelLabel?: string;
       triggerLabel?: string;
       trigger?: unknown;
       open?: boolean;
@@ -116,6 +129,9 @@ vi.mock('../../ui/ConfirmDialog', async () => {
               <h2>{title}</h2>
               <p>{description}</p>
               {children}
+              <button type="button" onClick={() => setOpen(false)}>
+                {cancelLabel}
+              </button>
               <button
                 type="button"
                 disabled={!isConfirmEnabled}
@@ -255,7 +271,7 @@ describe('Account', () => {
     it('asks Confirm it’s you in place, then adds the passkey under the guard it was refused with', async () => {
       vi.mocked(addPasskeyToSession)
         .mockRejectedValueOnce('not fresh')
-        .mockResolvedValueOnce({ outcome: 'added' });
+        .mockResolvedValueOnce({ outcome: 'added', passkeyId: 'pk-new', name: 'Chrome on Mac' });
       await mount();
       await click('Add passkey');
       expect(document.body.textContent).toContain('Confirm it’s you');
@@ -289,6 +305,298 @@ describe('Account', () => {
       await replaceSession();
       expect(document.body.textContent).not.toContain('Confirm it’s you');
       expect(confirmIdentity).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('passkeys', () => {
+    const LAPTOP: AccountPasskey = {
+      id: 'pk-laptop',
+      credentialId: 'cred-laptop',
+      name: 'MacBook',
+      addedAt: Date.parse('2026-09-01T09:00:00.000Z'),
+    };
+    const PHONE: AccountPasskey = {
+      id: 'pk-phone',
+      credentialId: 'cred-phone',
+      name: null,
+      addedAt: Date.parse('2026-10-05T09:00:00.000Z'),
+    };
+
+    const ADDED = { outcome: 'added', passkeyId: 'pk-new', name: 'Chrome on Mac' } as const;
+
+    beforeEach(() => {
+      mocks.session = sessionOf('user-alice', 'alice@example.com', 'passkey');
+      vi.mocked(listPasskeys).mockResolvedValue([LAPTOP, PHONE]);
+    });
+
+    /** The Remove button of one row, by the name its row is labelled with. */
+    const removeButtonOf = (rowLabel: string) =>
+      [...document.body.querySelectorAll('li')]
+        .find(row => row.textContent?.includes(rowLabel))
+        ?.querySelector<HTMLButtonElement>('button[aria-label^="Remove"]');
+
+    const clickRemoveOf = async (rowLabel: string) => {
+      const found = removeButtonOf(rowLabel);
+      if (found === null || found === undefined) throw new Error(`no Remove in "${rowLabel}"`);
+      await act(async () => found.click());
+    };
+
+    it('lists each passkey by name, "Passkey" when it has none, and the day it was added', async () => {
+      await mount();
+
+      const rows = [...document.body.querySelectorAll('li')].map(row => row.textContent);
+      expect(rows).toEqual([
+        'MacBookAdded 1 Sept 2026RenameRemove',
+        'PasskeyAdded 5 Oct 2026RenameRemove',
+      ]);
+      expect(listPasskeys).toHaveBeenCalledWith('user-alice');
+    });
+
+    it('offers no Remove for the only passkey, and says to add another first', async () => {
+      vi.mocked(listPasskeys).mockResolvedValue([PHONE]);
+      await mount();
+
+      expect(document.body.querySelectorAll('li')).toHaveLength(1);
+      expect(button('Remove')).toBeUndefined();
+      expect(document.body.textContent).toContain(
+        'This is your only passkey. Add another before you can remove it.',
+      );
+    });
+
+    it('asks before removing, saying who can no longer sign in and who still can', async () => {
+      await mount();
+      await clickRemoveOf('MacBook');
+
+      const dialog = document.querySelector('[role="alertdialog"]')?.textContent ?? '';
+      expect(dialog).toContain('Remove this passkey?');
+      expect(dialog).toContain('can no longer sign in to alice@example.com');
+      expect(dialog).toContain('every other device is signed out. Your other passkeys still work.');
+      expect(dialog).not.toMatch(/vault/i);
+      expect(removePasskey).not.toHaveBeenCalled();
+    });
+
+    it('removes the one asked about, reloads the list and keeps this device signed in', async () => {
+      await mount();
+      vi.mocked(listPasskeys).mockResolvedValue([PHONE]);
+      await clickRemoveOf('MacBook');
+      await click('Remove passkey');
+
+      expect(removePasskey).toHaveBeenCalledWith({
+        userId: 'user-alice',
+        credentialId: 'cred-laptop',
+      });
+      expect(document.querySelector('[role="alertdialog"]')).toBeNull();
+      expect(document.body.querySelectorAll('li')).toHaveLength(1);
+      expect(mocks.setSession).toHaveBeenCalledTimes(1);
+    });
+
+    it('keeps the question open with the reason when the server refuses it', async () => {
+      vi.mocked(removePasskey).mockRejectedValueOnce(new Error('This is the only passkey.'));
+      await mount();
+      await clickRemoveOf('MacBook');
+      await click('Remove passkey');
+
+      const dialog = document.querySelector('[role="alertdialog"]');
+      expect(dialog?.textContent).toContain('This is the only passkey.');
+      // Said once, in the dialog, and not again in the section behind it.
+      expect(document.body.querySelectorAll('[role="alert"]')).toHaveLength(1);
+      expect(mocks.setSession).not.toHaveBeenCalled();
+    });
+
+    it('asks Confirm it’s you for a session older than a day, then removes under it', async () => {
+      vi.mocked(removePasskey).mockRejectedValueOnce('not fresh').mockResolvedValueOnce();
+      await mount();
+      await clickRemoveOf('MacBook');
+      await click('Remove passkey');
+      expect(document.body.textContent).toContain('Confirm it’s you');
+
+      await click('Confirm with your passkey');
+      expect(removePasskey).toHaveBeenCalledTimes(2);
+      expect(mocks.setSession).toHaveBeenCalledTimes(1);
+    });
+
+    /** Types into the naming dialog's field. */
+    const typeName = async (value: string) => {
+      const input = document.getElementById('passkey-name');
+      const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+      if (!(input instanceof HTMLInputElement) || setValue === undefined) {
+        throw new Error('no name field');
+      }
+      await act(async () => {
+        setValue.call(input, value);
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+      });
+    };
+
+    const nameField = () => {
+      const input = document.getElementById('passkey-name');
+      if (!(input instanceof HTMLInputElement)) throw new Error('no name field');
+      return input;
+    };
+
+    describe('naming the one just added', () => {
+      beforeEach(() => {
+        vi.mocked(addPasskeyToSession).mockResolvedValue(ADDED);
+      });
+
+      it('opens at once with the automatic name filled in and selected, so typing replaces it', async () => {
+        await mount();
+        await click('Add passkey');
+
+        expect(document.querySelector('[role="alertdialog"]')?.textContent).toContain(
+          'Name this passkey',
+        );
+        const input = nameField();
+        expect(input.value).toBe('Chrome on Mac');
+        expect([input.selectionStart, input.selectionEnd]).toEqual([0, 'Chrome on Mac'.length]);
+        expect(button('Skip')).toBeDefined();
+      });
+
+      it('saves the typed name against the passkey that was added', async () => {
+        await mount();
+        await click('Add passkey');
+        await typeName('  Work laptop ');
+        await click('Save');
+
+        expect(renamePasskey).toHaveBeenCalledWith({
+          userId: 'user-alice',
+          passkeyId: 'pk-new',
+          name: 'Work laptop',
+        });
+        expect(document.querySelector('[role="alertdialog"]')).toBeNull();
+      });
+
+      it('keeps the automatic name on Skip, and writes nothing more', async () => {
+        await mount();
+        await click('Add passkey');
+        await click('Skip');
+
+        expect(renamePasskey).not.toHaveBeenCalled();
+        expect(document.querySelector('[role="alertdialog"]')).toBeNull();
+      });
+
+      it('takes a blank name as the automatic one, and writes it', async () => {
+        await mount();
+        await click('Add passkey');
+        await typeName('   ');
+        await click('Save');
+
+        expect(renamePasskey).toHaveBeenCalledWith({
+          userId: 'user-alice',
+          passkeyId: 'pk-new',
+          name: 'Chrome on Mac',
+        });
+        expect(document.querySelector('[role="alertdialog"]')).toBeNull();
+      });
+
+      // The automatic write may have failed unseen; Save is what makes sure the passkey has a name.
+      it('writes the name it offered when Save is pressed without an edit', async () => {
+        await mount();
+        await click('Add passkey');
+        await click('Save');
+
+        expect(renamePasskey).toHaveBeenCalledTimes(1);
+        expect(renamePasskey).toHaveBeenCalledWith({
+          userId: 'user-alice',
+          passkeyId: 'pk-new',
+          name: 'Chrome on Mac',
+        });
+      });
+
+      it('caps the field at the length the Worker accepts', async () => {
+        await mount();
+        await click('Add passkey');
+
+        expect(nameField().maxLength).toBe(60);
+      });
+
+      it('keeps the question open with the reason when the name cannot be saved', async () => {
+        vi.mocked(renamePasskey).mockRejectedValueOnce(new Error('That name could not be saved.'));
+        await mount();
+        await click('Add passkey');
+        await typeName('Work laptop');
+        await click('Save');
+
+        expect(document.querySelector('[role="alertdialog"]')?.textContent).toContain(
+          'That name could not be saved.',
+        );
+      });
+    });
+
+    describe('renaming one that is listed', () => {
+      it('offers Rename on every row, the only passkey included', async () => {
+        vi.mocked(listPasskeys).mockResolvedValue([PHONE]);
+        await mount();
+
+        expect(button('Rename')).toBeDefined();
+        expect(button('Remove')).toBeUndefined();
+      });
+
+      it('opens with the name it has, and saves the new one against that passkey', async () => {
+        await mount();
+        await act(async () => {
+          document
+            .querySelector<HTMLButtonElement>('button[aria-label^="Rename MacBook"]')
+            ?.click();
+        });
+
+        expect(document.querySelector('[role="alertdialog"]')?.textContent).toContain(
+          'Rename passkey',
+        );
+        expect(button('Skip')).toBeUndefined();
+        expect(nameField().value).toBe('MacBook');
+
+        await typeName('Home desktop');
+        await click('Save');
+        expect(renamePasskey).toHaveBeenCalledWith({
+          userId: 'user-alice',
+          passkeyId: 'pk-laptop',
+          name: 'Home desktop',
+        });
+        expect(listPasskeys).toHaveBeenCalledTimes(2);
+      });
+
+      it('starts empty for a passkey with no name, and will not save a blank one', async () => {
+        await mount();
+        await act(async () => {
+          document
+            .querySelector<HTMLButtonElement>('button[aria-label^="Rename Passkey"]')
+            ?.click();
+        });
+
+        expect(nameField().value).toBe('');
+        expect(button('Save')?.disabled).toBe(true);
+        await typeName('Phone');
+        expect(button('Save')?.disabled).toBe(false);
+      });
+    });
+
+    it('lists again after a passkey is added', async () => {
+      vi.mocked(addPasskeyToSession).mockResolvedValue(ADDED);
+      await mount();
+      vi.mocked(listPasskeys).mockResolvedValue([
+        LAPTOP,
+        PHONE,
+        { ...PHONE, id: 'pk-new', credentialId: 'c3' },
+      ]);
+      await click('Add passkey');
+
+      expect(document.body.querySelectorAll('li')).toHaveLength(3);
+      expect(mocks.setSession).toHaveBeenCalledTimes(1);
+    });
+
+    it('shows the account that signed in over the pane none of the one before', async () => {
+      await mount();
+      const bobsList = Promise.withResolvers<readonly AccountPasskey[]>();
+      vi.mocked(listPasskeys).mockReturnValueOnce(bobsList.promise);
+      mocks.session = sessionOf('user-bob', 'bob@example.com', 'passkey');
+      mocks.generation += 1;
+      await rerender();
+
+      expect(document.body.querySelectorAll('li')).toHaveLength(0);
+      expect(listPasskeys).toHaveBeenLastCalledWith('user-bob');
+      await act(async () => bobsList.resolve([PHONE]));
+      expect(document.body.textContent).toContain('Passkey');
     });
   });
 

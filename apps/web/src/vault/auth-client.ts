@@ -79,6 +79,24 @@ export const addPasskeyAuthenticator = async ({
   });
 };
 
+/** Names a passkey in our own row: the registration's `name` is not sent, a password manager files the passkey under it. */
+export const renamePasskeyAuthenticator = async ({
+  userId,
+  passkeyId,
+  name,
+}: {
+  readonly userId: string;
+  readonly passkeyId: string;
+  readonly name: string;
+}) => {
+  return accountAuthClient(userId).passkey.updatePasskey({ id: passkeyId, name });
+};
+
+export const listPasskeyAuthenticators = async (userId: string) => {
+  return accountAuthClient(userId).passkey.listUserPasskeys();
+};
+
+/** Only a provisional passkey: the Worker refuses one the DEK is wrapped under, which `removePasskey` takes out with its wrap. */
 export const deletePasskeyAuthenticator = async ({
   userId,
   passkeyId,

@@ -1,5 +1,5 @@
 /** Every rule fails closed: a body shape it does not recognise throws rather than falling through. */
-import { ACCOUNT_HEADER } from '@yozz.app/vault-contract';
+import { ACCOUNT_HEADER, PASSKEY_NAME_MAX_LENGTH } from '@yozz.app/vault-contract';
 import { APIError } from 'better-auth/api';
 import { type CreateAuthOverrides, createAuth } from './auth.ts';
 import { isPasskeyWrapped } from './db/unlock.ts';
@@ -59,6 +59,11 @@ const requireActivePasskeyMode = async ({ env, body }: PolicyContext): Promise<v
   }
 };
 
+/**
+ * Better Auth's delete reaches only a provisional passkey, one the web app registered and has not
+ * yet wrapped the DEK under. A wrapped one is removed by `DELETE /api/v1/vault/unlock/passkey/:id`,
+ * which deletes the wrap with it and keeps the last one.
+ */
 const refuseWrappedPasskeyDeletion = async ({
   env,
   overrides,
@@ -117,6 +122,43 @@ const requireNamedAccount = async ({
   }
 };
 
+/**
+ * Better Auth's update changes `name` on the passkey row it is given and checks the row is the
+ * session's own; this asks the same first, so the path is allowed on what we verified, and holds a
+ * name to the length the screen allows (the plugin only trims and wants one character).
+ */
+const requireOwnPasskeyWithShortName = async ({
+  env,
+  overrides,
+  body,
+  headers,
+}: PolicyContext): Promise<void> => {
+  const { id, name } = (body as { id?: unknown; name?: unknown } | undefined) ?? {};
+  if (typeof id !== 'string' || typeof name !== 'string') {
+    return badRequest('Renaming a passkey requires its id and a name');
+  }
+  if (name.trim().length > PASSKEY_NAME_MAX_LENGTH) {
+    return badRequest(`A passkey name is at most ${PASSKEY_NAME_MAX_LENGTH} characters`);
+  }
+
+  const session = await createAuth(env, overrides).api.getSession({
+    headers: headers ?? new Headers(),
+  });
+  if (!session) {
+    throw new APIError('UNAUTHORIZED', {
+      message: 'Authentication required',
+      code: 'UNAUTHORIZED',
+    });
+  }
+  const own = await env.DB.prepare('SELECT 1 AS found FROM passkey WHERE id = ? AND userId = ?')
+    .bind(id, session.user.id)
+    .first();
+  // Not theirs and not there look the same, as the remove route's do.
+  if (own === null) {
+    throw new APIError('NOT_FOUND', { message: 'Passkey not found', code: 'NOT_FOUND' });
+  }
+};
+
 /** Registration from a session must not mint a second session that outlives the first. */
 const refuseSessionFromRegistration = async ({ body }: PolicyContext): Promise<void> => {
   if ((body as { createSession?: unknown } | undefined)?.createSession !== undefined) {
@@ -146,7 +188,7 @@ const refuseRecoveryOfUnknownEmail = async ({ env, body }: PolicyContext): Promi
  * Every Better Auth path the app calls, each with what the vault requires of it, run in order. Any
  * other path is refused: a password change or reset, an email change or signup would each change a
  * live unlock credential without re-wrapping the DEK, and the rest (`/update-user`,
- * `/revoke-sessions`, `/list-user-passkeys`, …) would act on whichever account holds the cookie.
+ * `/revoke-sessions`, `/unlink-account`, …) would act on whichever account holds the cookie.
  * Signing in names no account: whoever signs in is the account.
  */
 export const ENDPOINT_POLICIES: Readonly<
@@ -160,6 +202,8 @@ export const ENDPOINT_POLICIES: Readonly<
   '/passkey/verify-authentication': [requireActivePasskeyMode],
   '/passkey/generate-register-options': [requireNamedAccount],
   '/passkey/verify-registration': [requireNamedAccount, refuseSessionFromRegistration],
+  '/passkey/list-user-passkeys': [requireNamedAccount],
+  '/passkey/update-passkey': [requireNamedAccount, requireOwnPasskeyWithShortName],
   '/passkey/delete-passkey': [requireNamedAccount, refuseWrappedPasskeyDeletion],
   '/sign-out': [requireNamedAccount],
 };

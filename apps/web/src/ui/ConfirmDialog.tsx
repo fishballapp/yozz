@@ -13,6 +13,7 @@ export const ConfirmDialog = ({
   description,
   children,
   confirmLabel,
+  cancelLabel = 'Cancel',
   confirmVariant = 'danger',
   isConfirmEnabled = true,
   busyLabel,
@@ -24,6 +25,8 @@ export const ConfirmDialog = ({
   /** Between the prose and the buttons, such as a "don't ask" tick. */
   children?: ReactNode;
   confirmLabel: string;
+  /** What the way out is called when it is a decision of its own, such as Skip. */
+  cancelLabel?: string;
   /** `danger` for a destructive question, `primary` for one that merely wants a decision. */
   confirmVariant?: 'danger' | 'primary';
   /** False keeps Confirm disabled, and Enter with it, until something in `children` is answered. */
@@ -123,7 +126,7 @@ export const ConfirmDialog = ({
               {children}
               <div className="mt-5 flex flex-wrap items-center gap-2">
                 <AlertDialog.Close render={<Button variant="ghost" disabled={isBusy} />}>
-                  Cancel
+                  {cancelLabel}
                 </AlertDialog.Close>
                 <Button
                   type="submit"

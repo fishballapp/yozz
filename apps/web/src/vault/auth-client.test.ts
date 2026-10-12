@@ -47,20 +47,26 @@ describe('auth client', () => {
         pubKeyCredParams: [],
       },
       '/api/auth/passkey/verify-registration': { id: 'pk-row' },
+      '/api/auth/passkey/list-user-passkeys': [],
     });
     stubAuthenticator();
     // Imported after the stub: Better Auth's client keeps the `fetch` it was created with.
-    const { addPasskeyAuthenticator, deletePasskeyAuthenticator, signOut } = await import(
-      './auth-client'
-    );
+    const {
+      addPasskeyAuthenticator,
+      deletePasskeyAuthenticator,
+      listPasskeyAuthenticators,
+      signOut,
+    } = await import('./auth-client');
 
     await addPasskeyAuthenticator({ userId: 'user-123' });
+    await listPasskeyAuthenticators('user-123');
     await deletePasskeyAuthenticator({ userId: 'user-123', passkeyId: 'pk-row' });
     await signOut('user-123');
 
     expect(Object.fromEntries(named)).toEqual({
       '/api/auth/passkey/generate-register-options': 'user-123',
       '/api/auth/passkey/verify-registration': 'user-123',
+      '/api/auth/passkey/list-user-passkeys': 'user-123',
       '/api/auth/passkey/delete-passkey': 'user-123',
       '/api/auth/sign-out': 'user-123',
     });

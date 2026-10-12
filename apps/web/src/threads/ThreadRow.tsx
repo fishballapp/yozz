@@ -132,8 +132,8 @@ const DISCARD_REFUSALS: Record<DiscardOutcome, string> = {
   busy: 'It is open in the composer — close that first.',
   sending: 'It is being sent right now.',
   conflict: 'Another device changed it since this list was built. Reload and try again.',
-  locked: 'The vault is locked.',
-  offline: 'The vault could not be reached.',
+  locked: "You're signed out.",
+  offline: 'YOZZ could not be reached. Check your connection and try again.',
 };
 
 /** One mark in the hover cluster. `confirm` present means it asks before it acts. */

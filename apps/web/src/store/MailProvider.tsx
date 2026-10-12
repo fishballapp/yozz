@@ -101,7 +101,7 @@ const ComposerContext = createContext<Composer | null>(null);
 /** What a runner answers once its session has ended, or before the session's manager exists. */
 const VAULT_LOCKED = {
   ok: false,
-  error: { kind: 'error', detail: 'The vault is locked' },
+  error: { kind: 'error', detail: "You're signed out" },
 } as const satisfies Result<never, MailConnectionFailure>;
 
 /** What a task answers when the record it was made for has been edited or removed since. */
@@ -243,7 +243,7 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
     async (record: AddressRecord) => {
       if (isDemo()) return;
       // Unreachable while locked; refuse rather than hold an address that looks stored and is not.
-      if (session === null) throw new Error('The vault is locked; nothing can be stored.');
+      if (session === null) throw new Error("You're signed out; nothing can be stored.");
       await session.store.put({
         type: ADDRESS_RECORD_TYPE,
         naturalKey: record.address,
@@ -259,7 +259,7 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
       const generation = sessionGeneration.current;
       await removalsRef.current.get(record.address);
       if (generation !== sessionGeneration.current) {
-        throw new Error('The vault was locked; nothing was stored.');
+        throw new Error('You were signed out; nothing was stored.');
       }
       await storeAddress(record);
       // Stored in the vault the call began in, whose next unlock lists it. Shown in the session
@@ -281,7 +281,7 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
   const removeAddress = useCallback(
     async (address: string) => {
       if (!isDemo()) {
-        if (session === null) throw new Error('The vault is locked; nothing can be removed.');
+        if (session === null) throw new Error("You're signed out; nothing can be removed.");
         const generation = sessionGeneration.current;
         const { store, userId } = session;
         const removal = Promise.withResolvers<void>();

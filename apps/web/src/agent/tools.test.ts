@@ -204,7 +204,7 @@ describe('get_threads', () => {
       inlineImagesTruncated: false,
       attachments: [],
     });
-    await expect(result).resolves.toEqual({ error: expect.stringContaining('locked') });
+    await expect(result).resolves.toEqual({ error: expect.stringContaining('signed out') });
   });
 
   it('says which mailboxes hold each message, so a mixed thread is legible', async () => {
@@ -651,8 +651,8 @@ describe('navigate', () => {
     const composed = call(tools, 'navigate', { target: 'composer', draftKey: 'k1' });
     endSession();
     navigation.resolve();
-    await expect(opened).resolves.toEqual({ error: expect.stringContaining('locked') });
-    await expect(composed).resolves.toEqual({ error: expect.stringContaining('locked') });
+    await expect(opened).resolves.toEqual({ error: expect.stringContaining('signed out') });
+    await expect(composed).resolves.toEqual({ error: expect.stringContaining('signed out') });
     expect(port.markRead).not.toHaveBeenCalled();
   });
 

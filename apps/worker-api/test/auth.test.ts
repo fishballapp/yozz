@@ -419,8 +419,6 @@ describe('Worker auth policies and magic link', () => {
     ['POST', '/send-verification-email'],
     ['GET', '/verify-email'],
     ['POST', '/verify-password'],
-    ['GET', '/passkey/list-user-passkeys'],
-    ['POST', '/passkey/update-passkey'],
     ['GET', '/ok'],
     ['GET', '/error'],
   ];
