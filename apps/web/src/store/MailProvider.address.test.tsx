@@ -415,14 +415,6 @@ describe('removeAddress', () => {
     expect(mocks.events).toEqual([`clear user-2 ${ALICE.address}`, `put ${ALICE.address}`]);
   });
 
-  it("a connection of an ended session cannot report into the next session's live state", async () => {
-    const { mail, replaceSession } = await mount(await vaultWith([ALICE]));
-    await replaceSession({ userId: 'user-2', store: await vaultWith([ALICE]) });
-
-    await act(async () => mocks.reportState[1]?.(ALICE.address, { status: 'closed' }));
-    expect(mail().liveStates[ALICE.address]).toBeUndefined();
-  });
-
   it('adding the address back stores nothing once its session has ended', async () => {
     const store = await vaultWith([ALICE]);
     const { mail, replaceSession } = await mount({ ...store, put: logged(store).put });

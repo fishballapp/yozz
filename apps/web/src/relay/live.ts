@@ -134,7 +134,8 @@ const STALL_CHECK_MS = 10 * 1000;
 
 export const createLiveManager = (deps: {
   readonly connect: ConnectFn;
-  readonly onState: (address: string, state: LiveState) => void;
+  /** Each connection's state as it changes; for tests and diagnostics, nothing on screen reads it. */
+  readonly onState?: (address: string, state: LiveState) => void;
   /** The server said the selected INBOX changed while idling (EXISTS/EXPUNGE/FETCH): the caller syncs. */
   readonly onMailboxChanged: (address: string) => void;
   /** Whether the tab is visible right now; `setVisible` tracks it from then on. */
@@ -155,7 +156,7 @@ export const createLiveManager = (deps: {
 
   const setState = (conn: Connection, state: LiveState): void => {
     conn.state = state;
-    deps.onState(conn.address, state);
+    deps.onState?.(conn.address, state);
   };
 
   const setFailed = (conn: Connection, failure: MailConnectionFailure): void =>

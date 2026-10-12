@@ -197,9 +197,9 @@ describe('MailProvider startup', () => {
     await vi.waitFor(() => expect(mail?.recordsError).not.toBeNull());
     await act(async () => mail?.putAddress(ADDRESS));
 
-    // The sync reached a live manager, which is opening the account's connection.
+    // The sync started against a live manager the refused list did not stop being built.
     await vi.waitFor(() =>
-      expect(mail?.liveStates[ADDRESS.address]).toEqual({ status: 'connecting' }),
+      expect(mail?.syncStates[ADDRESS.address]).toEqual({ status: 'syncing' }),
     );
   });
 });

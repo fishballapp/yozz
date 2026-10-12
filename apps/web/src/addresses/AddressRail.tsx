@@ -13,7 +13,7 @@ import { Link, useLocation, useParams } from '@tanstack/react-router';
 import type { ReactNode } from 'react';
 import { keepCompose, withCompose } from '../compose/intent';
 import { useMail } from '../store/MailProvider';
-import { type MailboxId, unreadCount } from '../threads/views';
+import { isViewId, type MailboxId, unreadCount } from '../threads/views';
 import { buttonClass } from '../ui/Button';
 import { Wordmark } from '../ui/Wordmark';
 
@@ -22,10 +22,26 @@ import { Wordmark } from '../ui/Wordmark';
  * row's id stays `unified` (DECISIONS.md), and every link uses `keepCompose`.
  */
 
+/**
+ * A rail row's click opens its mailbox, or, on the mailbox already open, syncs what it shows: every
+ * address for a view, one for an address, as Gmail does. The activity bar says it happened.
+ */
+const useRowClick = (mailbox: MailboxId, onNavigate: (() => void) | undefined) => {
+  const params = useParams({ strict: false });
+  const { sync } = useMail();
+  const isActive = params.mailbox === mailbox;
+  return {
+    isActive,
+    onClick: () => {
+      if (isActive) void sync(isViewId(mailbox) ? undefined : mailbox);
+      onNavigate?.();
+    },
+  };
+};
+
 const UnifiedRow = ({ onNavigate }: { onNavigate?: () => void }) => {
   const { threads } = useMail();
-  const params = useParams({ strict: false });
-  const isActive = params.mailbox === 'unified';
+  const { isActive, onClick } = useRowClick('unified', onNavigate);
   const unread = unreadCount(threads, 'unified');
 
   return (
@@ -33,7 +49,7 @@ const UnifiedRow = ({ onNavigate }: { onNavigate?: () => void }) => {
       to="/m/$mailbox"
       params={{ mailbox: 'unified' }}
       search={keepCompose}
-      onClick={onNavigate}
+      onClick={onClick}
       aria-current={isActive ? 'page' : undefined}
       className={cn(
         'relative mx-2 mb-1 flex h-11 items-center gap-2.5 px-2.5 transition-colors',
@@ -69,15 +85,14 @@ const RailRow = ({
   count?: number;
   onNavigate?: () => void;
 }) => {
-  const params = useParams({ strict: false });
-  const isActive = params.mailbox === mailbox;
+  const { isActive, onClick } = useRowClick(mailbox, onNavigate);
 
   return (
     <Link
       to="/m/$mailbox"
       params={{ mailbox }}
       search={keepCompose}
-      onClick={onNavigate}
+      onClick={onClick}
       // Explicit rather than inherited from TanStack Router's own `aria-current`.
       aria-current={isActive ? 'page' : undefined}
       className={cn(

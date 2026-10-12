@@ -15,10 +15,10 @@ import {
   isInbound,
   parseAddressRecord,
 } from '../addresses/record';
-import { createActivityTracker, isUnsavedWork } from '../relay/activity';
+import { type ActivityTracker, createActivityTracker, isUnsavedWork } from '../relay/activity';
 import type { MailConnectionFailure, Result } from '../relay/connection';
 import { describeMailFailure } from '../relay/describe-failure';
-import type { LiveManager, LiveState, RunOn } from '../relay/live';
+import type { LiveManager, RunOn } from '../relay/live';
 import {
   type BodyEntry,
   type BodyOutcome,
@@ -71,7 +71,6 @@ type MailContextValue = ComposerShared & {
   /** What last failed (a flag write, a move, a body, an older page) and why; cleared by the next one that works. */
   mailError: string | null;
   syncStates: Readonly<Record<string, AccountSyncState>>;
-  liveStates: Readonly<Record<string, LiveState>>;
   sync: (address?: string) => Promise<void>;
   /** Pages one window further back, on every account this mailbox shows. Coalesced per account and folder. */
   loadOlder: (mailbox: MailboxId) => Promise<void>;
@@ -95,6 +94,8 @@ type MailContextValue = ComposerShared & {
   removeAddress: (address: string) => Promise<void>;
   /** Sets or clears the From display name; an empty string clears it. */
   setSenderName: (address: string, senderName: string) => Promise<void>;
+  /** Every piece of mail work in flight, for whatever shows it. */
+  activity: ActivityTracker;
 };
 
 const MailContext = createContext<MailContextValue | null>(null);
@@ -176,7 +177,6 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
   const [previews, setPreviews] = useState<Previews>({});
   const [ops, setOps] = useState<readonly PendingOp[]>([]);
   const [syncStates, setSyncStates] = useState<Readonly<Record<string, AccountSyncState>>>({});
-  const [liveStates, setLiveStates] = useState<Readonly<Record<string, LiveState>>>({});
   const [mailError, setMailError] = useState<string | null>(null);
   const inFlightBodiesRef = useRef<Map<string, Promise<BodyOutcome>>>(new Map());
   const sessionRef = useRef(session);
@@ -339,10 +339,6 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
           // The next session's state for an address of the same name is not this removal's to drop.
           if (generation !== sessionGeneration.current) return;
           setSyncStates(current => {
-            const { [address]: _, ...rest } = current;
-            return rest;
-          });
-          setLiveStates(current => {
             const { [address]: _, ...rest } = current;
             return rest;
           });
@@ -730,10 +726,6 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
             }
             return connection.connectImap(imap, options);
           },
-          // A connection of an ended session still reports its close; the next session's are not its to set.
-          onState: (address, state) => {
-            if (!cancelled) setLiveStates(current => ({ ...current, [address]: state }));
-          },
           onMailboxChanged: address => {
             if (!cancelled) void syncRef.current(address);
           },
@@ -789,7 +781,6 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
       setPreviews({});
       setOps([]);
       setSyncStates({});
-      setLiveStates({});
       setOlderInFlight({});
       reset(userId);
       setMailError(null);
@@ -1323,7 +1314,6 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
       recordsError,
       mailError,
       syncStates,
-      liveStates,
       sync,
       loadOlder,
       isLoadingOlder: mailbox => olderInFlight[mailbox] === true,
@@ -1331,6 +1321,7 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
       replaceAddress,
       removeAddress,
       setSenderName,
+      activity,
       markRead,
       markUnread,
       toggleStar,
@@ -1348,7 +1339,6 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
       recordsError,
       mailError,
       syncStates,
-      liveStates,
       sync,
       loadOlder,
       olderInFlight,
@@ -1356,6 +1346,7 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
       replaceAddress,
       removeAddress,
       setSenderName,
+      activity,
       markRead,
       markUnread,
       toggleStar,

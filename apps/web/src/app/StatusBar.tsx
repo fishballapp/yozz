@@ -1,28 +1,11 @@
-import type { InboundAddress } from '../addresses/record';
-import type { MailConnectionFailure } from '../relay/connection';
+import { describeMailFailure } from '../relay/describe-failure';
 import { useMail } from '../store/MailProvider';
-import { clockTime } from '../ui/time';
 
-const shortFailureReason = (failure: MailConnectionFailure): string => {
-  switch (failure.kind) {
-    case 'relay':
-      return 'relay unreachable';
-    case 'error':
-      return 'error';
-    case 'tls':
-      return 'TLS failed';
-    case 'auth':
-      return 'auth rejected';
-    case 'stalled':
-      return 'no answer';
-    case 'imap':
-      return failure.reason.kind === 'no' ? 'IMAP rejected' : `IMAP ${failure.reason.kind}`;
-    case 'smtp':
-      return `SMTP ${failure.reason.kind}`;
-  }
-};
-
-/** One line across the foot: where you are and how much is there. Counts are optional; Settings is not a mailbox. */
+/**
+ * One line across the foot: where you are and how much is there. Counts are optional; Settings is
+ * not a mailbox. Its right end is empty while all is well — that work is going on is the activity
+ * bar's to say — and otherwise names what went wrong.
+ */
 export const StatusBar = ({
   title,
   counts,
@@ -30,66 +13,20 @@ export const StatusBar = ({
   title: string;
   counts?: { unread: number; total: number };
 }) => {
-  const {
-    accounts,
-    identities,
-    isDemo: demo,
-    syncStates,
-    liveStates,
-    mailError,
-    sentCopyError,
-    sync,
-  } = useMail();
+  const { accounts, isDemo: demo, syncStates, mailError, sentCopyError, sync } = useMail();
 
-  const isSyncing = accounts.some(account => syncStates[account.address]?.status === 'syncing');
   const failedAccount = accounts.find(account => syncStates[account.address]?.status === 'failed');
-  const syncedAccounts = accounts.filter(
-    (account): account is InboundAddress => syncStates[account.address]?.status === 'synced',
-  );
-
-  // `live` while any account has one (`live↺` when every live one resumed), else reconnecting, else `offline` only when a server or the network ended one.
-  const connectionWord = (() => {
-    if (demo || accounts.length === 0) return null;
-    const states = accounts.flatMap(account => liveStates[account.address] ?? []);
-    const live = states.flatMap(state => (state.status === 'live' ? [state] : []));
-    if (live.length > 0) return live.every(state => state.resumed) ? 'live↺' : 'live';
-    if (states.some(state => state.status === 'reconnecting')) return 'reconnecting…';
-    if (states.some(state => state.status === 'failed') && !isSyncing) return 'offline';
-    return null;
+  const failedSync = (() => {
+    if (failedAccount === undefined) return null;
+    const state = syncStates[failedAccount.address];
+    if (state?.status !== 'failed') return null;
+    return describeMailFailure(state.failure, failedAccount.imap.host);
   })();
 
-  let statusText: string;
-  if (demo) {
-    statusText = 'Demo data · dev only';
-  } else if (accounts.length === 0) {
-    const count = identities.length;
-    statusText = `${count} ${count === 1 ? 'address' : 'addresses'} · nothing to sync`;
-  } else if (isSyncing) {
-    statusText = 'syncing…';
-  } else if (failedAccount !== undefined) {
-    const syncState = syncStates[failedAccount.address];
-    const failureReason =
-      syncState?.status === 'failed' ? shortFailureReason(syncState.failure) : 'error';
-    statusText = `sync failed · ${failureReason}`;
-  } else if (sentCopyError !== null) {
-    statusText = sentCopyError;
-  } else if (mailError !== null) {
-    statusText = mailError;
-  } else if (syncedAccounts.length > 0) {
-    const newestAt = Math.max(
-      ...syncedAccounts.map(account => {
-        const s = syncStates[account.address];
-        return s?.status === 'synced' ? s.at : 0;
-      }),
-    );
-    statusText = `synced ${clockTime(newestAt)}`;
-  } else {
-    statusText = 'no sync yet';
-  }
-
-  if (connectionWord !== null) statusText = `${connectionWord} · ${statusText}`;
-
-  const canSync = !demo && accounts.length > 0 && !isSyncing;
+  const notice = (() => {
+    if (demo) return 'Demo data · dev only';
+    return failedSync ?? sentCopyError ?? mailError;
+  })();
 
   return (
     <footer className="flex h-7 shrink-0 items-center justify-between gap-4 border-t border-rule-soft bg-ink-raised px-3 font-mono text-2xs text-paper-faint">
@@ -108,17 +45,24 @@ export const StatusBar = ({
           </>
         )}
       </p>
-      {canSync ? (
-        <button
-          type="button"
-          onClick={() => void sync()}
-          className="shrink-0 truncate tracking-[0.08em] uppercase transition-colors hover:text-paper"
-          title={mailError ?? 'Sync now'}
-        >
-          {statusText}
-        </button>
-      ) : (
-        <p className="shrink-0 truncate tracking-[0.08em] uppercase">{statusText}</p>
+      {notice !== null && (
+        <p className="flex min-w-0 items-center gap-1.5 tracking-[0.08em] uppercase">
+          <span className="truncate" title={notice}>
+            {notice}
+          </span>
+          {!demo && failedSync !== null && failedAccount !== undefined && (
+            <>
+              <span aria-hidden>·</span>
+              <button
+                type="button"
+                onClick={() => void sync(failedAccount.address)}
+                className="shrink-0 text-paper underline underline-offset-3 transition-colors hover:text-signal"
+              >
+                Retry
+              </button>
+            </>
+          )}
+        </p>
       )}
     </footer>
   );

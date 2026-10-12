@@ -10,18 +10,21 @@ export type Activity = {
   readonly priority: 'user' | 'background';
 };
 
+/** Work in the list, with when it began. */
+export type TrackedActivity = Activity & { readonly startedAt: number };
+
 export type ActivityTracker = {
   /** Registers work as started; the function it returns ends it, once, however often it is called. */
   readonly begin: (activity: Activity) => () => void;
   /** The same array until the list changes, as `useSyncExternalStore` needs. */
-  readonly snapshot: () => readonly Activity[];
+  readonly snapshot: () => readonly TrackedActivity[];
   readonly subscribe: (listener: () => void) => () => void;
 };
 
-export const createActivityTracker = (): ActivityTracker => {
-  let current: readonly Activity[] = [];
+export const createActivityTracker = (now: () => number = Date.now): ActivityTracker => {
+  let current: readonly TrackedActivity[] = [];
   const listeners = new Set<() => void>();
-  const publish = (next: readonly Activity[]) => {
+  const publish = (next: readonly TrackedActivity[]) => {
     current = next;
     for (const listener of listeners) listener();
   };
@@ -29,7 +32,7 @@ export const createActivityTracker = (): ActivityTracker => {
   return {
     begin: activity => {
       // Its own object, so ending it removes this one and not an equal one.
-      const entry = { ...activity };
+      const entry: TrackedActivity = { ...activity, startedAt: now() };
       publish([...current, entry]);
       let isEnded = false;
       return () => {

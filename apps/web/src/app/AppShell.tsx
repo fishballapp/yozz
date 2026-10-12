@@ -12,6 +12,7 @@ import { isDemo } from '../ui/chrome';
 import { RAIL_WIDTH, Resizer, useListWidth, useRailWidth } from '../ui/Resizer';
 import { Wordmark } from '../ui/Wordmark';
 import { useVault } from '../vault/session';
+import { ActivityBar } from './ActivityBar';
 import { StatusBar } from './StatusBar';
 
 /**
@@ -95,6 +96,7 @@ const AppShellBody = () => {
 
   return (
     <div className="flex h-dvh flex-col bg-ink">
+      <ActivityBar />
       {/* One bar for every screen. Compose belongs on it everywhere, not only over the mail: on a
           wide screen the rail carries it on every route, and a phone that loses it the moment you
           open Settings is the desktop app minus a button for no reason. */}

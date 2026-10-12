@@ -84,6 +84,20 @@
   color-scheme: dark;
 }
 
+/* The activity bar's segment crosses the bar: it is 30% wide, so 100 / 30 of its own width. */
+@theme {
+  --animate-activity-slide: activity-slide 1.4s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+
+  @keyframes activity-slide {
+    from {
+      transform: translateX(-100%);
+    }
+    to {
+      transform: translateX(334%);
+    }
+  }
+}
+
 @theme inline {
   --font-sans: "Geist Variable", ui-sans-serif, system-ui, sans-serif;
   --font-mono: "Geist Mono Variable", ui-monospace, "SF Mono", monospace;

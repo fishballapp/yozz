@@ -228,7 +228,7 @@ describe('createLiveManager', () => {
     const running = manager.run(ACCOUNT, { ...slow.task, effect: 'write' });
     const queued = manager.run(ACCOUNT, quick);
     await flush();
-    expect(activity.snapshot()).toEqual([
+    expect(activity.snapshot()).toMatchObject([
       { effect: 'write', priority: 'user' },
       { effect: 'read', priority: 'background' },
     ]);

@@ -2,8 +2,8 @@ import { describe, expect, it, vi } from 'vitest';
 import { createActivityTracker, isUnsavedWork } from './activity';
 
 describe('createActivityTracker', () => {
-  it('lists work from begin until it ends, and ends it only once', () => {
-    const tracker = createActivityTracker();
+  it('lists work from begin until it ends, with when it began, and ends it only once', () => {
+    const tracker = createActivityTracker(() => 5);
     const listener = vi.fn();
     tracker.subscribe(listener);
     const endRead = tracker.begin({ effect: 'read', priority: 'user' });
@@ -12,7 +12,7 @@ describe('createActivityTracker', () => {
 
     endRead();
     endRead();
-    expect(tracker.snapshot()).toEqual([{ effect: 'write', priority: 'user' }]);
+    expect(tracker.snapshot()).toEqual([{ effect: 'write', priority: 'user', startedAt: 5 }]);
     expect(listener).toHaveBeenCalledTimes(3);
     endWrite();
     expect(tracker.snapshot()).toEqual([]);
