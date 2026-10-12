@@ -79,10 +79,10 @@ export const Login = ({ isAccountDeleted = false }: { isAccountDeleted?: boolean
       <AuthColumn title="Log in" footer={footer}>
         <h2 className="label-rule">Recover the account</h2>
         <p className="mt-3 text-base leading-relaxed text-paper-dim">
-          A recovery link restores your YOZZ account, but it cannot unlock your saved addresses: it
-          proves your address and holds no key. What follows starts again, which deletes everything
-          stored here, so your saved addresses have to be added back. Each password can be made
-          again at your provider. It takes about ten minutes.
+          A recovery link restores your YOZZ account, not your vault. It proves your address and
+          holds no key, so it cannot open a single record. What follows is a vault reset and adding
+          your accounts again: ten minutes, and nothing lost, because every credential in there can
+          be made again at your provider.
         </p>
         <form
           className="mt-6 space-y-4"
@@ -232,7 +232,7 @@ export const Login = ({ isAccountDeleted = false }: { isAccountDeleted?: boolean
             })();
           }}
         >
-          {busyKind === 'password' ? 'Logging in…' : 'Log in'}
+          {busyKind === 'password' ? 'Deriving keys…' : 'Log in'}
         </Button>
         {busyKind === 'password' && (
           <p className="text-2xs text-paper-faint">

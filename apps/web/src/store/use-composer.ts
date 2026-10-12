@@ -49,7 +49,7 @@ const watchSession = (generation: RefObject<number>) => {
 /** A send whose session ended before its claim: nothing was claimed, so nothing went out. */
 const lockedBeforeSend = {
   ok: false,
-  error: { kind: 'error', detail: "You're signed out." },
+  error: { kind: 'error', detail: 'The vault is locked.' },
 } as const satisfies Result<never, MailConnectionFailure>;
 
 type SendClaim = Result<{ readonly settled: Promise<SendReport> }, MailConnectionFailure>;

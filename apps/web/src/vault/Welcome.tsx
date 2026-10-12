@@ -82,7 +82,7 @@ export const Welcome = () => {
         <FieldRow
           label="Email address"
           htmlFor="welcome-email"
-          hint="This address is permanent. It is part of how your saved addresses are encrypted, so it can never be changed later."
+          hint="This address is permanent. It is part of how your vault key is derived, so it can never be changed later."
         >
           <Input
             id="welcome-email"

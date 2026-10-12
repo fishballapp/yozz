@@ -38,7 +38,7 @@ export const AuthColumn = ({
           <div className="mt-8 border-y border-rule bg-ink-raised px-4 py-3.5">
             <p className="label-rule">No backend configured</p>
             <p className="mt-2 text-base leading-relaxed text-paper-dim">
-              Sign-in needs the YOZZ API worker, and no address for it was supplied at build time.
+              The vault needs the YOZZ API worker, and no address for it was supplied at build time.
               Set <span className="font-mono text-2xs text-paper">VITE_API_URL</span> before
               starting the app. Nothing on this screen will work until then.
             </p>
@@ -47,7 +47,7 @@ export const AuthColumn = ({
         )}
 
         <p className="mt-auto pt-10 font-mono text-2xs tracking-[0.08em] text-paper-faint uppercase">
-          No mailbox connected
+          Vault only · no mailbox connected
         </p>
       </div>
     </div>

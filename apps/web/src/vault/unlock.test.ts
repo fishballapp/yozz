@@ -420,7 +420,7 @@ describe('Vault unlock and session orchestration', () => {
     });
 
     await expect(createPasskeyVault({ account: ALICE, api, idbFactory })).rejects.toThrow(
-      /already has a password sign-in/,
+      /already has a password vault/,
     );
     // Before registering anything.
     expect(mocks.addPasskey).not.toHaveBeenCalled();
@@ -994,7 +994,7 @@ describe('createPasswordVault over an enrolled account', () => {
         api,
         idbFactory,
       }),
-    ).rejects.toThrow(/already has a password sign-in/);
+    ).rejects.toThrow(/already has a password vault/);
     expect(alice.finalizePasswordUnlock).toHaveBeenCalledTimes(1);
   });
 });

@@ -451,7 +451,7 @@ describe("an ended session's IMAP work", () => {
 
     await replaceSession(await nextAccount());
     navigation.open();
-    expect(await act(() => opened)).toEqual({ error: expect.stringContaining('signed out') });
+    expect(await act(() => opened)).toEqual({ error: expect.stringContaining('locked') });
     await settle();
     expect(mocks.runs).toEqual([]);
   });

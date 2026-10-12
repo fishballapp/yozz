@@ -89,7 +89,7 @@ const reportSend = (settled: Promise<SendReport>, reopen: (draftKey: string) => 
 const DISCARD_REFUSALS: Record<Exclude<DeleteOutcome['outcome'], 'deleted' | 'absent'>, string> = {
   conflict: 'Another device changed it, so it is still in Drafts.',
   sending: 'Its send has not settled, so it is still in Drafts.',
-  offline: 'YOZZ could not be reached, so it is still in Drafts.',
+  offline: 'The vault could not be reached, so it is still in Drafts.',
 };
 
 /** Discard closes the composer before the vault answers, so a refusal is a toast. */

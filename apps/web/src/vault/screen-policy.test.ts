@@ -77,7 +77,7 @@ describe('vaultErrorMessage', () => {
     );
 
     expect(vaultErrorMessage(new VaultError('unreadable', 'x'))).toBe(
-      'That did not unlock your saved addresses. With a password, that usually means the password was wrong, and nothing more can be said about it.',
+      'That did not open your data. With a password, that usually means the password was wrong; the stored data itself cannot say more than that it failed to authenticate.',
     );
     expect(vaultErrorMessage(new VaultError('malformed', 'x'))).toBe(
       'A stored value was not the shape it should be.',
@@ -90,7 +90,7 @@ describe('vaultErrorMessage', () => {
     expect(vaultErrorMessage(new PasskeyPrfError(prfMessage))).toBe(prfMessage);
 
     const unlockMessage =
-      'This account already has a password sign-in. Switch modes to keep it, or start again first — creating one now would leave every saved record unreadable.';
+      'This account already has a password vault. Switch modes to keep it, or reset the vault first — creating one now would mint a new key and strand every existing record.';
     expect(vaultErrorMessage(new UnlockError(unlockMessage))).toBe(unlockMessage);
 
     const cancelled = 'The passkey prompt was cancelled or timed out. Try again.';

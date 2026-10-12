@@ -438,7 +438,7 @@ describe('removeAddress', () => {
 
     await act(async () => {
       mocks.syncs[0]?.finish();
-      await expect(readding).rejects.toThrow('signed out');
+      await expect(readding).rejects.toThrow('locked');
     });
     expect(mocks.events).toEqual([`clear user-1 ${ALICE.address}`]);
     expect(addressesOf(mail())).toEqual([BOB.address]);
