@@ -12,11 +12,11 @@ export const PASSKEY_OFFER: Record<
   supported: { canOffer: true, note: null },
   unknown: {
     canOffer: true,
-    note: 'This browser does not report whether a passkey can open your data. You can still try; if the authenticator cannot, use a password instead.',
+    note: 'This browser does not report whether a passkey can unlock your saved addresses. You can still try; if the authenticator cannot, use a password instead.',
   },
   unsupported: {
     canOffer: false,
-    note: 'This browser cannot use a passkey to open your data. Use a password instead.',
+    note: 'This browser cannot use a passkey to unlock your saved addresses. Use a password instead.',
   },
 };
 
@@ -43,7 +43,7 @@ const API_ERROR_MESSAGES: Record<ApiErrorCode | 'NETWORK_ERROR', string> = {
 
 const VAULT_ERROR_MESSAGES: Record<VaultFailureCode, string> = {
   unreadable:
-    'That did not open your data. With a password, that usually means the password was wrong; the stored data itself cannot say more than that it failed to authenticate.',
+    'That did not unlock your saved addresses. With a password, that usually means the password was wrong, and nothing more can be said about it.',
   malformed: 'A stored value was not the shape it should be.',
   stale:
     'The server answered with an older version of a record than this device has already seen. Nothing was read.',

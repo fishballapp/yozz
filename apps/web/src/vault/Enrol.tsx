@@ -61,11 +61,11 @@ export const Enrol = () => {
         const account = { userId: session.data.user.id, email: session.data.user.email };
 
         const status = await vaultApi.forAccount(account.userId).getUnlockStatus();
-        if (status.mode !== null && reset !== '1') {
+        if (status.mode !== null && reset !== true) {
           void navigate({ to: '/login', search: previous => previous, replace: true });
           return;
         }
-        if (status.mode !== null && reset === '1') {
+        if (status.mode !== null && reset === true) {
           setEnrolStep({ step: 'reset', account, mode: status.mode });
           return;
         }
@@ -132,7 +132,7 @@ export const Enrol = () => {
 
   if (enrolStep.step === 'checking') {
     return (
-      <AuthColumn title="Setting up your vault" description="Checking this sign-in…">
+      <AuthColumn title="Setting up your sign-in" description="Checking this sign-in…">
         {error !== null && (
           <p role="alert" className="text-base text-danger">
             {error}
@@ -145,8 +145,8 @@ export const Enrol = () => {
   if (enrolStep.step === 'reset') {
     return (
       <AuthColumn
-        title="Reset your vault"
-        description="A recovery link restores your YOZZ account. It cannot open your vault: the link proves your address and holds no key. Resetting deletes every stored record and gives you a new one, and nothing is lost that cannot be made again. Revoke each password at your provider, generate a new one, add the account back."
+        title="Start again"
+        description="A recovery link restores your YOZZ account, but it cannot unlock your saved addresses: the link proves your address and holds no key. Starting again deletes everything stored here, so your saved addresses have to be added again. Revoke each password at your provider, generate a new one, then add each address back."
         footer={
           <Link
             to="/login"
@@ -179,7 +179,7 @@ export const Enrol = () => {
             })();
           }}
         >
-          {busyKind === 'reset' ? 'Resetting…' : 'Reset the vault'}
+          {busyKind === 'reset' ? 'Starting again…' : 'Start again'}
         </Button>
         {renderError('reset')}
       </AuthColumn>
@@ -206,8 +206,8 @@ export const Enrol = () => {
         <div className="space-y-4">
           <h2 className="label-rule">Passkey (recommended)</h2>
           <p className="text-base leading-relaxed text-paper-dim">
-            One gesture signs you in and opens your vault. The key is derived by your authenticator
-            and never reaches us.
+            Your passkey signs you in and unlocks your saved addresses. The key is derived by your
+            authenticator and never reaches us.
           </p>
           <p className="text-base leading-relaxed text-paper-dim">
             Your browser will ask twice: once to create the passkey, once to derive the key it
@@ -255,16 +255,16 @@ export const Enrol = () => {
         )}
         <p className="text-base leading-relaxed text-paper-dim">
           Your password is the only key. It never leaves this browser, and nothing else has to be
-          carried to a new one, so any browser you can type it into opens the vault.
+          carried to a new one, so any browser you can type it into unlocks your saved addresses.
         </p>
         <p className="text-base leading-relaxed text-paper-dim">
-          Make it a passphrase rather than a password. It is the only thing standing between the
-          vault and whoever holds a copy of the encrypted data, and twelve characters is the floor
-          rather than the target.
+          Make it a passphrase rather than a password. It is the only thing standing between your
+          saved addresses and whoever holds a copy of the encrypted data, and twelve characters is
+          the floor rather than the target.
         </p>
         <p className="text-base leading-relaxed text-paper-dim">
-          There is no recovery. Lose the password and the vault resets, which is safe here because
-          every credential in it can be made again at your provider.
+          If you forget this password, nobody can recover your saved addresses, not even us. You
+          would add them again.
         </p>
         <FieldRow label="Password" htmlFor="enrol-password">
           <Input
@@ -320,7 +320,7 @@ export const Enrol = () => {
             })();
           }}
         >
-          {busyKind === 'password' ? 'Deriving keys…' : 'Create vault'}
+          {busyKind === 'password' ? 'Creating…' : 'Create password'}
         </Button>
         {busyKind === 'password' && (
           <p className="text-2xs text-paper-faint">

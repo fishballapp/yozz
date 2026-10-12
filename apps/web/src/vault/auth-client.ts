@@ -31,7 +31,7 @@ const accountAuthClient = (userId: string) =>
 
 /**
  * Absolute: Better Auth resolves a relative `callbackURL` against its own base URL, the API.
- * Both links land on `/enrol`; `?reset=1` is what lets a recovery link reset a live vault.
+ * Both links land on `/enrol`; `?reset=true` is what lets a recovery link reset a live vault.
  */
 const callbackURL = (path: string) => `${window.location.origin}${path}`;
 
@@ -47,7 +47,7 @@ export const requestSignupLink = async (email: string) => {
 export const requestRecoveryLink = async (email: string) => {
   return authClient.signIn.magicLink({
     email,
-    callbackURL: callbackURL('/enrol?reset=1'),
+    callbackURL: callbackURL('/enrol?reset=true'),
   });
 };
 

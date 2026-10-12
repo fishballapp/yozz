@@ -194,7 +194,7 @@ const refuseIfAlreadyEnrolled = async (api: AccountVaultApi): Promise<void> => {
   const status = await api.getUnlockStatus();
   if (status.mode !== null) {
     throw new UnlockError(
-      `This account already has a ${status.mode} vault. Switch modes to keep it, or reset the vault first — creating one now would mint a new key and strand every existing record.`,
+      `This account already has a ${status.mode} sign-in. Switch modes to keep it, or start again first — creating one now would leave every saved record unreadable.`,
     );
   }
 };
@@ -259,7 +259,7 @@ const readCeremony = (result: unknown): PasskeyCeremony => {
 const registerPrfPasskey = async (userId: string): Promise<PasskeyCeremony> => {
   if ((await checkPasskeyPrfCapability()) === 'unsupported') {
     throw new PasskeyPrfError(
-      'This browser cannot use a passkey to open your data. Use a password instead.',
+      'This browser cannot use a passkey to unlock your saved addresses. Use a password instead.',
     );
   }
 
@@ -284,7 +284,7 @@ const derivePasskeyKey = async (
   try {
     if (!isPrfEnabled(clientExtensionResults)) {
       throw new PasskeyPrfError(
-        'This passkey cannot open your data. Try another one, or use a password instead.',
+        'This passkey cannot unlock your saved addresses. Try another one, or use a password instead.',
       );
     }
     return await derivePasskeyEncKey(await evaluatePrfForCredential(credentialId));
@@ -328,7 +328,7 @@ export const createPasskeyVault = async ({
 };
 
 export const PASSKEY_DERIVES_ANOTHER_KEY =
-  'This passkey signed you in, but on this device it derives a different vault key from the one it was set up with, which synced passkeys can do. Log in on a device where it works, or with your password, then add a passkey on this device from Settings.';
+  'This passkey signed you in, but on this device it derives a different key from the one it was set up with, which synced passkeys can do. Log in on a device where it works, or with your password, then add a passkey on this device from Settings.';
 
 export const loginWithPasskey = async ({
   api = vaultApi,

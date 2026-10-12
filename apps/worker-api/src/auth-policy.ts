@@ -124,13 +124,14 @@ const refuseSessionFromRegistration = async ({ body }: PolicyContext): Promise<v
   }
 };
 
-/** One magic-link endpoint serves signup and recovery; a recovery link (`?reset=1`) for an unknown address would otherwise create an account. */
+/** One magic-link endpoint serves signup and recovery; a recovery link (`?reset=true`) for an unknown address would otherwise create an account. */
 const refuseRecoveryOfUnknownEmail = async ({ env, body }: PolicyContext): Promise<void> => {
   const { email, callbackURL } =
     (body as { email?: string; callbackURL?: string } | undefined) ?? {};
   if (!email) return badRequest('Magic link requires an email');
   if (!callbackURL) return;
-  const isRecovery = new URL(callbackURL, 'http://placeholder').searchParams.get('reset') === '1';
+  const isRecovery =
+    new URL(callbackURL, 'http://placeholder').searchParams.get('reset') === 'true';
   if (!isRecovery) return;
 
   const user = await env.DB.prepare('SELECT id FROM user WHERE lower(email) = lower(?)')

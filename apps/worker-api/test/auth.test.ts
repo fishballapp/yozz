@@ -93,7 +93,7 @@ describe('Worker auth policies and magic link', () => {
         env,
       );
 
-    const recovery = await request('https://yozz.app/enrol?reset=1');
+    const recovery = await request('https://yozz.app/enrol?reset=true');
     expect(recovery.status).toBe(404);
     expect(sent).toBe(0);
     const user = await env.DB.prepare('SELECT id FROM user WHERE email = ?')
