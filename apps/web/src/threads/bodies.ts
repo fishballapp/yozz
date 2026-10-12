@@ -204,6 +204,7 @@ export const fetchBody = async (
   }
   return run({
     priority: 'user',
+    effect: 'read',
     retry: true,
     run: async client => {
       const selectRes = await client.ensureSelected(mailbox);

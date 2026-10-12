@@ -7,6 +7,7 @@ import {
   useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
 } from 'react';
 import {
   ADDRESS_RECORD_TYPE,
@@ -14,6 +15,7 @@ import {
   isInbound,
   parseAddressRecord,
 } from '../addresses/record';
+import { createActivityTracker, isUnsavedWork } from '../relay/activity';
 import type { MailConnectionFailure, Result } from '../relay/connection';
 import { describeMailFailure } from '../relay/describe-failure';
 import type { LiveManager, LiveState, RunOn } from '../relay/live';
@@ -217,6 +219,22 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
    * outlived the PUT would clear the new address's cache.
    */
   const removalsRef = useRef<Map<string, Promise<void>>>(new Map());
+  /** Every piece of mail work in flight; the reload warning reads it (`relay/activity.ts`). */
+  const [activity] = useState(createActivityTracker);
+  const hasUnsavedWork = useSyncExternalStore(activity.subscribe, () =>
+    activity.snapshot().some(isUnsavedWork),
+  );
+  // The browser's own "Leave site?" sheet, while a write someone asked for is still on its way.
+  useEffect(() => {
+    if (!hasUnsavedWork) return;
+    const warn = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      // `preventDefault()` is the standard (Chromium); the deprecated property is what some WebKit builds read.
+      event.returnValue = '';
+    };
+    addEventListener('beforeunload', warn);
+    return () => removeEventListener('beforeunload', warn);
+  }, [hasUnsavedWork]);
   /**
    * Replacements from the moment the edited record is stored until the old connection and cache are
    * gone. The address does not sync again before then, or its first sync would write into a cache
@@ -652,6 +670,7 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
     threadsRef,
     baseByAccount,
     demo,
+    activity,
   });
   const { drafts } = shared;
 
@@ -720,6 +739,7 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
           },
           // A tab unlocked in the background must not hold connections open for ever.
           visible: !document.hidden,
+          activity,
         });
         if (listed.status === 'rejected') throw listed.reason;
         const parsed = listed.value.flatMap(row => {
@@ -777,7 +797,7 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
       // whoever unlocks next.
       toast.close();
     };
-  }, [store, userId, load, reset]);
+  }, [store, userId, load, reset, activity]);
 
   /** One account's next window of a folder. A refused page reports like a refused flag write. */
   const loadOlderOn = useCallback(

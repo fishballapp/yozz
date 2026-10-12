@@ -11,6 +11,8 @@ export const describeMailFailure = (failure: MailConnectionFailure, host: string
       return `Secure connection to ${host} failed: ${failure.detail}`;
     case 'auth':
       return `${host} rejected the username or password`;
+    case 'stalled':
+      return `${host} has not answered for a minute`;
     case 'smtp': {
       const { reason } = failure;
       const text = (() => {

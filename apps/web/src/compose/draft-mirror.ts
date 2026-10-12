@@ -61,6 +61,7 @@ export const mirrorDraft = async (
 
   const written = await run({
     priority: 'background',
+    effect: 'write',
     // An APPEND re-run would duplicate the copy; the next save mirrors the newer version anyway.
     retry: false,
     run: async client => {
@@ -103,6 +104,7 @@ export const expungeMirror = async (
   if (existing === null || locator === undefined) return;
   const erased = await run({
     priority: 'background',
+    effect: 'write',
     retry: true,
     run: async client => {
       if (!client.hasCapability('UIDPLUS')) return { ok: true, value: false };

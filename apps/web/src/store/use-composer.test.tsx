@@ -14,6 +14,7 @@ import {
   unconfirmSend,
 } from '../compose/draft-vault';
 import type { SentCopyFailure } from '../compose/send';
+import { createActivityTracker } from '../relay/activity';
 import type { Result } from '../relay/connection';
 import { threadsFromAccounts } from '../threads/summaries';
 import { isOnServer } from '../threads/thread';
@@ -168,6 +169,7 @@ const render = async (store: RecordStore) => {
     sync: async () => {},
     threadsRef: { current: [] },
     baseByAccount: {},
+    activity: createActivityTracker(),
     demo: false,
   };
   const latest: { current: ReturnType<typeof useComposerStore> | null } = { current: null };

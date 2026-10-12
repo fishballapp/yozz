@@ -1,6 +1,7 @@
 import type { ImapClient, ImapIdle, ImapResult, ImapSelected, ImapUntagged } from '@yozz.app/imap';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { InboundAddress } from '../addresses/record';
+import { createActivityTracker } from './activity';
 import type { MailConnectionFailure } from './connection';
 import { createLiveManager, type LiveState, type LiveTask } from './live';
 
@@ -110,6 +111,8 @@ describe('createLiveManager', () => {
   let nowMs: number;
   let timers: { id: number; fire: () => void; at: number }[];
   let nextTimerId: number;
+  /** The newest connection's traffic report, as `connectImap` would make it. */
+  let traffic: (() => void) | undefined;
 
   beforeEach(() => {
     clients = [];
@@ -155,14 +158,19 @@ describe('createLiveManager', () => {
     nowMs = target;
   };
 
-  const createManager = (capabilities: readonly string[] = ['IDLE']) => {
+  const createManager = (
+    capabilities: readonly string[] = ['IDLE'],
+    activity = createActivityTracker(),
+  ) => {
     let connectCount = 0;
     return createLiveManager({
+      activity,
       now: () => nowMs,
       setTimer: setTimer as typeof setTimeout,
       clearTimer: clearTimer as typeof clearTimeout,
       connect: async (_imap, options) => {
         connectCount += 1;
+        traffic = options?.onTraffic;
         const client = createFakeClient(capabilities);
         (
           client as FakeClient & { setOnUntagged: (fn: (u: ImapUntagged) => void) => void }
@@ -192,9 +200,144 @@ describe('createLiveManager', () => {
     });
   };
 
+  /** A task the server never answers, unless the test settles it. */
+  const hanging = () => {
+    let settle = () => {};
+    const task: LiveTask<number> = {
+      priority: 'user',
+      effect: 'read',
+      retry: false,
+      run: () =>
+        new Promise(resolve => {
+          settle = () => resolve({ ok: true, value: 1 });
+        }),
+    };
+    return { task, settle: () => settle() };
+  };
+  const quick: LiveTask<number> = {
+    priority: 'background',
+    effect: 'read',
+    retry: true,
+    run: async () => ({ ok: true, value: 2 }),
+  };
+
+  it('tells the tracker of every task from the moment it is queued until it settles', async () => {
+    const activity = createActivityTracker();
+    const manager = createManager(['IDLE'], activity);
+    const slow = hanging();
+    const running = manager.run(ACCOUNT, { ...slow.task, effect: 'write' });
+    const queued = manager.run(ACCOUNT, quick);
+    await flush();
+    expect(activity.snapshot()).toEqual([
+      { effect: 'write', priority: 'user' },
+      { effect: 'read', priority: 'background' },
+    ]);
+
+    slow.settle();
+    await Promise.all([running, queued]);
+    expect(activity.snapshot()).toEqual([]);
+  });
+
+  it('fails the work behind a server that stops answering, a minute after it last moved', async () => {
+    const manager = createManager();
+    void manager.run(ACCOUNT, hanging().task);
+    let behind: unknown = 'waiting';
+    void manager.run(ACCOUNT, quick).then(result => {
+      behind = result;
+    });
+    await flush();
+
+    await advance(50_000);
+    expect(behind).toBe('waiting');
+    await advance(20_000);
+    expect(behind).toEqual({ ok: false, error: { kind: 'stalled' } });
+    expect(states.at(-1)).toMatchObject({ status: 'failed', failure: { kind: 'stalled' } });
+  });
+
+  /** A manager over one `connect`, with the test's clock. */
+  const managerOver = (
+    connect: Parameters<typeof createLiveManager>[0]['connect'],
+    activity = createActivityTracker(),
+  ) =>
+    createLiveManager({
+      now: () => nowMs,
+      setTimer: setTimer as typeof setTimeout,
+      clearTimer: clearTimer as typeof clearTimeout,
+      activity,
+      connect,
+      onState: (_address, state) => {
+        states.push(state);
+      },
+      onMailboxChanged: () => {},
+    });
+  const whenAborted = (signal: AbortSignal | undefined) =>
+    new Promise<void>(resolve => signal?.addEventListener('abort', () => resolve()));
+
+  it('ends a socket whose command is never answered, without a LOGOUT that would wait behind it', async () => {
+    const activity = createActivityTracker();
+    let aborted: Promise<void> = new Promise(() => {});
+    const manager = managerOver(async (_imap, options) => {
+      aborted = whenAborted(options?.signal);
+      return {
+        ok: true,
+        // A graceful close queues LOGOUT behind the silent command: it ends only with the socket.
+        value: { client: createFakeClient(), close: () => aborted, resumed: false },
+      };
+    }, activity);
+    const write = manager.run(ACCOUNT, {
+      priority: 'user',
+      effect: 'write',
+      retry: false,
+      run: async () => {
+        await aborted;
+        return { ok: false, error: { kind: 'imap', reason: { kind: 'closed' } } };
+      },
+    });
+    await flush();
+
+    await advance(70_000);
+    expect(await write).toEqual({ ok: false, error: { kind: 'stalled' } });
+    expect(activity.snapshot()).toEqual([]);
+  });
+
+  it('ends a handshake or login that never finishes', async () => {
+    const activity = createActivityTracker();
+    const manager = managerOver(
+      (_imap, options) =>
+        whenAborted(options?.signal).then(() => ({
+          ok: false,
+          error: { kind: 'relay', detail: 'cancelled' },
+        })),
+      activity,
+    );
+    const read = manager.run(ACCOUNT, quick);
+    await flush();
+
+    await advance(70_000);
+    expect(await read).toEqual({ ok: false, error: { kind: 'stalled' } });
+    expect(states.at(-1)).toMatchObject({ status: 'failed', failure: { kind: 'stalled' } });
+    expect(activity.snapshot()).toEqual([]);
+  });
+
+  it('leaves slow work alone while bytes keep crossing the connection', async () => {
+    const manager = createManager();
+    const slow = hanging();
+    const running = manager.run(ACCOUNT, slow.task);
+    await flush();
+    for (let minute = 0; minute < 6; minute++) {
+      await advance(30_000);
+      traffic?.();
+    }
+    expect(states.some(state => state.status === 'failed')).toBe(false);
+
+    slow.settle();
+    expect(await running).toEqual({ ok: true, value: 1 });
+  });
+
   it('runs a task queued at any moment after the one before it finishes', async () => {
     const task: LiveTask<number> = {
       priority: 'user',
+      effect: 'read',
       retry: true,
       run: async () => ({ ok: true, value: 1 }),
     };
@@ -220,6 +363,7 @@ describe('createLiveManager', () => {
     const tasks = [
       manager.run(ACCOUNT, {
         priority: 'user',
+        effect: 'read',
         retry: true,
         run: async () => {
           order.push('u1');
@@ -228,6 +372,7 @@ describe('createLiveManager', () => {
       }),
       manager.run(ACCOUNT, {
         priority: 'background',
+        effect: 'read',
         retry: true,
         run: async () => {
           order.push('b1');
@@ -236,6 +381,7 @@ describe('createLiveManager', () => {
       }),
       manager.run(ACCOUNT, {
         priority: 'user',
+        effect: 'read',
         retry: true,
         run: async () => {
           order.push('u2');
@@ -251,6 +397,7 @@ describe('createLiveManager', () => {
     const manager = createManager();
     await manager.run(ACCOUNT, {
       priority: 'user',
+      effect: 'read',
       retry: true,
       run: async client => {
         await client.ensureSelected('INBOX');
@@ -267,6 +414,7 @@ describe('createLiveManager', () => {
     const manager = createManager();
     await manager.run(ACCOUNT, {
       priority: 'user',
+      effect: 'read',
       retry: true,
       run: async () => ({ ok: true, value: undefined }),
     });
@@ -275,6 +423,7 @@ describe('createLiveManager', () => {
     let ran = false;
     const next = manager.run(ACCOUNT, {
       priority: 'user',
+      effect: 'read',
       retry: true,
       run: async () => {
         ran = true;
@@ -290,6 +439,7 @@ describe('createLiveManager', () => {
     const manager = createManager();
     await manager.run(ACCOUNT, {
       priority: 'user',
+      effect: 'read',
       retry: true,
       run: async () => ({ ok: true, value: undefined }),
     });
@@ -310,6 +460,7 @@ describe('createLiveManager', () => {
     let attempts = 0;
     const result = await manager.run(ACCOUNT, {
       priority: 'user',
+      effect: 'read',
       retry: true,
       run: async () => {
         attempts += 1;
@@ -332,6 +483,7 @@ describe('createLiveManager', () => {
     let attempts = 0;
     const result = await manager.run(ACCOUNT, {
       priority: 'user',
+      effect: 'read',
       retry: false,
       run: async () => {
         attempts += 1;
@@ -350,6 +502,7 @@ describe('createLiveManager', () => {
     const manager = createManager();
     await manager.run(ACCOUNT, {
       priority: 'user',
+      effect: 'read',
       retry: true,
       run: async () => ({ ok: true, value: undefined }),
     });
@@ -376,6 +529,7 @@ describe('createLiveManager', () => {
     });
     const running = manager.run(ACCOUNT, {
       priority: 'user',
+      effect: 'read',
       retry: true,
       run: async () => {
         await gate;
@@ -384,6 +538,7 @@ describe('createLiveManager', () => {
     });
     const queued = manager.run(ACCOUNT, {
       priority: 'user',
+      effect: 'read',
       retry: true,
       run: async () => ({ ok: true, value: 'queued' }),
     });
@@ -404,6 +559,7 @@ describe('createLiveManager', () => {
     const manager = createManager();
     await manager.run(ACCOUNT, {
       priority: 'user',
+      effect: 'read',
       retry: true,
       run: async () => ({ ok: true, value: undefined }),
     });
@@ -415,6 +571,7 @@ describe('createLiveManager', () => {
     };
     await manager.run(changed, {
       priority: 'user',
+      effect: 'read',
       retry: true,
       run: async () => ({ ok: true, value: undefined }),
     });
@@ -431,6 +588,7 @@ describe('createLiveManager', () => {
     const commandsAfterChange: number[] = [];
     const running = manager.run(ACCOUNT, {
       priority: 'user',
+      effect: 'read',
       retry: false,
       run: async client => {
         await gate;
@@ -444,6 +602,7 @@ describe('createLiveManager', () => {
     const changed: InboundAddress = { ...ACCOUNT, imap: { ...ACCOUNT.imap, password: 'new' } };
     const next = manager.run(changed, {
       priority: 'user',
+      effect: 'read',
       retry: true,
       run: async () => ({ ok: true, value: 'second' }),
     });
@@ -460,6 +619,7 @@ describe('createLiveManager', () => {
     let attempts = 0;
     const result = await manager.run(ACCOUNT, {
       priority: 'user',
+      effect: 'read',
       retry: true,
       run: async () => {
         attempts += 1;
@@ -473,6 +633,7 @@ describe('createLiveManager', () => {
 
     const twice = await manager.run(ACCOUNT, {
       priority: 'user',
+      effect: 'read',
       retry: true,
       run: async () => {
         throw new Error('still boom');
@@ -486,6 +647,7 @@ describe('createLiveManager', () => {
     const manager = createManager([]);
     await manager.run(ACCOUNT, {
       priority: 'user',
+      effect: 'read',
       retry: true,
       run: async () => ({ ok: true, value: undefined }),
     });
@@ -505,6 +667,7 @@ describe('createLiveManager', () => {
     const manager = createManager();
     await manager.run(ACCOUNT, {
       priority: 'user',
+      effect: 'read',
       retry: true,
       run: async client => {
         // What a SELECT and a body fetch answer with.
@@ -524,6 +687,7 @@ describe('createLiveManager', () => {
     const manager = createManager();
     await manager.run(ACCOUNT, {
       priority: 'user',
+      effect: 'read',
       retry: true,
       run: async () => ({ ok: true, value: undefined }),
     });
@@ -542,6 +706,7 @@ describe('createLiveManager', () => {
     const manager = createManager();
     const result = await manager.run(ACCOUNT, {
       priority: 'user',
+      effect: 'read',
       retry: true,
       run: async () => ({ ok: false, error: { kind: 'imap', reason: { kind: 'closed' } } }),
     });
@@ -572,6 +737,7 @@ describe('createLiveManager', () => {
     });
     await manager.run(ACCOUNT, {
       priority: 'user',
+      effect: 'read',
       retry: true,
       run: async () => ({ ok: true, value: undefined }),
     });

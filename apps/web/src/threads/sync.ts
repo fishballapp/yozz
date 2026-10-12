@@ -137,7 +137,7 @@ export const syncAccount = async (
     state: { status: 'failed', failure, at: Date.now(), invalidated } as const,
   });
 
-  const folders = await run({ priority: 'user', retry: true, run: resolveFolders });
+  const folders = await run({ priority: 'user', effect: 'read', retry: true, run: resolveFolders });
   if (!folders.ok) return failed(folders.error);
 
   let invalidated = false;
@@ -153,6 +153,7 @@ export const syncAccount = async (
     }
     const synced = await run({
       priority: 'user',
+      effect: 'read',
       retry: true,
       run: async client => {
         const outcome = await syncFolder(
@@ -197,6 +198,7 @@ export const loadOlder = async (
 
   return run({
     priority: 'user',
+    effect: 'read',
     // Idempotent: a repeated window re-reads envelopes the cache already holds by uid.
     retry: true,
     run: async client => {
@@ -279,6 +281,7 @@ export const setFlag = async (
 ): Promise<Result<void, MailConnectionFailure>> =>
   run({
     priority: 'user',
+    effect: 'write',
     retry: true,
     run: async client => {
       for (const target of targets) {
@@ -321,6 +324,7 @@ export const moveThread = async (
 ): Promise<Result<readonly MovedCopy[], MailConnectionFailure>> =>
   run({
     priority: 'user',
+    effect: 'write',
     retry: false,
     run: async client => {
       const destination =
@@ -377,6 +381,7 @@ export const prefetchBodies = (
         queued += 1;
         void run({
           priority: 'background',
+          effect: 'read',
           retry: true,
           run: async client => {
             if (isStale()) return { ok: true, value: undefined };

@@ -13,6 +13,8 @@ const shortFailureReason = (failure: MailConnectionFailure): string => {
       return 'TLS failed';
     case 'auth':
       return 'auth rejected';
+    case 'stalled':
+      return 'no answer';
     case 'imap':
       return failure.reason.kind === 'no' ? 'IMAP rejected' : `IMAP ${failure.reason.kind}`;
     case 'smtp':

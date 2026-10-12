@@ -17,7 +17,12 @@ vi.mock('../relay/connection', () => new Promise(() => {}));
 // account's connection, which then waits on `relay/connection` for ever.
 const transport = vi.hoisted(() => ({
   syncAccount: vi.fn((run: Parameters<typeof syncAccount>[0]) =>
-    run({ run: async () => ({ ok: true, value: undefined }), priority: 'user', retry: true }),
+    run({
+      run: async () => ({ ok: true, value: undefined }),
+      priority: 'user',
+      effect: 'read',
+      retry: true,
+    }),
   ),
 }));
 vi.mock('../threads/sync', () => ({

@@ -15,6 +15,7 @@ import type { DeleteOutcome, DraftHandle, SaveOutcome } from '../compose/draft-v
 import { type ComposeIntent, draftKeyOfIntent, isUntouched } from '../compose/intent';
 import type { SendEffects } from '../compose/send-machine';
 import type { SentRecord } from '../compose/sent-record';
+import type { ActivityTracker } from '../relay/activity';
 import type { MailConnectionFailure, Result } from '../relay/connection';
 import { describeMailFailure } from '../relay/describe-failure';
 import type { RunOn } from '../relay/live';
@@ -160,6 +161,7 @@ export const useComposerStore = ({
   threadsRef,
   baseByAccount,
   demo,
+  activity,
 }: {
   session: ReturnType<typeof useVault>['session'];
   identities: readonly AddressRecord[];
@@ -180,6 +182,8 @@ export const useComposerStore = ({
   threadsRef: RefObject<readonly ThreadState[]>;
   baseByAccount: AccountSummaries;
   demo: boolean;
+  /** Where a send reports itself while it is on the network. */
+  activity: ActivityTracker;
 }) => {
   /** Every live draft in the vault. */
   const [drafts, setDrafts] = useState<readonly DraftHandle[]>([]);
@@ -362,19 +366,6 @@ export const useComposerStore = ({
     [expungeMirrorCopy, currentAccount],
   );
 
-  /** Sends past their claim and still on the network; the browser asks before unloading. */
-  const [sendsInFlight, setSendsInFlight] = useState(0);
-  useEffect(() => {
-    if (sendsInFlight === 0) return;
-    const warn = (event: BeforeUnloadEvent) => {
-      event.preventDefault();
-      // `preventDefault()` is the standard (Chromium); the deprecated property is what some WebKit builds read.
-      event.returnValue = '';
-    };
-    addEventListener('beforeunload', warn);
-    return () => removeEventListener('beforeunload', warn);
-  }, [sendsInFlight]);
-
   /**
    * The half of a send only the network can settle. Runs with the composer already closed, and
    * answers to the session the send began in (`isCurrent`), which may have ended by the claim.
@@ -387,8 +378,8 @@ export const useComposerStore = ({
       handle: DraftHandle,
       isCurrent: () => boolean,
     ): Promise<SendReport> => {
-      // Counted across a lock too: the send is on the network either way.
-      setSendsInFlight(count => count + 1);
+      // Counted across a lock too: the send is on the network either way, and a reload asks first.
+      const end = activity.begin({ effect: 'write', priority: 'user' });
       try {
         const [{ driveSend }, { listSentRecords, sentRecordFrom }] = await Promise.all([
           import('../compose/send-machine'),
@@ -467,10 +458,10 @@ export const useComposerStore = ({
         setSentCopyError(`the send did not finish · ${detail}`);
         return { state: 'unsettled', detail };
       } finally {
-        setSendsInFlight(count => count - 1);
+        end();
       }
     },
-    [sync, sendEffectsFor],
+    [sync, sendEffectsFor, activity],
   );
 
   /**

@@ -29,7 +29,9 @@ export type MailConnectionFailure =
   | { readonly kind: 'tls'; readonly detail: string }
   | { readonly kind: 'imap'; readonly reason: ImapFailure }
   | { readonly kind: 'smtp'; readonly reason: SmtpFailure }
-  | { readonly kind: 'auth'; readonly text: string };
+  | { readonly kind: 'auth'; readonly text: string }
+  /** Work waited a minute with nothing crossing the connection; see `live.ts`. */
+  | { readonly kind: 'stalled' };
 
 export type MailConnection = {
   readonly client: ImapClient;
@@ -90,6 +92,10 @@ export const openTlsDuplex = async (
   { host, port }: Host,
   expectedPort: 993 | 465,
   protocol: string,
+  /** Called whenever bytes cross the connection, either way. */
+  onTraffic: () => void = () => {},
+  /** Ends the connection at once, from the handshake on: no LOGOUT waiting behind a silent command. */
+  signal?: AbortSignal,
 ): Promise<Result<TlsDuplex, MailConnectionFailure>> => {
   if (port !== expectedPort) {
     return {
@@ -124,7 +130,7 @@ export const openTlsDuplex = async (
   ): Promise<Result<Handshake, MailConnectionFailure>> => {
     let transport: RelayTransport;
     try {
-      transport = await openRelayTransport(host, port);
+      transport = await openRelayTransport(host, port, signal);
     } catch (error) {
       return { ok: false, error: { kind: 'relay', detail: errorText(error) } };
     }
@@ -182,9 +188,11 @@ export const openTlsDuplex = async (
     read: async () => {
       const res = await tlsConn.read();
       if (!res.ok || res.kind === 'closed') return null;
+      onTraffic();
       return res.bytes;
     },
     write: async bytes => {
+      onTraffic();
       const res = await tlsConn.write(bytes);
       if (!res.ok) {
         throw new Error(`TLS write error: ${describeTlsFailure(res.reason)}`);
@@ -197,9 +205,13 @@ export const openTlsDuplex = async (
 
 export const connectImap = async (
   imap: AddressRecord['imap'] & {},
-  options?: { readonly onUntagged?: (response: ImapUntagged) => void },
+  options?: {
+    readonly onUntagged?: (response: ImapUntagged) => void;
+    readonly onTraffic?: () => void;
+    readonly signal?: AbortSignal;
+  },
 ): Promise<Result<MailConnection, MailConnectionFailure>> => {
-  const tls = await openTlsDuplex(imap, 993, 'IMAPS');
+  const tls = await openTlsDuplex(imap, 993, 'IMAPS', options?.onTraffic, options?.signal);
   if (!tls.ok) return tls;
   const { duplex, close: closeTls, resumed } = tls.value;
 

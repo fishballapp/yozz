@@ -1,5 +1,6 @@
 import type { ImapClient, ImapIdle, ImapResult, ImapSelected, ImapUntagged } from '@yozz.app/imap';
 import type { InboundAddress } from '../addresses/record';
+import type { ActivityTracker } from './activity';
 import type { MailConnection, MailConnectionFailure, Result } from './connection';
 
 /**
@@ -29,6 +30,8 @@ export type LiveTask<T> = {
   readonly run: (client: LiveClient) => Promise<Result<T, MailConnectionFailure>>;
   /** User-initiated work (open a body, a flag write, a sync) runs before prefetch. */
   readonly priority: 'user' | 'background';
+  /** A `write` changes the mailbox (a move, a flag, an APPEND); a reload must not drop it unasked. */
+  readonly effect: 'read' | 'write';
   /** Whether the task may be re-run on a fresh connection after a transport failure. APPEND must not. */
   readonly retry: boolean;
 };
@@ -51,7 +54,11 @@ export type LiveManager = {
 
 type ConnectFn = (
   imap: InboundAddress['imap'],
-  options?: { readonly onUntagged?: (response: ImapUntagged) => void },
+  options?: {
+    readonly onUntagged?: (response: ImapUntagged) => void;
+    readonly onTraffic?: () => void;
+    readonly signal?: AbortSignal;
+  },
 ) => Promise<Result<MailConnection, MailConnectionFailure>>;
 
 type Queued = {
@@ -89,6 +96,10 @@ type Connection = {
   tickMinutes: number;
   changedAt: number | null;
   idleDroppedAt: number | null;
+  /** When work here last moved: bytes either way, a task starting or ending, or work arriving. */
+  progressAt: number;
+  /** Ends the socket being opened or open at once, without the LOGOUT a stalled command would hold up. */
+  abort: AbortController | null;
 };
 
 const imapKeyOf = (imap: InboundAddress['imap']): string =>
@@ -102,6 +113,7 @@ const isTransportFailure = (error: MailConnectionFailure): boolean =>
 
 const CLOSED: LiveState = { status: 'closed' };
 const CONNECTION_CLOSED: MailConnectionFailure = { kind: 'error', detail: 'connection closed' };
+const STALLED: MailConnectionFailure = { kind: 'stalled' };
 
 const HIDDEN_CLOSE_MS = 2 * 60 * 1000;
 /** RFC 2177 §3: a server may drop an IDLE after 30 minutes; re-issue well inside that. */
@@ -113,6 +125,12 @@ const POLL_EVERY_MINUTES = 2;
 const MAILBOX_CHANGE_THROTTLE_MS = 1000;
 /** A dropped IDLE is reopened at once, but a server dropping every reopen is not retried in a loop. */
 const IDLE_RECONNECT_MIN_GAP_MS = 60 * 1000;
+/**
+ * Work waiting this long with nothing moving has stalled. Measured as no progress, not as a task's
+ * age: an APPEND of a large message may take minutes and is moving the whole time.
+ */
+const STALL_MS = 60 * 1000;
+const STALL_CHECK_MS = 10 * 1000;
 
 export const createLiveManager = (deps: {
   readonly connect: ConnectFn;
@@ -121,6 +139,8 @@ export const createLiveManager = (deps: {
   readonly onMailboxChanged: (address: string) => void;
   /** Whether the tab is visible right now; `setVisible` tracks it from then on. */
   readonly visible?: boolean;
+  /** Told of every task from the moment it is queued until it settles. */
+  readonly activity?: ActivityTracker;
   readonly now?: () => number;
   readonly setTimer?: typeof setTimeout;
   readonly clearTimer?: typeof clearTimeout;
@@ -147,11 +167,11 @@ export const createLiveManager = (deps: {
     conn.keepalive = null;
   };
 
-  const rejectQueued = (conn: Connection): void => {
+  const rejectQueued = (conn: Connection, error: MailConnectionFailure): void => {
     const pending = [...conn.userQueue, ...conn.backgroundQueue];
     conn.userQueue = [];
     conn.backgroundQueue = [];
-    for (const item of pending) item.resolve({ ok: false, error: CONNECTION_CLOSED });
+    for (const item of pending) item.resolve({ ok: false, error });
   };
 
   /** Only an unsolicited response while idling is "the mailbox changed": a command's own responses are the command's. */
@@ -207,12 +227,20 @@ export const createLiveManager = (deps: {
   ): Promise<Result<Socket, MailConnectionFailure>> => {
     await conn.teardown;
     setState(conn, { status });
+    const controller = new AbortController();
+    conn.abort = controller;
     const opened = await deps.connect(conn.imap, {
       onUntagged: untagged => handleUntagged(conn, untagged),
+      onTraffic: () => {
+        conn.progressAt = now();
+      },
+      signal: controller.signal,
     });
     if (!opened.ok) {
-      setFailed(conn, opened.error);
-      return opened;
+      // A handshake or login that hung was ended by `stall`, and fails as what it was.
+      const error = controller.signal.aborted ? STALLED : opened.error;
+      setFailed(conn, error);
+      return { ok: false, error };
     }
     // `wrapClient` needs the socket it belongs to, which does not exist until the client does.
     const socket: Socket = {
@@ -361,8 +389,13 @@ export const createLiveManager = (deps: {
         ? await openSocket(conn, status)
         : { ok: true as const, value: conn.socket };
     if (!opened.ok) return { result: opened, socketLost: false };
+    const signal = conn.abort?.signal;
     try {
       const result = await task.run(opened.value.client);
+      // Ended by `stall`: the closed socket is how it was ended, not what went wrong.
+      if (!result.ok && signal?.aborted === true) {
+        return { result: { ok: false, error: STALLED }, socketLost: true };
+      }
       return { result, socketLost: !result.ok && isTransportFailure(result.error) };
     } catch (error) {
       // A throw is a bug or a dead transport; either way this socket is not trusted again.
@@ -377,6 +410,7 @@ export const createLiveManager = (deps: {
   };
 
   const runOne = async (conn: Connection, { task, resolve }: Queued): Promise<void> => {
+    conn.progressAt = now();
     let last = await attempt(conn, task, 'connecting');
     if (last.socketLost && task.retry) {
       await closeSocket(conn);
@@ -386,6 +420,7 @@ export const createLiveManager = (deps: {
       await closeSocket(conn);
       setFailed(conn, last.result.error);
     }
+    conn.progressAt = now();
     resolve(last.result);
   };
 
@@ -409,6 +444,47 @@ export const createLiveManager = (deps: {
         rest(conn);
       }
     });
+  };
+
+  const hasWork = (conn: Connection): boolean =>
+    conn.pumping !== null || conn.userQueue.length > 0 || conn.backgroundQueue.length > 0;
+
+  /**
+   * Work waiting and nothing moving for a minute: a server that stopped answering, or a queue that
+   * stopped running. Either way it is reported rather than waited on for ever: what is queued fails
+   * as `stalled`, and the socket being opened or open is ended at once, so a handshake, a login or a
+   * task blocked on it fails as `stalled` too (a task is retried once on a new socket if it may be).
+   */
+  const stall = (conn: Connection): void => {
+    // biome-ignore lint/suspicious/noConsole: a stall is a bug or a dead server, and nothing else records it
+    console.error(
+      JSON.stringify({
+        event: 'mail-stalled',
+        address: conn.address,
+        running: conn.pumping !== null,
+        queued: conn.userQueue.length + conn.backgroundQueue.length,
+      }),
+    );
+    // Reported once a minute, not on every check.
+    conn.progressAt = now();
+    rejectQueued(conn, STALLED);
+    // Not `closeSocket`: its LOGOUT would queue behind the very command that is not answered.
+    conn.abort?.abort();
+    setFailed(conn, STALLED);
+  };
+
+  let watchdog: ReturnType<typeof setTimeout> | null = null;
+  /** Checks while any connection has work, and stops when none has. */
+  const watch = (): void => {
+    if (watchdog !== null) return;
+    watchdog = setTimer(() => {
+      watchdog = null;
+      const busy = [...connections.values()].filter(hasWork);
+      for (const conn of busy) {
+        if (now() - conn.progressAt >= STALL_MS) stall(conn);
+      }
+      if (busy.length > 0) watch();
+    }, STALL_CHECK_MS);
   };
 
   const getOrCreate = (account: InboundAddress): Connection => {
@@ -436,6 +512,8 @@ export const createLiveManager = (deps: {
       tickMinutes: 0,
       changedAt: null,
       idleDroppedAt: null,
+      progressAt: now(),
+      abort: null,
     };
     connections.set(account.address, conn);
     return conn;
@@ -443,7 +521,7 @@ export const createLiveManager = (deps: {
 
   /** Finishes the running task, drops the queued ones, LOGOUTs. The record stays for a later reopen. */
   const shutdown = async (conn: Connection): Promise<void> => {
-    rejectQueued(conn);
+    rejectQueued(conn, CONNECTION_CLOSED);
     await conn.pumping;
     clearKeepalive(conn);
     await closeSocket(conn);
@@ -462,9 +540,15 @@ export const createLiveManager = (deps: {
     run: (account, task) =>
       new Promise(resolve => {
         const conn = getOrCreate(account);
+        // An idle connection's last progress is old news; the clock starts with this work.
+        if (!hasWork(conn)) conn.progressAt = now();
+        const end = deps.activity?.begin({ effect: task.effect, priority: task.priority });
         const queued: Queued = {
           task: task as LiveTask<unknown>,
-          resolve: resolve as Queued['resolve'],
+          resolve: result => {
+            end?.();
+            resolve(result as Result<never, MailConnectionFailure>);
+          },
         };
         if (task.priority === 'user') {
           conn.userQueue.push(queued);
@@ -472,6 +556,7 @@ export const createLiveManager = (deps: {
           conn.backgroundQueue.push(queued);
         }
         pump(conn);
+        watch();
       }),
 
     close: async address => {

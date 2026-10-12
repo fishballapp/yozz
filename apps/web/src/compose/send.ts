@@ -100,6 +100,7 @@ export const storeSentCopy = async (
   let missingSent = false;
   const result = await run({
     priority: 'user',
+    effect: 'write',
     // The search makes a second run safe.
     retry: true,
     run: async client => {

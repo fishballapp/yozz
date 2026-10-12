@@ -172,6 +172,7 @@ describe('syncAccount', () => {
       if (name === 'INBOX') {
         void serial({
           priority: 'user',
+          effect: 'write',
           retry: false,
           run: async () => {
             order.push('open a message');

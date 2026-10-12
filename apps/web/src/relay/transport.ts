@@ -16,8 +16,17 @@ export class RelayError extends Error {
 
 export type RelayTransport = ByteDuplex & { readonly close: () => void };
 
-export const openRelayTransport = (host: string, port: 993 | 465): Promise<RelayTransport> =>
+/** `signal` closes the WebSocket at once, opening or open: what waits on it then ends. */
+export const openRelayTransport = (
+  host: string,
+  port: 993 | 465,
+  signal?: AbortSignal,
+): Promise<RelayTransport> =>
   new Promise((resolve, reject) => {
+    if (signal?.aborted === true) {
+      reject(new RelayError('refused', 'Cancelled before the connection was opened'));
+      return;
+    }
     const base = getApiBaseUrl()
       .replace(/^https:\/\//, 'wss://')
       .replace(/^http:\/\//, 'ws://');
@@ -36,6 +45,12 @@ export const openRelayTransport = (host: string, port: 993 | 465): Promise<Relay
       if (pending === null) return;
       waiter = null;
       pending(chunk);
+    };
+
+    const end = () => {
+      isEnded = true;
+      socket.close();
+      deliver(null);
     };
 
     const cleanupOpenListeners = () => {
@@ -89,11 +104,7 @@ export const openRelayTransport = (host: string, port: 993 | 465): Promise<Relay
           const copy = bytes.slice();
           socket.send(copy.buffer);
         },
-        close: () => {
-          isEnded = true;
-          socket.close();
-          deliver(null);
-        },
+        close: end,
       };
 
       resolve(transport);
@@ -116,4 +127,17 @@ export const openRelayTransport = (host: string, port: 993 | 465): Promise<Relay
     socket.addEventListener('open', onOpen);
     socket.addEventListener('error', onError);
     socket.addEventListener('close', onClose);
+    signal?.addEventListener(
+      'abort',
+      () => {
+        if (hasOpened) {
+          end();
+          return;
+        }
+        cleanupOpenListeners();
+        socket.close();
+        reject(new RelayError('refused', 'Cancelled before the connection was opened'));
+      },
+      { once: true },
+    );
   });
