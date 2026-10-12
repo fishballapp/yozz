@@ -2,7 +2,7 @@ import type { ImapClient, ImapIdle, ImapResult, ImapSelected, ImapUntagged } fro
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { InboundAddress } from '../addresses/record';
 import type { MailConnectionFailure } from './connection';
-import { createLiveManager, type LiveState } from './live';
+import { createLiveManager, type LiveState, type LiveTask } from './live';
 
 type FakeClient = ImapClient & {
   readonly selects: string[];
@@ -191,6 +191,28 @@ describe('createLiveManager', () => {
       },
     });
   };
+
+  it('runs a task queued at any moment after the one before it finishes', async () => {
+    const task: LiveTask<number> = {
+      priority: 'user',
+      retry: true,
+      run: async () => ({ ok: true, value: 1 }),
+    };
+    for (let delay = 0; delay < 12; delay++) {
+      const manager = createManager();
+      const second = manager.run(ACCOUNT, task).then(async () => {
+        for (let i = 0; i < delay; i++) await Promise.resolve();
+        return manager.run(ACCOUNT, task);
+      });
+      let isDone = false;
+      void second.then(() => {
+        isDone = true;
+      });
+      await flush();
+      await flush();
+      expect({ delay, isDone }).toEqual({ delay, isDone: true });
+    }
+  });
 
   it('runs user tasks before background tasks', async () => {
     const manager = createManager();

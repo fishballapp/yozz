@@ -401,7 +401,13 @@ export const createLiveManager = (deps: {
       }
     })().finally(() => {
       conn.pumping = null;
-      rest(conn);
+      // A task queued after the loop found the queues empty, but before this ran, saw it still
+      // pumping and started nothing; left there, it would wait for ever.
+      if (conn.userQueue.length > 0 || conn.backgroundQueue.length > 0) {
+        pump(conn);
+      } else {
+        rest(conn);
+      }
     });
   };
 
