@@ -121,7 +121,8 @@ const AppShellBody = () => {
         </Link>
       </div>
 
-      <div className="flex min-h-0 flex-1">
+      {/* `relative`: below `lg` an open message lies over the list (`Mailbox`). */}
+      <div className="relative flex min-h-0 flex-1">
         <aside className="hidden shrink-0 lg:block" style={{ width: railWidth }}>
           <AddressRail />
         </aside>

@@ -7,7 +7,9 @@ import { visibleThreads } from './views';
 
 /**
  * The rail and status line are `AppShell`'s. The list never tracks the viewport; the reader keeps a
- * `20rem` floor and CSS arbitrates. Below `lg` the panes show one at a time.
+ * `20rem` floor and CSS arbitrates. Below `lg` an open message lies over the list, which stays laid
+ * out underneath, invisible: hidden with `display: none`, its rows would measure 0 and come back
+ * one by one, and the virtualizer would scroll the list down for each of them.
  */
 
 export const Mailbox = () => {
@@ -32,8 +34,8 @@ export const Mailbox = () => {
       <section
         style={{ width: listWidth }}
         className={cn(
-          'min-w-0 flex-col lg:flex lg:min-w-80 lg:flex-initial',
-          isReading ? 'hidden' : 'flex flex-1',
+          'flex min-w-0 flex-1 flex-col lg:min-w-80 lg:flex-initial',
+          isReading && 'invisible lg:visible',
         )}
         aria-label="Messages"
       >
@@ -62,7 +64,10 @@ export const Mailbox = () => {
       />
 
       <section
-        className={cn('min-w-0 flex-1 lg:min-w-80', isReading ? 'block' : 'hidden lg:block')}
+        className={cn(
+          'min-w-0 flex-1 lg:min-w-80',
+          isReading ? 'max-lg:absolute max-lg:inset-0' : 'hidden lg:block',
+        )}
       >
         <Outlet />
       </section>
