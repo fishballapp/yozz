@@ -53,7 +53,15 @@ const root = createRoot(host);
 const showRow = async (mailbox: MailboxId, folders: readonly Folder[], uidValidity = 1) => {
   await act(async () =>
     root.render(
-      <ThreadRow thread={threadIn(folders, uidValidity)} mailbox={mailbox} isSelected={false} />,
+      <ThreadRow
+        thread={threadIn(folders, uidValidity)}
+        mailbox={mailbox}
+        isSelected={false}
+        isChecked={false}
+        hasSelection={false}
+        isSelecting={false}
+        onCheck={() => {}}
+      />,
     ),
   );
   return [...host.querySelectorAll('button')].flatMap(button => button.ariaLabel ?? []);

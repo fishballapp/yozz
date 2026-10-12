@@ -6,6 +6,9 @@ import { type ReactNode, useEffect, useEffectEvent, useRef, useState } from 'rea
 import { describeMailFailure } from '../relay/describe-failure';
 import { useMail } from '../store/MailProvider';
 import { buttonClass } from '../ui/Button';
+import { Checkbox } from '../ui/Checkbox';
+import { BulkActions } from './BulkActions';
+import { useSelection } from './selection';
 import { ThreadRow } from './ThreadRow';
 import { type ThreadState, threadByHandle } from './thread';
 import { isViewId, type MailboxId, olderAvailable, syncProgressIn } from './views';
@@ -36,10 +39,12 @@ const ThreadRows = ({
   threads,
   mailbox,
   openId,
+  selection,
 }: {
   threads: readonly ThreadState[];
   mailbox: MailboxId;
   openId: string | undefined;
+  selection: ReturnType<typeof useSelection>;
 }) => {
   const scrollRef = useRef<HTMLDivElement>(null);
   // The row holding focus stays mounted when it scrolls away, or focus would fall to the page.
@@ -96,7 +101,15 @@ const ThreadRows = ({
               )}
               style={{ transform: `translateY(${start}px)` }}
             >
-              <ThreadRow thread={thread} mailbox={mailbox} isSelected={thread.id === openId} />
+              <ThreadRow
+                thread={thread}
+                mailbox={mailbox}
+                isSelected={thread.id === openId}
+                isChecked={selection.isChecked(thread.id)}
+                hasSelection={selection.checkedIds.length > 0}
+                isSelecting={selection.isSelecting}
+                onCheck={(isChecked, extend) => selection.check(thread.id, isChecked, extend)}
+              />
             </li>
           );
         })}
@@ -121,6 +134,12 @@ export const ThreadList = ({
   const { _splat: handle } = useParams({ strict: false });
   const openId = handle === undefined ? undefined : threadByHandle(threads, handle)?.id;
   const { accounts, recordsError, syncStates, sync, loadOlder, isLoadingOlder, isDemo } = useMail();
+  // Opening a message, another mailbox or another search each start a new selection.
+  const selection = useSelection(
+    threads.map(({ id }) => id),
+    [mailbox, query, handle ?? ''].join('\n'),
+  );
+  const checked = threads.filter(({ id }) => selection.isChecked(id));
 
   const empty = (() => {
     if (query.trim() !== '') {
@@ -219,24 +238,60 @@ export const ThreadList = ({
 
   return (
     <div className="flex h-full flex-col">
-      <div className="flex h-11 shrink-0 items-center gap-2 border-b border-rule-soft px-3">
-        <MagnifyingGlassIcon size={14} className="shrink-0 text-paper-faint" />
-        <input
-          type="search"
-          // Named: an unnamed field trips Chrome's autofill advisory, and here remembering is wanted.
-          name="search"
-          value={query}
-          onChange={event => onQueryChange(event.target.value)}
-          placeholder="Search sender, subject or address"
-          aria-label="Search mail"
-          className="h-full w-full min-w-0 bg-transparent text-base text-paper outline-none placeholder:text-paper-faint"
+      {/* One bar, two jobs: search, or what to do with the ticked rows. Above `lg` its box sits
+          over the rows' boxes and its magnifier over their stars; below `lg` the box appears only
+          while selecting, and Select stands apart from the search behind a rule. */}
+      <div className="flex h-11 shrink-0 items-center border-b border-rule-soft pl-1">
+        <Checkbox
+          checked={selection.isAllChecked}
+          indeterminate={checked.length > 0 && !selection.isAllChecked}
+          onCheckedChange={() => selection.toggleAll()}
+          label={checked.length > 0 ? 'Clear the selection' : 'Select every message'}
+          className={cn('h-full w-11 lg:flex lg:w-7.5', !selection.isSelecting && 'hidden')}
         />
+        {selection.isSelecting ? (
+          <div className="flex min-w-0 flex-1 items-center lg:pl-1">
+            <BulkActions
+              threads={checked}
+              mailbox={mailbox}
+              openId={openId}
+              onDone={selection.clear}
+            />
+          </div>
+        ) : (
+          <>
+            <span className="flex h-full w-11 shrink-0 items-center justify-center lg:w-7.5">
+              <MagnifyingGlassIcon size={14} className="text-paper-faint" />
+            </span>
+            <input
+              type="search"
+              // Named: an unnamed field trips Chrome's autofill advisory, and here remembering is wanted.
+              name="search"
+              value={query}
+              onChange={event => onQueryChange(event.target.value)}
+              placeholder="Search sender, subject or address"
+              aria-label="Search mail"
+              className="h-full w-full min-w-0 bg-transparent pr-3 pl-2 text-base text-paper outline-none placeholder:text-paper-faint lg:pl-0"
+            />
+          </>
+        )}
+        {/* Cancel stays while selecting, ticked or not, and even once a sync has emptied the list:
+            it clears the ticks and leaves. */}
+        {(threads.length > 0 || selection.isSelecting) && (
+          <button
+            type="button"
+            onClick={() => selection.setSelecting(!selection.isSelecting)}
+            className="ml-auto h-full shrink-0 border-l border-rule-soft px-4 text-base text-paper-dim -outline-offset-2 hover:bg-ink-hover hover:text-paper lg:hidden"
+          >
+            {selection.isSelecting ? 'Cancel' : 'Select'}
+          </button>
+        )}
       </div>
 
       {threads.length === 0 ? (
         empty
       ) : (
-        <ThreadRows threads={threads} mailbox={mailbox} openId={openId} />
+        <ThreadRows threads={threads} mailbox={mailbox} openId={openId} selection={selection} />
       )}
       {/* Hidden, not disabled, once every account shown has its folder's start cached: a
           control that stays on screen implies there is more mail behind it. Search reads what

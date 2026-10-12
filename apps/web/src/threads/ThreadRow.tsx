@@ -10,6 +10,7 @@ import {
 import { Link } from '@tanstack/react-router';
 import { DISCARD_WARNING } from '../compose/intent';
 import { useMail } from '../store/MailProvider';
+import { Checkbox } from '../ui/Checkbox';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
 import { reportProblem } from '../ui/Toast';
 import { listTime } from '../ui/time';
@@ -53,8 +54,11 @@ const useRecord = (thread: ThreadState) => {
   };
 };
 
-/** One link covers the row and carries the whole record as its accessible name; the visible spans are decorative. */
-const RowLink = ({ thread, mailbox, isSelected }: RowProps) => {
+/**
+ * One link covers the row and carries the whole record as its accessible name; the visible spans
+ * are decorative. It stays the current one while the open row's bar gives way to ticked rows.
+ */
+const RowLink = ({ thread, mailbox, isSelected, isBarred }: RowProps & { isBarred: boolean }) => {
   const { latest, inbound, attachments } = useRecord(thread);
 
   return (
@@ -65,10 +69,7 @@ const RowLink = ({ thread, mailbox, isSelected }: RowProps) => {
       search={previous => previous}
       aria-current={isSelected ? true : undefined}
       // The ring is drawn inside the row; on the inverted bar a --signal outline sits on --select at 1.5:1.
-      className={cn(
-        'absolute inset-0 -outline-offset-2',
-        isSelected && 'focus-visible:outline-ink',
-      )}
+      className={cn('absolute inset-0 -outline-offset-2', isBarred && 'focus-visible:outline-ink')}
       aria-label={[
         thread.isUnread ? 'Unread.' : null,
         `${inbound.fromName}: ${thread.subject}.`,
@@ -128,7 +129,7 @@ type DiscardOutcome = Exclude<
 >;
 
 /** Each refusal names a different thing to do next. */
-const DISCARD_REFUSALS: Record<DiscardOutcome, string> = {
+export const DISCARD_REFUSALS: Record<DiscardOutcome, string> = {
   busy: 'It is open in the composer — close that first.',
   sending: 'It is being sent right now.',
   conflict: 'Another device changed it since this list was built. Reload and try again.',
@@ -269,11 +270,31 @@ const RowTriage = ({
     </span>
   );
 
+/** Whether the row is ticked, and how it says so; see `selection.ts`. */
+type CheckProps = {
+  isChecked: boolean;
+  /** Whether any row in the list is ticked: then, as in Gmail, the open row gives up its bar. */
+  hasSelection: boolean;
+  /** Below `lg`, the Select button's mode: the box takes the star's cell and a tap ticks the row. */
+  isSelecting: boolean;
+  onCheck: (isChecked: boolean, extend: boolean) => void;
+};
+
 /**
  * One grid, two shapes. Below `lg` the record folds onto two lines rather than truncating every
- * subject, and the star spans both lines so its 44px touch target is a real cell.
+ * subject, and the star spans both lines so its 44px touch target is a real cell. Above `lg` a box
+ * leads every row, as in Gmail; below it the box replaces the star only while selecting.
  */
-export const ThreadRow = ({ thread, mailbox, isSelected }: RowProps) => {
+export const ThreadRow = ({
+  thread,
+  mailbox,
+  isSelected,
+  isChecked,
+  hasSelection,
+  isSelecting,
+  onCheck,
+}: RowProps & CheckProps) => {
+  const isBarred = isSelected && !hasSelection;
   const isUnread = thread.isUnread;
   const { latest, inbound, attachments } = useRecord(thread);
   const actions = useRowActions({ thread, mailbox, isSelected });
@@ -283,26 +304,55 @@ export const ThreadRow = ({ thread, mailbox, isSelected }: RowProps) => {
       className={cn(
         'group relative grid items-center gap-x-2 py-2 pr-2 pl-1 text-base',
         'grid-cols-[2.75rem_minmax(0,1fr)_auto_2.75rem]',
-        'lg:h-8.5 lg:grid-cols-[1.875rem_9.375rem_minmax(0,1fr)_auto_auto_auto] lg:gap-x-0 lg:py-0',
-        isSelected ? 'bg-select text-ink' : 'hover:bg-ink-hover',
+        'lg:h-8.5 lg:grid-cols-[1.875rem_1.875rem_9.375rem_minmax(0,1fr)_auto_auto_auto] lg:gap-x-0 lg:py-0',
+        (() => {
+          if (isBarred) return 'bg-select text-ink';
+          return isChecked ? 'bg-signal-wash' : 'hover:bg-ink-hover';
+        })(),
       )}
     >
-      <RowLink thread={thread} mailbox={mailbox} isSelected={isSelected} />
+      <RowLink thread={thread} mailbox={mailbox} isSelected={isSelected} isBarred={isBarred} />
+
+      {/* While selecting, a tap anywhere on a phone's row ticks it rather than opening it. The box
+          is the control a keyboard or screen reader uses; this only widens its target. */}
+      {isSelecting && (
+        <button
+          type="button"
+          tabIndex={-1}
+          aria-hidden
+          onClick={() => onCheck(!isChecked, false)}
+          className="absolute inset-0 z-20 lg:hidden"
+        />
+      )}
+
+      <Checkbox
+        checked={isChecked}
+        onCheckedChange={onCheck}
+        label={`Select ${thread.subject}`}
+        isOnSelect={isBarred}
+        className={cn(
+          'col-start-1 row-span-2 row-start-1 size-11 lg:row-span-1 lg:flex lg:h-8.5 lg:w-full',
+          isSelecting ? 'z-30' : 'hidden',
+        )}
+      />
 
       <StarButton
         thread={thread}
-        isSelected={isSelected}
-        className="col-start-1 row-span-2 row-start-1 size-11 lg:row-span-1 lg:h-6 lg:w-full"
+        isSelected={isBarred}
+        className={cn(
+          'col-start-1 row-span-2 row-start-1 size-11 lg:col-start-2 lg:row-span-1 lg:h-6 lg:w-full',
+          isSelecting && 'hidden lg:flex',
+        )}
       />
 
       <span
         dir="auto"
         aria-hidden
         className={cn(
-          'pointer-events-none col-start-2 row-start-1 truncate lg:pr-3',
-          isUnread && !isSelected && 'font-semibold text-paper',
-          !isUnread && !isSelected && 'text-paper-dim',
-          isSelected && 'font-medium',
+          'pointer-events-none col-start-2 row-start-1 truncate lg:col-start-3 lg:pr-3',
+          isUnread && !isBarred && 'font-semibold text-paper',
+          !isUnread && !isBarred && 'text-paper-dim',
+          isBarred && 'font-medium',
         )}
       >
         {inbound.fromName}
@@ -310,22 +360,22 @@ export const ThreadRow = ({ thread, mailbox, isSelected }: RowProps) => {
 
       <span
         aria-hidden
-        className="pointer-events-none col-start-2 col-end-5 row-start-2 min-w-0 truncate lg:col-start-3 lg:col-end-4 lg:row-start-1 lg:pr-3"
+        className="pointer-events-none col-start-2 col-end-5 row-start-2 min-w-0 truncate lg:col-start-4 lg:col-end-5 lg:row-start-1 lg:pr-3"
       >
-        <span dir="auto" className={cn(isUnread && !isSelected && 'font-medium text-paper')}>
+        <span dir="auto" className={cn(isUnread && !isBarred && 'font-medium text-paper')}>
           {thread.subject}
         </span>
         {thread.messages.length > 1 && (
           <span
             className={cn(
               'ml-1.5 font-mono text-2xs',
-              isSelected ? 'text-ink/60' : 'text-paper-faint',
+              isBarred ? 'text-ink/60' : 'text-paper-faint',
             )}
           >
             {thread.messages.length}
           </span>
         )}
-        <span dir="auto" className={cn('ml-2', isSelected ? 'text-ink/60' : 'text-paper-faint')}>
+        <span dir="auto" className={cn('ml-2', isBarred ? 'text-ink/60' : 'text-paper-faint')}>
           {previewOf(thread)}
         </span>
       </span>
@@ -336,17 +386,17 @@ export const ThreadRow = ({ thread, mailbox, isSelected }: RowProps) => {
       {attachments.length > 0 && (
         <span
           aria-hidden
-          className="pointer-events-none col-start-3 row-start-1 flex w-4 justify-center lg:col-start-4 lg:mr-1.5"
+          className="pointer-events-none col-start-3 row-start-1 flex w-4 justify-center lg:col-start-5 lg:mr-1.5"
         >
-          <PaperclipIcon size={12} className={isSelected ? 'text-ink/60' : 'text-paper-faint'} />
+          <PaperclipIcon size={12} className={isBarred ? 'text-ink/60' : 'text-paper-faint'} />
         </span>
       )}
 
       <span
         aria-hidden
         className={cn(
-          'pointer-events-none col-start-4 row-start-1 text-right font-mono text-2xs lg:col-start-5',
-          isSelected ? 'text-ink/60' : 'text-paper-faint',
+          'pointer-events-none col-start-4 row-start-1 text-right font-mono text-2xs lg:col-start-6',
+          isBarred ? 'text-ink/60' : 'text-paper-faint',
           actions.length > 0 && REVEALED.gone,
         )}
       >
@@ -355,8 +405,8 @@ export const ThreadRow = ({ thread, mailbox, isSelected }: RowProps) => {
 
       <RowTriage
         actions={actions}
-        isSelected={isSelected}
-        className={cn('col-start-6 row-start-1', REVEALED.opened)}
+        isSelected={isBarred}
+        className={cn('col-start-7 row-start-1', REVEALED.opened)}
       />
     </div>
   );

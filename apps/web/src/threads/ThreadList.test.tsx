@@ -18,13 +18,15 @@ const mail = vi.hoisted(() => ({
   isLoadingOlder: () => false,
   isDemo: true,
   toggleStar: vi.fn(),
-  toggleArchive: vi.fn(),
+  markRead: vi.fn(),
+  markUnread: vi.fn(),
+  toggleArchive: vi.fn((_threadId: string) => true),
   trashThread: vi.fn(),
-  restoreThread: vi.fn(),
-  removeDraft: vi.fn(),
+  restoreThread: vi.fn((_threadId: string) => true),
+  removeDraft: vi.fn(async (_draftId: string) => ({ outcome: 'deleted' as const })),
 }));
 
-const route = vi.hoisted(() => ({ splat: undefined as string | undefined }));
+const route = vi.hoisted(() => ({ splat: undefined as string | undefined, navigate: vi.fn() }));
 
 vi.mock('@tanstack/react-router', () => ({
   Link: ({
@@ -41,6 +43,7 @@ vi.mock('@tanstack/react-router', () => ({
     </a>
   ),
   useParams: () => ({ _splat: route.splat }),
+  useNavigate: () => route.navigate,
 }));
 vi.mock('../store/MailProvider', () => ({ useMail: () => mail }));
 vi.mock('./use-advance', () => ({ useAdvancePast: () => vi.fn() }));
@@ -111,10 +114,10 @@ afterAll(() => {
 
 const host = document.body.appendChild(document.createElement('div'));
 const root = createRoot(host);
-const show = (threads: readonly ThreadState[], query = '') =>
+const show = (threads: readonly ThreadState[], query = '', mailbox = 'unified') =>
   act(async () =>
     root.render(
-      <ThreadList threads={threads} mailbox="unified" query={query} onQueryChange={() => {}} />,
+      <ThreadList threads={threads} mailbox={mailbox} query={query} onQueryChange={() => {}} />,
     ),
   );
 const scroller = () => {
@@ -130,8 +133,36 @@ const scrollTo = (top: number) =>
 const rowOf = (subject: string) =>
   host.querySelector(`a[aria-label*=": ${subject}."]`)?.closest('li') ?? null;
 
+const boxOf = (subject: string) => {
+  const box = rowOf(subject)?.querySelector<HTMLInputElement>(
+    `input[aria-label="Select ${subject}"]`,
+  );
+  if (box == null) throw new Error(`No box on ${subject}`);
+  return box;
+};
+const click = (element: Element, init: MouseEventInit = {}) =>
+  act(async () => {
+    element.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, ...init }));
+  });
+const button = (label: string) => {
+  const found = [...host.querySelectorAll('button')].find(
+    candidate => candidate.ariaLabel === label || candidate.textContent === label,
+  );
+  if (found === undefined) throw new Error(`No ${label} button`);
+  return found;
+};
+const tickedSubjects = () =>
+  [...host.querySelectorAll<HTMLInputElement>('li input[type="checkbox"]:checked')].map(box =>
+    box.ariaLabel?.replace('Select ', ''),
+  );
+const FEW = MAILBOX.slice(0, 5);
+
 afterEach(async () => {
   route.splat = undefined;
+  mail.toggleArchive.mockClear();
+  mail.restoreThread.mockClear();
+  route.navigate.mockClear();
+  mail.removeDraft.mockClear();
   await act(async () => root.render(null));
 });
 
@@ -171,6 +202,129 @@ describe('ThreadList', () => {
     await scrollTo(1_000 * ROW_HEIGHT);
     expect(rowOf('Subject 1000')).not.toBeNull();
     expect(document.activeElement).toBe(link);
+  });
+
+  it('turns the search bar into actions for the ticked rows, with a mixed box over them', async () => {
+    await show(FEW);
+    expect(host.querySelector('input[type="search"]')).not.toBeNull();
+
+    await click(boxOf('Subject 1'));
+    expect(host.querySelector('input[type="search"]')).toBeNull();
+    const all = host.querySelector<HTMLInputElement>('input[aria-label="Clear the selection"]');
+    expect(all?.indeterminate).toBe(true);
+    expect(button('Archive')).toBeDefined();
+  });
+
+  it('ticks a range on a Shift-click', async () => {
+    await show(FEW);
+    await click(boxOf('Subject 1'));
+    await click(boxOf('Subject 3'), { shiftKey: true });
+    expect(tickedSubjects()).toEqual(['Subject 1', 'Subject 2', 'Subject 3']);
+  });
+
+  it('clears every tick from the box over the list', async () => {
+    await show(FEW);
+    await click(boxOf('Subject 1'));
+    await click(boxOf('Subject 2'));
+    const all = host.querySelector('input[aria-label="Clear the selection"]');
+    if (all === null) throw new Error('No box over the list');
+    await click(all);
+    expect(tickedSubjects()).toEqual([]);
+    expect(host.querySelector('input[type="search"]')).not.toBeNull();
+  });
+
+  it('archives every ticked row, then clears the selection', async () => {
+    await show(FEW);
+    await click(boxOf('Subject 0'));
+    await click(boxOf('Subject 4'));
+    await click(button('Archive'));
+    expect(mail.toggleArchive.mock.calls.map(([id]) => id)).toEqual(['thread-0', 'thread-4']);
+    expect(tickedSubjects()).toEqual([]);
+  });
+
+  it('moves ticked rows back to the inbox from Archive, whatever else they hold', async () => {
+    const archived = FEW.map(thread => ({ ...thread, folders: ['archive', 'inbox'] as const }));
+    await show(archived, '', 'archive');
+    await click(boxOf('Subject 1'));
+    await click(button('Move to inbox'));
+    expect(mail.restoreThread.mock.calls.map(([id]) => id)).toEqual(['thread-1']);
+    expect(mail.toggleArchive).not.toHaveBeenCalled();
+  });
+
+  it('closes the open message when marking it unread with others, or it would be read again', async () => {
+    route.splat = 'thread-0';
+    await show(FEW);
+    await click(boxOf('Subject 0'));
+    await click(boxOf('Subject 1'));
+    await click(button('Mark as unread'));
+    expect(mail.markUnread.mock.calls.map(([id]) => id)).toEqual(['thread-0', 'thread-1']);
+    expect(route.navigate).toHaveBeenCalledWith(expect.objectContaining({ to: '/m/$mailbox' }));
+  });
+
+  it('does not bring back the ticks from before a message was opened when it closes', async () => {
+    await show(FEW);
+    await click(boxOf('Subject 1'));
+    route.splat = 'thread-3';
+    await show(FEW);
+    route.splat = undefined;
+    await show(FEW);
+    expect(tickedSubjects()).toEqual([]);
+  });
+
+  it('keeps Cancel while selecting after a sync empties the list', async () => {
+    await show(FEW);
+    await click(button('Select'));
+    await show([]);
+    expect(button('Cancel')).toBeDefined();
+  });
+
+  it('discards every draft in each ticked conversation', async () => {
+    const [first] = FEW;
+    if (first === undefined) throw new Error('No thread');
+    const draft = (draftId: string) => ({
+      ...first.messages[0],
+      id: draftId,
+      isDraft: true,
+      draftId,
+    });
+    const twoDrafts = { ...first, messages: [draft('d-1'), draft('d-2')] } as ThreadState;
+    await show([twoDrafts], '', 'drafts');
+    await click(boxOf('Subject 0'));
+    await click(button('Discard drafts'));
+    const confirm = [...document.querySelectorAll('button')].find(
+      candidate => candidate.textContent === 'Discard',
+    );
+    if (confirm === undefined) throw new Error('No confirm');
+    await act(async () => {
+      confirm.click();
+      await new Promise(resolve => setTimeout(resolve, 0));
+    });
+    expect(mail.removeDraft.mock.calls.map(([id]) => id)).toEqual(['d-1', 'd-2']);
+  });
+
+  it('keeps the open row current while its bar gives way to a tick, and clears ticks on opening another', async () => {
+    route.splat = 'thread-0';
+    await show(FEW);
+    await click(boxOf('Subject 2'));
+    expect(rowOf('Subject 0')?.querySelector('a')?.ariaCurrent).toBe('true');
+    expect(rowOf('Subject 0')?.firstElementChild?.className).not.toContain('bg-select');
+
+    route.splat = 'thread-3';
+    await show(FEW);
+    expect(tickedSubjects()).toEqual([]);
+  });
+
+  it('ticks a row with a tap anywhere on it once Select is on, and Cancel clears the ticks and leaves', async () => {
+    await show(FEW);
+    await click(button('Select'));
+    const tapTarget = rowOf('Subject 2')?.querySelector('button[aria-hidden="true"]');
+    if (tapTarget == null) throw new Error('No tap target');
+    await click(tapTarget);
+    expect(tickedSubjects()).toEqual(['Subject 2']);
+
+    await click(button('Cancel'));
+    expect(tickedSubjects()).toEqual([]);
+    expect(host.querySelector('li button[aria-hidden="true"]')).toBeNull();
   });
 
   it('says a search matched nothing', async () => {

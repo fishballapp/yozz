@@ -71,6 +71,9 @@
   --signal: oklch(0.87 0.19 140);
   --signal-ink: oklch(0.18 0.035 140);
   --signal-well: oklch(0.3 0.05 140); /* faint signal wash — the send-only chip, nothing else */
+  /* The ground of a ticked row: a step below --signal-well so --paper-faint still reads on it
+     (4.56:1; on --signal-well it falls to 3.98:1), and green so ticked never reads as hovered. */
+  --signal-wash: oklch(0.26 0.04 140);
   /* The accent as it survives --select, and the only thing on it is a set star on a selected row.
      3.37:1 there, and still C 0.177 — a proper green, not a drab one, which is the whole reason
      the hue changed. On any dark ground the accent is --signal; this is not an alternative to it. */
@@ -101,6 +104,7 @@
   --color-signal: var(--signal);
   --color-signal-ink: var(--signal-ink);
   --color-signal-well: var(--signal-well);
+  --color-signal-wash: var(--signal-wash);
   --color-signal-deep: var(--signal-deep);
   --color-danger: var(--danger);
 
