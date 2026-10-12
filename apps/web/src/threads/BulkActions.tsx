@@ -14,8 +14,8 @@ import { useMail } from '../store/MailProvider';
 import { Button } from '../ui/Button';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
 import { reportProblem } from '../ui/Toast';
+import { discardDrafts, discardTitle, draftIdsOf } from './discard-drafts';
 import { canMoveTo } from './reconcile';
-import { DISCARD_REFUSALS } from './ThreadRow';
 import type { ThreadState } from './thread';
 import { isOnServer } from './thread';
 import { useAdvancePast } from './use-advance';
@@ -79,12 +79,7 @@ const useBulkActions = (
     };
 
   if (mailbox === 'drafts') {
-    // Every draft in each conversation: two replies drafted in one thread are one row.
-    const draftIds = threads.flatMap(thread =>
-      thread.messages.flatMap(({ isDraft, draftId }) =>
-        isDraft === true && draftId !== undefined ? [draftId] : [],
-      ),
-    );
+    const draftIds = draftIdsOf(threads);
     if (draftIds.length === 0) return [];
     return [
       {
@@ -94,19 +89,11 @@ const useBulkActions = (
             icon: TrashIcon,
             label: 'Discard drafts',
             confirm: {
-              title:
-                draftIds.length === 1
-                  ? 'Discard this draft?'
-                  : `Discard ${draftIds.length} drafts?`,
+              title: discardTitle(draftIds.length),
               description: DISCARD_WARNING,
             },
             act: async () => {
-              const onRefused = reportOnce('Not every draft discarded');
-              const outcomes = await Promise.all(draftIds.map(draftId => removeDraft(draftId)));
-              for (const { outcome } of outcomes) {
-                if (outcome === 'deleted' || outcome === 'absent' || outcome === 'ended') continue;
-                onRefused(DISCARD_REFUSALS[outcome]);
-              }
+              await discardDrafts(removeDraft, draftIds);
               onDone();
             },
           },

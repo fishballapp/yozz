@@ -14,6 +14,7 @@ import { Checkbox } from '../ui/Checkbox';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
 import { reportProblem } from '../ui/Toast';
 import { listTime } from '../ui/time';
+import { discardDrafts, discardTitle, draftIdsOf } from './discard-drafts';
 import { canMoveTo } from './reconcile';
 import type { ThreadState } from './thread';
 import { attachmentsOf, isArchived, isOnServer, newestInbound } from './thread';
@@ -122,21 +123,6 @@ const StarButton = ({
   );
 };
 
-/** Every way `removeDraft` can answer, minus the two that mean the draft is gone and the one nobody hears. */
-type DiscardOutcome = Exclude<
-  Awaited<ReturnType<ReturnType<typeof useMail>['removeDraft']>>['outcome'],
-  'deleted' | 'absent' | 'ended'
->;
-
-/** Each refusal names a different thing to do next. */
-export const DISCARD_REFUSALS: Record<DiscardOutcome, string> = {
-  busy: 'It is open in the composer — close that first.',
-  sending: 'It is being sent right now.',
-  conflict: 'Another device changed it since this list was built. Reload and try again.',
-  locked: "You're signed out.",
-  offline: 'YOZZ could not be reached. Check your connection and try again.',
-};
-
 /** One mark in the hover cluster. `confirm` present means it asks before it acts. */
 type RowAction = {
   readonly icon: Icon;
@@ -164,25 +150,21 @@ const useRowActions = ({ thread, mailbox, isSelected }: RowProps): readonly RowA
       }
     };
   // A draft has no IMAP copy, so archive and delete can do nothing to it.
-  const draftId = thread.messages.find(message => message.isDraft === true)?.draftId;
+  const draftIds = draftIdsOf([thread]);
   return (() => {
-    if (mailbox === 'drafts' && draftId !== undefined) {
+    if (mailbox === 'drafts' && draftIds.length > 0) {
       return [
         {
           icon: TrashIcon,
           label: `Discard ${thread.subject}`,
           // The same sheet the composer's Discard takes.
           confirm: {
-            title: 'Discard this draft?',
+            title: discardTitle(draftIds.length),
             description: DISCARD_WARNING,
             confirmLabel: 'Discard',
             busyLabel: 'Discarding…',
           },
-          act: async () => {
-            const { outcome } = await removeDraft(draftId);
-            if (outcome === 'deleted' || outcome === 'absent' || outcome === 'ended') return;
-            reportProblem('Draft not discarded', DISCARD_REFUSALS[outcome]);
-          },
+          act: () => discardDrafts(removeDraft, draftIds),
         },
       ];
     }

@@ -115,3 +115,37 @@ describe('a row with no copy on a server', () => {
     expect(await showRow('sent', ['sent'])).toEqual(['Star Lunch', 'Delete Lunch']);
   });
 });
+
+describe('a Drafts row', () => {
+  it('discards every draft in its conversation, and says how many first', async () => {
+    mail.removeDraft.mockResolvedValue({ outcome: 'deleted' });
+    const thread = threadIn([]);
+    const [message] = thread.messages;
+    if (message === undefined) throw new Error('No message');
+    const draft = (draftId: string) => ({ ...message, id: draftId, isDraft: true, draftId });
+    await act(async () =>
+      root.render(
+        <ThreadRow
+          thread={{ ...thread, messages: [draft('d-1'), draft('d-2')] }}
+          mailbox="drafts"
+          isSelected={false}
+          isChecked={false}
+          hasSelection={false}
+          isSelecting={false}
+          onCheck={() => {}}
+        />,
+      ),
+    );
+
+    await act(async () =>
+      host.querySelector<HTMLButtonElement>('[aria-label="Discard Lunch"]')?.click(),
+    );
+    expect(document.body.textContent).toContain('Discard 2 drafts?');
+    const confirm = [...document.querySelectorAll('button')].find(
+      candidate => candidate.textContent === 'Discard',
+    );
+    if (confirm === undefined) throw new Error('No confirm');
+    await act(async () => confirm.click());
+    expect(mail.removeDraft.mock.calls.map(([id]) => id)).toEqual(['d-1', 'd-2']);
+  });
+});
