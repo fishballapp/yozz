@@ -4,13 +4,13 @@ import type { ActivityTracker } from './activity';
 import type { MailConnection, MailConnectionFailure, Result } from './connection';
 
 /**
- * Opened by the first task, kept while the tab is visible, holding `INBOX` in IDLE whenever nothing
- * is queued so the server can say "new mail" instead of being asked. Every IMAP touch is a task on
- * this queue; Connect's pre-store test is the one exception.
+ * Opened by the first task and kept open, hidden tab or not, holding `INBOX` in IDLE whenever
+ * nothing is queued so the server can say "new mail" instead of being asked. Every IMAP touch is a
+ * task on this queue; Connect's pre-store test is the one exception.
  */
 
 export type LiveState =
-  /** Nothing open: never opened, or closed by us (tab hidden, lock, address removed). */
+  /** Nothing open: never opened, or closed by us (lock, address removed). */
   | { readonly status: 'closed' }
   | { readonly status: 'connecting' }
   | { readonly status: 'live'; readonly resumed: boolean; readonly idling: boolean }
@@ -48,7 +48,6 @@ export type LiveManager = {
   ) => Promise<Result<T, MailConnectionFailure>>;
   readonly close: (address: string) => Promise<void>;
   readonly closeAll: () => Promise<void>;
-  readonly setVisible: (visible: boolean) => void;
   readonly state: (address: string) => LiveState;
 };
 
@@ -115,7 +114,6 @@ const CLOSED: LiveState = { status: 'closed' };
 const CONNECTION_CLOSED: MailConnectionFailure = { kind: 'error', detail: 'connection closed' };
 const STALLED: MailConnectionFailure = { kind: 'stalled' };
 
-const HIDDEN_CLOSE_MS = 2 * 60 * 1000;
 /** RFC 2177 §3: a server may drop an IDLE after 30 minutes; re-issue well inside that. */
 const IDLE_REFRESH_MS = 25 * 60 * 1000;
 const TICK_MS = 60 * 1000;
@@ -138,8 +136,6 @@ export const createLiveManager = (deps: {
   readonly onState?: (address: string, state: LiveState) => void;
   /** The server said the selected INBOX changed while idling (EXISTS/EXPUNGE/FETCH): the caller syncs. */
   readonly onMailboxChanged: (address: string) => void;
-  /** Whether the tab is visible right now; `setVisible` tracks it from then on. */
-  readonly visible?: boolean;
   /** Told of every task from the moment it is queued until it settles. */
   readonly activity?: ActivityTracker;
   readonly now?: () => number;
@@ -151,8 +147,6 @@ export const createLiveManager = (deps: {
   const clearTimer = deps.clearTimer ?? clearTimeout;
 
   const connections = new Map<string, Connection>();
-  let isVisible = deps.visible ?? true;
-  let hideTimer: ReturnType<typeof setTimeout> | null = null;
 
   const setState = (conn: Connection, state: LiveState): void => {
     conn.state = state;
@@ -255,9 +249,6 @@ export const createLiveManager = (deps: {
     conn.socket = socket;
     conn.socketKey = conn.imapKey;
     setState(conn, { status: 'live', resumed: socket.resumed, idling: false });
-    // A socket opened while the tab is hidden (a background unlock, a sync racing a hide) has the
-    // same two-minute lifetime as one that was open when it hid.
-    if (!isVisible) armHide();
     return { ok: true, value: socket };
   };
 
@@ -279,10 +270,7 @@ export const createLiveManager = (deps: {
   };
 
   const canRest = (conn: Connection): boolean =>
-    isVisible &&
-    conn.pumping === null &&
-    conn.userQueue.length === 0 &&
-    conn.backgroundQueue.length === 0;
+    conn.pumping === null && conn.userQueue.length === 0 && conn.backgroundQueue.length === 0;
 
   /** Holds INBOX in IDLE until a task needs the connection or the server ends it. */
   const idleUntilNeeded = async (conn: Connection, socket: Socket): Promise<void> => {
@@ -322,7 +310,7 @@ export const createLiveManager = (deps: {
     const tooSoon =
       conn.idleDroppedAt !== null && droppedAt - conn.idleDroppedAt < IDLE_RECONNECT_MIN_GAP_MS;
     conn.idleDroppedAt = droppedAt;
-    if (!isVisible || tooSoon) {
+    if (tooSoon) {
       setFailed(conn, failure);
       return;
     }
@@ -529,14 +517,6 @@ export const createLiveManager = (deps: {
     setState(conn, CLOSED);
   };
 
-  const armHide = (): void => {
-    if (hideTimer !== null) return;
-    hideTimer = setTimer(() => {
-      hideTimer = null;
-      for (const conn of connections.values()) void shutdown(conn);
-    }, HIDDEN_CLOSE_MS);
-  };
-
   return {
     run: (account, task) =>
       new Promise(resolve => {
@@ -570,19 +550,6 @@ export const createLiveManager = (deps: {
     closeAll: async () => {
       await Promise.all([...connections.values()].map(conn => shutdown(conn)));
       connections.clear();
-    },
-
-    setVisible: visible => {
-      isVisible = visible;
-      if (hideTimer !== null) {
-        clearTimer(hideTimer);
-        hideTimer = null;
-      }
-      if (visible) {
-        for (const conn of connections.values()) rest(conn);
-        return;
-      }
-      armHide();
     },
 
     state: address => connections.get(address)?.state ?? CLOSED,

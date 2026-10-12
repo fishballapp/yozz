@@ -45,7 +45,6 @@ vi.mock('../relay/live', () => ({
       run: async () => ({ ok: false, error: { kind: 'error', detail: 'not in this test' } }),
       close: (address: string) => mocks.closeLive(manager, address),
       closeAll: async () => {},
-      setVisible: () => {},
       state: () => ({ status: 'closed' }),
     };
   },

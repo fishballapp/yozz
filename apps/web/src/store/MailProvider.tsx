@@ -48,6 +48,7 @@ import { isDemo } from '../ui/chrome';
 import { toast } from '../ui/Toast';
 import { vaultErrorMessage } from '../vault/screen-policy';
 import { useVault } from '../vault/session';
+import { staleAccounts } from './sync-staleness';
 import { type Composer, type ComposerShared, useComposerStore } from './use-composer';
 
 /**
@@ -203,6 +204,8 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
   const writeTurnsRef = useRef<Map<string, Promise<void>>>(new Map());
   /** Counts sync starts; an acked op is retired by the first later one to land. */
   const syncSeqRef = useRef(0);
+  /** When each address's last sync started, for the tab-return trigger (see `sync-staleness.ts`). */
+  const syncStartedRef = useRef<Map<string, number>>(new Map());
   /** Keyed by account and folder: two mailboxes over the same folder are one page. */
   const inFlightOlderRef = useRef<Map<string, Promise<void>>>(new Map());
   const liveManagerRef = useRef<LiveManager | null>(null);
@@ -536,6 +539,7 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
       const runOn = bindRunOn();
       const userId = userIdRef.current;
       if (userId === null) return Promise.resolve();
+      syncStartedRef.current.set(address, Date.now());
       const entry = { dirty: false, isTorn: false, promise: Promise.resolve() };
       entry.promise = (async () => {
         try {
@@ -729,8 +733,6 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
           onMailboxChanged: address => {
             if (!cancelled) void syncRef.current(address);
           },
-          // A tab unlocked in the background must not hold connections open for ever.
-          visible: !document.hidden,
           activity,
         });
         if (listed.status === 'rejected') throw listed.reason;
@@ -760,6 +762,7 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
       sessionGeneration.current += 1;
       // Otherwise the next unlock's sync is handed the old in-flight promise.
       syncRunsRef.current.clear();
+      syncStartedRef.current.clear();
       movedRef.current.clear();
       writeTurnsRef.current.clear();
       inFlightOlderRef.current.clear();
@@ -892,10 +895,12 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
 
   useEffect(() => {
     if (isDemo()) return;
+    // Coming back syncs only what has not synced in the last two minutes, so switching back often
+    // does not resync every address each time. The other triggers are never throttled.
     const onVisibility = () => {
-      const visible = !document.hidden;
-      liveManagerRef.current?.setVisible(visible);
-      if (visible) void sync();
+      if (document.hidden) return;
+      const stale = staleAccounts(accountsRef.current, syncStartedRef.current, Date.now());
+      void Promise.all(stale.map(account => requestSync(account)));
     };
     const onOnline = () => {
       void sync();
@@ -906,7 +911,7 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
       document.removeEventListener('visibilitychange', onVisibility);
       window.removeEventListener('online', onOnline);
     };
-  }, [sync]);
+  }, [sync, requestSync]);
 
   // The server's last word, with bodies merged in and pending ops laid over it on every render.
   const threads = useMemo(() => {

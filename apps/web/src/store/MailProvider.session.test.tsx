@@ -91,7 +91,6 @@ vi.mock('../relay/live', () => ({
       },
       close: async () => {},
       closeAll: async () => {},
-      setVisible: () => {},
       state: () => ({ status: 'closed' }),
     };
   },

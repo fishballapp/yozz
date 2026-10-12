@@ -498,7 +498,7 @@ describe('createLiveManager', () => {
     expect(clients).toHaveLength(1);
   });
 
-  it('setVisible(false) closes after 2 minutes; setVisible(true) cancels', async () => {
+  it('keeps the connection open past the two minutes a hidden tab used to get, idling in INBOX', async () => {
     const manager = createManager();
     await manager.run(ACCOUNT, {
       priority: 'user',
@@ -506,19 +506,28 @@ describe('createLiveManager', () => {
       retry: true,
       run: async () => ({ ok: true, value: undefined }),
     });
-    expect(clients[0]?.logouts ?? 0).toBe(0);
+    await vi.waitFor(() => expect(states.at(-1)).toMatchObject({ status: 'live', idling: true }));
 
-    manager.setVisible(false);
-    await advance(60_000);
-    expect(clients[0]?.logouts ?? 0).toBe(0);
-    manager.setVisible(true);
-    await advance(120_000);
-    expect(clients[0]?.logouts ?? 0).toBe(0);
+    await advance(10 * 60 * 1000);
+    expect(clients[0]?.logouts).toBe(0);
+    expect(manager.state(ACCOUNT.address)).toMatchObject({ status: 'live', idling: true });
+    expect(clients).toHaveLength(1);
+  });
 
-    manager.setVisible(false);
-    await advance(120_000);
-    await vi.waitFor(() => expect(manager.state(ACCOUNT.address)).toEqual({ status: 'closed' }));
-    expect(clients[0]?.logouts).toBe(1);
+  it('a connection that stays open still reports a mailbox change while idling', async () => {
+    const manager = createManager();
+    await manager.run(ACCOUNT, {
+      priority: 'user',
+      effect: 'read',
+      retry: true,
+      run: async () => ({ ok: true, value: undefined }),
+    });
+    await vi.waitFor(() => expect(states.at(-1)).toMatchObject({ status: 'live', idling: true }));
+    await advance(10 * 60 * 1000);
+
+    clients[0]?.emitUntagged({ kind: 'exists', count: 3 });
+    expect(mailboxChanges).toEqual([ACCOUNT.address]);
+    expect(clients[0]?.logouts).toBe(0);
   });
 
   it('closeAll LOGOUTs every connection and rejects queued tasks', async () => {
@@ -683,7 +692,7 @@ describe('createLiveManager', () => {
     expect(mailboxChanges).toEqual([ACCOUNT.address]);
   });
 
-  it('reopens and idles again when the server drops an IDLE while visible', async () => {
+  it('reopens and idles again when the server drops an IDLE', async () => {
     const manager = createManager();
     await manager.run(ACCOUNT, {
       priority: 'user',
@@ -716,35 +725,18 @@ describe('createLiveManager', () => {
     expect(clients.map(client => client.logouts)).toEqual([1, 1]);
   });
 
-  it('a manager created hidden closes its connections after the grace period', async () => {
-    const manager = createLiveManager({
-      now: () => nowMs,
-      setTimer: setTimer as typeof setTimeout,
-      clearTimer: clearTimer as typeof clearTimeout,
-      visible: false,
-      connect: async () => {
-        const client = createFakeClient();
-        clients.push(client);
-        return {
-          ok: true,
-          value: { client, close: async () => void (await client.logout()), resumed: false },
-        };
-      },
-      onState: (_address, state) => {
-        states.push(state);
-      },
-      onMailboxChanged: () => {},
-    });
+  it('without IDLE, keeps polling for mail past the two minutes, and never closes', async () => {
+    const manager = createManager([]);
     await manager.run(ACCOUNT, {
       priority: 'user',
       effect: 'read',
       retry: true,
       run: async () => ({ ok: true, value: undefined }),
     });
-    // Hidden: no IDLE, and the grace close is armed by the open itself.
-    expect(states.at(-1)).toMatchObject({ status: 'live', idling: false });
-    await advance(2 * 60 * 1000);
-    await vi.waitFor(() => expect(manager.state(ACCOUNT.address)).toEqual({ status: 'closed' }));
-    expect(clients[0]?.logouts).toBe(1);
+    await flush();
+    await advance(10 * 60 * 1000);
+    expect(mailboxChanges).toHaveLength(5);
+    expect(clients[0]?.logouts).toBe(0);
+    expect(manager.state(ACCOUNT.address)).toMatchObject({ status: 'live', idling: false });
   });
 });

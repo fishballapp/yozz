@@ -25,7 +25,6 @@ vi.mock('../relay/live', () => ({
     run: async () => ({ ok: false, error: { kind: 'error', detail: 'offline' } }),
     close: async () => {},
     closeAll: async () => {},
-    setVisible: () => {},
   }),
 }));
 vi.mock('../threads/cache', () => ({

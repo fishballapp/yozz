@@ -72,7 +72,7 @@ vault, so it is waiting in Drafts on every device you use, and you press Send. T
 
 Early. The hosted app at [yozz.app](https://yozz.app) is the one we use ourselves and it is not
 finished: no mobile app, no notifications while the tab is closed, one live connection per
-address while the tab is visible. The protocol libraries are the mature part; the numbers they
+address while the tab is open. The protocol libraries are the mature part; the numbers they
 must print are in [docs/gates.md](docs/gates.md).
 
 This repository is an exported copy of a private monorepo, so it has no pull requests and its
