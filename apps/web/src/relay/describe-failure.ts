@@ -9,8 +9,6 @@ export const describeMailFailure = (failure: MailConnectionFailure, host: string
       return failure.detail;
     case 'tls':
       return `Secure connection to ${host} failed: ${failure.detail}`;
-    case 'pin-mismatch':
-      return `${failure.peer} presented a key YOZZ has not seen from it before. If you expect the server to have been re-keyed, forget its key under Servers on this address's page in Settings, then retry.`;
     case 'auth':
       return `${host} rejected the username or password`;
     case 'smtp': {

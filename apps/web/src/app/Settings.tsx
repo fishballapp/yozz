@@ -29,7 +29,7 @@ const NavRow = ({
   children: ReactNode;
 } & (
   | { to: '/settings/a/$address'; params: { address: string } }
-  | { to: '/settings/new' | '/settings/account' | '/settings/advanced'; params?: never }
+  | { to: '/settings/new' | '/settings/account'; params?: never }
 )) => (
   <li>
     <Link
@@ -95,13 +95,6 @@ const SettingsNav = () => {
             <span className="mt-0.5 block truncate text-2xs text-paper-faint">
               Password, passkeys, sign out, delete
             </span>
-          </span>
-          <span />
-        </NavRow>
-        <NavRow to="/settings/advanced" isActive={pathname === '/settings/advanced'}>
-          <span className="min-w-0">
-            <span className="block truncate text-base">Advanced</span>
-            <span className="mt-0.5 block truncate text-2xs text-paper-faint">Server keys</span>
           </span>
           <span />
         </NavRow>

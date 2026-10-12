@@ -3,15 +3,7 @@ import type { TlsSession } from '@yozz.app/tls';
 import { IDBFactory } from 'fake-indexeddb';
 import { describe, expect, it } from 'vitest';
 import { loadUnlockKeys } from '../vault/unlock-keys';
-import {
-  forgetPin,
-  listPins,
-  loadPin,
-  peerKey,
-  savePin,
-  saveSession,
-  takeSession,
-} from './peer-store';
+import { peerKey, saveSession, takeSession } from './session-store';
 
 const session = (ticket: number): TlsSession => ({
   serverName: 'imap.example.net',
@@ -27,22 +19,8 @@ const session = (ticket: number): TlsSession => ({
   peerCertificateChain: { leafDer: new Uint8Array([0x30]), intermediateDer: [] },
 });
 
-describe('peer store', () => {
+describe('session store', () => {
   const peer = peerKey('imap.example.net', 993);
-
-  it('keeps a pin per host:port until it is forgotten', async () => {
-    const idb = new IDBFactory();
-    expect(await loadPin(peer, idb)).toBeNull();
-    await savePin(peer, 'AAAA', idb);
-    await savePin(peerKey('imap.example.net', 465), 'BBBB', idb);
-    expect(await loadPin(peer, idb)).toBe('AAAA');
-    expect(await listPins(idb)).toEqual([
-      { peer: 'imap.example.net:465', pin: 'BBBB' },
-      { peer, pin: 'AAAA' },
-    ]);
-    await forgetPin(peer, idb);
-    expect(await loadPin(peer, idb)).toBeNull();
-  });
 
   it('hands a session out exactly once, Dates and bytes intact', async () => {
     const idb = new IDBFactory();
@@ -55,18 +33,17 @@ describe('peer store', () => {
     expect(await takeSession(peer, idb)).toBeNull();
   });
 
-  it('forgetting a pin drops the session too, so the next handshake is a full one', async () => {
+  it("keeps a session per host:port, so one port is never offered the other's", async () => {
     const idb = new IDBFactory();
-    await savePin(peer, 'AAAA', idb);
     await saveSession(peer, session(1), idb);
-    await forgetPin(peer, idb);
-    expect(await takeSession(peer, idb)).toBeNull();
+    expect(await takeSession(peerKey('imap.example.net', 465), idb)).toBeNull();
+    expect((await takeSession(peer, idb))?.ticket).toEqual(new Uint8Array([1]));
   });
 
   it('shares the database with the vault stores', async () => {
     const idb = new IDBFactory();
-    await savePin(peer, 'AAAA', idb);
+    await saveSession(peer, session(1), idb);
     expect(await loadUnlockKeys('u1', idb)).toBeNull();
-    expect(await loadPin(peer, idb)).toBe('AAAA');
+    expect((await takeSession(peer, idb))?.ticket).toEqual(new Uint8Array([1]));
   });
 });

@@ -7,7 +7,6 @@ import {
 import { createSmtpClient, type SmtpClient, type SmtpFailure } from '@yozz.app/smtp';
 import {
   type ByteDuplex,
-  pinnedValidator,
   startTls,
   type TlsConnection,
   type TlsFailure,
@@ -16,7 +15,7 @@ import {
 import { type TrustAnchorSource, YOZZ_VALIDATOR } from '@yozz.app/x509';
 import type { AddressRecord } from '../addresses/record';
 import { trustAnchors } from './anchors';
-import { loadPin, peerKey, savePin, saveSession, takeSession } from './peer-store';
+import { peerKey, saveSession, takeSession } from './session-store';
 import { openRelayTransport, type RelayTransport } from './transport';
 
 export type Result<T, E> =
@@ -28,8 +27,6 @@ export type MailConnectionFailure =
   /** Something threw outside the protocol layers. */
   | { readonly kind: 'error'; readonly detail: string }
   | { readonly kind: 'tls'; readonly detail: string }
-  /** The host proved a key other than the one pinned; forgetting its pin, on the address's page in Settings, accepts it. */
-  | { readonly kind: 'pin-mismatch'; readonly peer: string }
   | { readonly kind: 'imap'; readonly reason: ImapFailure }
   | { readonly kind: 'smtp'; readonly reason: SmtpFailure }
   | { readonly kind: 'auth'; readonly text: string };
@@ -80,14 +77,14 @@ type TlsDuplex = {
 type Handshake = {
   readonly tlsConn: TlsConnection;
   readonly transport: RelayTransport;
-  /** `HandshakeResult.peerPublicKeyPin`. */
-  readonly provenPin: string | null;
   readonly resumed: boolean;
 };
 
 /**
- * The port is checked against the one implicit-TLS port, since 143/587 are STARTTLS. Trust on first
- * use lives here on top of chain validation; a stored session is offered once.
+ * The port is checked against the one implicit-TLS port, since 143/587 are STARTTLS. The chain is
+ * validated on every connection, a mail client's usual check, and nothing about the server's key is
+ * kept (DECISIONS.md, "A server is trusted by its certificate alone"). A stored session is offered
+ * once, and its chain is validated again on resumption.
  */
 export const openTlsDuplex = async (
   { host, port }: Host,
@@ -115,18 +112,12 @@ export const openTlsDuplex = async (
   }
 
   const peer = peerKey(host, port);
-  let pin: string | null;
   let session: TlsSession | null;
   try {
-    pin = await loadPin(peer);
-    // Unpinned means the key has to be proven by a full handshake; a resumption would report the
-    // stored leaf's key.
-    session = pin === null ? null : await takeSession(peer);
+    session = await takeSession(peer);
   } catch (error) {
-    return { ok: false, error: { kind: 'error', detail: `Peer store: ${errorText(error)}` } };
+    return { ok: false, error: { kind: 'error', detail: `Session store: ${errorText(error)}` } };
   }
-  const validator =
-    pin === null ? YOZZ_VALIDATOR : pinnedValidator({ validator: YOZZ_VALIDATOR, pin });
 
   const handshake = async (
     offered: TlsSession | null,
@@ -145,7 +136,7 @@ export const openTlsDuplex = async (
         serverName: host,
         trustAnchors: anchors,
         validationTime: new Date(),
-        validator,
+        validator: YOZZ_VALIDATOR,
         session: offered ?? undefined,
         onSession: next => saveSession(peer, next),
       });
@@ -159,7 +150,6 @@ export const openTlsDuplex = async (
         value: {
           tlsConn: tlsResult.connection,
           transport,
-          provenPin: tlsResult.peerPublicKeyPin,
           resumed: tlsResult.isResumed,
         },
       };
@@ -172,19 +162,12 @@ export const openTlsDuplex = async (
       // is what `TlsFailure.chain` prescribes, not a fallback.
       return handshake(null);
     }
-    if (
-      reason.kind === 'certificate' &&
-      reason.reason.code === 'rejected-by-policy' &&
-      pin !== null
-    ) {
-      return { ok: false, error: { kind: 'pin-mismatch', peer } };
-    }
     return { ok: false, error: { kind: 'tls', detail: describeTlsFailure(reason) } };
   };
 
   const result = await handshake(session);
   if (!result.ok) return result;
-  const { tlsConn, transport, provenPin, resumed } = result.value;
+  const { tlsConn, transport, resumed } = result.value;
 
   const close = async () => {
     await tlsConn.close().catch(() => {});
@@ -194,15 +177,6 @@ export const openTlsDuplex = async (
       // already closed
     }
   };
-
-  if (pin === null && provenPin !== null) {
-    try {
-      await savePin(peer, provenPin);
-    } catch (error) {
-      await close();
-      return { ok: false, error: { kind: 'error', detail: `Peer store: ${errorText(error)}` } };
-    }
-  }
 
   const duplex: ByteDuplex = {
     read: async () => {

@@ -1,6 +1,6 @@
 /**
  * The one IndexedDB database on this device, so one version number covers the schema: per-user rows
- * (`revision-marks`, `unlock-keys`), per-host rows (`tls-pins`, `tls-sessions`), and the derived
+ * (`revision-marks`, `unlock-keys`), per-host rows (`tls-sessions`), and the derived
  * mail cache per user, account and folder.
  */
 export class DeviceDbError extends Error {
@@ -11,14 +11,13 @@ export class DeviceDbError extends Error {
 }
 
 const DB_NAME = 'yozz-device-state';
-const DB_VERSION = 6;
+const DB_VERSION = 7;
 
 type StoreSpec = { readonly name: string; readonly keyPath: string | string[] };
 
 export const STORES = {
   marks: { name: 'revision-marks', keyPath: ['userId', 'recordId'] },
   unlockKeys: { name: 'unlock-keys', keyPath: 'userId' },
-  tlsPins: { name: 'tls-pins', keyPath: 'peer' },
   tlsSessions: { name: 'tls-sessions', keyPath: 'peer' },
   mailSync: { name: 'mail-sync', keyPath: ['userId', 'account', 'folder'] },
   mailSummaries: { name: 'mail-summaries', keyPath: ['userId', 'account', 'folder', 'uid'] },
@@ -55,6 +54,11 @@ export const openDeviceDb = (factory: IDBFactory): Promise<IDBDatabase> =>
     })();
 
     req.onupgradeneeded = event => {
+      // A store the schema no longer names goes, with its rows: `tls-pins` since 7.
+      const named = new Set<string>(Object.values<StoreSpec>(STORES).map(({ name }) => name));
+      for (const name of Array.from(req.result.objectStoreNames)) {
+        if (!named.has(name)) req.result.deleteObjectStore(name);
+      }
       for (const { since, names } of REKEYED) {
         if (event.oldVersion >= since) continue;
         for (const name of names) {

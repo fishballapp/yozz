@@ -4,7 +4,6 @@ import { type ChangeEvent, type FormEvent, useEffect, useRef, useState } from 'r
 import { type AddressRecord, isInbound } from '../../addresses/record';
 import { keepCompose } from '../../compose/intent';
 import { describeMailFailure } from '../../relay/describe-failure';
-import { ServerRow } from '../../relay/ServerRow';
 import { useMail } from '../../store/MailProvider';
 import { Button, buttonClass } from '../../ui/Button';
 import { ConfirmDialog } from '../../ui/ConfirmDialog';
@@ -403,9 +402,9 @@ const ServersSection = ({ record }: { record: AddressRecord }) => {
       ) : (
         <dl>
           {isInbound(record) && (
-            <ServerRow term="IMAP" host={record.imap.host} port={record.imap.port} />
+            <Definition term="IMAP">{`${record.imap.host}:${record.imap.port}`}</Definition>
           )}
-          <ServerRow term="SMTP" host={record.smtp.host} port={record.smtp.port} />
+          <Definition term="SMTP">{`${record.smtp.host}:${record.smtp.port}`}</Definition>
           {hasOneUsername ? (
             <Definition term="Username">{record.smtp.username}</Definition>
           ) : (

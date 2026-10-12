@@ -34,8 +34,6 @@ const mocks = vi.hoisted(() => ({
   navigate: vi.fn(async (_options: unknown) => {}),
   testImap: vi.fn<(imap: unknown) => Promise<Result<void, MailConnectionFailure>>>(),
   testSmtp: vi.fn<(smtp: unknown) => Promise<Result<void, MailConnectionFailure>>>(),
-  pins: new Map<string, string>(),
-  forgetPin: vi.fn<(peer: string) => Promise<void>>(),
 }));
 
 const setIdentities = (identities: readonly AddressRecord[]) => {
@@ -74,11 +72,6 @@ vi.mock('@tanstack/react-router', () => ({
 
 vi.mock('../../threads/sync', () => ({ testImap: mocks.testImap }));
 vi.mock('../../compose/send', () => ({ testSmtp: mocks.testSmtp }));
-vi.mock('../../relay/peer-store', () => ({
-  peerKey: (host: string, port: number) => `${host}:${port}`,
-  loadPin: async (peer: string) => mocks.pins.get(peer) ?? null,
-  forgetPin: mocks.forgetPin,
-}));
 
 const OK = { ok: true, value: undefined } as const;
 const REFUSED = (error: MailConnectionFailure) => ({ ok: false, error }) as const;
@@ -147,12 +140,10 @@ const confirmRemoval = async () => {
 
 beforeEach(() => {
   mocks.address = SEND_ONLY.address;
-  mocks.pins.clear();
   mocks.testImap.mockResolvedValue(OK);
   mocks.testSmtp.mockResolvedValue(OK);
   mocks.replaceAddress.mockResolvedValue();
   mocks.setSenderName.mockResolvedValue();
-  mocks.forgetPin.mockResolvedValue();
   setIdentities([SEND_ONLY]);
 });
 
@@ -245,28 +236,6 @@ describe('Servers', () => {
     expect(text).toContain('smtp.example.com:465');
     expect(text).toContain('Username');
     expect(section('Servers').querySelector('form')).toBeNull();
-  });
-
-  it('shows each server whose key this device has pinned, and the ones it has not', async () => {
-    mocks.pins.set('imap.example.com:993', 'AbCdEfGhIjKlMnOpQrSt');
-    await mount();
-    const text = section('Servers').textContent;
-    expect(text).toContain('Key sha256/AbCdEfGhIjKl…');
-    expect(text).toContain('No key yet; pinned on first connection');
-    expect(button('Forget key')).toBeDefined();
-  });
-
-  it('forgets a pinned key only after the question is answered', async () => {
-    mocks.pins.set('imap.example.com:993', 'AbCdEfGhIjKlMnOpQrSt');
-    await mount();
-
-    await act(async () => button('Forget key').click());
-    expect(mocks.forgetPin).not.toHaveBeenCalled();
-    expect(document.body.textContent).toContain('trusts whatever key the server proves');
-
-    await act(async () => button('Forget key').click());
-    expect(mocks.forgetPin).toHaveBeenCalledWith('imap.example.com:993');
-    expect(section('Servers').textContent).not.toContain('sha256/');
   });
 
   it('Edit turns the section into a form, and Cancel restores the facts untouched', async () => {

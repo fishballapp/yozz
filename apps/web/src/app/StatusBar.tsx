@@ -11,8 +11,6 @@ const shortFailureReason = (failure: MailConnectionFailure): string => {
       return 'error';
     case 'tls':
       return 'TLS failed';
-    case 'pin-mismatch':
-      return 'server key changed';
     case 'auth':
       return 'auth rejected';
     case 'imap':
