@@ -347,7 +347,8 @@ export const Compose = () => {
                     <span className="ml-auto font-mono text-2xs text-paper-faint">markdown</span>
                   </Tabs.List>
 
-                  <Tabs.Panel value="write" className="min-h-0 flex-1 outline-none">
+                  {/* A flex column, not `h-full`: below `sm` the dialog only has a min-height, which a percentage cannot resolve against. */}
+                  <Tabs.Panel value="write" className="flex min-h-0 flex-1 flex-col outline-none">
                     <textarea
                       ref={bodyInput}
                       value={draft.body}
@@ -356,7 +357,7 @@ export const Compose = () => {
                         'Write your message.\n\nMarkdown works — **bold**, lists, > quotes.'
                       }
                       aria-label="Message body, markdown"
-                      className="h-full w-full resize-none bg-ink-raised px-4 py-4 font-mono text-[13px] leading-[1.7] text-paper outline-none placeholder:text-paper-faint"
+                      className="min-h-0 w-full flex-1 resize-none bg-ink-raised px-4 py-4 font-mono text-[13px] leading-[1.7] text-paper outline-none placeholder:text-paper-faint"
                     />
                   </Tabs.Panel>
 
