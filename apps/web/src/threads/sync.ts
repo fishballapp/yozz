@@ -1,4 +1,10 @@
-import { type CopyUid, copiedUid, type ImapClient, type ImapMessageSummary } from '@yozz.app/imap';
+import {
+  type CopyUid,
+  copiedUid,
+  type ImapClient,
+  type ImapMessageSummary,
+  uidSets,
+} from '@yozz.app/imap';
 import { ensureMailbox, resolveFolders } from '../addresses/mailboxes';
 import type { InboundAddress } from '../addresses/record';
 import { connectImap, type MailConnectionFailure, type Result } from '../relay/connection';
@@ -245,7 +251,7 @@ export const testImap = async (
   return { ok: true, value: undefined };
 };
 
-/** One folder's worth of a flag write or a move, off the sync mark. */
+/** One folder's worth of a flag write or a move, off the sync mark: one command per uid set. */
 export type FlagTarget = {
   readonly folder: Folder;
   readonly mailbox: string;
@@ -290,8 +296,10 @@ export const setFlag = async (
         const selectRes = await client.ensureSelected(mailbox);
         if (!selectRes.ok) return { ok: false, error: { kind: 'imap', reason: selectRes.reason } };
         if (renumbered(target, selectRes.value)) return { ok: false, error: RENUMBERED };
-        const storeRes = await client.storeFlags(uids.join(','), on ? 'add' : 'remove', [flag]);
-        if (!storeRes.ok) return { ok: false, error: { kind: 'imap', reason: storeRes.reason } };
+        for (const set of uidSets(uids)) {
+          const storeRes = await client.storeFlags(set, on ? 'add' : 'remove', [flag]);
+          if (!storeRes.ok) return { ok: false, error: { kind: 'imap', reason: storeRes.reason } };
+        }
         await cache.folder(folder).updateSummaries(uids, summary => ({
           ...summary,
           flags: withFlag(summary.flags, flag, on),
@@ -314,10 +322,10 @@ const destinationOf = (copy: CopyUid | null, folder: Folder, uid: number) => {
 };
 
 /**
- * `UID MOVE` every source mailbox's uids into `to`, answering where each went. Not retried: a
- * half-done MOVE must not re-run.
+ * `UID MOVE` every source mailbox's uids into `to`, answering where each went: one command per
+ * mailbox, however many conversations it carries. Not retried: a half-done MOVE must not re-run.
  */
-export const moveThread = async (
+export const moveMessages = async (
   run: Run,
   sources: readonly FlagTarget[],
   to: 'inbox' | 'archive' | 'trash',
@@ -337,12 +345,20 @@ export const moveThread = async (
         const selectRes = await client.ensureSelected(mailbox);
         if (!selectRes.ok) return { ok: false, error: { kind: 'imap', reason: selectRes.reason } };
         if (renumbered(source, selectRes.value)) return { ok: false, error: RENUMBERED };
-        const moveRes = await client.move(uids.join(','), destination.value);
-        if (!moveRes.ok) return { ok: false, error: { kind: 'imap', reason: moveRes.reason } };
+        const answers: (CopyUid | null)[] = [];
+        for (const set of uidSets(uids)) {
+          const moveRes = await client.move(set, destination.value);
+          if (!moveRes.ok) return { ok: false, error: { kind: 'imap', reason: moveRes.reason } };
+          answers.push(moveRes.value);
+        }
         moved.push(
           ...uids.map(uid => ({
             from: { folder: source.folder, uidValidity: source.uidValidity, uid },
-            to: destinationOf(moveRes.value, to, uid),
+            // Each answer names only the uids of its own set.
+            to:
+              answers
+                .map(answer => destinationOf(answer, to, uid))
+                .find(destination => destination !== null) ?? null,
           })),
         );
       }

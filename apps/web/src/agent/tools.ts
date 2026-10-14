@@ -24,15 +24,17 @@ export type AgentPort = {
   readonly drafts: readonly DraftHandle[];
   /** Read from the outcome, never from a later render. */
   readonly loadBody: (threadId: string, messageId: string) => Promise<BodyOutcome>;
-  /** The writes answer `false` when no mail server holds a copy of that thread to change. */
-  readonly markRead: (threadId: string) => boolean;
-  readonly markUnread: (threadId: string) => boolean;
-  readonly setStar: (threadId: string, isStarred: boolean) => boolean;
-  /** One direction only: a retried call after a timeout must never un-archive. */
-  readonly archive: (threadId: string) => boolean;
-  readonly trash: (threadId: string) => boolean;
-  /** Archive or Trash back to the inbox; one direction, like `archive`. */
-  readonly restore: (threadId: string) => boolean;
+  /**
+   * Each write is one write for every id it is given, and answers the ids it took; one it did not
+   * take has no copy on a mail server to change.
+   */
+  readonly setRead: (threadIds: readonly string[], isRead: boolean) => ReadonlySet<string>;
+  readonly setStar: (threadIds: readonly string[], isStarred: boolean) => ReadonlySet<string>;
+  /** One direction only: a retried call after a timeout must never undo itself. */
+  readonly move: (
+    threadIds: readonly string[],
+    to: 'inbox' | 'archive' | 'trash',
+  ) => ReadonlySet<string>;
   /** Settles once the navigation has. */
   readonly openThread: (thread: ThreadState) => Promise<void>;
   /** Opens the composer on a draft the vault already holds. Never creates one. */
@@ -154,6 +156,8 @@ const SESSION_ENDED =
 
 const NOT_ON_SERVER =
   'no copy of this conversation is on a mail server to change; a message just sent has one once its Sent copy syncs';
+
+const NOTHING_TO_ARCHIVE = 'nothing in the inbox to archive';
 
 const mailboxSchema = z
   .enum(['inbox', 'archive', 'trash', 'sent', 'drafts'])
@@ -457,60 +461,71 @@ export const buildAgentTools = (port: () => AgentPort): readonly AgentTool[] => 
         'Name at least one of read, starred or mailbox.',
       ),
     annotations: write,
-    run: ({ ids, read, starred, mailbox }) => ({
-      results: resolve(port().threads, ids).map(({ id, thread }) => {
-        if (thread === null) return { id, status: 'not_found' as const };
-        const notes: string[] = [];
-        const refused = (): boolean => {
-          if (read !== undefined && thread.isUnread === read) {
-            if (!(read ? port().markRead(thread.id) : port().markUnread(thread.id))) return true;
+    run: ({ ids, read, starred, mailbox }) => {
+      const entries = resolve(port().threads, ids);
+      const found = entries.flatMap(({ thread }) => (thread === null ? [] : [thread]));
+      /** Why a conversation needs no move, or null when it does. */
+      const unmoved = (thread: ThreadState): string | null => {
+        if (mailbox === 'archive') {
+          if (isArchived(thread)) return 'already archived';
+          // No inbox copy: nothing to move, so don't report one.
+          if (!thread.folders.includes('inbox')) return NOTHING_TO_ARCHIVE;
+        }
+        if (mailbox === 'trash' && isTrashed(thread)) return 'already in the trash';
+        if (mailbox === 'inbox' && !isArchived(thread) && !isTrashed(thread)) {
+          return 'already in the inbox';
+        }
+        return null;
+      };
+      // One write per field over every conversation it changes, as the bulk bar does; a
+      // conversation one write refused is left out of the next.
+      const refused = new Set<string>();
+      const write = (
+        changing: (thread: ThreadState) => boolean,
+        apply: (threadIds: readonly string[]) => ReadonlySet<string>,
+      ) => {
+        const targets = found.filter(thread => !refused.has(thread.id) && changing(thread));
+        if (targets.length === 0) return;
+        const taken = apply(targets.map(({ id }) => id));
+        for (const { id } of targets) if (!taken.has(id)) refused.add(id);
+      };
+      if (read !== undefined) {
+        write(
+          thread => thread.isUnread === read,
+          threadIds => port().setRead(threadIds, read),
+        );
+      }
+      if (starred !== undefined) {
+        write(
+          thread => thread.isStarred !== starred,
+          threadIds => port().setStar(threadIds, starred),
+        );
+      }
+      if (mailbox !== undefined) {
+        write(
+          thread => unmoved(thread) === null,
+          threadIds => port().move(threadIds, mailbox),
+        );
+      }
+      return {
+        results: entries.map(({ id, thread }) => {
+          if (thread === null) return { id, status: 'not_found' as const };
+          if (refused.has(thread.id)) {
+            return { id, status: 'pending' as const, note: NOT_ON_SERVER };
           }
-          if (starred !== undefined && thread.isStarred !== starred) {
-            if (!port().setStar(thread.id, starred)) return true;
-          }
-          if (mailbox === 'archive') {
-            if (isArchived(thread)) {
-              notes.push('already archived');
-            } else if (!thread.folders.includes('inbox')) {
-              // No inbox copy: nothing to move, so don't report one.
-              notes.push('nothing in the inbox to archive');
-            } else if (!port().archive(thread.id)) {
-              return true;
-            }
-          }
-          if (mailbox === 'trash') {
-            if (isTrashed(thread)) {
-              notes.push('already in the trash');
-            } else if (!port().trash(thread.id)) {
-              return true;
-            }
-          }
-          if (mailbox === 'inbox') {
-            if (!isArchived(thread) && !isTrashed(thread)) {
-              notes.push('already in the inbox');
-            } else if (!port().restore(thread.id)) {
-              return true;
-            }
-          }
-          return false;
-        };
-        if (refused()) {
+          const note = mailbox === undefined ? null : unmoved(thread);
           return {
             id,
-            status: 'pending' as const,
-            note: NOT_ON_SERVER,
+            status: 'ok' as const,
+            ...(read === undefined ? {} : { isRead: read }),
+            ...(starred === undefined ? {} : { isStarred: starred }),
+            // A row that moved nothing claims no mailbox.
+            ...(mailbox === undefined || note === NOTHING_TO_ARCHIVE ? {} : { mailbox }),
+            ...(note === null ? {} : { note }),
           };
-        }
-        return {
-          id,
-          status: 'ok' as const,
-          ...(read === undefined ? {} : { isRead: read }),
-          ...(starred === undefined ? {} : { isStarred: starred }),
-          ...(mailbox === undefined ? {} : { mailbox }),
-          ...(notes.length > 0 ? { note: notes.join('; ') } : {}),
-        };
-      }),
-    }),
+        }),
+      };
+    },
   }),
 
   tool({
@@ -697,7 +712,7 @@ export const buildAgentTools = (port: () => AgentPort): readonly AgentTool[] => 
       // The next session may hold this thread too, and its `markRead` would write over its connections.
       if (!isCurrent()) return { error: SESSION_ENDED };
       // The page's own effect marks read after it renders; the second write is a no-op.
-      if (thread.isUnread && !port().markRead(thread.id)) {
+      if (thread.isUnread && !port().setRead([thread.id], true).has(thread.id)) {
         return { ok: true, showing: 'thread', note: NOT_ON_SERVER };
       }
       return { ok: true, showing: 'thread', id: thread.id };

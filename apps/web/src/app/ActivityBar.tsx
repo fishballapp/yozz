@@ -43,14 +43,16 @@ export const ActivityBar = () => {
   const activities = useSyncExternalStore(activity.subscribe, activity.snapshot);
   const [now, setNow] = useState(Date.now);
 
-  // Looks again whenever the list changes, and when the next piece of work crosses its delay.
+  // The clock moves on a timer, at the next piece of work's delay, never in the commit the list
+  // changed in: that commit is synchronous (`useSyncExternalStore`), and a state set there counts as
+  // nested in it, so fifty tasks settling between two of the browser's tasks threw React #185.
+  // Measured from the last tick, so work whose delay passed since is shown at once.
   useEffect(() => {
-    setNow(Date.now());
-    const wait = nextShowIn(activities, Date.now());
+    const wait = nextShowIn(activities, now);
     if (wait === null) return;
-    const timer = setTimeout(() => setNow(Date.now()), wait);
+    const timer = setTimeout(() => setNow(Date.now()), Math.max(0, now + wait - Date.now()));
     return () => clearTimeout(timer);
-  }, [activities]);
+  }, [activities, now]);
 
   const bar = barAt(activities, now);
   // Kept through the fade-out, or a write's bar would turn grey as it leaves.

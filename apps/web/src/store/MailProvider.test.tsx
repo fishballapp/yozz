@@ -9,7 +9,7 @@ import type { Folder, ThreadState } from '../threads/thread';
 import { toast } from '../ui/Toast';
 import { MailProvider, useMail } from './MailProvider';
 
-const { session, moveThread, prefetchBodies, setFlag, syncAccount, thread, shown } = vi.hoisted(
+const { session, moveMessages, prefetchBodies, setFlag, syncAccount, thread, shown } = vi.hoisted(
   () => {
     const addresses = ['a@example.com', 'b@example.com'];
     const records = addresses.map(address => {
@@ -24,7 +24,7 @@ const { session, moveThread, prefetchBodies, setFlag, syncAccount, thread, shown
         userId: 'user',
         store: { list: async (type: string) => (type === 'address' ? records : []) },
       },
-      moveThread: vi.fn(),
+      moveMessages: vi.fn(),
       prefetchBodies: vi.fn(),
       setFlag: vi.fn(),
       syncAccount: vi.fn(),
@@ -70,7 +70,7 @@ vi.mock('../relay/live', () => ({
 vi.mock('../threads/sync', () => ({
   syncAccount,
   prefetchBodies,
-  moveThread,
+  moveMessages,
   setFlag,
 }));
 vi.mock('../threads/summaries', () => ({
@@ -93,7 +93,7 @@ const roots: Array<ReturnType<typeof createRoot>> = [];
 afterEach(async () => {
   for (const root of roots) await act(() => root.unmount());
   roots.length = 0;
-  moveThread.mockReset();
+  moveMessages.mockReset();
   prefetchBodies.mockReset();
   setFlag.mockReset();
   shown.threads = [];
@@ -130,7 +130,7 @@ const mount = async ({ archiveSynced = true } = {}) => {
 
 describe('MailProvider move refusals', () => {
   it('reports a move every account refused once, and says in the status line what failed', async () => {
-    moveThread.mockResolvedValue({
+    moveMessages.mockResolvedValue({
       ok: false,
       error: { kind: 'imap', reason: { kind: 'no', text: 'Archive is read-only' } },
     });
@@ -141,7 +141,7 @@ describe('MailProvider move refusals', () => {
       expect(mail().toggleArchive('t1', onRefused)).toBe(true);
     });
 
-    await vi.waitFor(() => expect(moveThread).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() => expect(moveMessages).toHaveBeenCalledTimes(2));
     await vi.waitFor(() => expect(mail().threads[0]?.folders).toEqual(['inbox']));
     expect(onRefused).toHaveBeenCalledTimes(1);
     expect(onRefused).toHaveBeenCalledWith(expect.stringMatching(/: Archive is read-only$/));
@@ -150,7 +150,7 @@ describe('MailProvider move refusals', () => {
 
   it('drops a refusal that lands after its session ended', async () => {
     let answer: (value: unknown) => void = () => {};
-    moveThread.mockReturnValue(
+    moveMessages.mockReturnValue(
       new Promise(resolve => {
         answer = resolve;
       }),
@@ -161,7 +161,7 @@ describe('MailProvider move refusals', () => {
     await act(async () => {
       mail().toggleArchive('t1', onRefused);
     });
-    await vi.waitFor(() => expect(moveThread).toHaveBeenCalled());
+    await vi.waitFor(() => expect(moveMessages).toHaveBeenCalled());
 
     const root = roots.pop();
     await act(async () => root?.unmount());
@@ -233,7 +233,7 @@ const unplaced = (targets: readonly FlagTarget[]) => ({
 /** Moves into `held` wait for `answer`; any other answers at once, as a UIDPLUS server would. */
 const holdMovesInto = (held: Folder, answer: (targets: readonly FlagTarget[]) => unknown) => {
   const answers: Array<() => void> = [];
-  moveThread.mockImplementation((_run, targets: readonly FlagTarget[], to: Folder) =>
+  moveMessages.mockImplementation((_run, targets: readonly FlagTarget[], to: Folder) =>
     to === held
       ? new Promise(resolve => answers.push(() => resolve(answer(targets))))
       : Promise.resolve(placed(targets, to)),
@@ -272,7 +272,7 @@ describe('MailProvider confirmed writes', () => {
 
   it('keeps a confirmed move pending, without asking for a sync, until the next one lands', async () => {
     const syncs = heldSyncs();
-    moveThread.mockImplementation((_run, targets: readonly FlagTarget[], to: Folder) =>
+    moveMessages.mockImplementation((_run, targets: readonly FlagTarget[], to: Folder) =>
       Promise.resolve(placed(targets, to)),
     );
     showOneAccount();
@@ -283,7 +283,7 @@ describe('MailProvider confirmed writes', () => {
     await act(async () => {
       expect(mail().toggleArchive('t1')).toBe(true);
     });
-    await vi.waitFor(() => expect(moveThread).toHaveBeenCalledTimes(1));
+    await vi.waitFor(() => expect(moveMessages).toHaveBeenCalledTimes(1));
     expect(syncAccount).toHaveBeenCalledTimes(2);
     expect(mail().threads[0]?.folders).toEqual(['archive']);
 
@@ -300,7 +300,7 @@ describe('MailProvider confirmed writes', () => {
     'lets a sync whose folders a move %s between go round again before it lands',
     async (outcome, shown) => {
       const syncs = heldSyncs();
-      moveThread.mockImplementation((_run, targets: readonly FlagTarget[], to: Folder) =>
+      moveMessages.mockImplementation((_run, targets: readonly FlagTarget[], to: Folder) =>
         Promise.resolve(
           outcome === 'answered'
             ? placed(targets, to)
@@ -314,7 +314,7 @@ describe('MailProvider confirmed writes', () => {
       await act(async () => {
         mail().toggleArchive('t1');
       });
-      await vi.waitFor(() => expect(moveThread).toHaveBeenCalledTimes(1));
+      await vi.waitFor(() => expect(moveMessages).toHaveBeenCalledTimes(1));
       await syncs.landAll();
       // Not landed: it read the inbox before the move and the archive after, so it goes round. A
       // landing prefetches; only the other account's pass, which no move touched, has.
@@ -339,12 +339,12 @@ describe('MailProvider stacked writes', () => {
       expect(mail().toggleArchive('t1')).toBe(true);
       expect(mail().trashThread('t1')).toBe(true);
     });
-    await vi.waitFor(() => expect(moveThread).toHaveBeenCalledTimes(1));
+    await vi.waitFor(() => expect(moveMessages).toHaveBeenCalledTimes(1));
     expect(mail().threads[0]?.folders).toEqual(['trash']);
 
     await archive.answerAll();
-    await vi.waitFor(() => expect(moveThread).toHaveBeenCalledTimes(2));
-    expect(moveThread.mock.calls[1]?.slice(1)).toEqual([
+    await vi.waitFor(() => expect(moveMessages).toHaveBeenCalledTimes(2));
+    expect(moveMessages.mock.calls[1]?.slice(1)).toEqual([
       [{ folder: 'archive', mailbox: 'Archive', uidValidity: 3, uids: [107] }],
       'trash',
     ]);
@@ -361,7 +361,7 @@ describe('MailProvider stacked writes', () => {
       mail().toggleArchive('t1');
       mail().toggleStar('t1');
     });
-    await vi.waitFor(() => expect(moveThread).toHaveBeenCalledTimes(1));
+    await vi.waitFor(() => expect(moveMessages).toHaveBeenCalledTimes(1));
     expect(setFlag).not.toHaveBeenCalled();
 
     await archive.answerAll();
@@ -385,10 +385,10 @@ describe('MailProvider stacked writes', () => {
       mail().toggleArchive('t1');
       mail().trashThread('t1');
     });
-    await vi.waitFor(() => expect(moveThread).toHaveBeenCalledTimes(1));
+    await vi.waitFor(() => expect(moveMessages).toHaveBeenCalledTimes(1));
     await archive.answerAll();
-    await vi.waitFor(() => expect(moveThread).toHaveBeenCalledTimes(2));
-    expect(moveThread.mock.calls[1]?.slice(1)).toEqual([
+    await vi.waitFor(() => expect(moveMessages).toHaveBeenCalledTimes(2));
+    expect(moveMessages.mock.calls[1]?.slice(1)).toEqual([
       [{ folder: 'inbox', mailbox: 'INBOX', uidValidity: 1, uids: [7] }],
       'trash',
     ]);
@@ -413,15 +413,201 @@ describe('MailProvider stacked writes', () => {
       mail().toggleArchive('t1');
       expect(mail().trashThread('t1', onRefused)).toBe(true);
     });
-    await vi.waitFor(() => expect(moveThread).toHaveBeenCalledTimes(1));
+    await vi.waitFor(() => expect(moveMessages).toHaveBeenCalledTimes(1));
     await archive.answerAll();
     const pending = 'Still confirming the last move of that conversation; try again in a moment.';
     await vi.waitFor(() => expect(onRefused).toHaveBeenCalledWith(pending));
     expect(onRefused).toHaveBeenCalledTimes(1);
-    expect(moveThread).toHaveBeenCalledTimes(1);
+    expect(moveMessages).toHaveBeenCalledTimes(1);
     expect(mail().mailError).toBe(`thread not moved · ${pending}`);
     expect(mail().threads[0]?.folders).toEqual(['archive']);
     await vi.waitFor(() => expect(syncs.count()).toBe(1));
+  });
+});
+
+/** A conversation of one message, held in `folder` at `uid` by each of `accounts`. */
+const conversation = (
+  id: string,
+  folder: 'inbox' | 'archive',
+  uid: number,
+  accounts: readonly string[] = thread.accounts,
+): ThreadState => ({
+  ...thread,
+  id,
+  accounts: [...accounts],
+  folders: [folder],
+  foldersByAccount: Object.fromEntries(accounts.map(account => [account, [folder]])),
+  messages: [
+    {
+      ...thread.messages[0]!,
+      id: `${id}/m`,
+      // As `mount` writes the marks: INBOX under UIDVALIDITY 1, Archive under 3.
+      locations: accounts.map(account => ({
+        account,
+        folder,
+        uidValidity: folder === 'inbox' ? 1 : 3,
+        uid,
+      })),
+    },
+  ],
+});
+
+describe('MailProvider bulk writes', () => {
+  it('moves many threads with one command per account, each naming every folder once', async () => {
+    moveMessages.mockImplementation((_run, targets: readonly FlagTarget[], to: Folder) =>
+      Promise.resolve(placed(targets, to)),
+    );
+    shown.threads = [
+      ...[10, 11, 12, 13].map(uid => conversation(`in-${uid}`, 'inbox', uid)),
+      ...[20, 21].map(uid => conversation(`ar-${uid}`, 'archive', uid)),
+    ];
+    await mount();
+
+    const ids = shown.threads.map(({ id }) => id);
+    await act(async () => {
+      expect(mail().moveThreads(ids, 'trash')).toEqual(new Set(ids));
+    });
+    await vi.waitFor(() => expect(moveMessages).toHaveBeenCalledTimes(2));
+    for (const [, targets, to] of moveMessages.mock.calls) {
+      expect(to).toBe('trash');
+      expect(targets).toEqual([
+        { folder: 'inbox', mailbox: 'INBOX', uidValidity: 1, uids: [10, 11, 12, 13] },
+        { folder: 'archive', mailbox: 'Archive', uidValidity: 3, uids: [20, 21] },
+      ]);
+    }
+    expect(mail().threads.map(({ folders }) => folders)).toEqual(ids.map(() => ['trash']));
+  });
+
+  it('puts back only what the refusing account held, and reports the batch once', async () => {
+    const syncs = heldSyncs();
+    const answers = [
+      (targets: readonly FlagTarget[]) => placed(targets, 'archive'),
+      () => ({ ok: false, error: { kind: 'imap', reason: { kind: 'no', text: 'System Error' } } }),
+    ];
+    moveMessages.mockImplementation(async (_run, targets: readonly FlagTarget[]) =>
+      answers.shift()?.(targets),
+    );
+    shown.threads = [10, 11, 12].map(uid => conversation(`in-${uid}`, 'inbox', uid));
+    await mount();
+    await vi.waitFor(() => expect(syncs.count()).toBe(2));
+    await syncs.landAll();
+
+    const onRefused = vi.fn();
+    await act(async () => {
+      mail().moveThreads(
+        shown.threads.map(({ id }) => id),
+        'archive',
+        onRefused,
+      );
+    });
+    await vi.waitFor(() => expect(onRefused).toHaveBeenCalledTimes(1));
+    expect(onRefused).toHaveBeenCalledWith(expect.stringMatching(/: System Error$/));
+    // One account's copies moved, the other's are back in its inbox, in every thread.
+    await vi.waitFor(() =>
+      expect(
+        mail().threads.map(({ foldersByAccount }) =>
+          Object.values(foldersByAccount)
+            .map(folders => folders.join())
+            .toSorted(),
+        ),
+      ).toEqual(shown.threads.map(() => ['archive', 'inbox'])),
+    );
+    // The half-done batch asks its account for one sync, not one per thread.
+    await vi.waitFor(() => expect(syncs.count()).toBe(1));
+  });
+
+  it.each([
+    [
+      'follows a pending move: the thread goes in the same command, from where that move put it',
+      true,
+    ],
+    [
+      'refuses only the thread a pending move left unplaced, and moves the rest in one command',
+      false,
+    ],
+  ])('%s', async (_, uidPlus) => {
+    const account = 'a@example.com';
+    const archive = holdMovesInto('archive', targets =>
+      uidPlus ? placed(targets, 'archive') : unplaced(targets),
+    );
+    shown.threads = [
+      conversation('first', 'inbox', 7, [account]),
+      conversation('second', 'inbox', 8, [account]),
+    ];
+    await mount();
+
+    const onRefused = vi.fn();
+    await act(async () => {
+      mail().toggleArchive('first');
+      mail().moveThreads(['first', 'second'], 'trash', onRefused);
+    });
+    await vi.waitFor(() => expect(moveMessages).toHaveBeenCalledTimes(1));
+    await archive.answerAll();
+    await vi.waitFor(() => expect(moveMessages).toHaveBeenCalledTimes(2));
+    expect(moveMessages.mock.calls[1]?.slice(1)).toEqual([
+      uidPlus
+        ? [
+            { folder: 'archive', mailbox: 'Archive', uidValidity: 3, uids: [107] },
+            { folder: 'inbox', mailbox: 'INBOX', uidValidity: 1, uids: [8] },
+          ]
+        : [{ folder: 'inbox', mailbox: 'INBOX', uidValidity: 1, uids: [8] }],
+      'trash',
+    ]);
+    if (uidPlus) {
+      expect(onRefused).not.toHaveBeenCalled();
+    } else {
+      expect(onRefused).toHaveBeenCalledTimes(1);
+      expect(onRefused).toHaveBeenCalledWith(expect.stringMatching(/^Still confirming/));
+      expect(mail().threads.find(({ id }) => id === 'first')?.folders).toEqual(['archive']);
+      // The rest of the batch landing keeps the refusal in the status line.
+      expect(mail().mailError).toMatch(/^thread not moved · Still confirming/);
+    }
+    expect(mail().threads.find(({ id }) => id === 'second')?.folders).toEqual(['trash']);
+  });
+
+  it('writes one flag command per account for many threads', async () => {
+    setFlag.mockResolvedValue({ ok: true, value: undefined });
+    shown.threads = [10, 11, 12].map(uid => ({
+      ...conversation(`in-${uid}`, 'inbox', uid),
+      isUnread: true,
+    }));
+    await mount();
+
+    const ids = shown.threads.map(({ id }) => id);
+    await act(async () => {
+      expect(mail().flagThreads(ids, 'isUnread', false)).toEqual(new Set(ids));
+    });
+    await vi.waitFor(() => expect(setFlag).toHaveBeenCalledTimes(2));
+    for (const call of setFlag.mock.calls) {
+      expect(call.slice(2)).toEqual([
+        [{ folder: 'inbox', mailbox: 'INBOX', uidValidity: 1, uids: [10, 11, 12] }],
+        '\\Seen',
+        true,
+      ]);
+    }
+  });
+
+  it('asks for a sync when a flag write is refused, since a folder before the refusal may have taken it', async () => {
+    const syncs = heldSyncs();
+    setFlag.mockResolvedValue({
+      ok: false,
+      error: { kind: 'imap', reason: { kind: 'no', text: 'System Error' } },
+    });
+    const account = 'a@example.com';
+    shown.threads = [
+      { ...conversation('in-10', 'inbox', 10, [account]), isUnread: true },
+      { ...conversation('ar-20', 'archive', 20, [account]), isUnread: true },
+    ];
+    await mount();
+    await vi.waitFor(() => expect(syncs.count()).toBe(2));
+    await syncs.landAll();
+
+    await act(async () => {
+      mail().flagThreads(['in-10', 'ar-20'], 'isUnread', false);
+    });
+    await vi.waitFor(() => expect(setFlag).toHaveBeenCalledTimes(1));
+    await vi.waitFor(() => expect(syncs.count()).toBe(1));
+    expect(mail().mailError).toMatch(/^flag not saved · /);
   });
 });
 

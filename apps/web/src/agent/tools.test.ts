@@ -92,12 +92,9 @@ const fakePort = (threads: ThreadState[], overrides: Partial<AgentPort> = {}) =>
       // The fake never publishes a render: the tool must not need one.
       return loadedBody(found.bodyStatus === undefined ? found.body : ['Loaded body.']);
     }),
-    markRead: vi.fn(() => true),
-    markUnread: vi.fn(() => true),
-    archive: vi.fn(() => true),
-    trash: vi.fn(() => true),
-    setStar: vi.fn(() => true),
-    restore: vi.fn(() => true),
+    setRead: vi.fn((threadIds: readonly string[]) => new Set(threadIds)),
+    setStar: vi.fn((threadIds: readonly string[]) => new Set(threadIds)),
+    move: vi.fn((threadIds: readonly string[]) => new Set(threadIds)),
     openThread: vi.fn(async () => {}),
     openDraft: vi.fn(async () => {}),
     writeDraft: vi.fn(async input => {
@@ -415,8 +412,31 @@ describe('update_threads', () => {
       starred: true,
     });
     expect(result).toEqual({ results: [{ id: 'a', status: 'ok', isRead: true, isStarred: true }] });
-    expect(port.markRead).toHaveBeenCalledWith('a');
-    expect(port.setStar).toHaveBeenCalledWith('a', true);
+    expect(port.setRead).toHaveBeenCalledWith(['a'], true);
+    expect(port.setStar).toHaveBeenCalledWith(['a'], true);
+  });
+
+  it('writes each field once for every conversation it changes, and reports a refusal per row', async () => {
+    const { tools, port } = fakePort(
+      [thread('a', ['inbox']), thread('b', ['inbox']), thread('c', ['archive'])],
+      // `b` has no copy on a mail server.
+      { setRead: (threadIds: readonly string[]) => new Set(threadIds.filter(id => id !== 'b')) },
+    );
+    const result = await call(tools, 'update_threads', {
+      ids: ['a', 'b', 'c'],
+      read: true,
+      mailbox: 'archive',
+    });
+    expect(result).toEqual({
+      results: [
+        { id: 'a', status: 'ok', isRead: true, mailbox: 'archive' },
+        { id: 'b', status: 'pending', note: expect.stringContaining('mail server') },
+        { id: 'c', status: 'ok', isRead: true, mailbox: 'archive', note: 'already archived' },
+      ],
+    });
+    // The refused conversation is not moved, and the archived one needs no move.
+    expect(port.move).toHaveBeenCalledTimes(1);
+    expect(port.move).toHaveBeenCalledWith(['a'], 'archive');
   });
 
   it('reports a state that was already right without repeating the write', async () => {
@@ -432,9 +452,9 @@ describe('update_threads', () => {
     expect(result).toMatchObject({
       results: [{ id: 'a', status: 'ok', mailbox: 'archive', note: 'already archived' }],
     });
-    expect(port.markRead).not.toHaveBeenCalled();
+    expect(port.setRead).not.toHaveBeenCalled();
     expect(port.setStar).not.toHaveBeenCalled();
-    expect(port.archive).not.toHaveBeenCalled();
+    expect(port.move).not.toHaveBeenCalled();
   });
 
   it('moves nothing that is not in the inbox, and names an unknown id', async () => {
@@ -446,7 +466,7 @@ describe('update_threads', () => {
         { id: 'ghost', status: 'not_found' },
       ],
     });
-    expect(port.archive).not.toHaveBeenCalled();
+    expect(port.move).not.toHaveBeenCalled();
   });
 
   it('changes a conversation once when several ids name it', async () => {
@@ -469,7 +489,7 @@ describe('update_threads', () => {
         }),
       ],
     });
-    const { tools } = fakePort([justSent], { trash: () => false });
+    const { tools } = fakePort([justSent], { move: () => new Set() });
     await expect(
       call(tools, 'update_threads', { ids: ['a'], mailbox: 'trash' }),
     ).resolves.toMatchObject({
@@ -624,7 +644,7 @@ describe('navigate', () => {
       id: 'a',
     });
     expect(port.openThread).toHaveBeenCalled();
-    expect(port.markRead).toHaveBeenCalledWith('a');
+    expect(port.setRead).toHaveBeenCalledWith(['a'], true);
   });
 
   it('opens a draft the vault holds, and refuses one it does not', async () => {
@@ -653,7 +673,7 @@ describe('navigate', () => {
     navigation.resolve();
     await expect(opened).resolves.toEqual({ error: expect.stringContaining('signed out') });
     await expect(composed).resolves.toEqual({ error: expect.stringContaining('signed out') });
-    expect(port.markRead).not.toHaveBeenCalled();
+    expect(port.setRead).not.toHaveBeenCalled();
   });
 
   it('names a conversation that is not cached', async () => {

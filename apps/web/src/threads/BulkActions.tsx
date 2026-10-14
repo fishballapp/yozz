@@ -15,7 +15,7 @@ import { Button } from '../ui/Button';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
 import { reportProblem } from '../ui/Toast';
 import { discardDrafts, discardTitle, draftIdsOf } from './discard-drafts';
-import { canMoveTo } from './reconcile';
+import { canMoveTo, type MoveTarget } from './reconcile';
 import type { ThreadState } from './thread';
 import { isOnServer } from './thread';
 import { useAdvancePast } from './use-advance';
@@ -31,16 +31,6 @@ type BulkAction = {
   readonly confirm?: { readonly title: string; readonly description: string };
 };
 
-/** Reports the first refusal of a batch once, however many of its threads refuse. */
-const reportOnce = (title: string) => {
-  let isReported = false;
-  return (reason: string) => {
-    if (isReported) return;
-    isReported = true;
-    reportProblem(title, reason);
-  };
-};
-
 /**
  * The row's own actions, over many threads: each acts on the ticked threads it can and is not
  * offered when none can. Read and star follow Gmail: while any ticked thread is unread the button
@@ -52,31 +42,21 @@ const useBulkActions = (
   openId: string | undefined,
   onDone: () => void,
 ): readonly { readonly key: string; readonly actions: readonly BulkAction[] }[] => {
-  const {
-    toggleArchive,
-    trashThread,
-    restoreThread,
-    markRead,
-    markUnread,
-    toggleStar,
-    removeDraft,
-  } = useMail();
+  const { moveThreads, flagThreads, removeDraft } = useMail();
   const advancePast = useAdvancePast();
   const navigate = useNavigate();
 
-  // Filing the open thread moves the reader on, past every other thread filed with it.
-  const file =
-    (
-      candidates: readonly ThreadState[],
-      move: (threadId: string, onRefused: (reason: string) => void) => boolean,
-      notFiled: string,
-    ) =>
-    () => {
-      const onRefused = reportOnce(notFiled);
-      const filed = new Set(candidates.filter(({ id }) => move(id, onRefused)).map(({ id }) => id));
-      if (openId !== undefined && filed.has(openId)) advancePast(openId, filed);
-      onDone();
-    };
+  // One write for the whole batch. Filing the open thread moves the reader on, past every other
+  // thread filed with it.
+  const file = (candidates: readonly ThreadState[], to: MoveTarget, notFiled: string) => () => {
+    const filed = moveThreads(
+      candidates.map(({ id }) => id),
+      to,
+      reason => reportProblem(notFiled, reason),
+    );
+    if (openId !== undefined && filed.has(openId)) advancePast(openId, filed);
+    onDone();
+  };
 
   if (mailbox === 'drafts') {
     const draftIds = draftIdsOf(threads);
@@ -104,8 +84,7 @@ const useBulkActions = (
 
   // A just-sent message or vault-held sent mail alone: no server holds a copy to change.
   const onServer = threads.filter(isOnServer);
-  const movable = (to: 'inbox' | 'archive' | 'trash') =>
-    onServer.filter(({ folders }) => canMoveTo(folders, to));
+  const movable = (to: MoveTarget) => onServer.filter(({ folders }) => canMoveTo(folders, to));
 
   if (mailbox === 'trash') {
     const restorable = movable('inbox');
@@ -117,24 +96,28 @@ const useBulkActions = (
           {
             icon: ArrowCounterClockwiseIcon,
             label: 'Restore',
-            act: file(restorable, restoreThread, 'Not every thread restored'),
+            act: file(restorable, 'inbox', 'Not every thread restored'),
           },
         ],
       },
     ];
   }
 
-  // In Archive the move goes back to the inbox, and says so: `toggleArchive` would archive a
-  // conversation that still has an inbox copy.
+  // In Archive the move goes back to the inbox, and says so.
   const isArchive = mailbox === 'archive';
   const archivable = movable(isArchive ? 'inbox' : 'archive');
   const trashable = movable('trash');
   const unread = onServer.filter(thread => thread.isUnread);
   const unstarred = onServer.filter(thread => !thread.isStarred);
-  const flag = (candidates: readonly ThreadState[], set: (threadId: string) => boolean) => () => {
-    for (const { id } of candidates) set(id);
-    onDone();
-  };
+  const flag =
+    (candidates: readonly ThreadState[], key: 'isUnread' | 'isStarred', value: boolean) => () => {
+      flagThreads(
+        candidates.map(({ id }) => id),
+        key,
+        value,
+      );
+      onDone();
+    };
 
   const moves: BulkAction[] = [
     ...(archivable.length > 0
@@ -143,8 +126,8 @@ const useBulkActions = (
             icon: ArchiveIcon,
             label: isArchive ? 'Move to inbox' : 'Archive',
             act: isArchive
-              ? file(archivable, restoreThread, 'Not every thread moved to inbox')
-              : file(archivable, toggleArchive, 'Not every thread archived'),
+              ? file(archivable, 'inbox', 'Not every thread moved to inbox')
+              : file(archivable, 'archive', 'Not every thread archived'),
           },
         ]
       : []),
@@ -153,7 +136,7 @@ const useBulkActions = (
           {
             icon: TrashIcon,
             label: 'Delete',
-            act: file(trashable, trashThread, 'Not every thread deleted'),
+            act: file(trashable, 'trash', 'Not every thread deleted'),
           },
         ]
       : []),
@@ -163,7 +146,11 @@ const useBulkActions = (
       ? []
       : [
           unread.length > 0
-            ? { icon: EnvelopeOpenIcon, label: 'Mark as read', act: flag(unread, markRead) }
+            ? {
+                icon: EnvelopeOpenIcon,
+                label: 'Mark as read',
+                act: flag(unread, 'isUnread', false),
+              }
             : {
                 icon: EnvelopeSimpleIcon,
                 label: 'Mark as unread',
@@ -176,12 +163,17 @@ const useBulkActions = (
                       search: previous => previous,
                     });
                   }
-                  flag(onServer, markUnread)();
+                  flag(onServer, 'isUnread', true)();
                 },
               },
           unstarred.length > 0
-            ? { icon: StarIcon, label: 'Star', act: flag(unstarred, toggleStar) }
-            : { icon: StarIcon, isFilled: true, label: 'Unstar', act: flag(onServer, toggleStar) },
+            ? { icon: StarIcon, label: 'Star', act: flag(unstarred, 'isStarred', true) }
+            : {
+                icon: StarIcon,
+                isFilled: true,
+                label: 'Unstar',
+                act: flag(onServer, 'isStarred', false),
+              },
         ];
   return [
     { key: 'moves', actions: moves },

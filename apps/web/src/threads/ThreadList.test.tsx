@@ -23,6 +23,10 @@ const mail = vi.hoisted(() => ({
   toggleArchive: vi.fn((_threadId: string) => true),
   trashThread: vi.fn(),
   restoreThread: vi.fn((_threadId: string) => true),
+  moveThreads: vi.fn((threadIds: readonly string[], _to: string) => new Set(threadIds)),
+  flagThreads: vi.fn(
+    (threadIds: readonly string[], _key: string, _value: boolean) => new Set(threadIds),
+  ),
   removeDraft: vi.fn(async (_draftId: string) => ({ outcome: 'deleted' as const })),
 }));
 
@@ -159,8 +163,8 @@ const FEW = MAILBOX.slice(0, 5);
 
 afterEach(async () => {
   route.splat = undefined;
-  mail.toggleArchive.mockClear();
-  mail.restoreThread.mockClear();
+  mail.moveThreads.mockClear();
+  mail.flagThreads.mockClear();
   route.navigate.mockClear();
   mail.removeDraft.mockClear();
   await act(async () => root.render(null));
@@ -238,7 +242,10 @@ describe('ThreadList', () => {
     await click(boxOf('Subject 0'));
     await click(boxOf('Subject 4'));
     await click(button('Archive'));
-    expect(mail.toggleArchive.mock.calls.map(([id]) => id)).toEqual(['thread-0', 'thread-4']);
+    // One write for the whole batch.
+    expect(mail.moveThreads.mock.calls.map(([ids, to]) => [ids, to])).toEqual([
+      [['thread-0', 'thread-4'], 'archive'],
+    ]);
     expect(tickedSubjects()).toEqual([]);
   });
 
@@ -247,8 +254,9 @@ describe('ThreadList', () => {
     await show(archived, '', 'archive');
     await click(boxOf('Subject 1'));
     await click(button('Move to inbox'));
-    expect(mail.restoreThread.mock.calls.map(([id]) => id)).toEqual(['thread-1']);
-    expect(mail.toggleArchive).not.toHaveBeenCalled();
+    expect(mail.moveThreads.mock.calls.map(([ids, to]) => [ids, to])).toEqual([
+      [['thread-1'], 'inbox'],
+    ]);
   });
 
   it('closes the open message when marking it unread with others, or it would be read again', async () => {
@@ -257,7 +265,7 @@ describe('ThreadList', () => {
     await click(boxOf('Subject 0'));
     await click(boxOf('Subject 1'));
     await click(button('Mark as unread'));
-    expect(mail.markUnread.mock.calls.map(([id]) => id)).toEqual(['thread-0', 'thread-1']);
+    expect(mail.flagThreads.mock.calls).toEqual([[['thread-0', 'thread-1'], 'isUnread', true]]);
     expect(route.navigate).toHaveBeenCalledWith(expect.objectContaining({ to: '/m/$mailbox' }));
   });
 

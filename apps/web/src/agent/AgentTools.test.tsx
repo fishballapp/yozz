@@ -16,11 +16,8 @@ vi.mock('../store/MailProvider', async importOriginal => ({
     threads: [],
     draft: null,
     loadBody: vi.fn(),
-    markRead: vi.fn(),
-    markUnread: vi.fn(),
-    toggleArchive: vi.fn(),
-    toggleStar: vi.fn(),
-    restoreThread: vi.fn(),
+    moveThreads: vi.fn(),
+    flagThreads: vi.fn(),
   }),
 }));
 

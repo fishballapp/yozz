@@ -35,7 +35,7 @@ const fakeClient = {
 const run = <T>(task: LiveTask<T>): Promise<Result<T, MailConnectionFailure>> =>
   task.run(fakeClient);
 
-const { syncAccount, loadOlder, prefetchBodies, moveThread, setFlag } = await import('./sync');
+const { syncAccount, loadOlder, prefetchBodies, moveMessages, setFlag } = await import('./sync');
 
 const SENT = { name: 'Sent', delimiter: '/', attributes: ['\\Sent'] };
 const ARCHIVE = { name: 'Archive', delimiter: '/', attributes: ['\\Archive'] };
@@ -483,7 +483,7 @@ describe('prefetchBodies', () => {
   });
 });
 
-describe('moveThread', () => {
+describe('moveMessages', () => {
   /** Moved, with no COPYUID to say where to. */
   const unplaced = (folder: Folder, uids: readonly number[]) =>
     uids.map(uid => ({ from: { folder, uidValidity: 1, uid }, to: null }));
@@ -503,7 +503,7 @@ describe('moveThread', () => {
         target: [[500, 501]],
       },
     });
-    const res = await moveThread(
+    const res = await moveMessages(
       run,
       [{ folder: 'inbox', mailbox: 'INBOX', uidValidity: 1, uids: [10, 11, 12] }],
       'archive',
@@ -524,18 +524,47 @@ describe('moveThread', () => {
     });
   });
 
+  it('moves one source as one ranged set, split only past the line budget', async () => {
+    list.mockResolvedValue({ ok: true, value: [...INBOX_ONLY, ARCHIVE] });
+    ensureSelected.mockResolvedValue({ ok: true, value: { uidValidity: 1 } });
+    // Every other uid, so no two make a range: 1,500 of them run past one set's 4096 characters.
+    const uids = Array.from({ length: 1500 }, (_, index) => 100_000 + index * 2);
+    // Each set lands at its first uid plus 1,000,000, in order.
+    move.mockImplementation(async (set: string) => {
+      const source = set.split(',').map(uid => [Number(uid), Number(uid)] as const);
+      const first = (source[0]?.[0] ?? 0) + 1_000_000;
+      return {
+        ok: true,
+        value: { uidValidity: 40, source, target: [[first, first + source.length - 1]] },
+      };
+    });
+    const res = await moveMessages(
+      run,
+      [{ folder: 'inbox', mailbox: 'INBOX', uidValidity: 1, uids }],
+      'archive',
+    );
+    const sets = move.mock.calls.map(([set]) => String(set).split(',').map(Number));
+    expect(sets.length).toBeGreaterThan(1);
+    expect(sets.flat()).toEqual(uids);
+    // Each uid's destination is read from the answer to its own set.
+    const secondSetStart = sets[1]?.[0] ?? 0;
+    expect(
+      res.ok ? res.value.find(copy => copy.from.uid === secondSetStart)?.to : undefined,
+    ).toEqual({ folder: 'archive', uidValidity: 40, uid: secondSetStart + 1_000_000 });
+  });
+
   it('archives into the LIST \\Archive mailbox without CREATE', async () => {
     list.mockResolvedValue({ ok: true, value: [...INBOX_ONLY, ARCHIVE] });
     ensureSelected.mockResolvedValue({ ok: true, value: { uidValidity: 1 } });
     move.mockResolvedValue({ ok: true, value: null });
-    const res = await moveThread(
+    const res = await moveMessages(
       run,
       [{ folder: 'inbox', mailbox: 'INBOX', uidValidity: 1, uids: [10, 11] }],
       'archive',
     );
     expect(res).toEqual({ ok: true, value: unplaced('inbox', [10, 11]) });
     expect(ensureSelected).toHaveBeenCalledWith('INBOX');
-    expect(move).toHaveBeenCalledWith('10,11', 'Archive');
+    expect(move).toHaveBeenCalledWith('10:11', 'Archive');
     expect(create).not.toHaveBeenCalled();
   });
 
@@ -544,7 +573,7 @@ describe('moveThread', () => {
     ensureSelected.mockResolvedValue({ ok: true, value: { uidValidity: 1 } });
     create.mockResolvedValue({ ok: true, value: undefined });
     move.mockResolvedValueOnce({ ok: true, value: null });
-    const archived = await moveThread(
+    const archived = await moveMessages(
       run,
       [{ folder: 'inbox', mailbox: 'INBOX', uidValidity: 1, uids: [3] }],
       'archive',
@@ -554,7 +583,7 @@ describe('moveThread', () => {
     expect(move).toHaveBeenCalledWith('3', 'Archive');
 
     move.mockResolvedValueOnce({ ok: true, value: null });
-    const unarchived = await moveThread(
+    const unarchived = await moveMessages(
       run,
       [{ folder: 'archive', mailbox: 'Archive', uidValidity: 1, uids: [3] }],
       'inbox',
@@ -564,7 +593,7 @@ describe('moveThread', () => {
     expect(create).toHaveBeenCalledTimes(1);
 
     move.mockResolvedValueOnce({ ok: false, reason: { kind: 'no', text: 'denied' } });
-    const refused = await moveThread(
+    const refused = await moveMessages(
       run,
       [{ folder: 'inbox', mailbox: 'INBOX', uidValidity: 1, uids: [4] }],
       'archive',
@@ -579,7 +608,7 @@ describe('moveThread', () => {
     list.mockResolvedValue({ ok: true, value: [...INBOX_ONLY, TRASH] });
     ensureSelected.mockResolvedValue({ ok: true, value: { uidValidity: 1 } });
     move.mockResolvedValue({ ok: true, value: null });
-    const res = await moveThread(
+    const res = await moveMessages(
       run,
       [
         { folder: 'inbox', mailbox: 'INBOX', uidValidity: 1, uids: [1, 2] },
@@ -592,7 +621,7 @@ describe('moveThread', () => {
       value: [...unplaced('inbox', [1, 2]), ...unplaced('sent', [7])],
     });
     expect(move.mock.calls).toEqual([
-      ['1,2', 'Deleted Items'],
+      ['1:2', 'Deleted Items'],
       ['7', 'Deleted Items'],
     ]);
     expect(create).not.toHaveBeenCalled();
@@ -602,7 +631,7 @@ describe('moveThread', () => {
     // After a UIDVALIDITY change the same uid names different mail.
     list.mockResolvedValue({ ok: true, value: [...INBOX_ONLY, TRASH] });
     ensureSelected.mockResolvedValue({ ok: true, value: { uidValidity: 9 } });
-    const res = await moveThread(
+    const res = await moveMessages(
       run,
       [{ folder: 'inbox', mailbox: 'INBOX', uidValidity: 1, uids: [1] }],
       'trash',
@@ -616,7 +645,7 @@ describe('moveThread', () => {
     ensureSelected.mockResolvedValue({ ok: true, value: { uidValidity: 1 } });
     create.mockResolvedValue({ ok: true, value: undefined });
     move.mockResolvedValue({ ok: true, value: null });
-    const res = await moveThread(
+    const res = await moveMessages(
       run,
       [{ folder: 'inbox', mailbox: 'INBOX', uidValidity: 1, uids: [8] }],
       'trash',

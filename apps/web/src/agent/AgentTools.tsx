@@ -4,7 +4,6 @@ import { flushSync } from 'react-dom';
 import { isInbound } from '../addresses/record';
 import { withCompose } from '../compose/intent';
 import { useMail } from '../store/MailProvider';
-import { isArchived, isTrashed } from '../threads/thread';
 import { type AgentPort, buildAgentTools } from './tools';
 
 /**
@@ -30,28 +29,11 @@ export const AgentTools = () => {
     drafts: mail.drafts,
     loadBody: mail.loadBody,
     // Flushed, so a tool's result describes the state after the write.
-    markRead: threadId => flushSync(() => mail.markRead(threadId)),
-    markUnread: threadId => flushSync(() => mail.markUnread(threadId)),
-    archive: threadId => {
-      const thread = mail.threads.find(candidate => candidate.id === threadId);
-      if (thread === undefined || isArchived(thread)) return true;
-      return flushSync(() => mail.toggleArchive(threadId));
-    },
-    setStar: (threadId, isStarred) => {
-      const thread = mail.threads.find(candidate => candidate.id === threadId);
-      if (thread === undefined || thread.isStarred === isStarred) return true;
-      return flushSync(() => mail.toggleStar(threadId));
-    },
-    trash: threadId => {
-      const thread = mail.threads.find(candidate => candidate.id === threadId);
-      if (thread === undefined || isTrashed(thread)) return true;
-      return flushSync(() => mail.trashThread(threadId));
-    },
-    restore: threadId => {
-      const thread = mail.threads.find(candidate => candidate.id === threadId);
-      if (thread === undefined || !(isArchived(thread) || isTrashed(thread))) return true;
-      return flushSync(() => mail.restoreThread(threadId));
-    },
+    setRead: (threadIds, isRead) =>
+      flushSync(() => mail.flagThreads(threadIds, 'isUnread', !isRead)),
+    setStar: (threadIds, isStarred) =>
+      flushSync(() => mail.flagThreads(threadIds, 'isStarred', isStarred)),
+    move: (threadIds, to) => flushSync(() => mail.moveThreads(threadIds, to)),
     writeDraft: input => mailRef.current.writeDraft(input),
     removeDraft: draftId => mailRef.current.removeDraft(draftId),
     openThread: async thread => {

@@ -28,3 +28,4 @@ export type {
 } from './tokenizer.ts';
 export { DEFAULT_MAX_LITERAL_BYTES } from './tokenizer.ts';
 export type { ByteDuplex } from './transport.ts';
+export { MAX_UID_SET_LENGTH, uidSets } from './uid-set.ts';
