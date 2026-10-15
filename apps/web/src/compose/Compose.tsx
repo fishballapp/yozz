@@ -13,6 +13,7 @@ import { useNavigate, useSearch } from '@tanstack/react-router';
 import { useEffect, useRef, useState } from 'react';
 import { describeMailFailure } from '../relay/describe-failure';
 import { useComposer, useMail } from '../store/MailProvider';
+import { displayName } from '../threads/attachment-preview';
 import { ATTACHMENT_LABEL, formatBytes } from '../threads/attachments';
 import { Button } from '../ui/Button';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
@@ -381,13 +382,15 @@ export const Compose = () => {
                         className="flex items-center gap-2 bg-ink px-2 py-1 font-mono text-2xs text-paper-dim"
                       >
                         <span className="text-paper-faint">{ATTACHMENT_LABEL[file.kind]}</span>
-                        <span className="max-w-56 truncate text-paper">{file.name}</span>
+                        <span dir="auto" className="max-w-56 truncate text-paper">
+                          {displayName(file.name)}
+                        </span>
                         <span className="text-paper-faint">{formatBytes(file.size)}</span>
                         <button
                           type="button"
                           onClick={() => detach(file.name)}
                           className="-m-1 flex size-6 items-center justify-center -outline-offset-2 text-paper-faint hover:text-paper"
-                          aria-label={`Remove ${file.name}`}
+                          aria-label={`Remove ${displayName(file.name)}`}
                         >
                           <XIcon size={11} />
                         </button>

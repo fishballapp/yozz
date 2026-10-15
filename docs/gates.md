@@ -89,7 +89,14 @@ pnpm -F @yozz.app/web html:security     # Chromium + Firefox + WebKit: loads the
                                     #   URL-bearing CSS removal, outward-link isolation and
                                     #   referrer-free image opt-in; direct DOM probes prove the
                                     #   child CSP independently blocks unlisted images and scripts;
-                                    #   build first, because it also rejects inline scripts in dist.
+                                    #   then the attachment policy and chips against hostile files
+                                    #   (HTML as an image and a PDF, a PDF polyglot, SVG with script,
+                                    #   markup as text, a U+202E name), image + PDF URL revocation,
+                                    #   and which blob types stay inert, in full Chromium and Firefox
+                                    #   with pdf.js on so each engine's PDF viewer is in play.
+                                    #   Six ✓ lines. Build first: it also rejects inline scripts in dist.
+                                    #   Linux WebKit alone has no PDF viewer: there PDFs must SAVE,
+                                    #   leaving no document, and its line says "PDFs saved".
 ```
 
 This gate runs in `ci.yml` on every push. It needs

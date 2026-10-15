@@ -4,6 +4,11 @@
  */
 
 import { MailAutoconfigSchema } from '@yozz.app/vault-contract';
+import beachDog from '../../fixtures/attachments/beach-dog-01.jpg?inline';
+import beachDogStick from '../../fixtures/attachments/beach-dog-stick.jpg?inline';
+import buildLog from '../../fixtures/attachments/build-4471-step14.log?raw';
+import receipt from '../../fixtures/attachments/receipt-AC-9382.pdf?inline';
+import runnerMetrics from '../../fixtures/attachments/runner-metrics.png?inline';
 import type { AutoconfigLookup } from '../addresses/autoconfig';
 import type { AddressRecord } from '../addresses/record';
 
@@ -15,7 +20,19 @@ const ago = (ms: number) => NOW - ms;
 
 const DEMO_PASSWORD = 'demo-app-password';
 
-import type { Thread } from '../threads/thread';
+import type { Attachment, Thread } from '../threads/thread';
+
+/** Vite inlines a binary sample file as a data URL. */
+const bytesOf = (dataUrl: string) =>
+  Uint8Array.from(atob(dataUrl.slice(dataUrl.indexOf(',') + 1)), char => char.charCodeAt(0));
+
+/** A received attachment, carrying its bytes as a fetched body does. */
+const sample = (
+  name: string,
+  mimeType: string,
+  kind: Attachment['kind'],
+  content: Uint8Array<ArrayBuffer>,
+): Attachment => ({ name, size: content.byteLength, kind, mimeType, content });
 
 /** Fixture addresses for demo mode. */
 export const DEMO_ADDRESSES: readonly AddressRecord[] = [
@@ -112,8 +129,13 @@ const AUTHORED: readonly Thread[] = [
           'Logs attached. Happy to take it if you are heads-down.',
         ],
         attachments: [
-          { name: 'build-4471-step14.log', size: 184_320, kind: 'other' },
-          { name: 'runner-metrics.png', size: 96_144, kind: 'image' },
+          sample(
+            'build-4471-step14.log',
+            'text/plain',
+            'other',
+            new TextEncoder().encode(buildLog),
+          ),
+          sample('runner-metrics.png', 'image/png', 'image', bytesOf(runnerMetrics)),
         ],
       },
     ],
@@ -139,7 +161,7 @@ const AUTHORED: readonly Thread[] = [
           'Amount charged: $29.00 to the card ending 4242. Invoice AC-9382, dated today.',
           'Questions about this charge? Just reply to this email.',
         ],
-        attachments: [{ name: 'receipt-AC-9382.pdf', size: 42_118, kind: 'pdf' }],
+        attachments: [sample('receipt-AC-9382.pdf', 'application/pdf', 'pdf', bytesOf(receipt))],
       },
     ],
   },
@@ -423,8 +445,15 @@ const AUTHORED: readonly Thread[] = [
           'Your mother wants the one with the stick printed for the hallway.',
         ],
         attachments: [
-          { name: 'beach-dog-01.jpg', size: 2_411_724, kind: 'image' },
-          { name: 'beach-dog-stick.jpg', size: 3_002_112, kind: 'image' },
+          sample('beach-dog-01.jpg', 'image/jpeg', 'image', bytesOf(beachDog)),
+          // As many phone clients send every attachment: a generic label, so the kind is `other`
+          // and the extension and the bytes are what make it an image.
+          sample(
+            'beach-dog-stick.jpg',
+            'application/octet-stream',
+            'other',
+            bytesOf(beachDogStick),
+          ),
           { name: 'weekend-originals.zip', size: 48_234_496, kind: 'archive' },
         ],
       },

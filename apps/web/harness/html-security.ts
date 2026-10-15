@@ -1,6 +1,7 @@
 /**
- * Adversarial browser gate for received HTML. Unit tests pin sanitizer output; this proves the
- * browser enforces the composed sanitizer, srcdoc CSP and opaque iframe sandbox across all three
+ * Adversarial browser gate for received HTML and attachments. Unit tests pin sanitizer output and
+ * the preview policy; this proves the browser enforces the composed sanitizer, srcdoc CSP and
+ * opaque iframe sandbox, and that no attachment becomes a document with script, across all three
  * engine families.
  */
 import { readFile } from 'node:fs/promises';
@@ -14,6 +15,7 @@ import {
   webkit,
 } from '@playwright/test';
 import { createServer } from 'vite';
+import { runAttachmentChecks } from './attachment-security.ts';
 
 type HtmlModule = typeof import('../src/threads/html');
 type MountResult = {
@@ -342,7 +344,8 @@ for (const header of [
 const server = await createServer({
   root: ROOT,
   logLevel: 'error',
-  server: { host: '127.0.0.1', port: 0 },
+  // No HMR, so plugin-react adds no Fast Refresh preamble: an inline script the host CSP refuses.
+  server: { host: '127.0.0.1', port: 0, hmr: false },
 });
 await server.listen();
 const origin = server.resolvedUrls?.local[0]?.replace(/\/$/, '');
@@ -354,6 +357,22 @@ try {
     ['WebKit', webkit],
   ] as const)
     await runEngine(label, browserType, origin, harnessCsp);
+  // Attachments need each engine as a person runs it, PDF viewer included: Playwright's default
+  // Chromium is the headless shell, which has none, and its Firefox ships with pdf.js switched off.
+  // The mail-frame checks above stay on the shell: full Chromium isolates a sandboxed srcdoc frame
+  // in a process of its own, where Playwright's routing no longer sees the opt-in image request.
+  for (const [label, browserType, launchOptions] of [
+    ['Chromium', chromium, { channel: 'chromium' }],
+    ['Firefox', firefox, { firefoxUserPrefs: { 'pdfjs.disabled': false } }],
+    ['WebKit', webkit, {}],
+  ] as const) {
+    const browser = await browserType.launch({ headless: true, ...launchOptions });
+    try {
+      await runAttachmentChecks(label, browser, origin, harnessCsp);
+    } finally {
+      await browser.close();
+    }
+  }
 } finally {
   await server.close();
 }

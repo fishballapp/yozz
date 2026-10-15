@@ -1,0 +1,62 @@
+2026-10-15T09:14:01.768Z ##[group]Run pnpm -F @acme/web build
+2026-10-15T09:14:01.189Z pnpm -F @acme/web build
+2026-10-15T09:14:04.969Z shell: /usr/bin/bash -e {0}
+2026-10-15T09:14:04.626Z env:
+2026-10-15T09:14:06.848Z   NODE_OPTIONS: --max-old-space-size=6144
+2026-10-15T09:14:08.250Z   CI: true
+2026-10-15T09:14:09.186Z ##[endgroup]
+2026-10-15T09:14:12.388Z 
+2026-10-15T09:14:14.410Z > @acme/web@4.18.0 build /__w/acme/acme/apps/web
+2026-10-15T09:14:14.106Z > vite build --mode production
+2026-10-15T09:14:15.135Z 
+2026-10-15T09:14:15.675Z vite v7.3.1 building for production...
+2026-10-15T09:14:15.460Z transforming...
+2026-10-15T09:14:18.841Z ✓ 512 modules transformed. heap 1.28 GB
+2026-10-15T09:14:18.996Z ✓ 1024 modules transformed. heap 1.46 GB
+2026-10-15T09:14:18.288Z ✓ 2048 modules transformed. heap 1.83 GB
+2026-10-15T09:14:19.496Z ✓ 3072 modules transformed. heap 2.19 GB
+2026-10-15T09:14:19.440Z ✓ 4096 modules transformed. heap 2.56 GB
+2026-10-15T09:14:19.909Z ✓ 5120 modules transformed. heap 2.92 GB
+2026-10-15T09:14:20.453Z ✓ 6144 modules transformed. heap 3.29 GB
+2026-10-15T09:14:23.336Z ✓ 7168 modules transformed. heap 3.65 GB
+2026-10-15T09:14:24.705Z ✓ 8192 modules transformed. heap 4.02 GB
+2026-10-15T09:14:26.287Z ✓ 9216 modules transformed. heap 4.38 GB
+2026-10-15T09:14:29.123Z ✓ 10240 modules transformed. heap 4.75 GB
+2026-10-15T09:14:30.498Z ✓ 11264 modules transformed. heap 5.11 GB
+2026-10-15T09:14:30.670Z ✓ 12288 modules transformed. heap 5.48 GB
+2026-10-15T09:14:32.735Z ✓ 12907 modules transformed. heap 5.7 GB
+2026-10-15T09:14:33.804Z rendering chunks...
+2026-10-15T09:14:34.226Z   computing gzip size for vendor-react... 142.31 kB
+2026-10-15T09:14:35.819Z   computing gzip size for vendor-charts... 611.08 kB
+2026-10-15T09:14:35.501Z   computing gzip size for editor... 1288.4 kB
+2026-10-15T09:14:37.982Z   computing gzip size for dashboard... 402.77 kB
+2026-10-15T09:14:40.511Z   computing gzip size for settings... 96.12 kB
+2026-10-15T09:14:42.570Z   computing gzip size for billing... 188.5 kB
+2026-10-15T09:14:43.698Z [warn] (!) Some chunks are larger than 500 kB after minification. Consider:
+2026-10-15T09:14:43.548Z [warn] - Using dynamic import() to code-split the application
+2026-10-15T09:14:44.900Z [warn] - Use build.rollupOptions.output.manualChunks to improve chunking
+2026-10-15T09:14:46.216Z generating sourcemaps for 214 chunks...
+2026-10-15T09:14:48.736Z   sourcemaps 25/214 · rss 5.86 GB
+2026-10-15T09:14:49.863Z   sourcemaps 50/214 · rss 6.02 GB
+2026-10-15T09:14:51.588Z   sourcemaps 75/214 · rss 6.18 GB
+2026-10-15T09:14:52.110Z   sourcemaps 100/214 · rss 6.34 GB
+2026-10-15T09:14:52.330Z   sourcemaps 125/214 · rss 6.5 GB
+2026-10-15T09:14:54.907Z   sourcemaps 150/214 · rss 6.66 GB
+2026-10-15T09:14:55.980Z   sourcemaps 175/214 · rss 6.82 GB
+2026-10-15T09:14:55.326Z   sourcemaps 200/214 · rss 6.98 GB
+2026-10-15T09:14:58.163Z 
+2026-10-15T09:14:58.157Z <--- Last few GCs --->
+2026-10-15T09:14:59.124Z 
+2026-10-15T09:14:59.564Z [2081:0x6a3c000]   187412 ms: Mark-Compact 6011.4 (6142.8) -> 5987.2 (6139.1) MB, 2213.07 / 0.00 ms  (average mu = 0.112, current mu = 0.041) allocation failure; scavenge might not succeed
+2026-10-15T09:14:59.295Z [2081:0x6a3c000]   190288 ms: Mark-Compact 6103.9 (6151.0) -> 6098.6 (6160.3) MB, 2701.55 / 0.00 ms  (average mu = 0.071, current mu = 0.039) allocation failure; scavenge might not succeed
+2026-10-15T09:14:59.352Z 
+2026-10-15T09:15:00.616Z ##[error]Process completed with exit code 137.
+2026-10-15T09:15:02.370Z ##[warning]The runner has received a shutdown signal. This can happen when the runner service is stopped, or a manually started runner is canceled.
+2026-10-15T09:15:03.429Z ##[group]Runner resource usage
+2026-10-15T09:15:03.117Z   runner:        ubuntu-latest (4 vCPU, 7 GB)
+2026-10-15T09:15:04.680Z   peak memory:   6.98 GB / 7.00 GB
+2026-10-15T09:15:06.426Z   oom_kill:      1 (pid 2081, node)
+2026-10-15T09:15:07.428Z   step duration: 3m 14s
+2026-10-15T09:15:08.205Z ##[endgroup]
+2026-10-15T09:15:08.985Z Cleaning up orphan processes
+2026-10-15T09:15:08.595Z Terminate orphan process: pid (2093) (esbuild)

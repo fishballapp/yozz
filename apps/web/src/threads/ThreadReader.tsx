@@ -8,7 +8,6 @@ import {
   ArrowUUpRightIcon,
   CaretDownIcon,
   CodeIcon,
-  DownloadSimpleIcon,
   EnvelopeSimpleIcon,
   type Icon,
   NotePencilIcon,
@@ -26,13 +25,12 @@ import { useChromePref } from '../ui/chrome';
 import { IconSwitch } from '../ui/IconSwitch';
 import { reportProblem } from '../ui/Toast';
 import { fullTime } from '../ui/time';
-import { ATTACHMENT_LABEL, formatBytes } from './attachments';
+import { AttachmentList } from './AttachmentList';
 import { HtmlBody } from './HtmlBody';
 import { linkify } from './linkify';
 import { canMoveTo } from './reconcile';
 import type { ThreadState } from './thread';
 import {
-  type Attachment,
   addresseesOf,
   inboxesOf,
   isArchived,
@@ -254,41 +252,6 @@ const MessageActions = ({ message, canReplyAll }: { message: Message; canReplyAl
       </Link>
     </div>
   );
-
-/** Saves the bytes as the sender's filename; the URL is revoked once the click has been handed off. */
-const download = (file: Attachment) => {
-  if (file.content === undefined) return;
-  const url = URL.createObjectURL(new Blob([file.content]));
-  const anchor = document.createElement('a');
-  anchor.href = url;
-  anchor.download = file.name;
-  anchor.click();
-  setTimeout(() => URL.revokeObjectURL(url), 0);
-};
-
-/** `dir="auto"` isolates the bidi run, so a U+202E in `invoice\u202Efdp.exe` cannot reorder the extension. */
-const AttachmentList = ({ attachments }: { attachments: Attachment[] }) => (
-  <ul className="mt-4 flex flex-wrap gap-2">
-    {attachments.map(file => (
-      <li key={file.name}>
-        <button
-          type="button"
-          onClick={() => download(file)}
-          disabled={file.content === undefined}
-          className="flex items-center gap-2.5 border border-rule bg-ink px-2.5 py-1.5 text-left font-mono text-2xs transition-colors hover:border-paper-faint disabled:cursor-default disabled:hover:border-rule"
-          aria-label={`Download ${file.name}, ${formatBytes(file.size)}`}
-        >
-          <span className="text-paper-faint">{ATTACHMENT_LABEL[file.kind]}</span>
-          <span dir="auto" className="max-w-64 truncate text-paper">
-            {file.name}
-          </span>
-          <span className="text-paper-faint">{formatBytes(file.size)}</span>
-          <DownloadSimpleIcon size={12} className="text-paper-faint" />
-        </button>
-      </li>
-    ))}
-  </ul>
-);
 
 /** `html` is the sender's document; `text` is the sender's own `text/plain` part. Nothing is derived. */
 type ReadingMode = 'html' | 'text';

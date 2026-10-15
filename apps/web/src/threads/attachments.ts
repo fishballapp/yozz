@@ -1,4 +1,5 @@
-import type { Attachment } from '../threads/thread';
+import type { Preview } from './attachment-preview';
+import type { Attachment } from './thread';
 
 /** Short, unpadded, never more than one decimal. */
 export const formatBytes = (bytes: number) => {
@@ -30,3 +31,12 @@ export const ATTACHMENT_LABEL: Record<Attachment['kind'], string> = {
   sheet: 'XLS',
   other: 'FILE',
 };
+
+const PREVIEW_LABEL: Record<Preview['kind'], string> = { image: 'IMG', pdf: 'PDF', text: 'TXT' };
+
+/**
+ * The chip's tag. A preview names what a click will open, which the bytes decided; without one the
+ * tag is the label's kind. A photo sent as `application/octet-stream` reads `IMG`, not `FILE`.
+ */
+export const attachmentTag = (kind: Attachment['kind'], preview: Preview | null) =>
+  preview === null ? ATTACHMENT_LABEL[kind] : PREVIEW_LABEL[preview.kind];
