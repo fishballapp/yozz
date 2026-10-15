@@ -112,19 +112,18 @@ const submitStep = async (page: HTMLElement) => {
   await act(async () => form.requestSubmit());
 };
 
-/** Name (blank), then the address through its lookup, to the servers step. */
+/** The address (with no name) through its lookup, to the servers step. */
 const toServers = async (page: HTMLElement, addressValue = 'alice@example.com') => {
-  await submitStep(page);
   await act(async () => type(page, 'connect-address', addressValue));
   await submitStep(page);
-  await vi.waitFor(() => expect(page.textContent).toContain('Step 3 of 4'));
+  await vi.waitFor(() => expect(page.textContent).toContain('Step 2 of 3'));
 };
 
 /** The whole flow to the password step, with the password typed. */
 const toPassword = async (page: HTMLElement) => {
   await toServers(page);
   await submitStep(page);
-  await vi.waitFor(() => expect(page.textContent).toContain('Step 4 of 4'));
+  await vi.waitFor(() => expect(page.textContent).toContain('Step 3 of 3'));
   await act(async () => type(page, 'connect-password', 'pw'));
 };
 
@@ -147,7 +146,7 @@ afterEach(async () => {
 });
 
 describe('AddAddress', () => {
-  it('walks the four steps and stores a tested address under its name', async () => {
+  it('walks the three steps and stores a tested address under its name', async () => {
     const page = await mount();
     await act(async () => type(page, 'connect-name', 'Jason Yu'));
     await submitAll(page);
@@ -182,7 +181,7 @@ describe('AddAddress', () => {
     expect(page.querySelector('#connect-username')).toBeNull();
     await act(async () => type(page, 'connect-imap-host', 'imap.elsewhere.test'));
     await submitStep(page);
-    await vi.waitFor(() => expect(page.textContent).toContain('Step 4 of 4'));
+    await vi.waitFor(() => expect(page.textContent).toContain('Step 3 of 3'));
     await act(async () => type(page, 'connect-password', 'pw'));
     await submitStep(page);
     await vi.waitFor(() => expect(mocks.putAddress).toHaveBeenCalled());
@@ -195,7 +194,7 @@ describe('AddAddress', () => {
     expect(page.querySelector('#connect-username')).toBeNull();
     expect(page.textContent).not.toContain('Username');
     await submitStep(page);
-    await vi.waitFor(() => expect(page.textContent).toContain('Step 4 of 4'));
+    await vi.waitFor(() => expect(page.textContent).toContain('Step 3 of 3'));
     expect(page.querySelector<HTMLInputElement>('#connect-username')?.value).toBe(
       'alice@example.com',
     );
@@ -224,9 +223,9 @@ describe('AddAddress', () => {
     );
     await act(async () => type(page, 'connect-address', 'bob@example.com'));
     await submitStep(page);
-    await vi.waitFor(() => expect(page.textContent).toContain('Step 3 of 4'));
+    await vi.waitFor(() => expect(page.textContent).toContain('Step 2 of 3'));
     await submitStep(page);
-    await vi.waitFor(() => expect(page.textContent).toContain('Step 4 of 4'));
+    await vi.waitFor(() => expect(page.textContent).toContain('Step 3 of 3'));
     expect(page.querySelector<HTMLInputElement>('#connect-username')?.value).toBe(
       'bob@example.com',
     );
@@ -256,7 +255,7 @@ describe('AddAddress', () => {
     expect(mocks.putAddress.mock.calls[0]?.[0].imap).toBeUndefined();
   });
 
-  it('says a duplicate under the address on step 2', async () => {
+  it('says a duplicate under the address on step 1', async () => {
     mocks.identities = [
       {
         address: 'alice@example.com',
@@ -264,27 +263,27 @@ describe('AddAddress', () => {
       },
     ];
     const page = await mount();
-    await submitStep(page);
     await act(async () => type(page, 'connect-address', 'alice@example.com'));
     await submitStep(page);
     expect(page.querySelector('[role="alert"]')?.textContent).toBe(
       'That address is already stored. Open it from Settings.',
     );
-    expect(page.textContent).toContain('Step 2 of 4');
+    expect(page.textContent).toContain('Step 1 of 3');
   });
 
   it('reopens an earlier step from Change and keeps the answers after it', async () => {
     const page = await mount();
     await act(async () => type(page, 'connect-name', 'Jason Yu'));
     await toPassword(page);
+    expect(page.textContent).toContain('Jason Yu');
     expect(page.textContent).toContain('imap.example.com:993');
     await act(async () => buttonNamed(page, 'Change').click());
-    expect(page.textContent).toContain('Step 1 of 4');
+    expect(page.textContent).toContain('Step 1 of 3');
     expect(page.querySelector<HTMLInputElement>('#connect-name')?.value).toBe('Jason Yu');
     expect(page.textContent).toContain('imap.example.com:993');
   });
 
-  it('keeps a refused login under the password, on step 4', async () => {
+  it('keeps a refused login under the password, on step 3', async () => {
     mocks.imapFailure = { kind: 'auth', text: 'Invalid credentials' };
     const page = await mount();
     await submitAll(page);
@@ -293,7 +292,7 @@ describe('AddAddress', () => {
         'imap.example.com rejected the username or password',
       ),
     );
-    expect(page.textContent).toContain('Step 4 of 4');
+    expect(page.textContent).toContain('Step 3 of 3');
     expect(mocks.putAddress).not.toHaveBeenCalled();
   });
 
@@ -306,30 +305,28 @@ describe('AddAddress', () => {
         'Could not reach the relay: connection refused',
       ),
     );
-    expect(page.textContent).toContain('Step 4 of 4');
+    expect(page.textContent).toContain('Step 3 of 3');
     expect(page.textContent).toContain('imap.example.com:993');
   });
 
   it('makes the address read-only while its lookup runs', async () => {
     mocks.lookupGate = Promise.withResolvers();
     const page = await mount();
-    await submitStep(page);
     await act(async () => type(page, 'connect-address', 'alice@example.com'));
     await submitStep(page);
     expect(page.querySelector<HTMLInputElement>('#connect-address')?.readOnly).toBe(true);
     await act(async () => mocks.lookupGate?.resolve());
-    await vi.waitFor(() => expect(page.textContent).toContain('Step 3 of 4'));
+    await vi.waitFor(() => expect(page.textContent).toContain('Step 2 of 3'));
   });
 
   it('stores the address that was looked up, not one typed while the lookup waited', async () => {
     mocks.lookupGate = Promise.withResolvers();
     const page = await mount();
-    await submitStep(page);
     await act(async () => type(page, 'connect-address', 'alice@example.com'));
     await submitStep(page);
     await act(async () => type(page, 'connect-address', 'bob@example.com'));
     await act(async () => mocks.lookupGate?.resolve());
-    await vi.waitFor(() => expect(page.textContent).toContain('Step 3 of 4'));
+    await vi.waitFor(() => expect(page.textContent).toContain('Step 2 of 3'));
     await submitStep(page);
     await act(async () => type(page, 'connect-password', 'pw'));
     await submitStep(page);
@@ -343,7 +340,7 @@ describe('AddAddress', () => {
     await toPassword(page);
     await submitStep(page);
     const changes = [...page.querySelectorAll('button')].filter(b => b.textContent === 'Change');
-    expect(changes).toHaveLength(3);
+    expect(changes).toHaveLength(2);
     for (const change of changes) expect(change.matches(':disabled')).toBe(true);
     expect(page.querySelector<HTMLInputElement>('#connect-username')?.matches(':disabled')).toBe(
       true,
@@ -381,9 +378,8 @@ describe('AddAddress', () => {
     expect(mocks.navigate).not.toHaveBeenCalled();
   });
 
-  it('moves focus to the address when Continue opens it', async () => {
-    const page = await mount();
-    await submitStep(page);
+  it('puts focus on the address when the page opens', async () => {
+    await mount();
     expect(document.activeElement?.id).toBe('connect-address');
   });
 

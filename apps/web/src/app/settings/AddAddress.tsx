@@ -27,9 +27,9 @@ import { SettingsPane } from './SettingsPane';
  * record is written.
  */
 
-type StepId = 'name' | 'address' | 'servers' | 'signin';
+type StepId = 'address' | 'servers' | 'signin';
 
-const STEP_NUMBER: Record<StepId, number> = { name: 1, address: 2, servers: 3, signin: 4 };
+const STEP_NUMBER: Record<StepId, number> = { address: 1, servers: 2, signin: 3 };
 
 type Lookup =
   | { readonly state: 'idle' }
@@ -86,7 +86,7 @@ export const AddAddress = () => {
   const navigate = useNavigate();
   const { identities, putAddress, watchSession, isDemo: demo } = useMail();
 
-  const [open, setOpen] = useState<StepId>('name');
+  const [open, setOpen] = useState<StepId>('address');
   const [done, setDone] = useState<ReadonlySet<StepId>>(() => new Set());
   const [senderName, setSenderName] = useState('');
   const [address, setAddress] = useState('');
@@ -165,12 +165,6 @@ export const AddAddress = () => {
       setUsername(usernameFor(forAddress, result.config.username));
     }
     return true;
-  };
-
-  const continueFromName = (event: FormEvent) => {
-    event.preventDefault();
-    mark('name', true);
-    setOpen('address');
   };
 
   const continueFromAddress = (event: FormEvent) => {
@@ -342,6 +336,13 @@ export const AddAddress = () => {
     </div>
   );
 
+  const addressAnswer = (
+    <>
+      <span className="block">{lookedUpFor}</span>
+      {senderName.trim() !== '' && <span className="block">{senderName.trim()}</span>}
+    </>
+  );
+
   const serversAnswer = isSendOnly ? (
     <span className="block">
       {servers.smtpHost}:{servers.smtpPort}
@@ -364,65 +365,47 @@ export const AddAddress = () => {
     >
       <div className="max-w-xl">
         <fieldset disabled={busyLabel !== null} className="m-0 min-w-0 border-0 p-0">
-          {open === 'name' ? (
-            <OpenStep>
-              <PageSection label="Name">
-                <form onSubmit={continueFromName}>
-                  <StepNumber step="name" />
-                  <Input
-                    id="connect-name"
-                    aria-label="Name"
-                    autoFocus
-                    autoComplete="name"
-                    placeholder="Optional"
-                    value={senderName}
-                    onChange={event => setSenderName(event.target.value)}
-                  />
-                  <p className="mt-2 text-2xs text-paper-faint">
-                    Shown next to this address on mail you send.
-                  </p>
-                  <StepActions>
-                    <Button type="submit" variant="primary">
-                      Continue
-                    </Button>
-                  </StepActions>
-                </form>
-              </PageSection>
-            </OpenStep>
-          ) : (
-            <StepLine
-              title="Name"
-              answer={done.has('name') ? senderName.trim() || 'Not set' : undefined}
-              onChange={done.has('name') ? () => reopen('name') : undefined}
-            />
-          )}
-
           {open === 'address' ? (
             <OpenStep>
               <PageSection label="Address">
                 <form onSubmit={continueFromAddress}>
                   <StepNumber step="address" />
-                  <FieldRow label="Email address" htmlFor="connect-address">
-                    <Input
-                      id="connect-address"
-                      type="email"
-                      required
-                      autoComplete="email"
-                      autoFocus
-                      readOnly={lookup.state === 'looking'}
-                      value={address}
-                      onChange={event => {
-                        setAddress(event.target.value);
-                        clearProblem('address');
-                      }}
-                      placeholder="you@yourdomain.com"
-                    />
-                    {problem?.at === 'address' && (
-                      <p role="alert" className="text-base text-danger">
-                        {problem.message}
-                      </p>
-                    )}
-                  </FieldRow>
+                  <div className="space-y-6">
+                    <FieldRow label="Email address" htmlFor="connect-address">
+                      <Input
+                        id="connect-address"
+                        type="email"
+                        required
+                        autoComplete="email"
+                        autoFocus
+                        readOnly={lookup.state === 'looking'}
+                        value={address}
+                        onChange={event => {
+                          setAddress(event.target.value);
+                          clearProblem('address');
+                        }}
+                        placeholder="you@yourdomain.com"
+                      />
+                      {problem?.at === 'address' && (
+                        <p role="alert" className="text-base text-danger">
+                          {problem.message}
+                        </p>
+                      )}
+                    </FieldRow>
+                    <FieldRow
+                      label="Name"
+                      htmlFor="connect-name"
+                      hint="Shown next to this address on mail you send."
+                    >
+                      <Input
+                        id="connect-name"
+                        autoComplete="name"
+                        placeholder="Optional"
+                        value={senderName}
+                        onChange={event => setSenderName(event.target.value)}
+                      />
+                    </FieldRow>
+                  </div>
                   {lookup.state === 'looking' && (
                     <p className="mt-2 text-2xs text-paper-faint" aria-live="polite">
                       Looking up mail servers for {lookup.domain}…
@@ -439,7 +422,7 @@ export const AddAddress = () => {
           ) : (
             <StepLine
               title="Address"
-              answer={done.has('address') ? (lookedUpFor ?? undefined) : undefined}
+              answer={done.has('address') ? addressAnswer : undefined}
               onChange={done.has('address') ? () => reopen('address') : undefined}
             />
           )}
@@ -570,9 +553,9 @@ export const AddAddress = () => {
   );
 };
 
-/** The step's number, as its place in the four. */
+/** The step's number, as its place in the three. */
 const StepNumber = ({ step }: { step: StepId }) => (
-  <p className="mb-4 text-2xs text-paper-faint">Step {STEP_NUMBER[step]} of 4</p>
+  <p className="mb-4 text-2xs text-paper-faint">Step {STEP_NUMBER[step]} of 3</p>
 );
 
 /**
