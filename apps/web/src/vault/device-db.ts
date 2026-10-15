@@ -11,7 +11,7 @@ export class DeviceDbError extends Error {
 }
 
 const DB_NAME = 'yozz-device-state';
-const DB_VERSION = 7;
+const DB_VERSION = 8;
 
 type StoreSpec = { readonly name: string; readonly keyPath: string | string[] };
 
@@ -31,6 +31,8 @@ const REKEYED: readonly { readonly since: number; readonly names: readonly strin
   { since: 5, names: [STORES.mailSync.name, STORES.mailSummaries.name, STORES.mailBodies.name] },
   // A body written before previews existed has no preview row; refetching keeps the two in step.
   { since: 6, names: [STORES.mailBodies.name] },
+  // A body without its sender headers could never be authenticated; refetched, it can.
+  { since: 8, names: [STORES.mailBodies.name] },
 ];
 
 type StoreName = (typeof STORES)[keyof typeof STORES]['name'];

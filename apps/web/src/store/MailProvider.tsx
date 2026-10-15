@@ -1182,7 +1182,8 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
       const message = thread?.messages.find(m => m.id === messageId);
       if (message === undefined || thread === undefined) return Promise.resolve(failed);
       if (message.bodyStatus === undefined) {
-        const { body, html, hasTextPart, inlineImagesTruncated, attachments } = message;
+        const { body, html, hasTextPart, inlineImagesTruncated, attachments, authenticatedSender } =
+          message;
         return Promise.resolve({
           status: 'loaded',
           body,
@@ -1190,6 +1191,7 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
           hasTextPart,
           inlineImagesTruncated,
           attachments,
+          authenticatedSender,
         });
       }
       // A second caller awaits the same fetch.
@@ -1232,10 +1234,13 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
       const runOn = bindRunOn();
       const promise = (async (): Promise<BodyOutcome> => {
         try {
-          const [{ fetchBody }, { createMailCache }] = await Promise.all([
-            import('../threads/bodies'),
-            import('../threads/cache'),
-          ]);
+          const [{ fetchBody }, { createMailCache }, { authenticatedSenderOf }] = await Promise.all(
+            [
+              import('../threads/bodies'),
+              import('../threads/cache'),
+              import('../threads/authentication-results'),
+            ],
+          );
           const cache = createMailCache(userId, accountAddress).folder(folder);
           const cached = await cache.getBody(uid);
           if (isRetired()) return failed;
@@ -1272,6 +1277,13 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
             hasTextPart: res.value.hasTextPart,
             inlineImagesTruncated: res.value.inlineImagesTruncated,
             attachments: res.value.attachments,
+            // Judged by the provider of the account whose copy this is: it stamped the headers.
+            authenticatedSender:
+              authenticatedSenderOf(
+                res.value.senderHeaders,
+                account.imap.host,
+                message.fromAddress,
+              ) ?? undefined,
           };
           setEntry(loaded);
           setMailError(null);

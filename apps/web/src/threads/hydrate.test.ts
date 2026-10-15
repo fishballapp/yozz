@@ -21,6 +21,7 @@ const body = (paragraphs: string[]) => ({
   hasTextPart: true,
   inlineImagesTruncated: false,
   attachments: [],
+  senderHeaders: [],
 });
 
 describe('hydration from the mail cache', () => {

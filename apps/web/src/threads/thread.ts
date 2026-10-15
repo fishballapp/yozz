@@ -36,6 +36,11 @@ export type Message = {
   hasTextPart?: boolean;
   /** A CID allocation ceiling left one or more inline images unavailable. */
   inlineImagesTruncated?: boolean;
+  /**
+   * The From address, when the receiving account's own provider says DMARC passed for its domain
+   * (`authentication-results.ts`). Absent means unauthenticated, never unknown-but-fine.
+   */
+  authenticatedSender?: string;
   bodyStatus?: BodyStatus;
   /** RFC822.SIZE from the summary fetch; checked before requesting the raw message. */
   rawSize?: number;

@@ -1,9 +1,20 @@
 // @vitest-environment jsdom
+
+import type { ComponentProps } from 'react';
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { fakeRecordStore } from '../vault/fake-record-store';
+import type { RecordStore } from '../vault/record-store';
 import { clearCachedFrames } from './frame-cache';
 import { HtmlBody } from './HtmlBody';
+import { IMAGE_CONSENTS_RECORD_TYPE, IMAGE_SENDER_RECORD_TYPE } from './remote-images';
+import { RemoteImagesStoreProvider } from './remote-images-context';
+
+const problems = vi.hoisted(() => [] as { title: string; description: string }[]);
+vi.mock('../ui/Toast', () => ({
+  reportProblem: (title: string, description: string) => problems.push({ title, description }),
+}));
 
 vi.mock('./html', async importOriginal => {
   const actual = await importOriginal<typeof import('./html')>();
@@ -26,10 +37,55 @@ vi.stubGlobal('localStorage', {
 
 const roots: Array<ReturnType<typeof createRoot>> = [];
 
+/** The reader as it sits in the app: under the remembered answers, here over `store` or memory. */
+const Reader = ({
+  store = null,
+  ...props
+}: Partial<ComponentProps<typeof HtmlBody>> & { store?: RecordStore | null }) => (
+  <RemoteImagesStoreProvider store={store}>
+    <HtmlBody
+      html=""
+      messageId="mid/<m1@sender.example>"
+      fromName="Sender"
+      fromAddress="news@sender.example"
+      authenticatedSender={undefined}
+      inlineImagesTruncated={false}
+      fallback={null}
+      {...props}
+    />
+  </RemoteImagesStoreProvider>
+);
+
 afterEach(async () => {
   for (const root of roots) await act(() => root.unmount());
   roots.length = 0;
 });
+
+const mountWithheld = async (html: string, props: ComponentProps<typeof Reader> = {}) => {
+  const container = document.createElement('div');
+  document.body.append(container);
+  const root = createRoot(container);
+  roots.push(root);
+  await act(async () => root.render(<Reader html={html} {...props} />));
+  const frameWindow = container.querySelector('iframe')?.contentWindow;
+  if (frameWindow === null || frameWindow === undefined) throw new Error('iframe did not mount');
+  const clickImage = (source: Window = frameWindow) =>
+    act(async () =>
+      window.dispatchEvent(
+        new MessageEvent('message', { source, data: { type: 'yozz:load-remote-images' } }),
+      ),
+    );
+  const srcdoc = () => container.querySelector('iframe')?.srcdoc ?? '';
+  const button = (text: string) =>
+    Array.from(container.querySelectorAll('button')).find(candidate =>
+      candidate.textContent?.startsWith(text),
+    );
+  const dialogButton = (text: string) =>
+    Array.from(document.querySelectorAll<HTMLButtonElement>('[role="alertdialog"] button')).find(
+      button => button.textContent === text,
+    );
+  return { container, root, clickImage, srcdoc, button, dialogButton };
+};
 
 describe('HtmlBody remote-image consent', () => {
   it('belongs to the exact message and is not inherited by the next sender', async () => {
@@ -42,11 +98,12 @@ describe('HtmlBody remote-image consent', () => {
 
     await act(async () =>
       root.render(
-        <HtmlBody
+        <Reader
           key="first-message"
           html={first}
+          messageId="mid/<first@first.example>"
           fromName="First"
-          inlineImagesTruncated={false}
+          fromAddress="first@first.example"
           fallback={<p>first fallback</p>}
         />,
       ),
@@ -81,11 +138,12 @@ describe('HtmlBody remote-image consent', () => {
 
     await act(async () =>
       root.render(
-        <HtmlBody
+        <Reader
           key="second-message"
           html={second}
+          messageId="mid/<second@second.example>"
           fromName="Second"
-          inlineImagesTruncated={false}
+          fromAddress="second@second.example"
           fallback={<p>second fallback</p>}
         />,
       ),
@@ -106,32 +164,6 @@ describe('HtmlBody remote-image consent', () => {
     expect(secondFrame?.style.height).toBe('160px');
     container.remove();
   });
-
-  const mountWithheld = async (html: string) => {
-    const container = document.createElement('div');
-    document.body.append(container);
-    const root = createRoot(container);
-    roots.push(root);
-    await act(async () =>
-      root.render(
-        <HtmlBody html={html} fromName="Sender" inlineImagesTruncated={false} fallback={null} />,
-      ),
-    );
-    const frameWindow = container.querySelector('iframe')?.contentWindow;
-    if (frameWindow === null || frameWindow === undefined) throw new Error('iframe did not mount');
-    const clickImage = (source: Window = frameWindow) =>
-      act(async () =>
-        window.dispatchEvent(
-          new MessageEvent('message', { source, data: { type: 'yozz:load-remote-images' } }),
-        ),
-      );
-    const srcdoc = () => container.querySelector('iframe')?.srcdoc ?? '';
-    const dialogButton = (text: string) =>
-      Array.from(document.querySelectorAll<HTMLButtonElement>('[role="alertdialog"] button')).find(
-        button => button.textContent === text,
-      );
-    return { container, clickImage, srcdoc, dialogButton };
-  };
 
   it('asks before an image click loads pictures, and remembers "don\'t ask again"', async () => {
     localStorage.removeItem('yozz:ask-before-remote-images');
@@ -179,14 +211,7 @@ describe('HtmlBody remote-image consent', () => {
     ).join('');
 
     await act(async () =>
-      root.render(
-        <HtmlBody
-          html={html}
-          fromName="Many CDNs"
-          inlineImagesTruncated={false}
-          fallback={<p>fallback</p>}
-        />,
-      ),
+      root.render(<Reader html={html} fromName="Many CDNs" fallback={<p>fallback</p>} />),
     );
     await act(async () => container.querySelector('button')?.click());
     expect(container.textContent).toContain('Some remote images were blocked.');
@@ -201,10 +226,9 @@ describe('HtmlBody remote-image consent', () => {
 
     await act(async () =>
       root.render(
-        <HtmlBody
+        <Reader
           html="__unsupported__"
           fromName="Unsupported"
-          inlineImagesTruncated={false}
           fallback={<p>Readable fallback</p>}
         />,
       ),
@@ -223,7 +247,7 @@ describe('HtmlBody remote-image consent', () => {
 
     await act(async () =>
       root.render(
-        <HtmlBody
+        <Reader
           html="<p>Message</p>"
           fromName="Inline images"
           inlineImagesTruncated
@@ -235,23 +259,172 @@ describe('HtmlBody remote-image consent', () => {
     expect(container.textContent).toContain('Some inline images were blocked.');
     container.remove();
   });
-  it('reopens a message on the frame it first built, without the consent given to it', async () => {
+  it('builds a withheld frame once per HTML, and loses it on lock', async () => {
     const html = '<p>kept</p><img src="https://cdn.example/kept.png">';
     const first = await mountWithheld(html);
     const withheld = first.srcdoc();
-    await act(async () => first.container.querySelector('button')?.click());
-    expect(first.srcdoc()).toContain('https://cdn.example/kept.png');
     await act(async () => roots.pop()?.unmount());
     first.container.remove();
 
-    const reopened = await mountWithheld(html);
+    // Another message with the same bytes: the frame is a function of them alone.
+    const twin = await mountWithheld(html, { messageId: 'mid/<twin@sender.example>' });
     // Byte-identical, nonce included: the sanitiser did not run again.
-    expect(reopened.srcdoc()).toBe(withheld);
-    reopened.container.remove();
+    expect(twin.srcdoc()).toBe(withheld);
+    twin.container.remove();
 
     clearCachedFrames();
     const afterLock = await mountWithheld(html);
     expect(afterLock.srcdoc()).not.toBe(withheld);
     afterLock.container.remove();
+  });
+});
+
+describe('HtmlBody remembered consent', () => {
+  const html = '<img src="https://cdn.example/hero.png" width="600" height="200">';
+  const loaded = (srcdoc: string) => srcdoc.includes('https://cdn.example/hero.png');
+  /** Lets the provider's vault reads and the consent's background write settle. */
+  const settle = () => act(async () => new Promise(resolve => setTimeout(resolve, 0)));
+
+  it('loads a consented message again on the next open, on any device, and on no other message', async () => {
+    const { store, rows, key } = fakeRecordStore();
+    const first = await mountWithheld(html, { store });
+    await settle();
+    await act(async () => first.button('Load remote images')?.click());
+    await settle();
+    expect(loaded(first.srcdoc())).toBe(true);
+    expect(rows.get(key(IMAGE_CONSENTS_RECORD_TYPE, 'consents'))?.plaintext).toContain(
+      'mid/<m1@sender.example>',
+    );
+    first.container.remove();
+
+    // A fresh provider over the same vault is a reload, or the phone.
+    const reopened = await mountWithheld(html, { store });
+    await settle();
+    expect(loaded(reopened.srcdoc())).toBe(true);
+    expect(reopened.button('Load remote images')).toBeUndefined();
+    reopened.container.remove();
+
+    // The same Message-ID under another From is another message.
+    const impostor = await mountWithheld(html, { store, fromAddress: 'someone@else.example' });
+    await settle();
+    expect(loaded(impostor.srcdoc())).toBe(false);
+    impostor.container.remove();
+  });
+
+  it('offers nothing until the remembered answers are read', async () => {
+    const { store } = fakeRecordStore();
+    const vault = Promise.withResolvers<void>();
+    const slow: RecordStore = {
+      ...store,
+      get: async (...args) => {
+        await vault.promise;
+        return store.get(...args);
+      },
+    };
+    const reader = await mountWithheld(html, { store: slow });
+    await settle();
+    expect(reader.button('Load remote images')).toBeUndefined();
+    vault.resolve();
+    await settle();
+    expect(reader.button('Load remote images')).toBeDefined();
+    reader.container.remove();
+  });
+
+  it('offers "always" only for an authenticated sender, and trusting one loads its mail', async () => {
+    const { store, rows, key } = fakeRecordStore();
+    const unauthenticated = await mountWithheld(html, { store });
+    await settle();
+    expect(unauthenticated.button('Always from')).toBeUndefined();
+    unauthenticated.container.remove();
+
+    const authenticated = await mountWithheld(html, {
+      store,
+      authenticatedSender: 'news@sender.example',
+    });
+    await settle();
+    await act(async () => authenticated.button('Always from news@sender.example')?.click());
+    await settle();
+    expect(rows.has(key(IMAGE_SENDER_RECORD_TYPE, 'news@sender.example'))).toBe(true);
+    expect(loaded(authenticated.srcdoc())).toBe(true);
+    expect(authenticated.container.textContent).toContain(
+      'Images from news@sender.example always load.',
+    );
+    authenticated.container.remove();
+
+    // Another message from that sender, authenticated: loads unasked, whatever the case.
+    const next = await mountWithheld(html, {
+      store,
+      messageId: 'mid/<m2@sender.example>',
+      authenticatedSender: 'News@Sender.Example',
+    });
+    await settle();
+    expect(loaded(next.srcdoc())).toBe(true);
+    next.container.remove();
+
+    // The same address, unauthenticated, is a forgery as far as the reader can tell.
+    const forged = await mountWithheld(html, { store, messageId: 'mid/<m3@sender.example>' });
+    await settle();
+    expect(loaded(forged.srcdoc())).toBe(false);
+    expect(forged.button('Load remote images')).toBeDefined();
+    expect(forged.button('Always from')).toBeUndefined();
+    forged.container.remove();
+  });
+
+  it('stops trusting a sender from the message it loaded, and blocks that message in place', async () => {
+    const { store, rows, key } = fakeRecordStore();
+    // Trusted from this message ("Always from" loads it too); another of theirs was loaded by hand.
+    const reader = await mountWithheld(html, {
+      store,
+      messageId: 'mid/<m4@sender.example>',
+      authenticatedSender: 'news@sender.example',
+    });
+    await settle();
+    await act(async () => reader.button('Always from news@sender.example')?.click());
+    await settle();
+    const other = await mountWithheld(html, { store, messageId: 'mid/<m5@sender.example>' });
+    await settle();
+    await act(async () => other.button('Load remote images')?.click());
+    await settle();
+    other.container.remove();
+    expect(loaded(reader.srcdoc())).toBe(true);
+
+    await act(async () => reader.button('Stop')?.click());
+    await settle();
+    expect(rows.has(key(IMAGE_SENDER_RECORD_TYPE, 'news@sender.example'))).toBe(false);
+    expect(loaded(reader.srcdoc())).toBe(false);
+    expect(reader.button('Load remote images')).toBeDefined();
+    expect(reader.button('Always from news@sender.example')).toBeDefined();
+    const stored = rows.get(key(IMAGE_CONSENTS_RECORD_TYPE, 'consents'))?.plaintext ?? '';
+    expect(stored).not.toContain('mid/<m4@sender.example>');
+    expect(stored).toContain('mid/<m5@sender.example>');
+    reader.container.remove();
+  });
+
+  it('says the sender was removed when only forgetting this message failed', async () => {
+    const { store, rows, key } = fakeRecordStore();
+    rows.set(key(IMAGE_SENDER_RECORD_TYPE, 'news@sender.example'), {
+      plaintext: JSON.stringify({ address: 'news@sender.example', addedAt: 1 }),
+      revision: 1,
+    });
+    const refusingConsents: RecordStore = {
+      ...store,
+      put: async input => {
+        if (input.type === IMAGE_CONSENTS_RECORD_TYPE) throw new TypeError('Failed to fetch');
+        return store.put(input);
+      },
+    };
+    const reader = await mountWithheld(html, {
+      store: refusingConsents,
+      messageId: 'mid/<m6@sender.example>',
+      authenticatedSender: 'news@sender.example',
+    });
+    await settle();
+    problems.length = 0;
+    await act(async () => reader.button('Stop')?.click());
+    await settle();
+    expect(rows.has(key(IMAGE_SENDER_RECORD_TYPE, 'news@sender.example'))).toBe(false);
+    expect(problems.map(problem => problem.title)).toEqual(['Sender removed']);
+    expect(loaded(reader.srcdoc())).toBe(false);
+    reader.container.remove();
   });
 });

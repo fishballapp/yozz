@@ -9,7 +9,7 @@ import { SendOnlyTag } from '../ui/SendOnlyTag';
 
 /**
  * A list and the thing you picked from it, the shape the mail already has: every address, adding
- * one, and the account on the left; the selected one on the right. Below `lg` the two show one at a
+ * one, remote images and the account on the left; the selected one on the right. Below `lg` the two show one at a
  * time, the list at `/settings` and a pane at any route under it.
  */
 
@@ -29,7 +29,7 @@ const NavRow = ({
   children: ReactNode;
 } & (
   | { to: '/settings/a/$address'; params: { address: string } }
-  | { to: '/settings/new' | '/settings/account'; params?: never }
+  | { to: '/settings/new' | '/settings/account' | '/settings/images'; params?: never }
 )) => (
   <li>
     <Link
@@ -82,6 +82,19 @@ const SettingsNav = () => {
           <span className="flex items-center gap-2 text-base">
             <PlusIcon size={13} className="text-paper-faint" />
             Add an address
+          </span>
+          <span />
+        </NavRow>
+      </ul>
+
+      <h2 className="label-rule px-5 pt-8 pb-2">Reading</h2>
+      <ul className="border-t border-rule-soft">
+        <NavRow to="/settings/images" isActive={pathname === '/settings/images'}>
+          <span className="min-w-0">
+            <span className="block truncate text-base">Remote images</span>
+            <span className="mt-0.5 block truncate text-2xs text-paper-faint">
+              Senders whose pictures always load
+            </span>
           </span>
           <span />
         </NavRow>

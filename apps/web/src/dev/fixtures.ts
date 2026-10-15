@@ -158,8 +158,9 @@ const AUTHORED: readonly Thread[] = [
         toAddress: 'jason@jyu.example',
         to: [{ address: 'jason@jyu.example' }],
         at: ago(4 * HOUR),
-        // The one fixture with an HTML body.
+        // The one fixture with an HTML body, from a sender the provider authenticated.
         hasTextPart: true,
+        authenticatedSender: 'hello@duneanddown.example',
         body: [
           'Our summer savings end tonight. Save up to 30% on sleep favourites, and spend over £49 for a free pack of tealights.',
         ],

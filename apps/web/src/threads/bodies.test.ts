@@ -219,6 +219,32 @@ ${'<div>'.repeat(2_000)}deep<script>garbage()</script><style>.garbage{}</style>$
     expect(body.html).toBeUndefined();
     expect(body.paragraphs).toEqual(['hi']);
   });
+
+  it('keeps From and every Authentication-Results, top to bottom, and nothing else', async () => {
+    const body = await parseBody(
+      raw(`Authentication-Results: mx.google.com;
+ dmarc=pass header.from=news.example
+Received: from mx.news.example by receiver
+Authentication-Results: sender.example; dmarc=pass header.from=news.example
+From: News <digest@news.example>
+Subject: hi
+Content-Type: text/plain
+
+hi
+`),
+    );
+    expect(body.senderHeaders).toEqual([
+      {
+        key: 'authentication-results',
+        value: 'mx.google.com; dmarc=pass header.from=news.example',
+      },
+      {
+        key: 'authentication-results',
+        value: 'sender.example; dmarc=pass header.from=news.example',
+      },
+      { key: 'from', value: 'News <digest@news.example>' },
+    ]);
+  });
 });
 
 describe('fetchBody size boundary', () => {

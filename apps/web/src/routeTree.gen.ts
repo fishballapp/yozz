@@ -18,6 +18,7 @@ import { Route as AppSettingsRouteImport } from './routes/_app.settings'
 import { Route as AppMMailboxRouteImport } from './routes/_app.m.$mailbox'
 import { Route as AppSettingsIndexRouteImport } from './routes/_app.settings.index'
 import { Route as AppSettingsAccountRouteImport } from './routes/_app.settings.account'
+import { Route as AppSettingsImagesRouteImport } from './routes/_app.settings.images'
 import { Route as AppSettingsNewRouteImport } from './routes/_app.settings.new'
 import { Route as AppMMailboxIndexRouteImport } from './routes/_app.m.$mailbox.index'
 import { Route as AppSettingsAAddressRouteImport } from './routes/_app.settings.a.$address'
@@ -69,6 +70,11 @@ const AppSettingsAccountRoute = AppSettingsAccountRouteImport.update({
   path: '/account',
   getParentRoute: () => AppSettingsRoute,
 } as any)
+const AppSettingsImagesRoute = AppSettingsImagesRouteImport.update({
+  id: '/images',
+  path: '/images',
+  getParentRoute: () => AppSettingsRoute,
+} as any)
 const AppSettingsNewRoute = AppSettingsNewRouteImport.update({
   id: '/new',
   path: '/new',
@@ -110,6 +116,7 @@ export interface FileRoutesByFullPath {
   '/settings': typeof AppSettingsRouteWithChildren
   '/m/$mailbox': typeof AppMMailboxRouteWithChildren
   '/settings/account': typeof AppSettingsAccountRoute
+  '/settings/images': typeof AppSettingsImagesRoute
   '/settings/new': typeof AppSettingsNewRoute
   '/settings/': typeof AppSettingsIndexRoute
   '/settings/a/$address': typeof AppSettingsAAddressRoute
@@ -124,6 +131,7 @@ export interface FileRoutesByTo {
   '/login': typeof LoginRoute
   '/welcome': typeof WelcomeRoute
   '/settings/account': typeof AppSettingsAccountRoute
+  '/settings/images': typeof AppSettingsImagesRoute
   '/settings/new': typeof AppSettingsNewRoute
   '/settings': typeof AppSettingsIndexRoute
   '/settings/a/$address': typeof AppSettingsAAddressRoute
@@ -142,6 +150,7 @@ export interface FileRoutesById {
   '/_app/settings': typeof AppSettingsRouteWithChildren
   '/_app/m/$mailbox': typeof AppMMailboxRouteWithChildren
   '/_app/settings/account': typeof AppSettingsAccountRoute
+  '/_app/settings/images': typeof AppSettingsImagesRoute
   '/_app/settings/new': typeof AppSettingsNewRoute
   '/_app/settings/': typeof AppSettingsIndexRoute
   '/_app/settings/a/$address': typeof AppSettingsAAddressRoute
@@ -160,6 +169,7 @@ export interface FileRouteTypes {
     | '/settings'
     | '/m/$mailbox'
     | '/settings/account'
+    | '/settings/images'
     | '/settings/new'
     | '/settings/'
     | '/settings/a/$address'
@@ -174,6 +184,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/welcome'
     | '/settings/account'
+    | '/settings/images'
     | '/settings/new'
     | '/settings'
     | '/settings/a/$address'
@@ -191,6 +202,7 @@ export interface FileRouteTypes {
     | '/_app/settings'
     | '/_app/m/$mailbox'
     | '/_app/settings/account'
+    | '/_app/settings/images'
     | '/_app/settings/new'
     | '/_app/settings/'
     | '/_app/settings/a/$address'
@@ -273,6 +285,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppSettingsAccountRouteImport
       parentRoute: typeof AppSettingsRoute
     }
+    '/_app/settings/images': {
+      id: '/_app/settings/images'
+      path: '/images'
+      fullPath: '/settings/images'
+      preLoaderRoute: typeof AppSettingsImagesRouteImport
+      parentRoute: typeof AppSettingsRoute
+    }
     '/_app/settings/new': {
       id: '/_app/settings/new'
       path: '/new'
@@ -320,6 +339,7 @@ declare module '@tanstack/react-router' {
 
 interface AppSettingsRouteChildren {
   AppSettingsAccountRoute: typeof AppSettingsAccountRoute
+  AppSettingsImagesRoute: typeof AppSettingsImagesRoute
   AppSettingsNewRoute: typeof AppSettingsNewRoute
   AppSettingsIndexRoute: typeof AppSettingsIndexRoute
   AppSettingsAAddressRoute: typeof AppSettingsAAddressRoute
@@ -329,6 +349,7 @@ interface AppSettingsRouteChildren {
 
 const AppSettingsRouteChildren: AppSettingsRouteChildren = {
   AppSettingsAccountRoute: AppSettingsAccountRoute,
+  AppSettingsImagesRoute: AppSettingsImagesRoute,
   AppSettingsNewRoute: AppSettingsNewRoute,
   AppSettingsIndexRoute: AppSettingsIndexRoute,
   AppSettingsAAddressRoute: AppSettingsAAddressRoute,

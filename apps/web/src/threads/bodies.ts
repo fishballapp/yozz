@@ -3,6 +3,7 @@ import PostalMime from 'postal-mime';
 import type { MailConnectionFailure, Result } from '../relay/connection';
 import type { LiveTask } from '../relay/live';
 import { attachmentKindOf } from './attachments';
+import type { MailHeader } from './authentication-results';
 import { SAFE_INLINE_IMAGE_MIME_TYPES } from './image-types';
 import { type Attachment, toParagraphs } from './thread';
 
@@ -15,7 +16,14 @@ export type FetchedBody = {
   /** A CID allocation ceiling left one or more inline images unavailable. */
   readonly inlineImagesTruncated: boolean;
   readonly attachments: Attachment[];
+  /**
+   * `From` and `Authentication-Results`, top to bottom: whether the sender is authenticated depends
+   * on the account that received the copy, so it is decided where the account is known.
+   */
+  readonly senderHeaders: readonly MailHeader[];
 };
+
+const SENDER_HEADERS = new Set(['from', 'authentication-results']);
 
 // RFC822.SIZE is checked before BODY.PEEK[], then the received byte count again before parsing.
 const MAX_RAW_MESSAGE_BYTES = DEFAULT_MAX_LITERAL_BYTES;
@@ -174,6 +182,9 @@ export const parseBody = async (raw: Uint8Array): Promise<FetchedBody> => {
     ...(inlinedHtml === null ? {} : { html: inlinedHtml.html }),
     inlineImagesTruncated: inlinedHtml?.truncated ?? false,
     attachments,
+    senderHeaders: mail.headers
+      .filter(header => SENDER_HEADERS.has(header.key))
+      .map(({ key, value }) => ({ key, value })),
   };
 };
 

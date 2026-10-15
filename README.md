@@ -46,12 +46,14 @@ your existing mail provider retains whatever access it already has. We also reta
 metadata needed to run the vault and relay; [the architecture](./ARCHITECTURE.md#what-is-on-yozzs-servers)
 spells out that boundary.
 
-Two things do get stored with us, sealed: the drafts you write, so one started on a laptop is on
-your phone, and mail sent from an address that has no mailbox to keep a copy in. Both are
-ciphertext under your key, like your stored passwords.
+A few things do get stored with us, sealed: the drafts you write, so one started on a laptop is on
+your phone; mail sent from an address that has no mailbox to keep a copy in; and which messages
+and senders you load remote images for. All are ciphertext under your key, like your stored
+passwords.
 
-Received HTML renders in a sandboxed frame with no network, remote images off until you ask, and
-a switch to the sender's plain-text part. Inbox and Sent are threaded together and cached on the
+Received HTML renders in a sandboxed frame with no network, remote images off until you ask (once
+per message, or always for a sender, when your provider confirms the mail really came from them),
+and a switch to the sender's plain-text part. Inbox and Sent are threaded together and cached on the
 device; nothing is synced through us.
 
 ## Works with your agent

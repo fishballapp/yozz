@@ -4,6 +4,7 @@ import { NotFound } from '../app/NotFound';
 import { Compose } from '../compose/Compose';
 import { composeIntentSchema } from '../compose/intent';
 import { MailProvider } from '../store/MailProvider';
+import { RemoteImagesProvider } from '../threads/remote-images-context';
 import { Toasts } from '../ui/Toast';
 import { VaultProvider } from '../vault/session';
 
@@ -24,9 +25,11 @@ function RootLayout() {
   return (
     <VaultProvider>
       <MailProvider>
-        <Outlet />
-        <Compose />
-        <Toasts />
+        <RemoteImagesProvider>
+          <Outlet />
+          <Compose />
+          <Toasts />
+        </RemoteImagesProvider>
       </MailProvider>
     </VaultProvider>
   );

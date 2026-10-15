@@ -348,7 +348,10 @@ const MessageBody = ({
         <HtmlBody
           key={message.id}
           html={message.html}
+          messageId={message.id}
           fromName={message.fromName}
+          fromAddress={message.fromAddress}
+          authenticatedSender={message.authenticatedSender}
           inlineImagesTruncated={message.inlineImagesTruncated ?? false}
           fallback={<div className="max-w-[68ch]">{fallback}</div>}
         />

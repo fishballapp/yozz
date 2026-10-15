@@ -1,11 +1,15 @@
+import { cn } from '@fishballapps/cn';
 import { ImageIcon } from '@phosphor-icons/react';
 import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import { z } from 'zod';
 import { Button } from '../ui/Button';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
 import { useChromePref } from '../ui/chrome';
+import { reportProblem } from '../ui/Toast';
+import { vaultErrorMessage } from '../vault/screen-policy';
 import { cachedFrameOf } from './frame-cache';
 import { buildMailFrame } from './html';
+import { useRemoteImages } from './remote-images-context';
 
 /** What the script inside the frame posts. Anything else on the channel is ignored. */
 const FrameMessageSchema = z.discriminatedUnion('type', [
@@ -14,25 +18,76 @@ const FrameMessageSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('yozz:load-remote-images') }),
 ]);
 
+/** A button whose action is a vault write: it says so while it runs, and a refusal is a toast. */
+const VaultActionButton = ({
+  label,
+  busyLabel,
+  failure,
+  onClick,
+  className,
+}: {
+  label: ReactNode;
+  busyLabel: string;
+  failure: string;
+  onClick: () => Promise<void>;
+  className?: string;
+}) => {
+  const [isBusy, setIsBusy] = useState(false);
+  return (
+    <Button
+      variant="ghost"
+      size="sm"
+      disabled={isBusy}
+      onClick={async () => {
+        setIsBusy(true);
+        try {
+          await onClick();
+        } catch (error) {
+          reportProblem(failure, vaultErrorMessage(error));
+        } finally {
+          setIsBusy(false);
+        }
+      }}
+      className={cn('h-11 max-w-full lg:h-7', className)}
+    >
+      {isBusy ? busyLabel : label}
+    </Button>
+  );
+};
+
 /**
  * The frame cannot be measured from outside, so a nonce'd script posts its own height; only
  * messages from this frame's window are trusted, and the height is capped. Containment is
  * documented on `threads/html.ts`.
+ *
+ * Remote images load when this message was consented to before, on any device (the pixel has
+ * fired and the address has leaked, so asking again buys nothing), or when its sender is trusted
+ * AND `authenticatedSender` says the account's provider vouched for that From address.
  */
 export const HtmlBody = ({
   html,
+  messageId,
   fromName,
+  fromAddress,
+  authenticatedSender,
   inlineImagesTruncated,
   fallback,
 }: {
   html: string;
+  messageId: string;
   fromName: string;
+  fromAddress: string;
+  authenticatedSender: string | undefined;
   inlineImagesTruncated: boolean;
   fallback: ReactNode;
 }) => {
-  // Consent belongs to these exact bytes: React may reuse the component for the next sender.
-  const [remoteAllowedFor, setRemoteAllowedFor] = useState<string | null>(null);
-  const isRemoteAllowed = remoteAllowedFor === html;
+  const remoteImages = useRemoteImages();
+  // From props alone, so a component React reuses for the next message holds nothing of this one.
+  const consent = { messageId, sender: fromAddress };
+  const isTrustedSender =
+    authenticatedSender !== undefined && remoteImages.isTrusted(authenticatedSender);
+  const isRemoteAllowed = remoteImages.isConsented(consent) || isTrustedSender;
+  const allowRemoteImages = () => remoteImages.consent(consent);
   // A withheld picture looks like a picture, so the first click on one explains what loading costs.
   const [asksBeforeImageClick, setAsksBeforeImageClick] = useChromePref(
     'yozz:ask-before-remote-images',
@@ -40,14 +95,17 @@ export const HtmlBody = ({
     raw => raw !== 'false',
   );
   const [askingFor, setAskingFor] = useState<string | null>(null);
-  const isAsking = askingFor === html;
+  const isAsking = askingFor === messageId;
   const [skipNextTime, setSkipNextTime] = useState(false);
   const [measurement, setMeasurement] = useState({ html, height: 160 });
   const height = measurement.html === html ? measurement.height : 160;
   const frameRef = useRef<HTMLIFrameElement>(null);
+  // Read by the frame's listener, which is not re-attached for every change of the consent lists.
+  const allowRemoteImagesRef = useRef(allowRemoteImages);
+  allowRemoteImagesRef.current = allowRemoteImages;
   const frame = useMemo(() => {
     try {
-      // Only the withheld frame is kept, so a reopened message never inherits a consent.
+      // The cache is keyed by bytes alone, so it holds only the withheld frame.
       return isRemoteAllowed
         ? buildMailFrame(html, { allowRemoteImages: true })
         : cachedFrameOf(html, () => buildMailFrame(html, { allowRemoteImages: false }));
@@ -66,9 +124,9 @@ export const HtmlBody = ({
       if (!message.success) return;
       if (message.data.type === 'yozz:load-remote-images') {
         if (asksBeforeImageClick) {
-          setAskingFor(html);
+          setAskingFor(messageId);
         } else {
-          setRemoteAllowedFor(html);
+          allowRemoteImagesRef.current();
         }
         return;
       }
@@ -79,26 +137,66 @@ export const HtmlBody = ({
     };
     window.addEventListener('message', onMessage);
     return () => window.removeEventListener('message', onMessage);
-  }, [html, asksBeforeImageClick]);
+  }, [html, messageId, asksBeforeImageClick]);
 
   if (srcdoc === undefined) return fallback;
 
   return (
     <div className="space-y-2">
-      {hasRemoteImages && !isRemoteAllowed && (
+      {/* Nothing is offered until the remembered answers are read, or the bar flashes on a
+          message about to load by itself. */}
+      {remoteImages.isReady && hasRemoteImages && !isRemoteAllowed && (
         <div className="flex min-h-11 flex-wrap items-center gap-x-2 lg:min-h-7">
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => setRemoteAllowedFor(html)}
-            className="-ml-2.5 h-11 lg:h-7"
-          >
-            <ImageIcon size={13} />
-            Load remote images
-          </Button>
+          {/* Pulled out by its padding as a pair, so whichever button starts a line on a phone
+              lines up with the text under it. */}
+          <div className="-ml-2.5 flex min-w-0 flex-wrap items-center">
+            <Button variant="ghost" size="sm" onClick={allowRemoteImages} className="h-11 lg:h-7">
+              <ImageIcon size={13} />
+              Load remote images
+            </Button>
+            {/* Offered only where the provider vouched for From: a forged one is never trusted. */}
+            {authenticatedSender !== undefined && (
+              <VaultActionButton
+                label={<span className="truncate">Always from {authenticatedSender}</span>}
+                busyLabel="Saving…"
+                failure="Sender not saved"
+                onClick={async () => {
+                  await remoteImages.trust(authenticatedSender);
+                  allowRemoteImages();
+                }}
+              />
+            )}
+          </div>
           <span className="font-mono text-2xs text-paper-faint">
             The sender may learn you opened this message.
           </span>
+        </div>
+      )}
+      {hasRemoteImages && isTrustedSender && (
+        <div className="flex min-h-11 flex-wrap items-center gap-x-2 lg:min-h-7">
+          <span className="min-w-0 truncate font-mono text-2xs text-paper-faint">
+            Images from {authenticatedSender} always load.
+          </span>
+          <VaultActionButton
+            label="Stop"
+            busyLabel="Stopping…"
+            // Its padding pulled in, so on a phone, where it wraps, it starts on the text edge.
+            className="-ml-2.5"
+            failure="Sender not removed"
+            onClick={async () => {
+              await remoteImages.forget(authenticatedSender);
+              // This message too, so its images block in place; others keep their own consent.
+              // The sender is gone by now, so a refusal here is reported as what it is.
+              try {
+                await remoteImages.unconsent(consent);
+              } catch (error) {
+                reportProblem(
+                  'Sender removed',
+                  `This message's images may load again after a reload. ${vaultErrorMessage(error)}`,
+                );
+              }
+            }}
+          />
         </div>
       )}
       {remoteImagesTruncated && isRemoteAllowed && (
@@ -109,7 +207,7 @@ export const HtmlBody = ({
       )}
       <ConfirmDialog
         open={isAsking}
-        onOpenChange={open => setAskingFor(open ? html : null)}
+        onOpenChange={open => setAskingFor(open ? messageId : null)}
         title="Show remote images?"
         description="The pictures in this message load from the sender's servers, so the sender may learn you opened it. This applies to this message only."
         confirmLabel="Show images"
@@ -118,7 +216,7 @@ export const HtmlBody = ({
         busyLabel="Showing…"
         onConfirm={async () => {
           if (skipNextTime) setAsksBeforeImageClick(false);
-          setRemoteAllowedFor(html);
+          allowRemoteImages();
         }}
       >
         <label className="mt-4 flex items-center gap-2 text-base text-paper">
