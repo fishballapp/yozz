@@ -1,6 +1,6 @@
 import PostalMime from 'postal-mime';
 import { describe, expect, it } from 'vitest';
-import { authenticatedSenderOf, parseAuthenticationResults } from './authentication-results';
+import { parseAuthenticationResults, senderCheckOf } from './authentication-results';
 
 /** Headers exactly as the reader gets them: a raw message through postal-mime. */
 const headersOf = async (head: string) =>
@@ -57,10 +57,13 @@ const RECEIVED = 'Received: from mx.news.example (mx.news.example [192.0.2.1]) b
 /** The From the reader shows, from IMAP's ENVELOPE: a parser of its own. */
 const SHOWN = 'digest@news.example';
 
-const verdict = async (host: string, ...blocks: string[]) =>
-  authenticatedSenderOf(await headersOf(blocks.join('\n')), host, SHOWN);
+const VERIFIED = { status: 'verified' };
+const FAILED = { status: 'failed' };
 
-describe('authenticatedSenderOf, real provider shapes', () => {
+const verdict = async (host: string, ...blocks: string[]) =>
+  senderCheckOf(await headersOf(blocks.join('\n')), host, SHOWN);
+
+describe('senderCheckOf, real provider shapes', () => {
   it.each([
     ['Gmail', 'imap.gmail.com', GMAIL_PASS],
     ['Outlook', 'outlook.office365.com', MICROSOFT_PASS],
@@ -69,42 +72,52 @@ describe('authenticatedSenderOf, real provider shapes', () => {
   ])(
     '%s: a DMARC pass aligned with From authenticates the From address',
     async (_, host, block) => {
-      expect(await verdict(host, block, RECEIVED, FROM)).toBe('Digest@News.Example');
+      expect(await verdict(host, block, RECEIVED, FROM)).toEqual(VERIFIED);
     },
   );
 
   it('matches the IMAP host case-insensitively', async () => {
-    expect(await verdict('IMAP.Gmail.com.', GMAIL_PASS, FROM)).toBe('Digest@News.Example');
+    expect(await verdict('IMAP.Gmail.com.', GMAIL_PASS, FROM)).toEqual(VERIFIED);
   });
 
-  it('trusts nobody on iCloud until its shape is verified, however good the header', async () => {
-    expect(await verdict('imap.mail.me.com', ICLOUD_PASS, RECEIVED, FROM)).toBeNull();
+  it('checks nobody on iCloud until its shape is verified, however good the header', async () => {
+    expect(await verdict('imap.mail.me.com', ICLOUD_PASS, RECEIVED, FROM)).toEqual({
+      status: 'unchecked',
+      imapHost: 'imap.mail.me.com',
+    });
   });
 
-  it('trusts nobody on a provider it does not know', async () => {
-    expect(await verdict('mail.example.org', GMAIL_PASS, FROM)).toBeNull();
-    expect(await verdict('imap.example.org', GMAIL_PASS, FROM)).toBeNull();
+  it('checks nobody on a provider it does not know, and names the host it could not read', async () => {
+    expect(await verdict('mail.example.org', GMAIL_PASS, FROM)).toEqual({
+      status: 'unchecked',
+      imapHost: 'mail.example.org',
+    });
+    // Unchecked whatever the headers say: a blind spot, not a verdict.
+    expect(await verdict('imap.example.org', RECEIVED, FROM)).toEqual({
+      status: 'unchecked',
+      imapHost: 'imap.example.org',
+    });
   });
 });
 
-describe('authenticatedSenderOf, refusals', () => {
+describe('senderCheckOf, refusals', () => {
   it('refuses a message with no Authentication-Results', async () => {
-    expect(await verdict('imap.gmail.com', RECEIVED, FROM)).toBeNull();
+    expect(await verdict('imap.gmail.com', RECEIVED, FROM)).toEqual(FAILED);
   });
 
   it('refuses dmarc=fail, none and bestguesspass', async () => {
     for (const result of ['fail', 'none', 'bestguesspass']) {
       const block = GMAIL_PASS.replace('dmarc=pass', `dmarc=${result}`);
-      expect(await verdict('imap.gmail.com', block, FROM)).toBeNull();
+      expect(await verdict('imap.gmail.com', block, FROM)).toEqual(FAILED);
     }
   });
 
   it('refuses a pass for another domain than From', async () => {
     const misaligned = GMAIL_PASS.replace('header.from=news.example', 'header.from=evil.example');
-    expect(await verdict('imap.gmail.com', misaligned, FROM)).toBeNull();
+    expect(await verdict('imap.gmail.com', misaligned, FROM)).toEqual(FAILED);
     // A subdomain is another domain here: the header names the domain DMARC evaluated.
     const parent = GMAIL_PASS.replace('header.from=news.example', 'header.from=example');
-    expect(await verdict('imap.gmail.com', parent, FROM)).toBeNull();
+    expect(await verdict('imap.gmail.com', parent, FROM)).toEqual(FAILED);
   });
 
   it("refuses a sender's own header carrying the provider's id below the provider's", async () => {
@@ -112,65 +125,65 @@ describe('authenticatedSenderOf, refusals', () => {
       'Authentication-Results: mx.google.com; dmarc=pass (p=REJECT) header.from=news.example';
     // Gmail writes no dmarc clause for a domain with no record; the forged one below must not fill in.
     const noRecord = GMAIL_PASS.replace(/;\s*dmarc=pass[\s\S]*$/, '');
-    expect(await verdict('imap.gmail.com', noRecord, RECEIVED, forged, FROM)).toBeNull();
+    expect(await verdict('imap.gmail.com', noRecord, RECEIVED, forged, FROM)).toEqual(FAILED);
     const failed = GMAIL_PASS.replace('dmarc=pass', 'dmarc=fail');
-    expect(await verdict('imap.gmail.com', failed, RECEIVED, forged, FROM)).toBeNull();
+    expect(await verdict('imap.gmail.com', failed, RECEIVED, forged, FROM)).toEqual(FAILED);
   });
 
   it('refuses a per-method provider whose own run says fail, whatever follows it', async () => {
     const failed = FASTMAIL_PASS.replace('dmarc=pass', 'dmarc=fail');
     const forged =
       'Authentication-Results: phl-mx-04.messagingengine.com; dmarc=pass header.from=news.example';
-    expect(await verdict('imap.fastmail.com', failed, forged, RECEIVED, FROM)).toBeNull();
+    expect(await verdict('imap.fastmail.com', failed, forged, RECEIVED, FROM)).toEqual(FAILED);
     // Below someone else's header the provider's id counts for nothing.
     const relay = 'Authentication-Results: relay.example; spf=pass smtp.mailfrom=news.example';
     const withoutDmarc = FASTMAIL_PASS.replace(/dmarc=pass[^;]*;/, '');
-    expect(
-      await verdict('imap.fastmail.com', withoutDmarc, relay, forged, RECEIVED, FROM),
-    ).toBeNull();
+    expect(await verdict('imap.fastmail.com', withoutDmarc, relay, forged, RECEIVED, FROM)).toEqual(
+      FAILED,
+    );
   });
 
   it("refuses when the provider's header is not on top", async () => {
     const sender = 'Authentication-Results: sender.example; dmarc=pass header.from=news.example';
-    expect(await verdict('imap.gmail.com', sender, GMAIL_PASS, FROM)).toBeNull();
-    expect(await verdict('outlook.office365.com', sender, MICROSOFT_PASS, FROM)).toBeNull();
-    expect(await verdict('imap.fastmail.com', sender, FASTMAIL_PASS, FROM)).toBeNull();
+    expect(await verdict('imap.gmail.com', sender, GMAIL_PASS, FROM)).toEqual(FAILED);
+    expect(await verdict('outlook.office365.com', sender, MICROSOFT_PASS, FROM)).toEqual(FAILED);
+    expect(await verdict('imap.fastmail.com', sender, FASTMAIL_PASS, FROM)).toEqual(FAILED);
   });
 
   it('refuses a provider id it does not own', async () => {
     const lookalike = GMAIL_PASS.replace('mx.google.com', 'mx.google.com.evil.example');
-    expect(await verdict('imap.gmail.com', lookalike, FROM)).toBeNull();
+    expect(await verdict('imap.gmail.com', lookalike, FROM)).toEqual(FAILED);
     const fastmailLookalike = FASTMAIL_PASS.replaceAll(
       'phl-mx-04.messagingengine.com',
       'mx.messagingengine.com.evil.example',
     );
-    expect(await verdict('imap.fastmail.com', fastmailLookalike, FROM)).toBeNull();
+    expect(await verdict('imap.fastmail.com', fastmailLookalike, FROM)).toEqual(FAILED);
   });
 
   it('refuses two From headers, or two authors in one', async () => {
     expect(
       await verdict('imap.gmail.com', GMAIL_PASS, FROM, 'From: someone@other.example'),
-    ).toBeNull();
+    ).toEqual(FAILED);
     expect(
       await verdict('imap.gmail.com', GMAIL_PASS, 'From: a@news.example, b@other.example'),
-    ).toBeNull();
-    expect(await verdict('imap.gmail.com', GMAIL_PASS)).toBeNull();
+    ).toEqual(FAILED);
+    expect(await verdict('imap.gmail.com', GMAIL_PASS)).toEqual(FAILED);
   });
 
   it('reads nothing hidden in a comment', async () => {
     const hidden =
       'Authentication-Results: mx.google.com; spf=pass (x; dmarc=pass header.from=news.example) smtp.mailfrom=news.example';
-    expect(await verdict('imap.gmail.com', hidden, FROM)).toBeNull();
+    expect(await verdict('imap.gmail.com', hidden, FROM)).toEqual(FAILED);
   });
 });
 
-describe('authenticatedSenderOf, what a sender can smuggle in', () => {
+describe('senderCheckOf, what a sender can smuggle in', () => {
   it('refuses a comment that a quoted local part closes early', async () => {
     // A MAIL FROM copied verbatim into the provider's spf comment, carrying a `)` in quotes.
     const smuggled = `Authentication-Results: mx.google.com;
        spf=pass (google.com: domain of "a); dmarc=pass header.from=news.example; ("@evil.example designates 192.0.2.9 as permitted sender) smtp.mailfrom="a"@evil.example;
        dmarc=fail (p=REJECT sp=REJECT dis=NONE) header.from=news.example`;
-    expect(await verdict('imap.gmail.com', smuggled, FROM)).toBeNull();
+    expect(await verdict('imap.gmail.com', smuggled, FROM)).toEqual(FAILED);
   });
 
   it('refuses a run carrying more than one dmarc result, whichever comes first', async () => {
@@ -178,18 +191,16 @@ describe('authenticatedSenderOf, what a sender can smuggle in', () => {
       'dmarc=pass',
       'dmarc=pass header.from=news.example; dmarc=fail',
     );
-    expect(await verdict('imap.gmail.com', twice, FROM)).toBeNull();
+    expect(await verdict('imap.gmail.com', twice, FROM)).toEqual(FAILED);
     const forged =
       'Authentication-Results: phl-mx-04.messagingengine.com; dmarc=pass header.from=news.example';
-    expect(await verdict('imap.fastmail.com', FASTMAIL_PASS, forged, FROM)).toBeNull();
+    expect(await verdict('imap.fastmail.com', FASTMAIL_PASS, forged, FROM)).toEqual(FAILED);
   });
 
   it('refuses when the From the reader shows is another address than the one authenticated', async () => {
     const headers = await headersOf([GMAIL_PASS, FROM].join('\n'));
-    expect(authenticatedSenderOf(headers, 'imap.gmail.com', 'other@news.example')).toBeNull();
-    expect(authenticatedSenderOf(headers, 'imap.gmail.com', 'DIGEST@news.example')).toBe(
-      'Digest@News.Example',
-    );
+    expect(senderCheckOf(headers, 'imap.gmail.com', 'other@news.example')).toEqual(FAILED);
+    expect(senderCheckOf(headers, 'imap.gmail.com', 'DIGEST@news.example')).toEqual(VERIFIED);
   });
 });
 

@@ -7,6 +7,8 @@ import {
   forgetSender,
   hasConsent,
   IMAGE_CONSENTS_RECORD_TYPE,
+  IMAGE_SENDER_RECORD_TYPE,
+  isLoadedByTrust,
   listTrustedSenders,
   MAX_REMEMBERED_CONSENTS,
   readConsents,
@@ -136,16 +138,78 @@ describe('forgetConsent', () => {
 describe('trusted senders', () => {
   it('stores one record per address, keyed case-insensitively, and forgets it', async () => {
     const { store } = fakeRecordStore();
-    await trustSender(store, { address: 'News@Sender.example', addedAt: 2 });
-    await trustSender(store, { address: 'first@a.example', addedAt: 1 });
-    await trustSender(store, { address: 'news@sender.EXAMPLE', addedAt: 3 });
+    await trustSender(store, { address: 'News@Sender.example', addedAt: 2, isVerifiedOnly: true });
+    await trustSender(store, { address: 'first@a.example', addedAt: 1, isVerifiedOnly: true });
+    await trustSender(store, { address: 'news@sender.EXAMPLE', addedAt: 3, isVerifiedOnly: true });
     expect(await listTrustedSenders(store)).toEqual([
-      { address: 'first@a.example', addedAt: 1 },
-      { address: 'news@sender.EXAMPLE', addedAt: 3 },
+      { address: 'first@a.example', addedAt: 1, isVerifiedOnly: true },
+      { address: 'News@Sender.example', addedAt: 2, isVerifiedOnly: true },
     ]);
     await forgetSender(store, 'NEWS@sender.example');
     expect((await listTrustedSenders(store)).map(sender => senderKeyOf(sender.address))).toEqual([
       'first@a.example',
     ]);
+  });
+
+  it('reads a record written before unverified trust existed as verified-only', async () => {
+    const { store } = fakeRecordStore();
+    await store.put({
+      type: IMAGE_SENDER_RECORD_TYPE,
+      naturalKey: 'news@sender.example',
+      plaintext: JSON.stringify({ address: 'news@sender.example', addedAt: 1 }),
+    });
+    expect(await listTrustedSenders(store)).toEqual([
+      { address: 'news@sender.example', addedAt: 1, isVerifiedOnly: true },
+    ]);
+  });
+
+  it('widens a verified-only trust when the address is trusted again through the warning', async () => {
+    const { store } = fakeRecordStore();
+    await trustSender(store, { address: 'news@sender.example', addedAt: 1, isVerifiedOnly: true });
+    await trustSender(store, { address: 'News@sender.example', addedAt: 2, isVerifiedOnly: false });
+    expect(await listTrustedSenders(store)).toEqual([
+      { address: 'News@sender.example', addedAt: 2, isVerifiedOnly: false },
+    ]);
+  });
+
+  it('keeps a wider trust when a device that has not seen it trusts the address verified-only', async () => {
+    const { store } = fakeRecordStore();
+    await trustSender(store, { address: 'news@sender.example', addedAt: 1, isVerifiedOnly: false });
+    const held = await trustSender(store, {
+      address: 'news@sender.example',
+      addedAt: 2,
+      isVerifiedOnly: true,
+    });
+    const kept = { address: 'news@sender.example', addedAt: 1, isVerifiedOnly: false };
+    expect(held).toEqual(kept);
+    expect(await listTrustedSenders(store)).toEqual([kept]);
+  });
+});
+
+describe('isLoadedByTrust', () => {
+  const sender = (isVerifiedOnly: boolean) => ({
+    address: 'news@sender.example',
+    addedAt: 1,
+    isVerifiedOnly,
+  });
+  const VERIFIED = { status: 'verified' } as const;
+  const UNCHECKED = { status: 'unchecked', imapHost: 'imap.example.org' } as const;
+  const FAILED = { status: 'failed' } as const;
+
+  it('loads nothing from a sender nobody trusted', () => {
+    expect(isLoadedByTrust(undefined, VERIFIED)).toBe(false);
+  });
+
+  it('loads only verified messages under a verified-only trust', () => {
+    expect(isLoadedByTrust(sender(true), VERIFIED)).toBe(true);
+    expect(isLoadedByTrust(sender(true), UNCHECKED)).toBe(false);
+    expect(isLoadedByTrust(sender(true), FAILED)).toBe(false);
+    expect(isLoadedByTrust(sender(true), undefined)).toBe(false);
+  });
+
+  it('loads every message showing the address under a trust given through the warning', () => {
+    for (const check of [VERIFIED, UNCHECKED, FAILED, undefined]) {
+      expect(isLoadedByTrust(sender(false), check)).toBe(true);
+    }
   });
 });

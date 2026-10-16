@@ -125,3 +125,22 @@ it('keeps a message stopped while its earlier consent is still on its way, and i
   expect(tab.remoteImages().isConsented(consentTo(1))).toBe(false);
   await tab.unmount();
 });
+
+it('remembers how a trust was given, and widens a verified-only one given again through the warning', async () => {
+  const { store } = fakeRecordStore();
+  const tab = await mount(store);
+  await settle();
+  await act(() => tab.remoteImages().trust({ address: 'News@x.example', isVerifiedOnly: true }));
+  expect(tab.remoteImages().trustOf('news@x.example')?.isVerifiedOnly).toBe(true);
+
+  await act(() => tab.remoteImages().trust({ address: 'news@x.example', isVerifiedOnly: false }));
+  expect(tab.remoteImages().trustedSenders).toHaveLength(1);
+  expect(tab.remoteImages().trustOf('NEWS@x.example')?.isVerifiedOnly).toBe(false);
+  await tab.unmount();
+
+  // Another session reads the widened record back from the vault.
+  const next = await mount(store);
+  await settle();
+  expect(next.remoteImages().trustOf('news@x.example')?.isVerifiedOnly).toBe(false);
+  await next.unmount();
+});

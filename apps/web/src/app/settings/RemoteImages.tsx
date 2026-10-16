@@ -19,7 +19,7 @@ export const RemoteImages = () => {
     <SettingsPane title="Remote images">
       <PageSection
         label="Always load from"
-        note="Pictures in mail from these senders load without asking, but only when your provider confirms the message really came from that address. Add a sender from one of their messages."
+        note="Images from these senders load without asking once verified. Unverified ones load either way. Add one from any of their messages."
         error={error}
       >
         {isReady && trustedSenders.length === 0 && (
@@ -32,7 +32,14 @@ export const RemoteImages = () => {
               className="flex items-center gap-3 border-b border-rule-soft py-2.5"
             >
               <span className="min-w-0 flex-1">
-                <span className="block truncate text-base text-paper">{sender.address}</span>
+                <span className="flex min-w-0 items-center gap-2">
+                  <span className="truncate text-base text-paper">{sender.address}</span>
+                  {!sender.isVerifiedOnly && (
+                    <span className="shrink-0 bg-ink-hover px-1 py-px font-mono text-[10px] tracking-[0.08em] text-paper-dim uppercase">
+                      Unverified
+                    </span>
+                  )}
+                </span>
                 <span className="mt-0.5 block font-mono text-2xs text-paper-faint">
                   Added {fullDate(sender.addedAt)}
                 </span>

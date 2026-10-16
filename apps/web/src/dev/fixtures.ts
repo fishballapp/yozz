@@ -71,14 +71,15 @@ export const DEMO_ADDRESSES: readonly AddressRecord[] = [
   {
     address: 'hello@stillwater.example',
     senderName: 'Stillwater',
+    // A provider YOZZ cannot check senders on, so its mail shows the unverified "Always from".
     smtp: {
-      host: 'smtp.fastmail.com',
+      host: 'smtp.migadu.com',
       port: 465,
       username: 'hello@stillwater.example',
       password: DEMO_PASSWORD,
     },
     imap: {
-      host: 'imap.fastmail.com',
+      host: 'imap.migadu.com',
       port: 993,
       username: 'hello@stillwater.example',
       password: DEMO_PASSWORD,
@@ -180,9 +181,9 @@ const AUTHORED: readonly Thread[] = [
         toAddress: 'jason@jyu.example',
         to: [{ address: 'jason@jyu.example' }],
         at: ago(4 * HOUR),
-        // The one fixture with an HTML body, from a sender the provider authenticated.
+        // An HTML body from a sender the provider verified.
         hasTextPart: true,
-        authenticatedSender: 'hello@duneanddown.example',
+        senderCheck: { status: 'verified' },
         body: [
           'Our summer savings end tonight. Save up to 30% on sleep favourites, and spend over £49 for a free pack of tealights.',
         ],
@@ -204,6 +205,42 @@ const AUTHORED: readonly Thread[] = [
       <li>One size fits all.</li>
     </ul>
     <p style="margin:20px 0 0"><a href="https://duneanddown.example/pillow" style="color:#232946">Shop now →</a></p>
+  </div>
+</div>`,
+      },
+    ],
+  },
+  {
+    id: 't-hollis',
+    accounts: ['jason@northlane.example'],
+    subject: 'Your beans ship tomorrow',
+    isUnread: true,
+    isReplied: false,
+    isStarred: false,
+    messages: [
+      {
+        id: 'm-hollis-1',
+        fromName: 'Hollis Coffee Roasters',
+        fromAddress: 'orders@hollisroasters.example',
+        toAddress: 'jason@northlane.example',
+        to: [{ address: 'jason@northlane.example' }],
+        at: ago(4 * HOUR + 40 * MINUTE),
+        // Sent through a mailing service the shop never aligned, so the provider's check failed.
+        hasTextPart: true,
+        senderCheck: { status: 'failed' },
+        body: [
+          'Order #H-20931 is roasted and packed. 250 g Kiambu AA, whole bean, ships tomorrow by Royal Mail Tracked 48.',
+        ],
+        html: `<div style="margin:0 auto;max-width:520px;font-family:Helvetica,Arial,sans-serif;color:#2b2118">
+  <img src="https://hollisroasters.example/email/header.png" alt="Hollis Coffee Roasters" width="520" height="120" style="width:100%;height:auto">
+  <div style="padding:24px">
+    <h1 style="margin:0;font-size:22px">Roasted, packed, ready to go</h1>
+    <p style="margin:12px 0 0;font-size:14px;line-height:1.6">Order #H-20931 left the roaster this morning and ships tomorrow by Royal Mail Tracked 48.</p>
+    <table style="margin-top:20px;width:100%;font-size:14px;border-collapse:collapse">
+      <tr><td style="padding:8px 0;border-top:1px solid #e6dccf">Kiambu AA · 250 g · whole bean</td><td style="padding:8px 0;border-top:1px solid #e6dccf;text-align:right">£11.50</td></tr>
+      <tr><td style="padding:8px 0;border-top:1px solid #e6dccf">Shipping</td><td style="padding:8px 0;border-top:1px solid #e6dccf;text-align:right">£3.20</td></tr>
+    </table>
+    <p style="margin:20px 0 0;font-size:13px;color:#6b5d50">Rest the beans four days after roasting for the best cup.</p>
   </div>
 </div>`,
       },
@@ -511,6 +548,38 @@ const AUTHORED: readonly Thread[] = [
           'Hi — I bought the pro upgrade on my phone, then tapped restore purchases on my iPad and it charged me a second time.',
           'Order numbers are MT7QK9L2XZ and MT7QM4P8RB. Could you refund the second one? Happy to send screenshots if that helps.',
         ],
+      },
+    ],
+  },
+  {
+    id: 't-indie-monday',
+    accounts: ['hello@stillwater.example'],
+    subject: 'Issue #212 — the pricing page nobody reads',
+    isUnread: true,
+    isReplied: false,
+    isStarred: false,
+    messages: [
+      {
+        id: 'm-indie-monday-1',
+        fromName: 'Indie Dev Monday',
+        fromAddress: 'hello@indiedevmonday.example',
+        toAddress: 'hello@stillwater.example',
+        to: [{ address: 'hello@stillwater.example' }],
+        at: ago(14 * HOUR),
+        hasTextPart: true,
+        senderCheck: { status: 'unchecked', imapHost: 'imap.migadu.com' },
+        body: [
+          'This week: why most visitors skip your pricing page, three founders on charging from day one, and a tool for screenshotting App Store listings.',
+        ],
+        html: `<div style="margin:0 auto;max-width:560px;font-family:-apple-system,Segoe UI,sans-serif;color:#1a1a1a">
+  <img src="https://indiedevmonday.example/banner/212.png" alt="Indie Dev Monday #212" width="560" height="140" style="width:100%;height:auto">
+  <div style="padding:20px 24px">
+    <h1 style="margin:0;font-size:24px">The pricing page nobody reads</h1>
+    <p style="margin:12px 0 0;font-size:15px;line-height:1.6">Most visitors never scroll past the first plan. Three founders on what they put above the fold instead, and what it did to trials.</p>
+    <p style="margin:20px 0 0;font-size:15px;line-height:1.6"><strong>Also this week:</strong> charging from day one, a tidy way to screenshot App Store listings, and a launch checklist that fits on a postcard.</p>
+    <p style="margin:20px 0 0"><a href="https://indiedevmonday.example/212" style="color:#4b3fd1">Read the issue →</a></p>
+  </div>
+</div>`,
       },
     ],
   },

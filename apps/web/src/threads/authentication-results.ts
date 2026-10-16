@@ -1,5 +1,6 @@
 import { addressParser } from 'postal-mime';
 import { senderKeyOf } from './remote-images';
+import type { SenderCheck } from './thread';
 
 /**
  * Whether the person's own mail provider vouched for a message's From address: DMARC passed,
@@ -198,26 +199,26 @@ const singleFrom = (headers: readonly MailHeader[]): string | null => {
 };
 
 /**
- * The From address, when the account's provider says DMARC passed for its domain; null whenever
- * that cannot be established — an unknown provider, no header of its own on top, any other verdict,
- * a `header.from` naming another domain, or a From that is not `shownFrom`, the address the reader
- * shows (IMAP's ENVELOPE, parsed elsewhere), so images never load for a sender other than the one
- * on screen.
+ * The account's provider's word on a message's From. `shownFrom` is the address the reader shows
+ * (IMAP's ENVELOPE, parsed elsewhere); `SenderCheck` says what each answer means.
  */
-export const authenticatedSenderOf = (
+export const senderCheckOf = (
   headers: readonly MailHeader[],
   imapHost: string,
   shownFrom: string,
-): string | null => {
+): SenderCheck => {
   const provider = providerOf(imapHost);
-  if (provider === undefined) return null;
+  if (provider === undefined) return { status: 'unchecked', imapHost };
+  const failed = { status: 'failed' } as const;
   const from = singleFrom(headers);
-  if (from === null || senderKeyOf(from) !== senderKeyOf(shownFrom)) return null;
+  if (from === null || senderKeyOf(from) !== senderKeyOf(shownFrom)) return failed;
   const stamped = headers
     .filter(header => header.key === 'authentication-results')
     .map(header => parseAuthenticationResults(header.value));
   const dmarc = providerDmarc(provider, stamped);
-  if (dmarc?.result !== 'pass') return null;
+  if (dmarc?.result !== 'pass') return failed;
   const fromDomain = from.slice(from.lastIndexOf('@') + 1).toLowerCase();
-  return dmarc.properties['header.from']?.toLowerCase() === fromDomain ? from : null;
+  return dmarc.properties['header.from']?.toLowerCase() === fromDomain
+    ? { status: 'verified' }
+    : failed;
 };

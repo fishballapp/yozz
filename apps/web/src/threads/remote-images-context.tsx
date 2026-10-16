@@ -36,9 +36,12 @@ type RemoteImagesValue = {
   readonly unconsent: (consent: ImageConsent) => Promise<void>;
   /** Oldest first. */
   readonly trustedSenders: readonly TrustedSender[];
-  readonly isTrusted: (address: string) => boolean;
-  /** Each resolves once the vault has it, and rejects, changing nothing, when it does not. */
-  readonly trust: (address: string) => Promise<void>;
+  readonly trustOf: (address: string) => TrustedSender | undefined;
+  /**
+   * Each resolves once the vault has it, and rejects, changing nothing, when it does not. A trust
+   * given again replaces the address's record, so one given through the warning widens it.
+   */
+  readonly trust: (sender: Pick<TrustedSender, 'address' | 'isVerifiedOnly'>) => Promise<void>;
   readonly forget: (address: string) => Promise<void>;
 };
 
@@ -193,9 +196,9 @@ export const RemoteImagesStoreProvider = ({
   );
 
   const trust = useCallback(
-    async (address: string) => {
-      const sender = { address, addedAt: Date.now() };
-      if (store !== null) await trustSender(store, sender);
+    async ({ address, isVerifiedOnly }: Pick<TrustedSender, 'address' | 'isVerifiedOnly'>) => {
+      const asked = { address, addedAt: Date.now(), isVerifiedOnly };
+      const sender = store === null ? asked : await trustSender(store, asked);
       updateFor(store, current => ({ ...current, senders: withSender(current.senders, sender) }));
     },
     [store, updateFor],
@@ -223,8 +226,8 @@ export const RemoteImagesStoreProvider = ({
       consent,
       unconsent,
       trustedSenders: senders,
-      isTrusted: address =>
-        senders.some(sender => senderKeyOf(sender.address) === senderKeyOf(address)),
+      trustOf: address =>
+        senders.find(sender => senderKeyOf(sender.address) === senderKeyOf(address)),
       trust,
       forget,
     }),

@@ -314,7 +314,7 @@ const MessageBody = ({
           messageId={message.id}
           fromName={message.fromName}
           fromAddress={message.fromAddress}
-          authenticatedSender={message.authenticatedSender}
+          senderCheck={message.senderCheck}
           inlineImagesTruncated={message.inlineImagesTruncated ?? false}
           fallback={<div className="max-w-[68ch]">{fallback}</div>}
         />

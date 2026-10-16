@@ -17,6 +17,18 @@ export type Recipient = { readonly name?: string; readonly address: string };
 /** A received body is fetched when the message is opened. Absent means loaded. */
 export type BodyStatus = 'pending' | 'loading' | 'failed';
 
+/**
+ * Whether the receiving account's provider vouched for a message's From (`senderCheckOf`).
+ * `unchecked` is a blind spot: the provider is not one YOZZ can read, so it said nothing either
+ * way. `failed` is a forgery signal: the provider's verdict is missing or another, its
+ * `header.from` names another domain, the From is not one mailbox, or it is not the address the
+ * reader shows, so a verdict never vouches for a sender other than the one on screen.
+ */
+export type SenderCheck =
+  | { readonly status: 'verified' }
+  | { readonly status: 'unchecked'; readonly imapHost: string }
+  | { readonly status: 'failed' };
+
 export type Message = {
   id: string;
   fromName: string;
@@ -36,11 +48,8 @@ export type Message = {
   hasTextPart?: boolean;
   /** A CID allocation ceiling left one or more inline images unavailable. */
   inlineImagesTruncated?: boolean;
-  /**
-   * The From address, when the receiving account's own provider says DMARC passed for its domain
-   * (`authentication-results.ts`). Absent means unauthenticated, never unknown-but-fine.
-   */
-  authenticatedSender?: string;
+  /** Whether the receiving account's own provider vouched for From. Read with the body. */
+  senderCheck?: SenderCheck;
   bodyStatus?: BodyStatus;
   /** RFC822.SIZE from the summary fetch; checked before requesting the raw message. */
   rawSize?: number;

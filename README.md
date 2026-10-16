@@ -52,7 +52,8 @@ and senders you load remote images for. All are ciphertext under your key, like 
 passwords.
 
 Received HTML renders in a sandboxed frame with no network, remote images off until you ask (once
-per message, or always for a sender, when your provider confirms the mail really came from them),
+per message, or always for a sender: in one click when your provider confirms the mail really came
+from them, after a warning when it can't),
 and a switch to the sender's plain-text part. Inbox and Sent are threaded together and cached on the
 device; nothing is synced through us.
 

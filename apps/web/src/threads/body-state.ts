@@ -10,12 +10,7 @@ export type BodyOutcome =
   | { readonly status: 'failed' }
   | ({ readonly status: 'loaded' } & Pick<
       Message,
-      | 'body'
-      | 'html'
-      | 'hasTextPart'
-      | 'inlineImagesTruncated'
-      | 'attachments'
-      | 'authenticatedSender'
+      'body' | 'html' | 'hasTextPart' | 'inlineImagesTruncated' | 'attachments' | 'senderCheck'
     >);
 
 export type BodyEntry = { readonly status: 'loading' } | BodyOutcome;

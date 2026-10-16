@@ -27,8 +27,11 @@ export const ConfirmDialog = ({
   confirmLabel: string;
   /** What the way out is called when it is a decision of its own, such as Skip. */
   cancelLabel?: string;
-  /** `danger` for a destructive question, `primary` for one that merely wants a decision. */
-  confirmVariant?: 'danger' | 'primary';
+  /**
+   * `danger` for a destructive question, `primary` for one that merely wants a decision, `ghost`
+   * for one the app advises against, so Confirm is no louder than the way out.
+   */
+  confirmVariant?: 'danger' | 'primary' | 'ghost';
   /** False keeps Confirm disabled, and Enter with it, until something in `children` is answered. */
   isConfirmEnabled?: boolean;
   busyLabel: string;

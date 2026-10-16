@@ -48,7 +48,7 @@ const Reader = ({
       messageId="mid/<m1@sender.example>"
       fromName="Sender"
       fromAddress="news@sender.example"
-      authenticatedSender={undefined}
+      senderCheck={undefined}
       inlineImagesTruncated={false}
       fallback={null}
       {...props}
@@ -330,44 +330,204 @@ describe('HtmlBody remembered consent', () => {
     reader.container.remove();
   });
 
-  it('offers "always" only for an authenticated sender, and trusting one loads its mail', async () => {
-    const { store, rows, key } = fakeRecordStore();
-    const unauthenticated = await mountWithheld(html, { store });
-    await settle();
-    expect(unauthenticated.button('Always from')).toBeUndefined();
-    unauthenticated.container.remove();
+  const VERIFIED = { status: 'verified' } as const;
+  const FAILED = { status: 'failed' } as const;
+  const UNCHECKED = { status: 'unchecked', imapHost: 'imap.example.org' } as const;
+  const senderRecord = (rows: Map<string, { plaintext: string }>, id: string) =>
+    JSON.parse(rows.get(id)?.plaintext ?? 'null');
+  const dialogText = () => document.querySelector('[role="alertdialog"]')?.textContent ?? '';
 
-    const authenticated = await mountWithheld(html, {
-      store,
-      authenticatedSender: 'news@sender.example',
+  it('trusts a verified sender in one click, for their verified mail only', async () => {
+    const { store, rows, key } = fakeRecordStore();
+    const unknown = await mountWithheld(html, { store });
+    await settle();
+    // Nothing known about this From: nothing to offer.
+    expect(unknown.button('Always from')).toBeUndefined();
+    unknown.container.remove();
+
+    const verified = await mountWithheld(html, { store, senderCheck: VERIFIED });
+    await settle();
+    await act(async () => verified.button('Always from news@sender.example')?.click());
+    await settle();
+    expect(document.querySelector('[role="alertdialog"]')).toBeNull();
+    expect(senderRecord(rows, key(IMAGE_SENDER_RECORD_TYPE, 'news@sender.example'))).toMatchObject({
+      address: 'news@sender.example',
+      isVerifiedOnly: true,
     });
-    await settle();
-    await act(async () => authenticated.button('Always from news@sender.example')?.click());
-    await settle();
-    expect(rows.has(key(IMAGE_SENDER_RECORD_TYPE, 'news@sender.example'))).toBe(true);
-    expect(loaded(authenticated.srcdoc())).toBe(true);
-    expect(authenticated.container.textContent).toContain(
+    expect(loaded(verified.srcdoc())).toBe(true);
+    expect(verified.container.textContent).toContain(
       'Images from news@sender.example always load.',
     );
-    authenticated.container.remove();
+    verified.container.remove();
 
-    // Another message from that sender, authenticated: loads unasked, whatever the case.
+    // Another verified message from that sender loads unasked, whatever the case.
     const next = await mountWithheld(html, {
       store,
       messageId: 'mid/<m2@sender.example>',
-      authenticatedSender: 'News@Sender.Example',
+      fromAddress: 'News@Sender.Example',
+      senderCheck: VERIFIED,
     });
     await settle();
     expect(loaded(next.srcdoc())).toBe(true);
     next.container.remove();
 
-    // The same address, unauthenticated, is a forgery as far as the reader can tell.
-    const forged = await mountWithheld(html, { store, messageId: 'mid/<m3@sender.example>' });
+    // The same address unverified could be a forgery: it asks, and "always" goes through the warning.
+    const forged = await mountWithheld(html, {
+      store,
+      messageId: 'mid/<m3@sender.example>',
+      senderCheck: FAILED,
+    });
     await settle();
     expect(loaded(forged.srcdoc())).toBe(false);
     expect(forged.button('Load remote images')).toBeDefined();
-    expect(forged.button('Always from')).toBeUndefined();
+    await act(async () => forged.button('Always from news@sender.example')?.click());
+    expect(dialogText()).toContain('This message may be forged');
     forged.container.remove();
+  });
+
+  it('warns before trusting a sender whose message did not pass, and Cancel trusts nobody', async () => {
+    const { store, rows, key } = fakeRecordStore();
+    const reader = await mountWithheld(html, { store, senderCheck: FAILED });
+    await settle();
+    await act(async () => reader.button('Always from news@sender.example')?.click());
+    expect(dialogText()).toContain('This message may be forged');
+    expect(dialogText()).toContain('It failed sender verification.');
+    expect(dialogText()).toContain('Fakes from this address would load images too.');
+    // The safer answer is not outshone by the risky one.
+    expect(reader.dialogButton('Always load')?.className).not.toContain('bg-signal');
+    await act(async () => reader.dialogButton('Cancel')?.click());
+    await settle();
+    expect(rows.has(key(IMAGE_SENDER_RECORD_TYPE, 'news@sender.example'))).toBe(false);
+    expect(loaded(reader.srcdoc())).toBe(false);
+
+    await act(async () => reader.button('Always from news@sender.example')?.click());
+    await act(async () => reader.dialogButton('Always load')?.click());
+    await settle();
+    expect(senderRecord(rows, key(IMAGE_SENDER_RECORD_TYPE, 'news@sender.example'))).toMatchObject({
+      isVerifiedOnly: false,
+    });
+    expect(loaded(reader.srcdoc())).toBe(true);
+    expect(reader.container.textContent).toContain(
+      'Images from news@sender.example always load, verified or not.',
+    );
+    reader.container.remove();
+
+    // Every message showing that From now loads, verified or not.
+    for (const senderCheck of [VERIFIED, UNCHECKED, FAILED]) {
+      const next = await mountWithheld(html, {
+        store,
+        messageId: `mid/<${senderCheck.status}@sender.example>`,
+        senderCheck,
+      });
+      await settle();
+      expect(loaded(next.srcdoc())).toBe(true);
+      next.container.remove();
+    }
+  });
+
+  it('keeps the warning open with the reason when the save fails, and saves on a retry', async () => {
+    const { store, rows, key } = fakeRecordStore();
+    let isOffline = true;
+    const flaky: RecordStore = {
+      ...store,
+      put: async input => {
+        if (isOffline && input.type === IMAGE_SENDER_RECORD_TYPE) {
+          throw new TypeError('Failed to fetch');
+        }
+        return store.put(input);
+      },
+    };
+    const reader = await mountWithheld(html, { store: flaky, senderCheck: FAILED });
+    await settle();
+    problems.length = 0;
+    await act(async () => reader.button('Always from news@sender.example')?.click());
+    await act(async () => reader.dialogButton('Always load')?.click());
+    await settle();
+    expect(document.querySelector('[role="alertdialog"] [role="alert"]')?.textContent).toContain(
+      'Sender not saved.',
+    );
+    // Said where the person is looking, not again in a toast.
+    expect(problems).toEqual([]);
+    expect(rows.has(key(IMAGE_SENDER_RECORD_TYPE, 'news@sender.example'))).toBe(false);
+    expect(loaded(reader.srcdoc())).toBe(false);
+
+    isOffline = false;
+    await act(async () => reader.dialogButton('Always load')?.click());
+    await settle();
+    expect(document.querySelector('[role="alertdialog"]')).toBeNull();
+    expect(rows.has(key(IMAGE_SENDER_RECORD_TYPE, 'news@sender.example'))).toBe(true);
+    expect(loaded(reader.srcdoc())).toBe(true);
+    reader.container.remove();
+  });
+
+  it("names the provider it can't check senders on, and asks with a plain decision", async () => {
+    const reader = await mountWithheld(html, { senderCheck: UNCHECKED });
+    await act(async () => reader.button('Always from news@sender.example')?.click());
+    expect(dialogText()).toContain('Always load images from news@sender.example?');
+    expect(dialogText()).toContain("YOZZ can't verify senders on imap.example.org.");
+    expect(dialogText()).not.toContain('forged');
+    expect(reader.dialogButton('Always load')?.className).toContain('bg-signal');
+    await act(async () => reader.dialogButton('Cancel')?.click());
+    reader.container.remove();
+  });
+
+  it('widens a verified-only trust given again through the warning', async () => {
+    const { store, rows, key } = fakeRecordStore();
+    rows.set(key(IMAGE_SENDER_RECORD_TYPE, 'news@sender.example'), {
+      // A record from before the warning existed: verified-only.
+      plaintext: JSON.stringify({ address: 'news@sender.example', addedAt: 1 }),
+      revision: 1,
+    });
+    const reader = await mountWithheld(html, { store, senderCheck: UNCHECKED });
+    await settle();
+    expect(loaded(reader.srcdoc())).toBe(false);
+    await act(async () => reader.button('Always from news@sender.example')?.click());
+    await act(async () => reader.dialogButton('Always load')?.click());
+    await settle();
+    expect(senderRecord(rows, key(IMAGE_SENDER_RECORD_TYPE, 'news@sender.example'))).toMatchObject({
+      isVerifiedOnly: false,
+    });
+    expect(loaded(reader.srcdoc())).toBe(true);
+    reader.container.remove();
+  });
+
+  it('still offers "always" once a message is loaded by hand, and not once the sender is trusted', async () => {
+    const { store, rows, key } = fakeRecordStore();
+    const reader = await mountWithheld(html, { store, senderCheck: VERIFIED });
+    await settle();
+    await act(async () => reader.button('Load remote images')?.click());
+    await settle();
+    expect(loaded(reader.srcdoc())).toBe(true);
+    expect(reader.button('Load remote images')).toBeUndefined();
+    expect(reader.container.textContent).toContain('Just this message.');
+    await act(async () => reader.button('Always from news@sender.example')?.click());
+    await settle();
+    expect(rows.has(key(IMAGE_SENDER_RECORD_TYPE, 'news@sender.example'))).toBe(true);
+    expect(reader.container.textContent).not.toContain('Just this message.');
+    expect(reader.button('Always from')).toBeUndefined();
+    expect(reader.button('Stop')).toBeDefined();
+    reader.container.remove();
+
+    // Unverified, the offer after loading goes through the same warning.
+    const unverified = await mountWithheld(html, {
+      store,
+      fromAddress: 'other@sender.example',
+      senderCheck: FAILED,
+    });
+    await settle();
+    await act(async () => unverified.button('Load remote images')?.click());
+    await settle();
+    await act(async () => unverified.button('Always from other@sender.example')?.click());
+    expect(dialogText()).toContain('This message may be forged');
+    await act(async () => unverified.dialogButton('Cancel')?.click());
+    unverified.container.remove();
+  });
+
+  it('draws Stop as a button, not as a word in the sentence', async () => {
+    const reader = await mountWithheld(html, { senderCheck: VERIFIED });
+    await act(async () => reader.button('Always from news@sender.example')?.click());
+    expect(reader.button('Stop')?.className).toContain('bg-ink-hover');
+    reader.container.remove();
   });
 
   it('stops trusting a sender from the message it loaded, and blocks that message in place', async () => {
@@ -376,7 +536,7 @@ describe('HtmlBody remembered consent', () => {
     const reader = await mountWithheld(html, {
       store,
       messageId: 'mid/<m4@sender.example>',
-      authenticatedSender: 'news@sender.example',
+      senderCheck: VERIFIED,
     });
     await settle();
     await act(async () => reader.button('Always from news@sender.example')?.click());
@@ -416,7 +576,7 @@ describe('HtmlBody remembered consent', () => {
     const reader = await mountWithheld(html, {
       store: refusingConsents,
       messageId: 'mid/<m6@sender.example>',
-      authenticatedSender: 'news@sender.example',
+      senderCheck: VERIFIED,
     });
     await settle();
     problems.length = 0;
