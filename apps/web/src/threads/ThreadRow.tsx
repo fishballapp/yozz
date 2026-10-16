@@ -290,7 +290,8 @@ export const ThreadRow = ({
         (() => {
           if (isBarred) return 'bg-select text-ink';
           if (isChecked) return 'bg-signal-wash';
-          return cn('hover:bg-ink-hover', isUnread && 'bg-ink-raised');
+          // No hover ground, as in Gmail: beside unread's raised ground it read as a second state.
+          return isUnread && 'bg-ink-raised';
         })(),
       )}
     >

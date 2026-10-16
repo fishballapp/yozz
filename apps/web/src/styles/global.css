@@ -39,10 +39,10 @@
   --rule-soft: oklch(0.243 0.007 75);
 
   /* ink on ink — warm off-white, three steps */
-  /* Three steps of ink-on-ink. The binding surface for contrast is --ink-hover, NOT --ink: a
-     hovered row is the lightest ground any of this text ever sits on, so a value tuned against
-     --ink alone gets worse exactly when the pointer is on it. Measured against --ink-hover:
-     --paper 14.9:1, --paper-dim 6.4:1, --paper-faint 4.96:1. All clear AA at 11px. */
+  /* Three steps of ink-on-ink. The binding surface for contrast is --ink-hover, NOT --ink: the
+     active rail row, a highlighted select item and a secondary button are the lightest ground any
+     of this text sits on, so a value tuned against --ink alone gets worse there. Measured against
+     --ink-hover: --paper 14.9:1, --paper-dim 6.4:1, --paper-faint 4.96:1. All clear AA at 11px. */
   --paper: oklch(0.945 0.008 85);
   --paper-dim: oklch(0.706 0.01 82);
   --paper-faint: oklch(0.64 0.01 80);
@@ -72,7 +72,7 @@
   --signal-ink: oklch(0.18 0.035 140);
   --signal-well: oklch(0.3 0.05 140); /* faint signal wash — the send-only chip, nothing else */
   /* The ground of a ticked row: a step below --signal-well so --paper-faint still reads on it
-     (4.56:1; on --signal-well it falls to 3.98:1), and green so ticked never reads as hovered. */
+     (4.56:1; on --signal-well it falls to 3.98:1), and green so ticked never reads as unread (--ink-raised). */
   --signal-wash: oklch(0.26 0.04 140);
   /* The accent as it survives --select, and the only thing on it is a set star on a selected row.
      3.37:1 there, and still C 0.177 — a proper green, not a drab one, which is the whole reason
