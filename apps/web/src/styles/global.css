@@ -30,7 +30,7 @@
 :root {
   /* grounds — warm ink */
   --ink: oklch(0.155 0.006 75);
-  --ink-raised: oklch(0.198 0.007 75); /* rail, status bar, compose plate */
+  --ink-raised: oklch(0.198 0.007 75); /* rail, status bar, compose plate, unread row */
   --ink-sunken: oklch(0.128 0.006 75); /* reader ground, inset wells */
   --ink-hover: oklch(0.235 0.008 75);
 

@@ -289,7 +289,8 @@ export const ThreadRow = ({
         'lg:h-8.5 lg:grid-cols-[1.875rem_1.875rem_9.375rem_minmax(0,1fr)_auto_auto_auto] lg:gap-x-0 lg:py-0',
         (() => {
           if (isBarred) return 'bg-select text-ink';
-          return isChecked ? 'bg-signal-wash' : 'hover:bg-ink-hover';
+          if (isChecked) return 'bg-signal-wash';
+          return cn('hover:bg-ink-hover', isUnread && 'bg-ink-raised');
         })(),
       )}
     >
@@ -344,7 +345,13 @@ export const ThreadRow = ({
         aria-hidden
         className="pointer-events-none col-start-2 col-end-5 row-start-2 min-w-0 truncate lg:col-start-4 lg:col-end-5 lg:row-start-1 lg:pr-3"
       >
-        <span dir="auto" className={cn(isUnread && !isBarred && 'font-medium text-paper')}>
+        <span
+          dir="auto"
+          className={cn(
+            isUnread && !isBarred && 'font-semibold text-paper',
+            !isUnread && !isBarred && 'text-paper-dim',
+          )}
+        >
           {thread.subject}
         </span>
         {thread.messages.length > 1 && (
@@ -378,7 +385,10 @@ export const ThreadRow = ({
         aria-hidden
         className={cn(
           'pointer-events-none col-start-4 row-start-1 text-right font-mono text-2xs lg:col-start-6',
-          isBarred ? 'text-ink/60' : 'text-paper-faint',
+          (() => {
+            if (isBarred) return 'text-ink/60';
+            return isUnread ? 'font-semibold text-paper' : 'text-paper-faint';
+          })(),
           actions.length > 0 && REVEALED.gone,
         )}
       >
