@@ -12,6 +12,7 @@
     { "path": "./apps/web" },
     { "path": "./internal/cn" },
     { "path": "./internal/email" },
-    { "path": "./internal/vite-plugins" }
+    { "path": "./internal/vite-plugins" },
+    { "path": "./internal/html-screenshot" }
   ]
 }

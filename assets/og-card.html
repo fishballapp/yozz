@@ -1,9 +1,9 @@
 <!doctype html>
 <!--
   Source for apps/web/public/og.png, the 1200x630 social card. Rendered, not hand-drawn, so the
-  wording can change without redrawing the type. Build it with assets/build-og.sh, which explains
-  its own steps; do not screenshot this file straight to og.png, because the envelope and the type
-  want opposite treatment and the script is what reconciles them.
+  wording can change without redrawing the type. Build it with `pnpm -F @yozz.app/web og`, whose
+  script explains its own steps; do not screenshot this file straight to og.png, because the
+  envelope and the type want opposite treatment and the script is what reconciles them.
 
   Three layers: envelope.jpg for the envelope, the real app screenshot clipped into its opening,
   and live text on the front panel.
@@ -125,8 +125,8 @@
         color: var(--paper-dim);
       }
 
-      /* build-og.sh renders this file twice and composites the two. ?layer=base is everything
-         under the type; ?layer=type is the type alone on transparency. */
+      /* apps/web/scripts/build-og.ts renders this file twice and composites the two. ?layer=base
+         is everything under the type; ?layer=type is the type alone on transparency. */
       body[data-layer='base'] .type,
       body[data-layer='type'] .letter,
       body[data-layer='type'] .fold-shadow,

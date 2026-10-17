@@ -111,6 +111,7 @@
     {
       "includes": [
         "**/scripts/**/*.ts",
+        "internal/*/src/**/*.ts",
         "**/harness/**/*.ts",
         "packages/x509/anchors/**/*.ts",
         "**/corpus/harvest.ts"

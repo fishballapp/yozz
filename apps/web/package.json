@@ -12,7 +12,8 @@
     "test": "vitest run --passWithNoTests",
     "html:security": "node harness/html-security.ts",
     "vault:drive": "node harness/vault-drive.ts",
-    "draft:drive": "node harness/draft-open.ts"
+    "draft:drive": "node harness/draft-open.ts",
+    "og": "node scripts/build-og.ts"
   },
   "dependencies": {
     "@base-ui/react": "catalog:",
@@ -39,6 +40,7 @@
     "zod": "catalog:"
   },
   "devDependencies": {
+    "@fishballapps/html-screenshot": "workspace:*",
     "@fishballapps/vite-plugins": "workspace:*",
     "@playwright/test": "catalog:",
     "@tailwindcss/vite": "catalog:",

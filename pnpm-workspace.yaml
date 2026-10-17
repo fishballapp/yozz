@@ -4,6 +4,7 @@ packages:
   - apps/worker-web
   - internal/cn
   - internal/email
+  - internal/html-screenshot
   - internal/vault
   - internal/vault-contract
   - internal/vite-plugins
@@ -42,6 +43,7 @@ overrides:
 allowBuilds:
   "@biomejs/biome": true
   esbuild: true
+  puppeteer: true
   sharp: false
   workerd: true
 catalog:
@@ -75,6 +77,7 @@ catalog:
   jsdom: ^30.0.1
   kysely: ^0.29.5
   postal-mime: ^3.0.0
+  puppeteer: ^25.13.0
   react-native: 0.86.3
   react-native-gesture-handler: ~2.32.0
   react-native-reanimated: 4.5.1
