@@ -39,8 +39,8 @@ it('writes one consent change at a time, forgetting included, so a device never 
     remoteImages?.consent({ messageId: 'mid/<1@x>', sender: 'a@x.example' });
     remoteImages?.consent({ messageId: 'mid/<2@x>', sender: 'a@x.example' });
     remoteImages?.consent({ messageId: 'mid/<3@x>', sender: 'a@x.example' });
-    void remoteImages?.unconsent({ messageId: 'mid/<3@x>', sender: 'a@x.example' });
-    await new Promise(resolve => setTimeout(resolve, 50));
+    // Queued behind the three consents, so once the vault has it, so have they.
+    await remoteImages?.unconsent({ messageId: 'mid/<3@x>', sender: 'a@x.example' });
   });
   expect(mostInFlight).toBe(1);
   expect((await readConsents(store)).consents.map(consent => consent.messageId)).toEqual([
