@@ -1,5 +1,5 @@
-import { cn } from '@fishballapps/cn';
 import { Outlet, useNavigate, useParams, useSearch } from '@tanstack/react-router';
+import { cn } from 'cn';
 import { useMail } from '../store/MailProvider';
 import { LIST_WIDTH, Resizer, useListWidth } from '../ui/Resizer';
 import { ThreadList } from './ThreadList';

@@ -1,4 +1,3 @@
-import { cn } from '@fishballapps/cn';
 import {
   ArchiveIcon,
   ArrowCounterClockwiseIcon,
@@ -8,6 +7,7 @@ import {
   TrashIcon,
 } from '@phosphor-icons/react';
 import { Link } from '@tanstack/react-router';
+import { cn } from 'cn';
 import { DISCARD_WARNING } from '../compose/intent';
 import { useMail } from '../store/MailProvider';
 import { Checkbox } from '../ui/Checkbox';

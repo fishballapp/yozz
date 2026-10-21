@@ -1,5 +1,5 @@
-import { cn } from '@fishballapps/cn';
 import { CheckIcon, MinusIcon } from '@phosphor-icons/react';
+import { cn } from 'cn';
 
 /**
  * A 13px square box, centred in a hit area the caller sizes: the input fills the whole cell and

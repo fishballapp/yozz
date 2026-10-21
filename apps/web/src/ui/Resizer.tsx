@@ -1,6 +1,6 @@
 // biome-ignore-all lint/a11y/useSemanticElements: this file is the ARIA window-splitter widget — a focusable separator carrying a range — and no HTML element is one. `<hr>` is a thematic break in CONTENT, and a void element besides, so it can hold neither the grab zone nor a value.
 
-import { cn } from '@fishballapps/cn';
+import { cn } from 'cn';
 import { useRef, useState } from 'react';
 import { useMediaQuery, usePaneWidth } from './chrome';
 

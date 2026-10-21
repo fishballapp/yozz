@@ -1,5 +1,5 @@
-import { cn } from '@fishballapps/cn';
 import { cva, type VariantProps } from 'class-variance-authority';
+import { cn } from 'cn';
 import type { ButtonHTMLAttributes } from 'react';
 
 /** Square by design: nothing in Ink & Rule has a corner radius. */

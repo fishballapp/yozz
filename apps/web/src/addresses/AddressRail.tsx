@@ -1,4 +1,3 @@
-import { cn } from '@fishballapps/cn';
 import {
   ArchiveIcon,
   GearIcon,
@@ -10,6 +9,7 @@ import {
   TrashIcon,
 } from '@phosphor-icons/react';
 import { Link, useLocation, useParams } from '@tanstack/react-router';
+import { cn } from 'cn';
 import type { ReactNode } from 'react';
 import { keepCompose, withCompose } from '../compose/intent';
 import { useMail } from '../store/MailProvider';

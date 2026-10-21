@@ -1,6 +1,6 @@
 import { Toast } from '@base-ui/react/toast';
-import { cn } from '@fishballapps/cn';
 import { XIcon } from '@phosphor-icons/react';
+import { cn } from 'cn';
 import { Button } from './Button';
 
 /**

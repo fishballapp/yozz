@@ -1,4 +1,4 @@
-import { cn } from '@fishballapps/cn';
+import { cn } from 'cn';
 import type { ComponentPropsWithRef, ReactNode } from 'react';
 
 /** Plain label-associated native controls; anything with real behaviour goes through Base UI. Wells, not boxes. */

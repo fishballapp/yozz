@@ -1,6 +1,5 @@
 import { Dialog } from '@base-ui/react/dialog';
 import { Tabs } from '@base-ui/react/tabs';
-import { cn } from '@fishballapps/cn';
 import {
   EyeIcon,
   PaperclipIcon,
@@ -10,6 +9,7 @@ import {
   XIcon,
 } from '@phosphor-icons/react';
 import { useNavigate, useSearch } from '@tanstack/react-router';
+import { cn } from 'cn';
 import { useEffect, useRef, useState } from 'react';
 import { describeMailFailure } from '../relay/describe-failure';
 import { useComposer, useMail } from '../store/MailProvider';

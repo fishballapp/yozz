@@ -1,6 +1,6 @@
-import { cn } from '@fishballapps/cn';
 import { CaretRightIcon, PlusIcon } from '@phosphor-icons/react';
 import { Link, Outlet, useLocation, useParams } from '@tanstack/react-router';
+import { cn } from 'cn';
 import type { ReactNode } from 'react';
 import { type AddressRecord, isInbound } from '../addresses/record';
 import { keepCompose } from '../compose/intent';

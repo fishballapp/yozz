@@ -1,4 +1,4 @@
-import { cn } from '@fishballapps/cn';
+import { cn } from 'cn';
 import { useEffect, useState, useSyncExternalStore } from 'react';
 import { isUnsavedWork, type TrackedActivity } from '../relay/activity';
 import { useMail } from '../store/MailProvider';

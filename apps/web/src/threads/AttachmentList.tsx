@@ -1,6 +1,5 @@
 import { Button as BaseButton } from '@base-ui/react/button';
 import { Dialog } from '@base-ui/react/dialog';
-import { cn } from '@fishballapps/cn';
 import {
   ArrowSquareOutIcon,
   CaretLeftIcon,
@@ -8,6 +7,7 @@ import {
   DownloadSimpleIcon,
   XIcon,
 } from '@phosphor-icons/react';
+import { cn } from 'cn';
 import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import { Button, buttonClass } from '../ui/Button';
 import {

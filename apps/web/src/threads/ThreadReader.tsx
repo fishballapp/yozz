@@ -1,5 +1,4 @@
 import { Popover } from '@base-ui/react/popover';
-import { cn } from '@fishballapps/cn';
 import {
   ArchiveIcon,
   ArrowCounterClockwiseIcon,
@@ -17,6 +16,7 @@ import {
   XIcon,
 } from '@phosphor-icons/react';
 import { Link, useParams } from '@tanstack/react-router';
+import { cn } from 'cn';
 import { Fragment, type ReactNode, useState } from 'react';
 import { replyAllCc, withCompose } from '../compose/intent';
 import { useMail } from '../store/MailProvider';

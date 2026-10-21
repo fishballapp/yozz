@@ -1,5 +1,5 @@
-import { cn } from '@fishballapps/cn';
 import { ImageIcon } from '@phosphor-icons/react';
+import { cn } from 'cn';
 import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import { z } from 'zod';
 import { Button } from '../ui/Button';

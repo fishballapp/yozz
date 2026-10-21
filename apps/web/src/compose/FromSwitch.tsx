@@ -1,6 +1,6 @@
 import { Select } from '@base-ui/react/select';
-import { cn } from '@fishballapps/cn';
 import { CaretUpDownIcon, CheckIcon } from '@phosphor-icons/react';
+import { cn } from 'cn';
 import { type AddressRecord, isInbound } from '../addresses/record';
 import { useMail } from '../store/MailProvider';
 import { SendOnlyTag } from '../ui/SendOnlyTag';

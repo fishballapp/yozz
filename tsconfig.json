@@ -10,7 +10,6 @@
     { "path": "./apps/worker-api" },
     { "path": "./apps/worker-api/scripts" },
     { "path": "./apps/web" },
-    { "path": "./internal/cn" },
     { "path": "./internal/email" },
     { "path": "./internal/vite-plugins" },
     { "path": "./internal/html-screenshot" }

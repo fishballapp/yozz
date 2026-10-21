@@ -125,7 +125,7 @@
   /* Product-tight scale. This app's BASE size is 13px — the list record — so the `base` step is
      redefined rather than a new step invented.
 
-     NAME THESE CAREFULLY. tailwind-merge decides whether `text-x` is a size or a colour by whether
+     NAME THESE CAREFULLY. cn() decides whether `text-x` is a size or a colour by whether
      `x` looks like a t-shirt size; an invented name like `text-row` is classified as a COLOUR, put
      in the same conflict group as `text-signal-ink`, and one of the two is silently dropped. That
      shipped a near-white label on the filled primary button at 1.2:1. `base` and `2xs` are both recognised as

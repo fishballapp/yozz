@@ -1,7 +1,7 @@
-import { cn } from '@fishballapps/cn';
 import { MagnifyingGlassIcon } from '@phosphor-icons/react';
 import { Link, useParams } from '@tanstack/react-router';
 import { defaultRangeExtractor, useVirtualizer } from '@tanstack/react-virtual';
+import { cn } from 'cn';
 import { type ReactNode, useEffect, useEffectEvent, useRef, useState } from 'react';
 import { describeMailFailure } from '../relay/describe-failure';
 import { useMail } from '../store/MailProvider';

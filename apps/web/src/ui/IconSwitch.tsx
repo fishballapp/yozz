@@ -1,7 +1,7 @@
 import { Toggle } from '@base-ui/react/toggle';
 import { ToggleGroup } from '@base-ui/react/toggle-group';
-import { cn } from '@fishballapps/cn';
 import type { Icon } from '@phosphor-icons/react';
+import { cn } from 'cn';
 
 /**
  * Base UI's Toggle Group, so the row is one labelled control with arrow-key movement. Ruled as one

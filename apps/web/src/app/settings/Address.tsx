@@ -1,5 +1,5 @@
-import { cn } from '@fishballapps/cn';
 import { Link, useNavigate, useParams } from '@tanstack/react-router';
+import { cn } from 'cn';
 import { type ChangeEvent, type FormEvent, useEffect, useRef, useState } from 'react';
 import { type AddressRecord, isInbound } from '../../addresses/record';
 import { keepCompose } from '../../compose/intent';

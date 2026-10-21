@@ -1,6 +1,6 @@
-import { cn } from '@fishballapps/cn';
 import { CaretLeftIcon } from '@phosphor-icons/react';
 import { Link } from '@tanstack/react-router';
+import { cn } from 'cn';
 import type { ReactNode } from 'react';
 import { keepCompose } from '../../compose/intent';
 import { buttonClass } from '../../ui/Button';
