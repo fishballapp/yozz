@@ -111,7 +111,7 @@ describe('the upstream trust-store diff', () => {
     ).toEqual([{ kind: 'root-added', subject: subjectLabel(second.der) }]);
   });
 
-  /** An error page parses as zero certificates; reporting 121 removals for a 502 would train readers to ignore the job. */
+  /** An error page parses as zero certificates; reporting every root as removed for a 502 would train readers to ignore the job. */
   it('refuses an empty upstream rather than reporting a mass removal', () => {
     expect(() =>
       diffTrustStore({

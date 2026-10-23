@@ -93,7 +93,7 @@ export const diffTrustStore = ({
   const upstreamRoots = derFromPem(upstreamCacertPem);
   if (upstreamRoots.length === 0) {
     throw new Error(
-      'upstream cacert.pem yielded no certificates. Refusing to report 121 removals from what ' +
+      'upstream cacert.pem yielded no certificates. Refusing to report every shipped root as removed on what ' +
         'is almost certainly a failed fetch or an error page.',
     );
   }

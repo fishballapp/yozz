@@ -8,7 +8,7 @@ export const trustAnchors = async (): Promise<TrustAnchorSource> => {
     return cachedAnchors;
   }
 
-  // ponytail: 121 roots parsed synchronously on the main thread, once per page load, inside the
+  // ponytail: 118 roots parsed synchronously on the main thread, once per page load, inside the
   // first sync. It is the pause between Connect and the first WebSocket. Upgrade: a Worker.
   const source = compileAnchors(ROOT_BUNDLE).source;
   cachedAnchors = source;

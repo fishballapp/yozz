@@ -5,7 +5,7 @@ import { ROOT_BUNDLE } from './root-bundle-generated.ts';
 
 describe('the shipped root bundle', () => {
   it('holds every root curl ships, and each one decodes', () => {
-    expect(ROOT_BUNDLE.length).toBe(121);
+    expect(ROOT_BUNDLE.length).toBe(118);
     for (const entry of ROOT_BUNDLE) {
       expect(() => decodeCertificate(entry.der)).not.toThrow();
     }
