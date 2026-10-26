@@ -61,6 +61,7 @@ jobs:
     needs: gates
     # GitHub-hosted on purpose: npm trusted publishing does not work on self-hosted runners.
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     permissions:
       contents: read
       id-token: write

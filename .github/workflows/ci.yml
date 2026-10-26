@@ -21,6 +21,7 @@ jobs:
   check:
     name: Check · typecheck · test · build
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
       - uses: pnpm/action-setup@v6
@@ -40,6 +41,7 @@ jobs:
   html:
     name: HTML containment
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
       - uses: pnpm/action-setup@v6
@@ -68,6 +70,7 @@ jobs:
   limbo:
     name: x509-limbo
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v6
       - uses: pnpm/action-setup@v6
@@ -91,6 +94,7 @@ jobs:
   bogo:
     name: BoGo
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-go@v6
