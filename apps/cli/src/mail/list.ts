@@ -1,10 +1,5 @@
 import type { InboundAddress } from '@yozz.app/mail/addresses/record';
-import {
-  fitting,
-  LIST_LIMIT_DEFAULT,
-  LIST_LIMIT_MAX,
-  OUTPUT_CHARS,
-} from '@yozz.app/mail/agent-budgets';
+import { LIST_LIMIT_DEFAULT, LIST_LIMIT_MAX } from '@yozz.app/mail/agent-budgets';
 import type { Folder, ThreadState } from '@yozz.app/mail/threads/thread';
 import {
   accountsShown,
@@ -188,12 +183,9 @@ export const listCommand = Command.make(
         rowsOf: (watched, isWanted) =>
           Effect.map(candidates(watched, isWanted), ({ found }) => found),
       });
-      const rows = arrived.slice(0, limit).map(thread => rowOf(thread, { webUrl, mailbox: view }));
-      const kept = fitting(rows, OUTPUT_CHARS);
       return yield* printJson({
         notice: NOTICE,
-        threads: kept,
-        ...(kept.length < arrived.length ? { truncated: true } : {}),
+        threads: arrived.slice(0, limit).map(thread => rowOf(thread, { webUrl, mailbox: view })),
         nextCursor: null,
         syncedAt: yield* cache.syncedAt(shown),
         ...failedOf(failed),
@@ -228,17 +220,13 @@ export const listCommand = Command.make(
         return yield* filled(windows - 1);
       });
     const { found, hasOlder, hasMoreMatches } = yield* filled(OLDER_WINDOWS_PER_PAGE);
+    // Every field of a row is capped, so --limit alone bounds the page.
     const rows = found.slice(0, limit);
-    const kept = fitting(
-      rows.map(thread => rowOf(thread, { webUrl, mailbox: view })),
-      OUTPUT_CHARS,
-    );
-    const last = rows[kept.length - 1];
-    const isMore = kept.length < found.length || hasOlder;
+    const last = rows.at(-1);
+    const isMore = rows.length < found.length || hasOlder;
     yield* printJson({
-      ...(kept.length > 0 ? { notice: NOTICE } : {}),
-      threads: kept,
-      ...(kept.length < rows.length ? { truncated: true } : {}),
+      ...(rows.length > 0 ? { notice: NOTICE } : {}),
+      threads: rows.map(thread => rowOf(thread, { webUrl, mailbox: view })),
       nextCursor: isMore && last !== undefined ? encodeCursor(last) : null,
       ...(hasMoreMatches ? { moreMatches: true } : {}),
       syncedAt: yield* cache.syncedAt(shown),
@@ -256,8 +244,8 @@ covers on the server, its newest ${SEARCH_HITS} matches each; "moreMatches": tru
 had more, so narrow the query (more words, a sender, a subject) rather than paging. --wait watches
 the inbox only (--mailbox inbox, starred or an address, no --cursor): it holds each inbox open and
 answers with the first mail that arrives and matches, or fails WaitTimedOut. A page can hold fewer
-than --limit: "truncated" says the output budget cut it, and nextCursor continues from the last row
-shown.
+than --limit when the older mail it reached for held too few; a nextCursor that isn't null says
+there is more.
 
 An address whose mail server failed answers from its cache: it is listed under "failed", and its
 syncedAt says how old what it shows is. Only when every address fails is it MailServerError.

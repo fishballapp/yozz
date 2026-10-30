@@ -124,6 +124,29 @@ layer(NodeServices.layer)(it => {
       }),
     );
 
+    it.effect('prints every conversation --limit asks for, however long their rows', () =>
+      Effect.gen(function* () {
+        const { world, homes, server, servers } = yield* makeMailWorld();
+        for (let n = 1; n <= 60; n += 1) {
+          server.deliver(
+            'INBOX',
+            mail(n, { subject: `${n} ${'a long subject '.repeat(30)}`, date: minuteOf2026(n) }),
+          );
+        }
+
+        const { stdout } = yield* runCli(['list', '--limit', '50'], {
+          fetch: world.fetch,
+          homes,
+          servers,
+        });
+
+        const out = JSON.parse(stdout);
+        expect(out.threads).toHaveLength(50);
+        expect(out.truncated).toBeUndefined();
+        expect(out.nextCursor).not.toBeNull();
+      }),
+    );
+
     it.effect('refuses a cursor it did not print', () =>
       Effect.gen(function* () {
         const { world, homes, servers } = yield* makeMailWorld();
