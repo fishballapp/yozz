@@ -18,18 +18,11 @@ import * as Console from 'effect/Console';
 import * as Context from 'effect/Context';
 import * as Effect from 'effect/Effect';
 import * as Layer from 'effect/Layer';
-import type * as Scope from 'effect/Scope';
 import * as Semaphore from 'effect/Semaphore';
 import { usingCache } from '../cache/disk.ts';
 import { MailServerError, reportFailure, type UsageError } from '../errors.ts';
 import { Vault } from '../vault/vault.ts';
-import {
-  connectImap,
-  connectSmtp,
-  MailServers,
-  QUIET_LIMIT_MS,
-  type SmtpConnection,
-} from './servers.ts';
+import { connectImap, connectSmtp, MailServers, QUIET_LIMIT_MS } from './servers.ts';
 
 /** How often a server without IDLE is asked again while `list --wait` waits. */
 const POLL_SECONDS = 30;
@@ -79,10 +72,16 @@ export class Mail extends Context.Service<
       account: InboundAddress,
       lastUid: number,
     ) => Effect.Effect<void, MailServerError>;
-    /** A signed-in SMTP connection for the address, closed with the scope. */
-    readonly smtp: (
+    /**
+     * One SMTP connection, one submission of exactly these bytes, as the web app's `submitBytes`. A
+     * failure says which side of the end of `DATA` it fell on (`isUnconfirmedSubmission`), which the
+     * send machine needs to know. A promise, as `@yozz.app/mail`'s `SendEffects` takes it.
+     */
+    readonly submit: (
       identity: AddressRecord,
-    ) => Effect.Effect<SmtpConnection, MailServerError, Scope.Scope>;
+      bytes: Uint8Array,
+      recipients: readonly string[],
+    ) => Promise<Result<void, MailConnectionFailure>>;
   }
 >()('@yozz.app/cli/Mail') {
   /** One connection per inbound address, opened on first use and closed when the command ends. */
@@ -260,17 +259,16 @@ export class Mail extends Context.Service<
             );
             if (!hasIdle) yield* Effect.sleep(`${POLL_SECONDS} seconds`);
           }),
-          smtp: identity =>
-            Effect.acquireRelease(
-              Effect.promise(() => connectSmtp(servers, identity.smtp)).pipe(
-                Effect.flatMap(res =>
-                  res.ok
-                    ? Effect.succeed(res.value)
-                    : Effect.fail(failure(identity.address, identity.smtp.host, res.error)),
-                ),
-              ),
-              connection => Effect.promise(() => connection.close()),
-            ),
+          submit: async (identity, bytes, recipients) => {
+            const connected = await connectSmtp(servers, identity.smtp);
+            if (!connected.ok) return connected;
+            const { client, close } = connected.value;
+            const sent = await client.send({ from: identity.address, to: recipients, data: bytes });
+            await close();
+            return sent.ok
+              ? { ok: true, value: undefined }
+              : { ok: false, error: { kind: 'smtp', reason: sent.reason } };
+          },
         });
       }),
     ),

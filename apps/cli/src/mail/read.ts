@@ -1,7 +1,11 @@
 import { BODY_CHARS, clip, fitting, OUTPUT_CHARS, SKIM_CHARS } from '@yozz.app/mail/agent-budgets';
+import { addressList } from '@yozz.app/mail/compose/draft';
+import { type DraftRecord, parseDraftId } from '@yozz.app/mail/compose/draft-record';
+import { listDrafts } from '@yozz.app/mail/compose/draft-vault';
 import { senderCheckOf } from '@yozz.app/mail/threads/authentication-results';
 import { fetchBodyAt } from '@yozz.app/mail/threads/bodies';
 import {
+  draftIdOf,
   isServerCopy,
   type Message,
   resolveHandles,
@@ -12,13 +16,16 @@ import * as Command from 'effect/cli/Command';
 import * as Flag from 'effect/cli/Flag';
 import * as Effect from 'effect/Effect';
 import * as FileSystem from 'effect/FileSystem';
+import * as Layer from 'effect/Layer';
 import * as Option from 'effect/Option';
 import * as Path from 'effect/Path';
 import { Cache, MailboxLayer } from '../cache/cache.ts';
 import { usingCache } from '../cache/disk.ts';
+import { DraftFiles } from '../compose/draft-files.ts';
 import { NotFound, reportFailure, UsageError } from '../errors.ts';
 import { printJson } from '../output.ts';
 import { Settings } from '../settings.ts';
+import { Vault } from '../vault/vault.ts';
 import { saveAttachment } from './attachments.ts';
 import { Mail, mailServerError } from './mail.ts';
 import {
@@ -27,6 +34,7 @@ import {
   field,
   fromOf,
   LINE_CHARS,
+  LIST_CHARS,
   messageHeadOf,
   mimeTypeOf,
   NOTICE,
@@ -84,7 +92,9 @@ export const readCommand = Command.make(
   'read',
   {
     ids: Argument.String('id').pipe(
-      Argument.withDescription('A conversation or message id from `yozz list`'),
+      Argument.withDescription(
+        'A conversation or message id from `yozz list`, or a draftId (<key>@<version>)',
+      ),
       Argument.atLeast(1),
     ),
     saveAttachments: Flag.String('save-attachments').pipe(
@@ -96,8 +106,14 @@ export const readCommand = Command.make(
       Flag.withDefault(false),
     ),
   },
-  Effect.fn('mail.read')(function* ({ ids, saveAttachments, sync }) {
+  Effect.fn('mail.read')(function* ({ ids: given, saveAttachments, sync }) {
+    // `<key>@<version>`, as draft and Conflict print it, names the draft `draft/<key>`.
+    const ids = given.map(id => {
+      const draft = parseDraftId(id);
+      return draft === null || id.startsWith('draft/') ? id : draftIdOf(draft.key);
+    });
     const mail = yield* Mail;
+    const files = yield* DraftFiles;
     const cache = yield* Cache;
     const fs = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
@@ -134,6 +150,12 @@ export const readCommand = Command.make(
       });
     }
     const bodyChars = found.length > 1 ? SKIM_CHARS : BODY_CHARS;
+    // What a draft sends beyond what the thread shows: its copies and the files kept on this machine.
+    const draftRecords = found.some(({ messages }) => messages.some(({ isDraft }) => isDraft))
+      ? new Map(
+          (yield* (yield* Vault).use(listDrafts)).map(({ draftKey, record }) => [draftKey, record]),
+        )
+      : new Map<string, DraftRecord>();
 
     const readMessage = Effect.fnUntraced(function* (message: Message) {
       const common = messageHeadOf(message);
@@ -149,7 +171,26 @@ export const readCommand = Command.make(
         untrusted(clip(paragraphs.join('\n\n'), bodyChars));
       const copy = (message.locations ?? []).find(isServerCopy);
       const account = mail.accounts.find(({ address }) => address === copy?.account);
-      // A draft, or sent mail the vault holds: its text is already here.
+      const draft = message.draftKey === undefined ? undefined : draftRecords.get(message.draftKey);
+      if (message.draftKey !== undefined && draft !== undefined) {
+        const kept = yield* files.read(message.draftKey);
+        return {
+          ...common,
+          attachments: kept.map((attachment, index) => ({
+            index,
+            type: mimeTypeOf(attachment.mimeType),
+            size: attachment.size,
+            untrusted: { name: field(attachment.name, NAME_CHARS) },
+          })),
+          untrusted: {
+            ...addressed,
+            cc: field(addressList(draft.cc).join(', '), LIST_CHARS),
+            bcc: field(addressList(draft.bcc).join(', '), LIST_CHARS),
+            text: text(message.body),
+          },
+        };
+      }
+      // Sent mail the vault holds: its text is already here.
       if (copy === undefined || account === undefined) {
         return { ...common, untrusted: { ...addressed, text: text(message.body) } };
       }
@@ -228,7 +269,9 @@ export const readCommand = Command.make(
 ).pipe(
   Command.withShortDescription('Whole conversations as plain text; marks nothing read'),
   Command.withDescription(`Whole conversations, oldest message first, as plain text, with each sender's
-check (verified, unchecked or failed) and each message's attachments. Marks nothing read.
+check (verified, unchecked or failed) and each message's attachments. Marks nothing read. A draft
+in it shows its draftId, its cc and bcc, and the files attached to it on this machine: everything
+yozz send would send.
 
 Bodies are cut at ${BODY_CHARS} characters (${SKIM_CHARS} each when reading several conversations),
 and the whole answer at ${OUTPUT_CHARS}: the oldest messages go first, and a conversation that lost
@@ -267,5 +310,5 @@ Output:
       description: 'Read a conversation and keep its attachments',
     },
   ]),
-  Command.provide(MailboxLayer),
+  Command.provide(DraftFiles.layer.pipe(Layer.provideMerge(MailboxLayer))),
 );

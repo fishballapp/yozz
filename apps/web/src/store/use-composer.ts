@@ -524,10 +524,9 @@ export const useComposerStore = ({
         const runOn = bindRunOn();
         clearTimeout(autosaveTimerRef.current);
         const content = contentOf(draft, ownerAccountOf(draft));
-        const [{ claimSend, createDraft }, { buildOutgoing }, { renderHtml }] = await Promise.all([
+        const [{ claimSend, createDraft }, { buildOutgoing }] = await Promise.all([
           import('@yozz.app/mail/compose/draft-vault'),
           import('@yozz.app/mail/compose/send'),
-          import('@tanstack/markdown/html'),
         ]);
         // An ended session mints and claims nothing, so nothing goes out on its behalf.
         if (!isCurrent()) return lockedBeforeSend;
@@ -554,9 +553,6 @@ export const useComposerStore = ({
           bcc: addressList(draft.bcc),
           subject: draft.subject,
           text: draft.body,
-          // A whole document: a bare fragment is what filters see from templating tools
-          // (docs/knowledge/email-deliverability.md).
-          html: `<!DOCTYPE html><html><head><meta charset="utf-8"></head><body>${renderHtml(draft.body)}</body></html>`,
           messageId,
           inReplyTo: draft.inReplyTo,
           references: draft.references,
@@ -655,15 +651,11 @@ export const useComposerStore = ({
       const isCurrent = watchSession(sessionGeneration);
       const runOn = bindRunOn();
       void (async () => {
-        const [
-          { draftMirrorMessageId, mirrorAccountOf, mirrorDraft },
-          { buildOutgoing },
-          { renderHtml },
-        ] = await Promise.all([
-          import('@yozz.app/mail/compose/draft-mirror'),
-          import('@yozz.app/mail/compose/send'),
-          import('@tanstack/markdown/html'),
-        ]);
+        const [{ draftMirrorMessageId, mirrorAccountOf, mirrorDraft }, { buildOutgoing }] =
+          await Promise.all([
+            import('@yozz.app/mail/compose/draft-mirror'),
+            import('@yozz.app/mail/compose/send'),
+          ]);
         // The live connections are the next session's by now.
         if (!isCurrent()) return;
         const address = mirrorAccountOf(openHandle.record, candidate =>
@@ -679,7 +671,6 @@ export const useComposerStore = ({
           bcc: addressList(record.bcc),
           subject: record.subject,
           text: record.body,
-          html: `<!DOCTYPE html><html><head><meta charset="utf-8"></head><body>${renderHtml(record.body)}</body></html>`,
           // Derived from the draft key: the handle a later mirror and a discard both search on.
           messageId: draftMirrorMessageId(openHandle.draftKey, account.address),
           ...(record.inReplyTo === undefined ? {} : { inReplyTo: record.inReplyTo }),

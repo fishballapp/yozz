@@ -2,7 +2,8 @@ import type { ByteDuplex, MailSocket } from './servers.ts';
 
 // An IMAP server in memory, for tests: the commands `@yozz.app/imap` sends on the CLI's paths
 // (AUTHENTICATE, LIST, SELECT, FETCH and UID FETCH, UID STORE, UID MOVE with COPYUID, CREATE,
-// UID SEARCH TEXT, IDLE, NOOP, LOGOUT), over a byte pipe, so the real client parses real responses.
+// APPEND with APPENDUID, UID SEARCH TEXT and HEADER, IDLE, NOOP, LOGOUT), over a byte pipe, so the
+// real client parses real responses.
 
 export type FakeMessage = {
   readonly from: string;
@@ -15,6 +16,8 @@ export type FakeMessage = {
   readonly text: string;
   readonly inReplyTo?: string;
   readonly references?: readonly string[];
+  readonly cc?: readonly string[];
+  readonly replyTo?: string;
   readonly attachments?: readonly {
     readonly name: string;
     readonly type: string;
@@ -71,6 +74,10 @@ const rawOf = (message: FakeMessage): Uint8Array => {
     ...(message.authenticationResults ?? []).map(value => `Authentication-Results: ${value}`),
     `From: ${message.fromName === undefined ? '' : `${encodedWord(message.fromName)} `}<${message.from}>`,
     `To: <${message.to}>`,
+    ...(message.cc === undefined
+      ? []
+      : [`Cc: ${message.cc.map(address => `<${address}>`).join(', ')}`]),
+    ...(message.replyTo === undefined ? [] : [`Reply-To: <${message.replyTo}>`]),
     `Subject: ${encodedWord(message.subject)}`,
     `Message-ID: ${message.messageId}`,
     `Date: ${message.date}`,
@@ -97,6 +104,31 @@ const rawOf = (message: FakeMessage): Uint8Array => {
   );
 };
 
+/** The headers a summary shows, read back from a message a client appended. */
+const appendedOf = (raw: string): FakeMessage => {
+  const head = raw.slice(0, raw.indexOf('\r\n\r\n')).replace(/\r\n[ \t]+/gu, ' ');
+  const header = (name: string) =>
+    head
+      .split('\r\n')
+      .find(line => line.toLowerCase().startsWith(`${name.toLowerCase()}:`))
+      ?.slice(name.length + 1)
+      .trim();
+  const addressOf = (value: string | undefined) =>
+    /<([^>]+)>/u.exec(value ?? '')?.[1] ?? value ?? '';
+  return {
+    from: addressOf(header('From')),
+    to: addressOf(header('To')?.split(',')[0]),
+    subject: header('Subject') ?? '',
+    messageId: header('Message-ID') ?? '',
+    date: header('Date') ?? '',
+    text: raw.slice(raw.indexOf('\r\n\r\n') + 4),
+    ...(header('In-Reply-To') === undefined ? {} : { inReplyTo: header('In-Reply-To') }),
+    ...(header('References') === undefined
+      ? {}
+      : { references: (header('References') ?? '').split(/\s+/u) }),
+  };
+};
+
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const internalDateOf = ({ date }: FakeMessage) => {
   const at = new Date(Date.parse(date));
@@ -105,7 +137,7 @@ const internalDateOf = ({ date }: FakeMessage) => {
 };
 
 /** A pipe whose two ends read what the other writes. */
-const pipe = () => {
+export const pipe = () => {
   const make = () => {
     const queue: (Uint8Array | null)[] = [];
     let waiter: ((chunk: Uint8Array | null) => void) | null = null;
@@ -261,9 +293,15 @@ export const makeFakeImapServer = ({
 
     const box = () => (selected === null ? undefined : boxes.get(selected));
     const summary = (message: Stored, seq: number) => {
-      const { from, fromName, to, subject, messageId, date, inReplyTo, references } =
+      const { from, fromName, to, cc, replyTo, subject, messageId, date, inReplyTo, references } =
         message.message;
-      const envelope = `(${quoted(date)} ${quoted(encodedWord(subject))} ${addressList(from, fromName)} ${addressList(from, fromName)} ${addressList(from, fromName)} ${addressList(to)} NIL NIL ${quoted(inReplyTo)} ${quoted(messageId)})`;
+      const ccList =
+        cc === undefined || cc.length === 0
+          ? 'NIL'
+          : `(${cc.map(address => addressList(address).slice(1, -1)).join('')})`;
+      const replyToList =
+        replyTo === undefined ? addressList(from, fromName) : addressList(replyTo);
+      const envelope = `(${quoted(date)} ${quoted(encodedWord(subject))} ${addressList(from, fromName)} ${addressList(from, fromName)} ${replyToList} ${addressList(to)} ${ccList} NIL ${quoted(inReplyTo)} ${quoted(messageId)})`;
       const referencesHeader = bytes(
         references === undefined ? '\r\n' : `References: ${references.join(' ')}\r\n\r\n`,
       );
@@ -336,6 +374,25 @@ export const makeFakeImapServer = ({
             messages: [],
           });
           await ok();
+          return true;
+        }
+        case 'APPEND': {
+          // The literal arrives inlined as a quoted string: `"Sent" (\Seen) "<message>"`.
+          const target = boxes.get(unquote(rest.slice(0, rest.indexOf(' ('))));
+          if (target === undefined) {
+            await no('[TRYCREATE] No such mailbox');
+            return true;
+          }
+          const raw = rest.slice(rest.indexOf(') "') + 3, -1);
+          const uid = target.uidNext;
+          target.uidNext += 1;
+          target.messages.push({
+            uid,
+            flags: new Set(/\(([^)]*)\)/u.exec(rest)?.[1]?.split(' ').filter(Boolean)),
+            message: appendedOf(raw),
+            raw: bytes(raw),
+          });
+          await ok(`[APPENDUID ${target.uidValidity} ${uid}] APPEND completed`);
           return true;
         }
         case 'FETCH':

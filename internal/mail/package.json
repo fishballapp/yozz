@@ -10,6 +10,7 @@
     "./*": "./src/*.ts"
   },
   "dependencies": {
+    "@tanstack/markdown": "catalog:",
     "@yozz.app/imap": "workspace:*",
     "@yozz.app/smtp": "workspace:*",
     "@yozz.app/vault": "workspace:*",

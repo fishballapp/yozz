@@ -53,6 +53,30 @@ export class MailServerError extends Schema.TaggedError<MailServerError>()('Mail
   address: Schema.String,
 }) {}
 
+/** The draft version named is not its newest: someone wrote another, `currentDraftId` (null when the draft is gone). */
+export class Conflict extends Schema.TaggedError<Conflict>()('Conflict', {
+  message: Schema.String,
+  currentDraftId: Schema.NullOr(Schema.String),
+}) {}
+
+/** A send holds the draft (running, or waiting for the person to settle it), so it can't change. */
+export class DraftSending extends Schema.TaggedError<DraftSending>()('DraftSending', {
+  message: Schema.String,
+}) {}
+
+/** The mail server refused the message before taking it: nothing went out, and the draft is back. */
+export class SendRefused extends Schema.TaggedError<SendRefused>()('SendRefused', {
+  message: Schema.String,
+  address: Schema.String,
+  /** The version to send again: giving the draft back made a new one. */
+  currentDraftId: Schema.String,
+}) {}
+
+/** Nobody saw whether the mail server took the message; the person settles it in yozz.app. */
+export class SendUnconfirmed extends Schema.TaggedError<SendUnconfirmed>()('SendUnconfirmed', {
+  message: Schema.String,
+}) {}
+
 /** `list --wait` elapsed with no new mail. */
 export class WaitTimedOut extends Schema.TaggedError<WaitTimedOut>()('WaitTimedOut', {
   message: Schema.String,
@@ -74,6 +98,10 @@ export type CliFailure =
   | LoginFailed
   | NotFound
   | MailServerError
+  | Conflict
+  | DraftSending
+  | SendRefused
+  | SendUnconfirmed
   | WaitTimedOut
   | PartialFailure;
 

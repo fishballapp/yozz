@@ -1,3 +1,4 @@
+import { renderHtml } from '@tanstack/markdown/html';
 import { buildMessage } from '@yozz.app/smtp';
 import { resolveFolders } from '../addresses/mailboxes.ts';
 import type { AddressRecord } from '../addresses/record.ts';
@@ -10,9 +11,8 @@ export type OutgoingMail = {
   readonly cc: readonly string[];
   readonly bcc: readonly string[];
   readonly subject: string;
-  /** The markdown source, sent as the text part. */
+  /** The markdown source, sent as the text part beside its rendered HTML. */
   readonly text: string;
-  readonly html: string;
   readonly messageId: string;
   readonly inReplyTo?: string;
   readonly references?: readonly string[];
@@ -57,7 +57,9 @@ export const buildOutgoing = (
       date: new Date(),
       messageId: mail.messageId,
       text: mail.text,
-      html: mail.html,
+      // A whole document: a bare fragment is what filters see from templating tools
+      // (docs/knowledge/email-deliverability.md).
+      html: `<!DOCTYPE html><html><head><meta charset="utf-8"></head><body>${renderHtml(mail.text)}</body></html>`,
       inReplyTo: mail.inReplyTo,
       references: mail.references,
       attachments,

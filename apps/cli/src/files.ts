@@ -30,3 +30,47 @@ export const writePrivateFile = Effect.fn('files.writePrivateFile')(function* (
     .rename(pending, file)
     .pipe(Effect.onError(() => Effect.ignore(fs.remove(pending, { force: true }))));
 });
+
+const IV_BYTES = 12;
+
+/** `iv ‖ AES-GCM(key, plaintext)`, bound to `additionalData`: every file the CLI keeps sealed is this. */
+export const seal = Effect.fn('files.seal')(function* ({
+  key,
+  additionalData,
+  plaintext,
+}: {
+  readonly key: CryptoKey;
+  readonly additionalData: Uint8Array<ArrayBuffer>;
+  readonly plaintext: Uint8Array<ArrayBuffer>;
+}) {
+  const crypto = yield* Crypto.Crypto;
+  const iv = new Uint8Array(yield* crypto.randomBytes(IV_BYTES).pipe(Effect.orDie));
+  const body = yield* Effect.promise(() =>
+    globalThis.crypto.subtle.encrypt({ name: 'AES-GCM', iv, additionalData }, key, plaintext),
+  );
+  const content = new Uint8Array(IV_BYTES + body.byteLength);
+  content.set(iv);
+  content.set(new Uint8Array(body), IV_BYTES);
+  return content;
+});
+
+/** What `seal` sealed, or none when it does not authenticate: another key, another slot, damage. */
+export const unseal = ({
+  key,
+  additionalData,
+  content,
+}: {
+  readonly key: CryptoKey;
+  readonly additionalData: Uint8Array<ArrayBuffer>;
+  readonly content: Uint8Array;
+}) =>
+  Effect.tryPromise(() =>
+    globalThis.crypto.subtle.decrypt(
+      { name: 'AES-GCM', iv: content.slice(0, IV_BYTES), additionalData },
+      key,
+      content.slice(IV_BYTES),
+    ),
+  ).pipe(
+    Effect.map(plain => new Uint8Array(plain)),
+    Effect.option,
+  );

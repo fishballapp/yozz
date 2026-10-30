@@ -584,6 +584,9 @@ importers:
 
   internal/mail:
     dependencies:
+      '@tanstack/markdown':
+        specifier: 'catalog:'
+        version: 0.0.15(react@19.3.0)
       '@yozz.app/imap':
         specifier: workspace:*
         version: link:../../packages/imap

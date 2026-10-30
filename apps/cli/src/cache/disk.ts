@@ -2,7 +2,7 @@ import type { ImapMessageSummary } from '@yozz.app/imap';
 import type { FetchedBody } from '@yozz.app/mail/threads/bodies';
 import type { FolderCache, FolderSync, MailCache } from '@yozz.app/mail/threads/cache';
 import { FOLDERS, type Folder } from '@yozz.app/mail/threads/thread';
-import * as Crypto from 'effect/Crypto';
+import type * as Crypto from 'effect/Crypto';
 import * as Effect from 'effect/Effect';
 import * as FileSystem from 'effect/FileSystem';
 import * as Option from 'effect/Option';
@@ -10,7 +10,7 @@ import * as Path from 'effect/Path';
 import * as Schema from 'effect/Schema';
 import * as Semaphore from 'effect/Semaphore';
 import { UsageError } from '../errors.ts';
-import { writePrivateFile } from '../files.ts';
+import { seal, unseal, writePrivateFile } from '../files.ts';
 
 // One account's mail cache on disk: a file per folder (its sync mark, summaries and previews), a
 // file per cached body named for its folder's UIDVALIDITY, and when the account last synced. Each is `iv ‖ AES-GCM(key, JSON)` with the account and the file's name as
@@ -110,8 +110,6 @@ const asFetchedBody = (body: typeof BodySchema.Type): FetchedBody => ({
   })),
 });
 
-const IV_BYTES = 12;
-
 /** The mail-cache promises reject with the CLI's own `UsageError`; anything else is a fault. */
 export const usingCache = <A>(thunk: () => Promise<A>): Effect.Effect<A, UsageError> =>
   Effect.tryPromise(thunk).pipe(
@@ -132,7 +130,6 @@ export const accountCache = Effect.fn('cache.accountCache')(function* ({
 }) {
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
-  const crypto = yield* Crypto.Crypto;
   const context = yield* Effect.context<FileSystem.FileSystem | Path.Path | Crypto.Crypto>();
   const run = Effect.runPromiseWith(context);
   const additionalData = (name: string) =>
@@ -155,20 +152,16 @@ export const accountCache = Effect.fn('cache.accountCache')(function* ({
         Effect.mapError(unusable('read')),
       );
       if (Option.isNone(bytes)) return Option.none<A>();
-      const opened = yield* Effect.tryPromise(() =>
-        globalThis.crypto.subtle.decrypt(
-          {
-            name: 'AES-GCM',
-            iv: bytes.value.slice(0, IV_BYTES),
-            additionalData: additionalData(name),
-          },
-          key,
-          bytes.value.slice(IV_BYTES),
+      const opened = yield* unseal({
+        key,
+        additionalData: additionalData(name),
+        content: bytes.value,
+      }).pipe(
+        Effect.flatMap(plain =>
+          Option.isNone(plain)
+            ? Effect.succeedNone
+            : Schema.decodeEffect(codec)(new TextDecoder().decode(plain.value)).pipe(Effect.option),
         ),
-      ).pipe(
-        Effect.map(plain => new TextDecoder().decode(plain)),
-        Effect.flatMap(Schema.decodeEffect(codec)),
-        Effect.option,
       );
       if (Option.isNone(opened)) {
         // A body is only fetched again; a folder's file held what the sync read.
@@ -181,17 +174,11 @@ export const accountCache = Effect.fn('cache.accountCache')(function* ({
   const write = <A>(name: string, codec: Schema.Codec<A, string>, value: A) =>
     Effect.gen(function* () {
       const json = yield* Schema.encodeEffect(codec)(value).pipe(Effect.orDie);
-      const iv = new Uint8Array(yield* crypto.randomBytes(IV_BYTES).pipe(Effect.orDie));
-      const sealed = yield* Effect.promise(() =>
-        globalThis.crypto.subtle.encrypt(
-          { name: 'AES-GCM', iv, additionalData: additionalData(name) },
-          key,
-          new TextEncoder().encode(json),
-        ),
-      );
-      const content = new Uint8Array(IV_BYTES + sealed.byteLength);
-      content.set(iv);
-      content.set(new Uint8Array(sealed), IV_BYTES);
+      const content = yield* seal({
+        key,
+        additionalData: additionalData(name),
+        plaintext: new TextEncoder().encode(json),
+      });
       yield* writePrivateFile(path.join(dir, name), content).pipe(
         Effect.mapError(unusable('written')),
       );

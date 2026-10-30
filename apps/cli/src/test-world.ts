@@ -4,7 +4,11 @@ import {
   addressRecordSchema,
 } from '@yozz.app/mail/addresses/record';
 import { createVault, deriveApprovalKeys, generateCliKeyPair, rewrapDek } from '@yozz.app/vault';
-import { formatCliToken, type VaultRecordEnvelope } from '@yozz.app/vault-contract';
+import {
+  formatCliToken,
+  PutRecordRequestSchema,
+  type VaultRecordEnvelope,
+} from '@yozz.app/vault-contract';
 import * as ConfigProvider from 'effect/ConfigProvider';
 import * as Console from 'effect/Console';
 import * as Deferred from 'effect/Deferred';
@@ -16,13 +20,15 @@ import * as Path from 'effect/Path';
 import * as PlatformError from 'effect/PlatformError';
 import * as ChildProcess from 'effect/process/ChildProcess';
 import * as ChildProcessSpawner from 'effect/process/ChildProcessSpawner';
+import * as Stdio from 'effect/Stdio';
+import * as Stream from 'effect/Stream';
 import { CliLayer, cli } from './app.ts';
-import type { FakeImapServer } from './mail/fake-imap-server.ts';
-import { MailServers } from './mail/servers.ts';
+import { MailServers, type MailSocket } from './mail/servers.ts';
 import { runCommand } from './output.ts';
 
 // The CLI run in-process against a fake Worker that holds a real vault: the CLI key's wrap, its
-// bearer, and address records sealed as the browser seals them.
+// bearer, address records sealed as the browser seals them, and the record routes under
+// compare-and-swap as the Worker answers them.
 
 export const API = 'https://api.yozz.test';
 export const WEB = 'https://yozz.test';
@@ -33,7 +39,7 @@ export const TOKEN = formatCliToken({ keyId: KEY_ID, secret: 'S'.repeat(43) });
 
 export type Call = { readonly url: string; readonly method: string; readonly headers: Headers };
 
-type StoredRecord = { readonly envelope: VaultRecordEnvelope; readonly naturalKey: string };
+type StoredRecord = { readonly envelope: VaultRecordEnvelope };
 
 /** A vault with one CLI key approved, and the Worker routes the CLI calls. */
 export const makeWorld = Effect.fnUntraced(function* () {
@@ -49,7 +55,8 @@ export const makeWorld = Effect.fnUntraced(function* () {
 
   const records = new Map<string, StoredRecord>();
   const calls: Call[] = [];
-  const state = { isRevoked: false, deleteStatus: 200 };
+  /** `refusePuts`: how many record writes from now are refused as conflicts (a write that raced). */
+  const state = { isRevoked: false, deleteStatus: 200, refusePuts: 0 };
 
   const json = (status: number, body: unknown) =>
     new Response(JSON.stringify(body), {
@@ -98,23 +105,53 @@ export const makeWorld = Effect.fnUntraced(function* () {
         nextCursor: start + 1 < ofType.length ? (page[0]?.id ?? null) : null,
       });
     }
+    const record = /^\/api\/v1\/vault\/records\/([a-z-]+)\/([A-Za-z0-9_-]+)$/u.exec(url.pathname);
+    if (record !== null) {
+      const [, type = '', id = ''] = record;
+      const held = records.get(id);
+      if (call.method === 'GET') {
+        return held === undefined
+          ? json(404, { error: { code: 'NOT_FOUND', message: 'Not found' } })
+          : json(200, held.envelope);
+      }
+      if (call.method === 'PUT') {
+        const { ciphertext, revision, precondition } = PutRecordRequestSchema.parse(
+          JSON.parse(String(init?.body)),
+        );
+        const isRefused =
+          state.refusePuts > 0 ||
+          (precondition?.expect === 'absent' && held !== undefined) ||
+          (precondition?.expect === 'revision' &&
+            (held?.envelope.revision ?? null) !== precondition.revision);
+        if (state.refusePuts > 0) state.refusePuts -= 1;
+        if (isRefused) {
+          return json(409, { error: { code: 'CONFLICT', message: 'Revision mismatch' } });
+        }
+        records.set(id, { envelope: { id, type, ciphertext, updatedAt: 0, revision } });
+        return json(200, { ok: true });
+      }
+    }
     return json(404, { error: { code: 'NOT_FOUND', message: 'Not found' } });
   }) as typeof globalThis.fetch;
 
-  /** Seals `record` at `revision` as the browser would, replacing what the Worker held. */
-  const putAddress = (record: AddressRecord, revision: number) =>
+  /** Seals a record at `revision` as the browser would, replacing what the Worker held. */
+  const putRecord = (item: {
+    readonly type: string;
+    readonly naturalKey: string;
+    readonly revision: number;
+    readonly plaintext: string;
+  }) =>
     Effect.promise(async () => {
-      const plaintext = JSON.stringify(addressRecordSchema.parse(record));
-      const sealed = await vault.encryptRecord({
-        type: ADDRESS_RECORD_TYPE,
-        naturalKey: record.address,
-        revision,
-        plaintext,
-      });
-      records.set(sealed.id, {
-        naturalKey: record.address,
-        envelope: { ...sealed, updatedAt: 0, revision },
-      });
+      const sealed = await vault.encryptRecord(item);
+      records.set(sealed.id, { envelope: { ...sealed, updatedAt: 0, revision: item.revision } });
+    });
+
+  const putAddress = (record: AddressRecord, revision: number) =>
+    putRecord({
+      type: ADDRESS_RECORD_TYPE,
+      naturalKey: record.address,
+      revision,
+      plaintext: JSON.stringify(addressRecordSchema.parse(record)),
     });
 
   /** What `yozz login` would have written for this key. */
@@ -127,7 +164,17 @@ export const makeWorld = Effect.fnUntraced(function* () {
     privateKey: cliKey.privateKey,
   };
 
-  return { fetch, calls, state, putAddress, credentials };
+  /** Opens every record of `type` the Worker holds, as the CLI would. */
+  const readRecords = (type: string) =>
+    Effect.promise(() =>
+      Promise.all(
+        [...records.values()]
+          .filter(({ envelope }) => envelope.type === type)
+          .map(({ envelope }) => vault.decryptListedRecord(type, envelope)),
+      ),
+    );
+
+  return { fetch, calls, state, putRecord, putAddress, readRecords, credentials };
 });
 
 /** Fresh XDG homes, gone with the scope. */
@@ -180,8 +227,11 @@ const browserOpening = (opened: Deferred.Deferred<string>) =>
     ),
   );
 
+/** A mail server in memory: the fake IMAP or SMTP server. */
+type FakeServer = { readonly open: () => MailSocket };
+
 /** Mail servers by host name, each in memory; any other host cannot be reached. */
-const mailServersOf = (servers: Readonly<Record<string, FakeImapServer>>) =>
+const mailServersOf = (servers: Readonly<Record<string, FakeServer>>) =>
   Layer.succeed(
     MailServers,
     MailServers.of({
@@ -203,13 +253,16 @@ export const runCli = Effect.fnUntraced(function* (
     env = {},
     browser,
     servers = {},
+    stdin,
   }: {
     readonly fetch: typeof globalThis.fetch;
     readonly homes: Homes;
     /** `undefined` unsets one of the defaults below. */
     readonly env?: Record<string, string | undefined>;
     readonly browser?: Deferred.Deferred<string>;
-    readonly servers?: Readonly<Record<string, FakeImapServer>>;
+    readonly servers?: Readonly<Record<string, FakeServer>>;
+    /** What the command reads on stdin. */
+    readonly stdin?: string;
   },
 ) {
   const stdout: string[] = [];
@@ -221,6 +274,9 @@ export const runCli = Effect.fnUntraced(function* (
         CliLayer,
         mailServersOf(servers),
         browser === undefined ? Layer.empty : browserOpening(browser),
+        stdin === undefined
+          ? Layer.empty
+          : Stdio.layerTest({ stdin: Stream.make(new TextEncoder().encode(stdin)) }),
       ),
     ),
     Effect.provideService(
