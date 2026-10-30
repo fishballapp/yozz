@@ -3,6 +3,7 @@
  * offsets from module load.
  */
 
+import type { AddressRecord } from '@yozz.app/mail/addresses/record';
 import { MailAutoconfigSchema } from '@yozz.app/vault-contract';
 import beachDog from '../../fixtures/attachments/beach-dog-01.jpg?inline';
 import beachDogStick from '../../fixtures/attachments/beach-dog-stick.jpg?inline';
@@ -10,7 +11,6 @@ import buildLog from '../../fixtures/attachments/build-4471-step14.log?raw';
 import receipt from '../../fixtures/attachments/receipt-AC-9382.pdf?inline';
 import runnerMetrics from '../../fixtures/attachments/runner-metrics.png?inline';
 import type { AutoconfigLookup } from '../addresses/autoconfig';
-import type { AddressRecord } from '../addresses/record';
 
 const NOW = Date.now();
 const MINUTE = 60_000;
@@ -20,7 +20,7 @@ const ago = (ms: number) => NOW - ms;
 
 const DEMO_PASSWORD = 'demo-app-password';
 
-import type { Attachment, Thread } from '../threads/thread';
+import type { Attachment, Thread } from '@yozz.app/mail/threads/thread';
 
 /** Vite inlines a binary sample file as a data URL. */
 const bytesOf = (dataUrl: string) =>

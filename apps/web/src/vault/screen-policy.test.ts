@@ -1,7 +1,7 @@
+import { VaultApiError } from '@yozz.app/mail/vault/api';
 import { VaultError, type VaultFailureCode } from '@yozz.app/vault';
 import { ApiErrorCodeSchema } from '@yozz.app/vault-contract';
 import { describe, expect, it } from 'vitest';
-import { VaultApiError } from './api';
 import { PasskeyPrfError, type PrfCapability } from './passkey-prf';
 import { PASSKEY_OFFER, vaultErrorMessage } from './screen-policy';
 import { UnlockError } from './unlock';

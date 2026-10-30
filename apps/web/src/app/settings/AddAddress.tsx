@@ -1,4 +1,11 @@
 import { Link, useNavigate } from '@tanstack/react-router';
+import {
+  type AddressRecord,
+  addressRecordSchema,
+  isInbound,
+} from '@yozz.app/mail/addresses/record';
+import type { MailConnectionFailure } from '@yozz.app/mail/connection';
+import { describeMailFailure } from '@yozz.app/mail/describe-failure';
 import type { MailAutoconfig } from '@yozz.app/vault-contract';
 import { type FormEvent, type ReactNode, useEffect, useRef, useState } from 'react';
 import { ZodError } from 'zod';
@@ -8,10 +15,7 @@ import {
   lookupMailServers,
   usernameFor,
 } from '../../addresses/autoconfig';
-import { type AddressRecord, addressRecordSchema, isInbound } from '../../addresses/record';
 import { keepCompose } from '../../compose/intent';
-import type { MailConnectionFailure } from '../../relay/connection';
-import { describeMailFailure } from '../../relay/describe-failure';
 import { useMail } from '../../store/MailProvider';
 import { Button, buttonClass } from '../../ui/Button';
 import { FieldRow, Input } from '../../ui/Field';
@@ -249,7 +253,7 @@ export const AddAddress = () => {
           // Both tried before anything is stored. The TLS stack loads on demand.
           if (isInbound(record)) {
             setBusyLabel(`Testing ${record.imap.host}…`);
-            const { testImap } = await import('../../threads/sync');
+            const { testImap } = await import('../../relay/probe');
             if (!isLive()) return;
             const test = await testImap(record.imap);
             if (!isLive()) return;
@@ -259,7 +263,7 @@ export const AddAddress = () => {
             }
           }
           setBusyLabel(`Testing ${record.smtp.host}…`);
-          const { testSmtp } = await import('../../compose/send');
+          const { testSmtp } = await import('../../relay/probe');
           if (!isLive()) return;
           const test = await testSmtp(record.smtp);
           if (!isLive()) return;

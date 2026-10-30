@@ -1,9 +1,10 @@
 // @vitest-environment jsdom
+
+import type { ThreadState } from '@yozz.app/mail/threads/thread';
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { ThreadList } from './ThreadList';
-import type { ThreadState } from './thread';
 
 // @ts-expect-error React reads it off the global
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;

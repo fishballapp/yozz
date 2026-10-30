@@ -1,6 +1,6 @@
 import { useNavigate, useParams, useSearch } from '@tanstack/react-router';
+import { neighbourOf, visibleThreads } from '@yozz.app/mail/threads/views';
 import { useMail } from '../store/MailProvider';
-import { neighbourOf, visibleThreads } from './views';
 
 /**
  * Filing the open thread away moves the reader on to its neighbour, or back to the list when it was

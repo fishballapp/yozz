@@ -9,9 +9,12 @@ import {
   XIcon,
 } from '@phosphor-icons/react';
 import { useNavigate, useSearch } from '@tanstack/react-router';
+import { MAX_ATTACHMENT_BYTES } from '@yozz.app/mail/compose/draft';
+import type { DeleteOutcome } from '@yozz.app/mail/compose/draft-vault';
+import { seedFor } from '@yozz.app/mail/compose/seed';
+import { describeMailFailure } from '@yozz.app/mail/describe-failure';
 import { cn } from 'cn';
 import { useEffect, useRef, useState } from 'react';
-import { describeMailFailure } from '../relay/describe-failure';
 import { useComposer, useMail } from '../store/MailProvider';
 import { displayName } from '../threads/attachment-preview';
 import { ATTACHMENT_LABEL, formatBytes } from '../threads/attachments';
@@ -22,10 +25,15 @@ import { Input } from '../ui/Field';
 import { reportProblem, toast } from '../ui/Toast';
 import { useVault } from '../vault/session';
 import type { SessionEnded } from '../vault/unlock';
-import { MAX_ATTACHMENT_BYTES, readAttachments, type SendReport } from './draft';
-import type { DeleteOutcome } from './draft-vault';
+import { readAttachments, type SendReport } from './draft';
 import { FromSwitch } from './FromSwitch';
-import { DISCARD_WARNING, draftKeyOfIntent, seedFor, withCompose, withoutCompose } from './intent';
+import {
+  DISCARD_WARNING,
+  draftKeyOfIntent,
+  seedRequestOf,
+  withCompose,
+  withoutCompose,
+} from './intent';
 import { MarkdownView } from './MarkdownView';
 
 /**
@@ -114,6 +122,7 @@ export const Compose = () => {
     draftError,
     resolveDraftConflict,
     openSendState,
+    isOpenDraftFrozen,
     sendAgain,
     backToEditing,
     discardDraft,
@@ -142,12 +151,12 @@ export const Compose = () => {
   const seeded = useRef<string | undefined>(undefined);
   useEffect(() => {
     if (seeded.current === seedKey || !canSeed) return;
-    const seed = compose === undefined ? {} : seedFor(compose, threads, identities, ownedAddresses);
+    const request = compose === undefined ? null : seedRequestOf(compose);
+    const seed = request === null ? {} : seedFor(request, threads, identities, ownedAddresses);
     // A referenced intent is not marked seeded until its message has loaded. A `draft:` intent
     // gets nothing from `seedFor` by design; its content is the vault record's.
+    if (request !== null && Object.keys(seed).length === 0) return;
     const draftKey = compose === undefined ? null : draftKeyOfIntent(compose);
-    const namesMessage = compose !== undefined && compose !== 'new' && draftKey === null;
-    if (namesMessage && Object.keys(seed).length === 0) return;
     // The same wait for a `draft:` intent: the records load after unlock.
     if (draftKey !== null && !drafts.some(candidate => candidate.draftKey === draftKey)) return;
     seeded.current = seedKey;
@@ -473,7 +482,7 @@ export const Compose = () => {
                             size="sm"
                             className="h-11 lg:h-7"
                             // Frozen as Send is: the bytes may already be on the wire.
-                            disabled={isSending || openSendState === 'sending'}
+                            disabled={isSending || isOpenDraftFrozen}
                           >
                             <TrashIcon size={13} />
                             Discard
@@ -525,8 +534,8 @@ export const Compose = () => {
                       // A Bcc-only send is a real message.
                       disabled={
                         isSending ||
-                        // Frozen by a send in flight, here or on another device.
-                        openSendState === 'sending' ||
+                        // Frozen by a send in flight, here or on another device, or one to settle.
+                        isOpenDraftFrozen ||
                         pendingReads > 0 ||
                         [draft.to, draft.cc, draft.bcc].every(field => field.trim() === '')
                       }

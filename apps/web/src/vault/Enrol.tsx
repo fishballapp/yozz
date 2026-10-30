@@ -1,9 +1,10 @@
 import { Link, useNavigate, useSearch } from '@tanstack/react-router';
+import { VaultApiError } from '@yozz.app/mail/vault/api';
 import { useEffect, useState } from 'react';
 import { Button } from '../ui/Button';
 import { FieldRow, Input } from '../ui/Field';
 import { AuthColumn } from './AuthColumn';
-import { VaultApiError, vaultApi } from './api';
+import { vaultApi } from './api';
 import { isApiConfigured } from './api-base-url';
 import { getSession } from './auth-client';
 import { checkPasskeyPrfCapability, PasskeyPrfError, type PrfCapability } from './passkey-prf';

@@ -1,13 +1,13 @@
 // @vitest-environment jsdom
 import 'fake-indexeddb/auto';
 import type { ImapMessageSummary } from '@yozz.app/imap';
+import { ADDRESS_RECORD_TYPE, type AddressRecord } from '@yozz.app/mail/addresses/record';
+import type { syncAccount } from '@yozz.app/mail/threads/sync';
+import type { RecordStore } from '@yozz.app/mail/vault/record-store';
 import { act, type ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { ADDRESS_RECORD_TYPE, type AddressRecord } from '../addresses/record';
 import { createMailCache } from '../threads/cache';
-import type { syncAccount } from '../threads/sync';
-import type { RecordStore } from '../vault/record-store';
 import { MailProvider, useMail } from './MailProvider';
 
 // The TLS stack never arrives: whatever renders below rendered without it.
@@ -25,7 +25,7 @@ const transport = vi.hoisted(() => ({
     }),
   ),
 }));
-vi.mock('../threads/sync', () => ({
+vi.mock('@yozz.app/mail/threads/sync', () => ({
   syncAccount: transport.syncAccount,
   prefetchBodies: () => {},
 }));
@@ -44,7 +44,6 @@ const store: RecordStore = {
       : [],
   put: async () => {},
   remove: async () => {},
-  close: () => {},
 };
 
 const vault = { session: { userId: 'u1', store } };

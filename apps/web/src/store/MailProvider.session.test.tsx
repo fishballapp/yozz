@@ -1,21 +1,21 @@
 // @vitest-environment jsdom
+
+import { ADDRESS_RECORD_TYPE, type AddressRecord } from '@yozz.app/mail/addresses/record';
+import { claimSend, createDraft, listDrafts } from '@yozz.app/mail/compose/draft-vault';
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { ADDRESS_RECORD_TYPE, type AddressRecord } from '../addresses/record';
 import { AgentTools } from '../agent/AgentTools';
 import type { AgentTool } from '../agent/tools';
-import { claimSend, createDraft, listDrafts } from '../compose/draft-vault';
 // Loaded up front, so the work a test holds runs on as soon as it is let go, and so two sessions'
 // first syncs never race the mocked module's factory into handing one of them the real sync.
-import '../compose/send';
-import '../compose/send-machine';
-import '../threads/sync';
-import { SENT_RECORD_TYPE } from '../compose/sent-record';
-import type { ThreadState } from '../threads/thread';
-import { fakeRecordStore } from '../vault/fake-record-store';
-import type { RecordStore } from '../vault/record-store';
-import type { UnlockedVaultSession } from '../vault/unlock';
+import '@yozz.app/mail/compose/send-machine';
+import '@yozz.app/mail/threads/sync';
+import '../compose/submit';
+import { SENT_RECORD_TYPE } from '@yozz.app/mail/compose/sent-record';
+import { fakeRecordStore } from '@yozz.app/mail/testing/fake-record-store';
+import type { ThreadState } from '@yozz.app/mail/threads/thread';
+import type { RecordStore } from '@yozz.app/mail/vault/record-store';
 import { MailProvider, useComposer, useMail } from './MailProvider';
 
 // @ts-expect-error React reads it off the global
@@ -42,7 +42,8 @@ const gate = (): Gate => {
 };
 
 const mocks = vi.hoisted(() => ({
-  session: null as Pick<UnlockedVaultSession, 'userId' | 'store'> | null,
+  // What the mail store reads of the session.
+  session: null as { readonly userId: string; readonly store: RecordStore } | null,
   /** Counts live managers, one per session. */
   managers: 0,
   /** Every IMAP task that reached a manager: which session's, and for which address. */
@@ -116,13 +117,13 @@ vi.mock('../threads/cache', () => ({
   }),
   clearMailCache: async () => {},
 }));
-vi.mock('../threads/hydrate', () => ({
+vi.mock('@yozz.app/mail/threads/hydrate', () => ({
   cachedSummaries: async () => ({}),
   cachedPreviews: async () => ({}),
 }));
 // A sync that never lands and asks for no task, so every task a test sees is the one under test.
-vi.mock('../threads/sync', async importOriginal => ({
-  ...(await importOriginal<typeof import('../threads/sync')>()),
+vi.mock('@yozz.app/mail/threads/sync', async importOriginal => ({
+  ...(await importOriginal<typeof import('@yozz.app/mail/threads/sync')>()),
   syncAccount: () =>
     mocks.syncLands
       ? Promise.resolve({
@@ -132,12 +133,11 @@ vi.mock('../threads/sync', async importOriginal => ({
       : new Promise(() => {}),
   prefetchBodies: () => {},
 }));
-vi.mock('../threads/summaries', async importOriginal => ({
-  ...(await importOriginal<typeof import('../threads/summaries')>()),
+vi.mock('@yozz.app/mail/threads/summaries', async importOriginal => ({
+  ...(await importOriginal<typeof import('@yozz.app/mail/threads/summaries')>()),
   threadsFromAccounts: () => mocks.threads,
 }));
-vi.mock('../compose/send', async importOriginal => ({
-  ...(await importOriginal<typeof import('../compose/send')>()),
+vi.mock('../compose/submit', () => ({
   submitBytes: async () => {
     await mocks.smtp?.promise;
     return { ok: true, value: undefined };

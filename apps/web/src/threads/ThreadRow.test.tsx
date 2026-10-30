@@ -1,11 +1,12 @@
 // @vitest-environment jsdom
+
+import { type Folder, type ThreadState, VAULT_UID_VALIDITY } from '@yozz.app/mail/threads/thread';
+import type { MailboxId } from '@yozz.app/mail/threads/views';
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { toast } from '../ui/Toast';
 import { ThreadRow } from './ThreadRow';
-import { type Folder, type ThreadState, VAULT_UID_VALIDITY } from './thread';
-import type { MailboxId } from './views';
 
 const mail = vi.hoisted(() => ({
   ownedAddresses: ['me@example.com'],

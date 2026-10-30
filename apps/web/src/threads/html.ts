@@ -1,5 +1,5 @@
+import { SAFE_INLINE_IMAGE_MIME_TYPES } from '@yozz.app/mail/threads/image-types';
 import createDOMPurify from 'dompurify';
-import { SAFE_INLINE_IMAGE_MIME_TYPES } from './image-types';
 import { isPermittedExternalHostname, normalizedUrlInputOf, outboundHrefOf } from './url-policy';
 
 /**

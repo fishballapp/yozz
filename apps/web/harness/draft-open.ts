@@ -3,17 +3,19 @@
  * reads what the fields hold. Needs both dev servers up.
  */
 import { execFileSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { chromium, type Page } from '@playwright/test';
 
 type UnlockModule = typeof import('../src/vault/unlock');
 type VaultAccount = import('../src/vault/unlock').VaultAccount;
 type AuthModule = typeof import('../src/vault/auth-client');
 type KeysModule = typeof import('../src/vault/unlock-keys');
-type DraftsModule = typeof import('../src/compose/draft-vault');
+type DraftsModule = typeof import('@yozz.app/mail/compose/draft-vault');
 const UNLOCK = '/src/vault/unlock.ts' as string;
 const AUTH = '/src/vault/auth-client.ts' as string;
 const KEYS = '/src/vault/unlock-keys.ts' as string;
-const DRAFTS = '/src/compose/draft-vault.ts' as string;
+// Outside the app's root, so the dev server serves it by its path on disk.
+const DRAFTS = `/@fs${fileURLToPath(import.meta.resolve('@yozz.app/mail/compose/draft-vault'))}`;
 
 const WEB = process.env.YOZZ_WEB ?? 'http://localhost:5177';
 const API = process.env.YOZZ_API ?? 'http://localhost:8177';

@@ -98,7 +98,8 @@ describe('client session', () => {
       { expect: 'MAIL FROM:<me@x.test> BODY=8BITMIME\r\n', reply: '250 ok\r\n' },
       { expect: 'RCPT TO:<you@y.test>\r\n', reply: '252 cannot VRFY, will try\r\n' },
       { expect: 'DATA\r\n', reply: '354 go\r\n' },
-      { expect: 'Subject: hi\r\n\r\n..body\r\n.\r\n', reply: '250 queued as 1\r\n' },
+      { expect: 'Subject: hi\r\n\r\n..body\r\n', reply: '' },
+      { expect: '.\r\n', reply: '250 queued as 1\r\n' },
       { expect: 'QUIT\r\n', reply: '221 bye\r\n' },
     ]);
     const client = createSmtpClient(duplex);
@@ -140,9 +141,151 @@ describe('client session', () => {
       to: ['you@y.test'],
       data: encoder.encode('Subject: hi\r\n\r\nbody'),
     });
+    // Before the dot, so a refusal: the server discards a message it never saw end.
     expect(sent).toMatchObject({ ok: false, reason: { kind: 'protocol' } });
     // The script has no QUIT step, so a write here would throw.
     expect(await client.quit()).toMatchObject({ ok: false, reason: { kind: 'protocol' } });
+  });
+
+  /**
+   * Which side of the end of DATA a failure fell on decides whether the message may have gone out:
+   * the caller hands a refused draft back to be sent again, and must not hand back one the server
+   * may already be delivering.
+   */
+  describe('the end of DATA', () => {
+    const throughData = [
+      { expect: null, reply: '220 mx.example ESMTP\r\n' },
+      { expect: 'MAIL FROM:<me@x.test>\r\n', reply: '250 ok\r\n' },
+      { expect: 'RCPT TO:<you@y.test>\r\n', reply: '250 ok\r\n' },
+      { expect: 'DATA\r\n', reply: '354 go\r\n' },
+      { expect: 'Subject: hi\r\n\r\nbody\r\n', reply: '' },
+    ];
+    const envelope = {
+      from: 'me@x.test',
+      to: ['you@y.test'],
+      data: encoder.encode('Subject: hi\r\n\r\nbody'),
+    };
+    const send = async (client: ReturnType<typeof createSmtpClient>) => {
+      await client.greeting();
+      return client.send(envelope);
+    };
+
+    it('is unconfirmed when the connection drops after the dot, before any answer', async () => {
+      // The server took the dot and the connection ended: it may be delivering the message now.
+      const { duplex } = scriptedDuplex([...throughData, { expect: '.\r\n', reply: '' }]);
+      const client = createSmtpClient(duplex);
+      expect(await send(client)).toEqual({
+        ok: false,
+        reason: {
+          kind: 'unconfirmed',
+          detail: 'the connection closed before the server answered',
+        },
+      });
+      // Nothing more is written on a connection in an unknown state.
+      expect(await client.quit()).toMatchObject({ ok: false, reason: { kind: 'protocol' } });
+    });
+
+    it('is unconfirmed when the answer after the dot is not a reply', async () => {
+      const { duplex } = scriptedDuplex([
+        ...throughData,
+        { expect: '.\r\n', reply: 'garbage\r\n' },
+      ]);
+      expect(await send(createSmtpClient(duplex))).toMatchObject({
+        ok: false,
+        reason: { kind: 'unconfirmed' },
+      });
+    });
+
+    it('is unconfirmed when writing the dot itself fails, which may have reached the server', async () => {
+      const { duplex } = scriptedDuplex(throughData);
+      const failing: ByteDuplex = {
+        read: duplex.read,
+        write: async bytes => {
+          if (decoder.decode(bytes) === '.\r\n') throw new Error('socket closed');
+          await duplex.write(bytes);
+        },
+      };
+      expect(await send(createSmtpClient(failing))).toMatchObject({
+        ok: false,
+        reason: { kind: 'unconfirmed' },
+      });
+    });
+
+    it('is unconfirmed when the answer to the dot is neither yes nor no', async () => {
+      // A syntactically valid code RFC 5321 does not allow here says nothing about the message.
+      const { duplex } = scriptedDuplex([
+        ...throughData,
+        { expect: '.\r\n', reply: '354 again?\r\n' },
+      ]);
+      expect(await send(createSmtpClient(duplex))).toMatchObject({
+        ok: false,
+        reason: { kind: 'unconfirmed' },
+      });
+    });
+
+    it('is accepted on any 2xx answer to the dot', async () => {
+      const { duplex } = scriptedDuplex([
+        ...throughData,
+        { expect: '.\r\n', reply: '251 queued\r\n' },
+      ]);
+      expect(await send(createSmtpClient(duplex))).toEqual({
+        ok: true,
+        value: { code: 251, lines: ['queued'] },
+      });
+    });
+
+    it('writes nothing more once abandoned, through any command', async () => {
+      // The scripts end at the dot, so any write after it would throw in the script.
+      for (const [label, failing] of [
+        ['a lost answer', scriptedDuplex([...throughData, { expect: '.\r\n', reply: '' }]).duplex],
+        [
+          'a body write that failed',
+          (() => {
+            const { duplex } = scriptedDuplex(throughData.slice(0, 4));
+            return {
+              read: duplex.read,
+              write: async (bytes: Uint8Array) => {
+                if (decoder.decode(bytes).startsWith('Subject')) throw new Error('reset');
+                await duplex.write(bytes);
+              },
+            } satisfies ByteDuplex;
+          })(),
+        ],
+      ] as const) {
+        const client = createSmtpClient(failing);
+        expect((await send(client)).ok, label).toBe(false);
+        const abandoned = {
+          ok: false,
+          reason: { kind: 'protocol', detail: 'connection abandoned inside DATA' },
+        };
+        expect(await client.ehlo('yozz.app'), label).toEqual(abandoned);
+        expect(await client.send(envelope), label).toEqual(abandoned);
+        expect(await client.authenticate('u', 'p'), label).toMatchObject({ ok: false });
+        expect(await client.quit(), label).toEqual(abandoned);
+      }
+    });
+
+    it('is a refusal when the server answers the dot with an error', async () => {
+      const { duplex } = scriptedDuplex([
+        ...throughData,
+        { expect: '.\r\n', reply: '554 5.7.1 message rejected\r\n' },
+      ]);
+      expect(await send(createSmtpClient(duplex))).toEqual({
+        ok: false,
+        reason: { kind: 'reply', code: 554, text: '5.7.1 message rejected' },
+      });
+    });
+
+    it('is a refusal when the connection drops before DATA is accepted', async () => {
+      const { duplex } = scriptedDuplex([
+        ...throughData.slice(0, 3),
+        { expect: 'DATA\r\n', reply: '' },
+      ]);
+      expect(await send(createSmtpClient(duplex))).toEqual({
+        ok: false,
+        reason: { kind: 'closed' },
+      });
+    });
   });
 
   it('falls back to AUTH LOGIN and surfaces a refused recipient', async () => {

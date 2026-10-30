@@ -1,4 +1,10 @@
-import { createLineReader, readReply, type SmtpReply, type SmtpResult } from './reply.ts';
+import {
+  createLineReader,
+  readReply,
+  type SmtpFailure,
+  type SmtpReply,
+  type SmtpResult,
+} from './reply.ts';
 import type { ByteDuplex } from './transport.ts';
 
 export type SmtpCapabilities = {
@@ -42,6 +48,16 @@ const refused = (reply: SmtpReply): SmtpResult<never> => ({
 
 const isCommandSafe = (address: string) => /^[^\s<>\r\n]+$/.test(address);
 
+/** `.` CR LF, the end of the message after `dotStuff`'s final CRLF. */
+const DATA_TERMINATOR_BYTES = 3;
+
+/** Why the answer to the end of DATA, if any, says nothing about the message. */
+const unconfirmedDetail = (reason: SmtpFailure): string => {
+  if (reason.kind === 'closed') return 'the connection closed before the server answered';
+  if (reason.kind === 'reply') return `neither yes nor no: ${reason.code} ${reason.text}`;
+  return reason.detail;
+};
+
 /** RFC 5321 §4.5.2: a line beginning with `.` gets a second `.`; the message ends at `CRLF.CRLF`. */
 export const dotStuff = (data: Uint8Array): Uint8Array => {
   const out: number[] = [];
@@ -58,10 +74,20 @@ export const dotStuff = (data: Uint8Array): Uint8Array => {
 
 export const createSmtpClient = (transport: ByteDuplex): SmtpClient => {
   const reader = createLineReader(transport);
-  let inData = false;
+  /**
+   * DATA ended in a state nobody knows: the server may still be reading the message, so anything
+   * written now, QUIT included, could be read as body text. Nothing more is written.
+   */
+  let isAbandoned = false;
   let capabilities: SmtpCapabilities = { keywords: [], auth: [] };
 
   const command = async (line: string): Promise<SmtpResult<SmtpReply>> => {
+    if (isAbandoned) {
+      return {
+        ok: false,
+        reason: { kind: 'protocol', detail: 'connection abandoned inside DATA' },
+      };
+    }
     try {
       await transport.write(encoder.encode(`${line}\r\n`));
     } catch (error) {
@@ -130,6 +156,12 @@ export const createSmtpClient = (transport: ByteDuplex): SmtpClient => {
     };
   };
 
+  /** What `send` answers once the end of the message was written and no usable answer came back. */
+  const abandon = (reason: SmtpFailure): SmtpResult<never> => {
+    isAbandoned = true;
+    return { ok: false, reason: { kind: 'unconfirmed', detail: unconfirmedDetail(reason) } };
+  };
+
   const send = async (envelope: SmtpEnvelope): Promise<SmtpResult<SmtpReply>> => {
     for (const address of [envelope.from, ...envelope.to]) {
       if (!isCommandSafe(address)) {
@@ -149,25 +181,44 @@ export const createSmtpClient = (transport: ByteDuplex): SmtpClient => {
     }
     const data = await expect('DATA', 354);
     if (!data.ok) return data;
+    // The terminator is written on its own: a message the server never saw end is one it discards
+    // (RFC 5321 §4.1.1.4), so only a failure from here on can have delivered anything.
+    const stuffed = dotStuff(envelope.data);
+    const terminatorAt = stuffed.length - DATA_TERMINATOR_BYTES;
     try {
-      await transport.write(dotStuff(envelope.data));
+      await transport.write(stuffed.subarray(0, terminatorAt));
     } catch (error) {
-      // The server is still inside DATA: anything sent now, QUIT included, is read as body text.
-      inData = true;
+      // The server is still inside DATA, waiting for an end it never saw: nothing went out.
+      isAbandoned = true;
       return { ok: false, reason: { kind: 'protocol', detail: `write failed: ${String(error)}` } };
     }
-    const accepted = await readReply(reader);
-    if (!accepted.ok) return accepted;
-    return accepted.value.code === 250 ? accepted : refused(accepted.value);
+    // From here the server may hold the message, and the connection's state is unknown: nothing
+    // more is written on it, and a failure is `unconfirmed`, never a refusal.
+    const accepted = await (async (): Promise<SmtpResult<SmtpReply>> => {
+      try {
+        await transport.write(stuffed.subarray(terminatorAt));
+      } catch (error) {
+        return {
+          ok: false,
+          reason: { kind: 'protocol', detail: `write failed: ${String(error)}` },
+        };
+      }
+      try {
+        return await readReply(reader);
+      } catch (error) {
+        return { ok: false, reason: { kind: 'protocol', detail: `read failed: ${String(error)}` } };
+      }
+    })();
+    if (!accepted.ok) return abandon(accepted.reason);
+    const { code } = accepted.value;
+    if (code >= 200 && code < 300) return accepted;
+    // The server answered, and the answer was no: nothing went out.
+    if (code >= 400 && code < 600) return refused(accepted.value);
+    // Not an answer RFC 5321 allows here, so whether the server took the message is unknown.
+    return abandon({ kind: 'reply', code, text: accepted.value.lines.join(' ') });
   };
 
   const quit = async (): Promise<SmtpResult<void>> => {
-    if (inData) {
-      return {
-        ok: false,
-        reason: { kind: 'protocol', detail: 'connection abandoned inside DATA' },
-      };
-    }
     const reply = await expect('QUIT', 221);
     return reply.ok ? { ok: true, value: undefined } : reply;
   };

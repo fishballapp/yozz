@@ -1,7 +1,8 @@
+import { fakeRecordStore } from '@yozz.app/mail/testing/fake-record-store';
+import { senderKeyOf } from '@yozz.app/mail/threads/thread';
+import { VaultApiError } from '@yozz.app/mail/vault/api';
+import type { RecordStore } from '@yozz.app/mail/vault/record-store';
 import { describe, expect, it } from 'vitest';
-import { VaultApiError } from '../vault/api';
-import { fakeRecordStore } from '../vault/fake-record-store';
-import type { RecordStore } from '../vault/record-store';
 import {
   forgetConsent,
   forgetSender,
@@ -13,7 +14,6 @@ import {
   MAX_REMEMBERED_CONSENTS,
   readConsents,
   rememberConsent,
-  senderKeyOf,
   trustSender,
   withConsent,
 } from './remote-images';

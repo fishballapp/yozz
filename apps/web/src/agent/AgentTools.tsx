@@ -1,7 +1,7 @@
 import { useNavigate, useParams } from '@tanstack/react-router';
+import { isInbound } from '@yozz.app/mail/addresses/record';
 import { useEffect, useRef } from 'react';
 import { flushSync } from 'react-dom';
-import { isInbound } from '../addresses/record';
 import { withCompose } from '../compose/intent';
 import { useMail } from '../store/MailProvider';
 import { type AgentPort, buildAgentTools } from './tools';

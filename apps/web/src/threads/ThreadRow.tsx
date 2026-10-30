@@ -7,6 +7,14 @@ import {
   TrashIcon,
 } from '@phosphor-icons/react';
 import { Link } from '@tanstack/react-router';
+import type { ThreadState } from '@yozz.app/mail/threads/thread';
+import {
+  attachmentsOf,
+  isArchived,
+  isOnServer,
+  newestInbound,
+} from '@yozz.app/mail/threads/thread';
+import { latestOf, type MailboxId, previewOf } from '@yozz.app/mail/threads/views';
 import { cn } from 'cn';
 import { DISCARD_WARNING } from '../compose/intent';
 import { useMail } from '../store/MailProvider';
@@ -16,10 +24,7 @@ import { reportProblem } from '../ui/Toast';
 import { listTime } from '../ui/time';
 import { discardDrafts, discardTitle, draftIdsOf } from './discard-drafts';
 import { canMoveTo } from './reconcile';
-import type { ThreadState } from './thread';
-import { attachmentsOf, isArchived, isOnServer, newestInbound } from './thread';
 import { useAdvancePast } from './use-advance';
-import { latestOf, type MailboxId, previewOf } from './views';
 
 /** One record in columns: a 34px line above `lg`, two lines below. Contrast figures and rationale are in DESIGN.md. */
 

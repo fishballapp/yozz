@@ -1,17 +1,22 @@
 import { MagnifyingGlassIcon } from '@phosphor-icons/react';
 import { Link, useParams } from '@tanstack/react-router';
 import { defaultRangeExtractor, useVirtualizer } from '@tanstack/react-virtual';
+import { describeMailFailure } from '@yozz.app/mail/describe-failure';
+import { type ThreadState, threadByHandle } from '@yozz.app/mail/threads/thread';
+import {
+  isViewId,
+  type MailboxId,
+  olderAvailable,
+  syncProgressIn,
+} from '@yozz.app/mail/threads/views';
 import { cn } from 'cn';
 import { type ReactNode, useEffect, useEffectEvent, useRef, useState } from 'react';
-import { describeMailFailure } from '../relay/describe-failure';
 import { useMail } from '../store/MailProvider';
 import { buttonClass } from '../ui/Button';
 import { Checkbox } from '../ui/Checkbox';
 import { BulkActions } from './BulkActions';
 import { useSelection } from './selection';
 import { ThreadRow } from './ThreadRow';
-import { type ThreadState, threadByHandle } from './thread';
-import { isViewId, type MailboxId, olderAvailable, syncProgressIn } from './views';
 
 /** The list over a mailbox: search, the rows, the empty states and Older mail. */
 

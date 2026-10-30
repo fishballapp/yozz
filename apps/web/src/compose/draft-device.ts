@@ -1,5 +1,5 @@
+import type { ComposeDraft } from '@yozz.app/mail/compose/draft';
 import { z } from 'zod';
-import type { ComposeDraft } from './draft';
 import type { ComposeIntent } from './intent';
 
 /**

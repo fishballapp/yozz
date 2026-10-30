@@ -1,12 +1,12 @@
 import { Dialog } from '@base-ui/react/dialog';
 import { ListIcon, PlusIcon, XIcon } from '@phosphor-icons/react';
 import { Link, Navigate, Outlet, useMatches, useParams, useSearch } from '@tanstack/react-router';
+import { mailboxLabel, visibleThreads } from '@yozz.app/mail/threads/views';
 import { useEffect, useState } from 'react';
 import { AddressRail } from '../addresses/AddressRail';
 import { AgentTools } from '../agent/AgentTools';
 import { withCompose } from '../compose/intent';
 import { useMail } from '../store/MailProvider';
-import { mailboxLabel, visibleThreads } from '../threads/views';
 import { Button, buttonClass } from '../ui/Button';
 import { isDemo } from '../ui/chrome';
 import { RAIL_WIDTH, Resizer, useListWidth, useRailWidth } from '../ui/Resizer';

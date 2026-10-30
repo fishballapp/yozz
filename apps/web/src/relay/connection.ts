@@ -1,9 +1,6 @@
-import {
-  createImapClient,
-  type ImapClient,
-  type ImapFailure,
-  type ImapUntagged,
-} from '@yozz.app/imap';
+import { createImapClient, type ImapClient, type ImapUntagged } from '@yozz.app/imap';
+import type { AddressRecord } from '@yozz.app/mail/addresses/record';
+import type { MailConnectionFailure, Result } from '@yozz.app/mail/connection';
 import { createSmtpClient, type SmtpClient, type SmtpFailure } from '@yozz.app/smtp';
 import {
   type ByteDuplex,
@@ -13,25 +10,9 @@ import {
   type TlsSession,
 } from '@yozz.app/tls';
 import { type TrustAnchorSource, YOZZ_VALIDATOR } from '@yozz.app/x509';
-import type { AddressRecord } from '../addresses/record';
 import { trustAnchors } from './anchors';
 import { peerKey, saveSession, takeSession } from './session-store';
 import { openRelayTransport, type RelayTransport } from './transport';
-
-export type Result<T, E> =
-  | { readonly ok: true; readonly value: T }
-  | { readonly ok: false; readonly error: E };
-
-export type MailConnectionFailure =
-  | { readonly kind: 'relay'; readonly detail: string }
-  /** Something threw outside the protocol layers. */
-  | { readonly kind: 'error'; readonly detail: string }
-  | { readonly kind: 'tls'; readonly detail: string }
-  | { readonly kind: 'imap'; readonly reason: ImapFailure }
-  | { readonly kind: 'smtp'; readonly reason: SmtpFailure }
-  | { readonly kind: 'auth'; readonly text: string }
-  /** Work waited a minute with nothing crossing the connection; see `live.ts`. */
-  | { readonly kind: 'stalled' };
 
 export type MailConnection = {
   readonly client: ImapClient;

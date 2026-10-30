@@ -1,7 +1,7 @@
 import { Select } from '@base-ui/react/select';
 import { CaretUpDownIcon, CheckIcon } from '@phosphor-icons/react';
+import { type AddressRecord, isInbound } from '@yozz.app/mail/addresses/record';
 import { cn } from 'cn';
-import { type AddressRecord, isInbound } from '../addresses/record';
 import { useMail } from '../store/MailProvider';
 import { SendOnlyTag } from '../ui/SendOnlyTag';
 

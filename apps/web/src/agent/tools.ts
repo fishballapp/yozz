@@ -1,12 +1,12 @@
+import type { AddressRecord } from '@yozz.app/mail/addresses/record';
+import type { DraftContent } from '@yozz.app/mail/compose/draft';
+import type { DeleteOutcome, DraftHandle, SaveOutcome } from '@yozz.app/mail/compose/draft-vault';
+import { quoteForReply, seedFor } from '@yozz.app/mail/compose/seed';
+import type { BodyOutcome } from '@yozz.app/mail/threads/body-state';
+import type { Recipient, ThreadState } from '@yozz.app/mail/threads/thread';
+import { inboxesOf, isArchived, isTrashed, threadByHandle } from '@yozz.app/mail/threads/thread';
+import { previewOf, visibleThreads } from '@yozz.app/mail/threads/views';
 import { z } from 'zod';
-import type { AddressRecord } from '../addresses/record';
-import type { DraftContent } from '../compose/draft';
-import type { DeleteOutcome, DraftHandle, SaveOutcome } from '../compose/draft-vault';
-import { quoteForReply, seedFor } from '../compose/intent';
-import type { BodyOutcome } from '../threads/body-state';
-import type { Recipient, ThreadState } from '../threads/thread';
-import { inboxesOf, isArchived, isTrashed, threadByHandle } from '../threads/thread';
-import { previewOf, visibleThreads } from '../threads/views';
 
 /**
  * Pure functions over a port, so the tests can drive a fake. Every input is parsed
@@ -617,7 +617,7 @@ export const buildAgentTools = (port: () => AgentPort): readonly AgentTool[] => 
       if (parent === undefined) return { error: 'That conversation has no message to reply to.' };
       // The same seed the Reply all button produces.
       const seed = seedFor(
-        `reply-all:${parent.id}`,
+        { kind: 'reply-all', messageId: parent.id },
         port().threads,
         port().identities,
         port().ownedAddresses,

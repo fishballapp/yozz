@@ -16,20 +16,8 @@ import {
   XIcon,
 } from '@phosphor-icons/react';
 import { Link, useParams } from '@tanstack/react-router';
-import { cn } from 'cn';
-import { Fragment, type ReactNode, useState } from 'react';
-import { replyAllCc, withCompose } from '../compose/intent';
-import { useMail } from '../store/MailProvider';
-import { Button, buttonClass } from '../ui/Button';
-import { useChromePref } from '../ui/chrome';
-import { IconSwitch } from '../ui/IconSwitch';
-import { reportProblem } from '../ui/Toast';
-import { fullTime } from '../ui/time';
-import { AttachmentList } from './AttachmentList';
-import { HtmlBody } from './HtmlBody';
-import { linkify } from './linkify';
-import { canMoveTo } from './reconcile';
-import type { ThreadState } from './thread';
+import { replyAllCc } from '@yozz.app/mail/compose/seed';
+import type { ThreadState } from '@yozz.app/mail/threads/thread';
 import {
   addresseesOf,
   inboxesOf,
@@ -38,7 +26,20 @@ import {
   type Message,
   newestInbound,
   type Recipient,
-} from './thread';
+} from '@yozz.app/mail/threads/thread';
+import { fullTime } from '@yozz.app/mail/time';
+import { cn } from 'cn';
+import { Fragment, type ReactNode, useState } from 'react';
+import { withCompose } from '../compose/intent';
+import { useMail } from '../store/MailProvider';
+import { Button, buttonClass } from '../ui/Button';
+import { useChromePref } from '../ui/chrome';
+import { IconSwitch } from '../ui/IconSwitch';
+import { reportProblem } from '../ui/Toast';
+import { AttachmentList } from './AttachmentList';
+import { HtmlBody } from './HtmlBody';
+import { linkify } from './linkify';
+import { canMoveTo } from './reconcile';
 
 /**
  * Every message says who it was written to under its From line, the way Gmail does: one "to me,

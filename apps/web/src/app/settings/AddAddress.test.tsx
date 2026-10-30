@@ -1,9 +1,10 @@
 // @vitest-environment jsdom
+
+import type { AddressRecord } from '@yozz.app/mail/addresses/record';
+import type { MailConnectionFailure } from '@yozz.app/mail/connection';
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { AddressRecord } from '../../addresses/record';
-import type { MailConnectionFailure } from '../../relay/connection';
 import { AddAddress } from './AddAddress';
 
 // @ts-expect-error React reads it off the global
@@ -63,14 +64,14 @@ vi.mock('../../addresses/autoconfig', async importOriginal => ({
     return mocks.lookupResult;
   },
 }));
-vi.mock('../../threads/sync', () => ({
+vi.mock('../../relay/probe', () => ({
   testImap: async () => {
     await mocks.imapTest?.promise;
     if (mocks.imapFailure !== null) return { ok: false, error: mocks.imapFailure };
     return { ok: true, value: undefined };
   },
+  testSmtp: async () => ({ ok: true, value: undefined }),
 }));
-vi.mock('../../compose/send', () => ({ testSmtp: async () => ({ ok: true, value: undefined }) }));
 
 const endSession = () => {
   mocks.generation += 1;

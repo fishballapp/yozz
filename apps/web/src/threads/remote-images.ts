@@ -1,22 +1,15 @@
+import type { SenderCheck } from '@yozz.app/mail/threads/thread';
+import { senderKeyOf } from '@yozz.app/mail/threads/thread';
+import { VaultApiError } from '@yozz.app/mail/vault/api';
+import type { RecordStore } from '@yozz.app/mail/vault/record-store';
 import { VaultError } from '@yozz.app/vault';
 import { z } from 'zod';
-import { VaultApiError } from '../vault/api';
-import type { RecordStore } from '../vault/record-store';
-import type { SenderCheck } from './thread';
 
 /**
  * What the reader remembers about remote images, in the vault so every device agrees: the messages
  * whose images were loaded (one bounded record), and the senders whose images always load (one
  * record each). Both name who you correspond with, so neither may sit anywhere unencrypted.
  */
-
-/**
- * A sender as compared: the whole address, lowercased. The domain is case-insensitive by RFC 5321;
- * the local part is folded too, because no provider YOZZ authenticates for treats it otherwise,
- * and DMARC vouches for the domain only, so case in the local part could protect nothing. No other
- * normalisation: `a+news@` and `a@` are two senders.
- */
-export const senderKeyOf = (address: string): string => address.trim().toLowerCase();
 
 /**
  * One message's images, loaded once. The sender rides along so a message that reuses a

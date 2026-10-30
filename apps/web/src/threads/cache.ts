@@ -1,4 +1,7 @@
 import type { ImapMessageSummary } from '@yozz.app/imap';
+import type { FetchedBody } from '@yozz.app/mail/threads/bodies';
+import type { FolderCache, FolderSync, MailCache } from '@yozz.app/mail/threads/cache';
+import type { Folder } from '@yozz.app/mail/threads/thread';
 import {
   getIdbFactory,
   openDeviceDb,
@@ -6,22 +9,11 @@ import {
   runTransaction,
   STORES,
 } from '../vault/device-db';
-import type { FetchedBody } from './bodies';
-import type { Folder } from './thread';
 
 /**
- * Per device, derived from IMAP, rebuilt whenever lost (ARCHITECTURE.md, "State placement"). Per
- * vault user, account and folder; dropped whole on lock.
+ * The web app's `MailCache`: per device in IndexedDB, per vault user, account and folder; dropped
+ * whole on lock.
  */
-
-export type FolderSync = {
-  /** The mailbox `SELECT` names. */
-  readonly name: string;
-  readonly uidValidity: number;
-  readonly lastUid: number;
-  /** The folder's oldest message is cached. A row written before this field existed has no start cached yet. */
-  readonly complete: boolean;
-};
 
 type Scope = { readonly userId: string; readonly account: string; readonly folder: Folder };
 type SyncRow = Scope & FolderSync;
@@ -86,7 +78,7 @@ const folderRange = ({ userId, account, folder }: Scope) =>
 const accountRange = (userId: string, account: string) =>
   IDBKeyRange.bound([userId, account], [userId, account, []]);
 
-const createFolderCache = (scope: Scope, idbFactory?: IDBFactory) => {
+const createFolderCache = (scope: Scope, idbFactory?: IDBFactory): FolderCache => {
   const { userId, account, folder } = scope;
   return {
     getSync: () =>
@@ -113,7 +105,7 @@ const createFolderCache = (scope: Scope, idbFactory?: IDBFactory) => {
         idbFactory,
       ),
 
-    putSync: (sync: FolderSync) =>
+    putSync: sync =>
       withDb<void>(
         STORES.mailSync.name,
         'readwrite',
@@ -135,7 +127,7 @@ const createFolderCache = (scope: Scope, idbFactory?: IDBFactory) => {
         idbFactory,
       ),
 
-    putSummaries: (summaries: readonly ImapMessageSummary[]) =>
+    putSummaries: summaries =>
       withDb<void>(
         STORES.mailSummaries.name,
         'readwrite',
@@ -148,7 +140,7 @@ const createFolderCache = (scope: Scope, idbFactory?: IDBFactory) => {
         idbFactory,
       ),
 
-    deleteSummaries: (uids: readonly number[]) =>
+    deleteSummaries: uids =>
       withDb<void>(
         STORES.mailSummaries.name,
         'readwrite',
@@ -159,11 +151,8 @@ const createFolderCache = (scope: Scope, idbFactory?: IDBFactory) => {
         idbFactory,
       ),
 
-    /** Rewrites the summaries cached at `uids` in one transaction; a uid not cached stays absent. */
-    updateSummaries: (
-      uids: readonly number[],
-      update: (summary: ImapMessageSummary) => ImapMessageSummary,
-    ) =>
+    // One transaction.
+    updateSummaries: (uids, update) =>
       withDb<void>(
         STORES.mailSummaries.name,
         'readwrite',
@@ -180,7 +169,7 @@ const createFolderCache = (scope: Scope, idbFactory?: IDBFactory) => {
         idbFactory,
       ),
 
-    getBody: (uid: number) =>
+    getBody: uid =>
       withDb<FetchedBody | null>(
         STORES.mailBodies.name,
         'readonly',
@@ -191,7 +180,7 @@ const createFolderCache = (scope: Scope, idbFactory?: IDBFactory) => {
         idbFactory,
       ),
 
-    /** The uids of every cached body in the folder, reading keys only. */
+    // Reading keys only.
     listBodyUids: () =>
       withDb<ReadonlySet<number>>(
         STORES.mailBodies.name,
@@ -204,7 +193,6 @@ const createFolderCache = (scope: Scope, idbFactory?: IDBFactory) => {
         idbFactory,
       ),
 
-    /** The text of every cached body in the folder, without the bodies themselves. */
     listPreviews: () =>
       withDb<readonly { readonly uid: number; readonly paragraphs: readonly string[] }[]>(
         STORES.mailPreviews.name,
@@ -217,8 +205,8 @@ const createFolderCache = (scope: Scope, idbFactory?: IDBFactory) => {
         idbFactory,
       ),
 
-    /** The body and its preview row in one transaction, so neither exists without the other. */
-    putBody: async (uid: number, body: FetchedBody) => {
+    // One transaction.
+    putBody: async (uid, body) => {
       const db = await deviceDbOf(idbFactory);
       await runStoresTransaction(db, [STORES.mailBodies.name, STORES.mailPreviews.name], tx => {
         tx.objectStore(STORES.mailBodies.name).put({ ...scope, uid, body } satisfies BodyRow);
@@ -232,13 +220,14 @@ const createFolderCache = (scope: Scope, idbFactory?: IDBFactory) => {
   };
 };
 
-export type FolderCache = ReturnType<typeof createFolderCache>;
+export const createMailCache = (
+  userId: string,
+  account: string,
+  idbFactory?: IDBFactory,
+): MailCache => ({
+  folder: folder => createFolderCache({ userId, account, folder }, idbFactory),
 
-export const createMailCache = (userId: string, account: string, idbFactory?: IDBFactory) => ({
-  folder: (folder: Folder): FolderCache =>
-    createFolderCache({ userId, account, folder }, idbFactory),
-
-  /** Every store in one transaction, or a reused uid could resolve to a stale body. */
+  // Every store in one transaction.
   clear: async () => {
     const db = await deviceDbOf(idbFactory);
     await runStoresTransaction(db, MAIL_STORES, tx => {
@@ -248,8 +237,6 @@ export const createMailCache = (userId: string, account: string, idbFactory?: ID
     });
   },
 });
-
-export type MailCache = ReturnType<typeof createMailCache>;
 
 /** Everything this user has cached; one transaction. */
 export const clearMailCache = async (userId: string, idbFactory?: IDBFactory): Promise<void> => {

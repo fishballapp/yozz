@@ -14,17 +14,6 @@ export const listTime = (at: number, now = Date.now()) => {
   return new Date(at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
 };
 
-/** Long form for the reader's message header: `Sun 13 Oct 2026, 09:42`. */
-export const fullTime = (at: number) =>
-  new Date(at).toLocaleString('en-GB', {
-    weekday: 'short',
-    day: 'numeric',
-    month: 'short',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
-
 /** A calendar day, for a fact about the past with no clock time worth reading: `13 Oct 2026`. */
 export const fullDate = (at: number) =>
   new Date(at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });

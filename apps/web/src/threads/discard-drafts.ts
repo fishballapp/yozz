@@ -1,6 +1,6 @@
+import type { ThreadState } from '@yozz.app/mail/threads/thread';
 import type { useMail } from '../store/MailProvider';
 import { reportProblem } from '../ui/Toast';
-import type { ThreadState } from './thread';
 
 type RemoveDraft = ReturnType<typeof useMail>['removeDraft'];
 

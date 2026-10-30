@@ -1,12 +1,13 @@
 // @vitest-environment jsdom
+
+import type { ComposeDraft } from '@yozz.app/mail/compose/draft';
+import type { Attachment } from '@yozz.app/mail/threads/thread';
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Composer } from '../store/use-composer';
-import type { Attachment } from '../threads/thread';
 import { toast } from '../ui/Toast';
 import { Compose } from './Compose';
-import type { ComposeDraft } from './draft';
 
 type SendAnswer = Awaited<ReturnType<Composer['send']>>;
 
@@ -51,6 +52,7 @@ vi.mock('../store/MailProvider', () => ({
     draftError: null,
     resolveDraftConflict: vi.fn(),
     openSendState: null,
+    isOpenDraftFrozen: false,
     sendAgain: vi.fn(),
     backToEditing: vi.fn(),
     discardDraft: vi.fn(),

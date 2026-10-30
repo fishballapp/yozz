@@ -1,0 +1,28 @@
+{
+  "name": "@yozz.app/mail",
+  "version": "0.0.0",
+  "private": true,
+  "license": "AGPL-3.0-only",
+  "type": "module",
+  "description": "The mail logic every YOZZ client runs: threading, sync, bodies, the vault records, reply seeding and the send state machine, behind ports for the IMAP session, the mail cache and the vault's HTTP.",
+  "sideEffects": false,
+  "exports": {
+    "./*": "./src/*.ts"
+  },
+  "dependencies": {
+    "@yozz.app/imap": "workspace:*",
+    "@yozz.app/smtp": "workspace:*",
+    "@yozz.app/vault": "workspace:*",
+    "@yozz.app/vault-contract": "workspace:*",
+    "parse5": "catalog:",
+    "postal-mime": "catalog:",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "vitest": "catalog:"
+  },
+  "scripts": {
+    "test": "vitest run"
+  }
+}

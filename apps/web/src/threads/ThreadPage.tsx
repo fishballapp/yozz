@@ -1,9 +1,9 @@
 import { Link, useNavigate, useParams } from '@tanstack/react-router';
+import { threadByHandle } from '@yozz.app/mail/threads/thread';
 import { useEffect, useRef } from 'react';
 import { keepCompose } from '../compose/intent';
 import { useMail } from '../store/MailProvider';
 import { ThreadReader } from './ThreadReader';
-import { threadByHandle } from './thread';
 import { useAdvancePast } from './use-advance';
 
 /** Resolved against the whole store, not the filtered list, so a search must not unmount the open message. */

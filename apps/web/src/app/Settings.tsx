@@ -1,8 +1,8 @@
 import { CaretRightIcon, PlusIcon } from '@phosphor-icons/react';
 import { Link, Outlet, useLocation, useParams } from '@tanstack/react-router';
+import { type AddressRecord, isInbound } from '@yozz.app/mail/addresses/record';
 import { cn } from 'cn';
 import type { ReactNode } from 'react';
-import { type AddressRecord, isInbound } from '../addresses/record';
 import { keepCompose } from '../compose/intent';
 import { useMail } from '../store/MailProvider';
 import { SendOnlyTag } from '../ui/SendOnlyTag';

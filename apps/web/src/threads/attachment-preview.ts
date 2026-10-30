@@ -1,5 +1,5 @@
-import { SAFE_INLINE_IMAGE_MIME_TYPES } from './image-types';
-import type { Attachment } from './thread';
+import { SAFE_INLINE_IMAGE_MIME_TYPES } from '@yozz.app/mail/threads/image-types';
+import type { Attachment } from '@yozz.app/mail/threads/thread';
 
 /**
  * The one boundary between a received attachment's bytes and the browser. An attachment previews

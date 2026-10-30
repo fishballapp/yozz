@@ -1,9 +1,10 @@
 // @vitest-environment jsdom
+
+import type { Thread } from '@yozz.app/mail/threads/thread';
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ThreadPage } from './ThreadPage';
-import type { Thread } from './thread';
 
 const route = vi.hoisted(() => ({ threadId: 't1' }));
 const mail = vi.hoisted(() => ({

@@ -1,9 +1,10 @@
 // @vitest-environment jsdom
+
+import { fakeRecordStore } from '@yozz.app/mail/testing/fake-record-store';
+import type { RecordStore } from '@yozz.app/mail/vault/record-store';
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { expect, it } from 'vitest';
-import { fakeRecordStore } from '../vault/fake-record-store';
-import type { RecordStore } from '../vault/record-store';
 import { forgetConsent, readConsents, rememberConsent } from './remote-images';
 import { RemoteImagesStoreProvider, useRemoteImages } from './remote-images-context';
 

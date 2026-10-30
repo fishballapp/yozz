@@ -1,4 +1,5 @@
 import { ImageIcon } from '@phosphor-icons/react';
+import type { SenderCheck } from '@yozz.app/mail/threads/thread';
 import { cn } from 'cn';
 import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import { z } from 'zod';
@@ -11,7 +12,6 @@ import { cachedFrameOf } from './frame-cache';
 import { buildMailFrame } from './html';
 import { isLoadedByTrust } from './remote-images';
 import { useRemoteImages } from './remote-images-context';
-import type { SenderCheck } from './thread';
 
 /** What the script inside the frame posts. Anything else on the channel is ignored. */
 const FrameMessageSchema = z.discriminatedUnion('type', [

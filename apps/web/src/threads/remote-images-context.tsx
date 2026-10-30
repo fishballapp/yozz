@@ -1,3 +1,5 @@
+import { senderKeyOf } from '@yozz.app/mail/threads/thread';
+import type { RecordStore } from '@yozz.app/mail/vault/record-store';
 import {
   createContext,
   type ReactNode,
@@ -8,7 +10,6 @@ import {
   useRef,
   useState,
 } from 'react';
-import type { RecordStore } from '../vault/record-store';
 import { useVault } from '../vault/session';
 import {
   forgetConsent,
@@ -19,7 +20,6 @@ import {
   MAX_REMEMBERED_ID_LENGTH,
   readConsents,
   rememberConsent,
-  senderKeyOf,
   type TrustedSender,
   trustSender,
   withConsent,

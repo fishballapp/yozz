@@ -1,4 +1,31 @@
 import {
+  ADDRESS_RECORD_TYPE,
+  type AddressRecord,
+  isInbound,
+  parseAddressRecord,
+} from '@yozz.app/mail/addresses/record';
+import type { MailConnectionFailure, Result } from '@yozz.app/mail/connection';
+import { describeMailFailure } from '@yozz.app/mail/describe-failure';
+import {
+  type BodyEntry,
+  type BodyOutcome,
+  MAX_CACHED_BODY_BYTES,
+  type Previews,
+  previewKey,
+  withBodies,
+  withoutAccountPreviews,
+} from '@yozz.app/mail/threads/body-state';
+import type { MailCache } from '@yozz.app/mail/threads/cache';
+import {
+  type AccountSummaries,
+  threadsFromAccounts,
+  withDrafts,
+} from '@yozz.app/mail/threads/summaries';
+import type { AccountSyncState, FlagTarget, MovedCopy } from '@yozz.app/mail/threads/sync';
+import type { Location, ThreadState } from '@yozz.app/mail/threads/thread';
+import { type Folder, isArchived, isServerCopy } from '@yozz.app/mail/threads/thread';
+import { accountsShown, folderPaged, type MailboxId } from '@yozz.app/mail/threads/views';
+import {
   createContext,
   type ReactNode,
   use,
@@ -9,26 +36,8 @@ import {
   useState,
   useSyncExternalStore,
 } from 'react';
-import {
-  ADDRESS_RECORD_TYPE,
-  type AddressRecord,
-  isInbound,
-  parseAddressRecord,
-} from '../addresses/record';
 import { type ActivityTracker, createActivityTracker, isUnsavedWork } from '../relay/activity';
-import type { MailConnectionFailure, Result } from '../relay/connection';
-import { describeMailFailure } from '../relay/describe-failure';
 import type { LiveManager, RunOn } from '../relay/live';
-import {
-  type BodyEntry,
-  type BodyOutcome,
-  MAX_CACHED_BODY_BYTES,
-  type Previews,
-  previewKey,
-  withBodies,
-  withoutAccountPreviews,
-} from '../threads/body-state';
-import type { MailCache } from '../threads/cache';
 import { clearCachedFrames } from '../threads/frame-cache';
 import {
   applyOps,
@@ -39,11 +48,6 @@ import {
   type PendingOp,
   retireOps,
 } from '../threads/reconcile';
-import { type AccountSummaries, threadsFromAccounts, withDrafts } from '../threads/summaries';
-import type { AccountSyncState, FlagTarget, MovedCopy } from '../threads/sync';
-import type { Location, ThreadState } from '../threads/thread';
-import { type Folder, isArchived, isServerCopy } from '../threads/thread';
-import { accountsShown, folderPaged, type MailboxId } from '../threads/views';
 import { isDemo } from '../ui/chrome';
 import { toast } from '../ui/Toast';
 import { vaultErrorMessage } from '../vault/screen-policy';
@@ -568,7 +572,9 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
           // The cache is the list until the server answers.
           if (!hydratedRef.current.has(address)) {
             hydratedRef.current.add(address);
-            const { cachedSummaries, cachedPreviews } = await import('../threads/hydrate');
+            const { cachedSummaries, cachedPreviews } = await import(
+              '@yozz.app/mail/threads/hydrate'
+            );
             const [cached, cachedText] = await Promise.all([
               cachedSummaries(cache),
               cachedPreviews(cache, address),
@@ -583,7 +589,7 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
             await afterNextPaint();
             if (isStale()) return;
           }
-          const { syncAccount, prefetchBodies } = await import('../threads/sync');
+          const { syncAccount, prefetchBodies } = await import('@yozz.app/mail/threads/sync');
           do {
             // The first pass fetched the TLS stack, long enough for a lock to land under it; a later
             // one may belong to a record that has since been replaced, and would log in as it.
@@ -822,8 +828,8 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
         try {
           const [{ loadOlder: loadOlderPage }, { cachedSummaries }, { createMailCache }] =
             await Promise.all([
-              import('../threads/sync'),
-              import('../threads/hydrate'),
+              import('@yozz.app/mail/threads/sync'),
+              import('@yozz.app/mail/threads/hydrate'),
               import('../threads/cache'),
             ]);
           const cache = createMailCache(userId, account.address);
@@ -1164,7 +1170,7 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
         { kind: 'flag', key, value },
         () => true,
         async (run, targets, cache) => {
-          const { setFlag } = await import('../threads/sync');
+          const { setFlag } = await import('@yozz.app/mail/threads/sync');
           const res = await setFlag(run, cache, targets, imapFlag, on);
           // A flag write moves nothing.
           return res.ok ? { ok: true, value: [] } : res;
@@ -1235,9 +1241,9 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
       const promise = (async (): Promise<BodyOutcome> => {
         try {
           const [{ fetchBody }, { createMailCache }, { senderCheckOf }] = await Promise.all([
-            import('../threads/bodies'),
+            import('@yozz.app/mail/threads/bodies'),
             import('../threads/cache'),
-            import('../threads/authentication-results'),
+            import('@yozz.app/mail/threads/authentication-results'),
           ]);
           const cache = createMailCache(userId, accountAddress).folder(folder);
           const cached = await cache.getBody(uid);
@@ -1342,7 +1348,7 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
         // Only the copies this move consumes, in every account that holds one.
         folder => sources.includes(folder),
         async (run, targets) => {
-          const { moveMessages } = await import('../threads/sync');
+          const { moveMessages } = await import('@yozz.app/mail/threads/sync');
           return moveMessages(run, targets, to);
         },
         onRefused,

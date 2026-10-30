@@ -1,9 +1,9 @@
 import type { ImapClient, ImapIdle, ImapResult, ImapSelected, ImapUntagged } from '@yozz.app/imap';
+import type { InboundAddress } from '@yozz.app/mail/addresses/record';
+import type { MailConnectionFailure, MailTask } from '@yozz.app/mail/connection';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { InboundAddress } from '../addresses/record';
 import { createActivityTracker } from './activity';
-import type { MailConnectionFailure } from './connection';
-import { createLiveManager, type LiveState, type LiveTask } from './live';
+import { createLiveManager, type LiveState } from './live';
 
 type FakeClient = ImapClient & {
   readonly selects: string[];
@@ -203,7 +203,7 @@ describe('createLiveManager', () => {
   /** A task the server never answers, unless the test settles it. */
   const hanging = () => {
     let settle = () => {};
-    const task: LiveTask<number> = {
+    const task: MailTask<number> = {
       priority: 'user',
       effect: 'read',
       retry: false,
@@ -214,7 +214,7 @@ describe('createLiveManager', () => {
     };
     return { task, settle: () => settle() };
   };
-  const quick: LiveTask<number> = {
+  const quick: MailTask<number> = {
     priority: 'background',
     effect: 'read',
     retry: true,
@@ -335,7 +335,7 @@ describe('createLiveManager', () => {
   });
 
   it('runs a task queued at any moment after the one before it finishes', async () => {
-    const task: LiveTask<number> = {
+    const task: MailTask<number> = {
       priority: 'user',
       effect: 'read',
       retry: true,

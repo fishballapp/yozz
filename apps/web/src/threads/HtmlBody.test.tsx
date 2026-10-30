@@ -1,11 +1,11 @@
 // @vitest-environment jsdom
 
+import { fakeRecordStore } from '@yozz.app/mail/testing/fake-record-store';
+import type { RecordStore } from '@yozz.app/mail/vault/record-store';
 import type { ComponentProps } from 'react';
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { fakeRecordStore } from '../vault/fake-record-store';
-import type { RecordStore } from '../vault/record-store';
 import { clearCachedFrames } from './frame-cache';
 import { HtmlBody } from './HtmlBody';
 import { IMAGE_CONSENTS_RECORD_TYPE, IMAGE_SENDER_RECORD_TYPE } from './remote-images';

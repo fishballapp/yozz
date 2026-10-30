@@ -1,9 +1,9 @@
 import { Outlet, useNavigate, useParams, useSearch } from '@tanstack/react-router';
+import { visibleThreads } from '@yozz.app/mail/threads/views';
 import { cn } from 'cn';
 import { useMail } from '../store/MailProvider';
 import { LIST_WIDTH, Resizer, useListWidth } from '../ui/Resizer';
 import { ThreadList } from './ThreadList';
-import { visibleThreads } from './views';
 
 /**
  * The rail and status line are `AppShell`'s. The list never tracks the viewport; the reader keeps a

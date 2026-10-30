@@ -1,9 +1,9 @@
 import { Link, useNavigate, useParams } from '@tanstack/react-router';
+import { type AddressRecord, isInbound } from '@yozz.app/mail/addresses/record';
+import { describeMailFailure } from '@yozz.app/mail/describe-failure';
 import { cn } from 'cn';
 import { type ChangeEvent, type FormEvent, useEffect, useRef, useState } from 'react';
-import { type AddressRecord, isInbound } from '../../addresses/record';
 import { keepCompose } from '../../compose/intent';
-import { describeMailFailure } from '../../relay/describe-failure';
 import { useMail } from '../../store/MailProvider';
 import { Button, buttonClass } from '../../ui/Button';
 import { ConfirmDialog } from '../../ui/ConfirmDialog';
@@ -263,7 +263,7 @@ const ServersSection = ({ record }: { record: AddressRecord }) => {
           // Both tried before anything is stored. The TLS stack loads on demand.
           if (isInbound(next)) {
             setProgress(`Testing ${next.imap.host}…`);
-            const { testImap } = await import('../../threads/sync');
+            const { testImap } = await import('../../relay/probe');
             if (!isCurrent()) return;
             const test = await testImap(next.imap);
             if (!isCurrent()) return;
@@ -276,7 +276,7 @@ const ServersSection = ({ record }: { record: AddressRecord }) => {
             }
           }
           setProgress(`Testing ${next.smtp.host}…`);
-          const { testSmtp } = await import('../../compose/send');
+          const { testSmtp } = await import('../../relay/probe');
           if (!isCurrent()) return;
           const test = await testSmtp(next.smtp);
           if (!isCurrent()) return;

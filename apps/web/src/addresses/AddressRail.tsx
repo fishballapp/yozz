@@ -9,11 +9,11 @@ import {
   TrashIcon,
 } from '@phosphor-icons/react';
 import { Link, useLocation, useParams } from '@tanstack/react-router';
+import { isViewId, type MailboxId, unreadCount } from '@yozz.app/mail/threads/views';
 import { cn } from 'cn';
 import type { ReactNode } from 'react';
 import { keepCompose, withCompose } from '../compose/intent';
 import { useMail } from '../store/MailProvider';
-import { isViewId, type MailboxId, unreadCount } from '../threads/views';
 import { buttonClass } from '../ui/Button';
 import { Wordmark } from '../ui/Wordmark';
 

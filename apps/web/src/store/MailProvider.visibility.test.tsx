@@ -1,10 +1,11 @@
 // @vitest-environment jsdom
+
+import { ADDRESS_RECORD_TYPE, type AddressRecord } from '@yozz.app/mail/addresses/record';
+import { fakeRecordStore } from '@yozz.app/mail/testing/fake-record-store';
+import type { RecordStore } from '@yozz.app/mail/vault/record-store';
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { ADDRESS_RECORD_TYPE, type AddressRecord } from '../addresses/record';
-import { fakeRecordStore } from '../vault/fake-record-store';
-import type { RecordStore } from '../vault/record-store';
 import { MailProvider, useMail } from './MailProvider';
 
 // @ts-expect-error React reads it off the global
@@ -32,7 +33,7 @@ vi.mock('../threads/cache', () => ({
   createMailCache: () => ({ clear: async () => {} }),
   clearMailCache: async () => {},
 }));
-vi.mock('../threads/hydrate', () => ({
+vi.mock('@yozz.app/mail/threads/hydrate', () => ({
   cachedSummaries: async () => ({}),
   cachedPreviews: async () => ({}),
 }));

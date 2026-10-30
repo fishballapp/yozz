@@ -239,6 +239,9 @@ catalogs:
     kysely:
       specifier: ^0.29.5
       version: 0.29.5
+    parse5:
+      specifier: ^8.0.1
+      version: 8.0.1
     postal-mime:
       specifier: ^3.0.0
       version: 3.0.0
@@ -350,6 +353,9 @@ importers:
       '@yozz.app/imap':
         specifier: workspace:*
         version: link:../../packages/imap
+      '@yozz.app/mail':
+        specifier: workspace:*
+        version: link:../../internal/mail
       '@yozz.app/smtp':
         specifier: workspace:*
         version: link:../../packages/smtp
@@ -377,9 +383,6 @@ importers:
       dompurify:
         specifier: 'catalog:'
         version: 3.4.15
-      postal-mime:
-        specifier: 'catalog:'
-        version: 3.0.0
       react:
         specifier: catalog:web
         version: 19.3.0
@@ -423,6 +426,9 @@ importers:
       jsdom:
         specifier: 'catalog:'
         version: 30.0.1(@noble/hashes@2.4.0)
+      postal-mime:
+        specifier: 'catalog:'
+        version: 3.0.0
       tailwindcss:
         specifier: 'catalog:'
         version: 4.3.3
@@ -508,6 +514,37 @@ importers:
       '@types/node':
         specifier: ^24.13.4
         version: 24.13.4
+
+  internal/mail:
+    dependencies:
+      '@yozz.app/imap':
+        specifier: workspace:*
+        version: link:../../packages/imap
+      '@yozz.app/smtp':
+        specifier: workspace:*
+        version: link:../../packages/smtp
+      '@yozz.app/vault':
+        specifier: workspace:*
+        version: link:../vault
+      '@yozz.app/vault-contract':
+        specifier: workspace:*
+        version: link:../vault-contract
+      parse5:
+        specifier: 'catalog:'
+        version: 8.0.1
+      postal-mime:
+        specifier: 'catalog:'
+        version: 3.0.0
+      zod:
+        specifier: 'catalog:'
+        version: 4.6.5
+    devDependencies:
+      '@types/node':
+        specifier: ^24.13.4
+        version: 24.13.4
+      vitest:
+        specifier: 'catalog:'
+        version: 5.0.1(@opentelemetry/api@1.9.1)(@types/node@24.13.4)(happy-dom@20.11.2)(jsdom@30.0.1(@noble/hashes@2.4.0))(vite@8.3.0(@types/node@24.13.4)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(tsx@4.23.13)(yaml@2.9.1))
 
   internal/vault:
     dependencies:

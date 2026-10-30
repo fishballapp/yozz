@@ -1,4 +1,4 @@
-import { describeMailFailure } from '../relay/describe-failure';
+import { describeMailFailure } from '@yozz.app/mail/describe-failure';
 import { useMail } from '../store/MailProvider';
 
 /**

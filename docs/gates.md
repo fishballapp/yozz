@@ -16,10 +16,14 @@ pnpm -F @yozz.app/vault-contract test   # 34. The wire schemas, incl. the strict
 pnpm -F @yozz.app/worker-api test       # 230. Against an ISOLATED LOCAL D1 with every migration
                                     #   applied; migrations.test.ts pins the vault tables' exact
                                     #   column lists, so a new plaintext column is a red test
-pnpm -F @yozz.app/web test              # 298. Vault client + unlock (WebAuthn mocked), mail MIME,
-                                    #   the WebMCP tools over a fake port + their mount, draft
-                                    #   records under CAS, the send state machine and the draft
-                                    #   mirror, ceilings, sanitizer policy and image consent
+pnpm -F @yozz.app/mail test             # 191. Threading, sync over a fake IMAP client, MIME and the
+                                    #   HTML-to-text reduction (in Node), draft records under CAS,
+                                    #   the send state machine (a lost SMTP answer is recorded unconfirmed),
+                                    #   the draft mirror, reply seeding, the record store's marks
+pnpm -F @yozz.app/web test              # 575. Vault client + unlock (WebAuthn mocked), the IndexedDB
+                                    #   cache, the live connection, the WebMCP tools over a fake
+                                    #   port + their mount, ceilings, sanitizer policy, image
+                                    #   consent, the screens, and architecture.test.ts
 pnpm -F @yozz.app/x509 test             # 426, incl. end-to-end chains signed at test time and the
                                     #   two authentication bypasses as regressions
 pnpm -F @yozz.app/tls test              # 455. RFC 8448 byte-exact on all five traces; the interop

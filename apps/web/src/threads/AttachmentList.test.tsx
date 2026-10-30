@@ -1,9 +1,10 @@
 // @vitest-environment jsdom
+
+import type { Attachment } from '@yozz.app/mail/threads/thread';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AttachmentList } from './AttachmentList';
-import type { Attachment } from './thread';
 
 const encode = (text: string) => new TextEncoder().encode(text);
 

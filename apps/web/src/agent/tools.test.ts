@@ -1,9 +1,14 @@
+import { addressList } from '@yozz.app/mail/compose/draft';
+import type { DraftRecord } from '@yozz.app/mail/compose/draft-record';
+import type { DraftHandle } from '@yozz.app/mail/compose/draft-vault';
+import type { BodyOutcome } from '@yozz.app/mail/threads/body-state';
+import {
+  type Folder,
+  type Message,
+  type ThreadState,
+  VAULT_UID_VALIDITY,
+} from '@yozz.app/mail/threads/thread';
 import { describe, expect, it, vi } from 'vitest';
-import { addressList } from '../compose/draft';
-import type { DraftRecord } from '../compose/draft-record';
-import type { DraftHandle } from '../compose/draft-vault';
-import type { BodyOutcome } from '../threads/body-state';
-import { type Folder, type Message, type ThreadState, VAULT_UID_VALIDITY } from '../threads/thread';
 import {
   type AgentPort,
   BODY_CHARS,

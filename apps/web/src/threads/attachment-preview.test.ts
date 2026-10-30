@@ -1,6 +1,6 @@
+import type { Attachment } from '@yozz.app/mail/threads/thread';
 import { describe, expect, it } from 'vitest';
 import { decodeText, displayName, MAX_TEXT_PREVIEW_BYTES, previewOf } from './attachment-preview';
-import type { Attachment } from './thread';
 
 const bytes = (...parts: (string | number[])[]) =>
   new Uint8Array(

@@ -1,28 +1,37 @@
-import { type RefObject, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { type AddressRecord, type InboundAddress, isInbound } from '../addresses/record';
+import {
+  type AddressRecord,
+  type InboundAddress,
+  isInbound,
+} from '@yozz.app/mail/addresses/record';
 import {
   addressList,
   type ComposeDraft,
   contentOf,
   type DraftContent,
   ownerAccountFor,
-  type SendReport,
   sameDraftContent,
-} from '../compose/draft';
+} from '@yozz.app/mail/compose/draft';
+import {
+  isFrozenBySend,
+  openSendStateOf,
+  parseDraftId,
+  unconfirmedSendOf,
+} from '@yozz.app/mail/compose/draft-record';
+import type { DeleteOutcome, DraftHandle, SaveOutcome } from '@yozz.app/mail/compose/draft-vault';
+import type { SendEffects } from '@yozz.app/mail/compose/send-machine';
+import type { SentRecord } from '@yozz.app/mail/compose/sent-record';
+import type { MailConnectionFailure, Result } from '@yozz.app/mail/connection';
+import { describeMailFailure } from '@yozz.app/mail/describe-failure';
+import type { AccountSummaries, VaultSentMessage } from '@yozz.app/mail/threads/summaries';
+import type { Attachment, ThreadState } from '@yozz.app/mail/threads/thread';
+import type { RecordStore } from '@yozz.app/mail/vault/record-store';
+import { type RefObject, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { SendReport } from '../compose/draft';
 import { clearDraft, loadDraft, saveDraft } from '../compose/draft-device';
-import { openSendStateOf, parseDraftId } from '../compose/draft-record';
-import type { DeleteOutcome, DraftHandle, SaveOutcome } from '../compose/draft-vault';
 import { type ComposeIntent, draftKeyOfIntent, isUntouched } from '../compose/intent';
-import type { SendEffects } from '../compose/send-machine';
-import type { SentRecord } from '../compose/sent-record';
 import type { ActivityTracker } from '../relay/activity';
-import type { MailConnectionFailure, Result } from '../relay/connection';
-import { describeMailFailure } from '../relay/describe-failure';
 import type { RunOn } from '../relay/live';
-import type { AccountSummaries, VaultSentMessage } from '../threads/summaries';
-import type { Attachment, ThreadState } from '../threads/thread';
 import { isDemo } from '../ui/chrome';
-import type { RecordStore } from '../vault/record-store';
 import type { useVault } from '../vault/session';
 import type { SessionEnded } from '../vault/unlock';
 
@@ -122,6 +131,8 @@ export type Composer = {
   resolveDraftConflict: (choice: 'theirs' | 'mine') => void;
   /** `'sending'`: a send is running (here or elsewhere) and the draft is frozen. `'unconfirmed'`: nobody saw SMTP's answer. */
   openSendState: 'sending' | 'unconfirmed' | null;
+  /** No write may change the open draft: a send is running, or its lost answer waits on the person. */
+  isOpenDraftFrozen: boolean;
   /** Re-runs the unconfirmed send with the same bytes. */
   sendAgain: () => Promise<void>;
   /** Puts the unconfirmed send aside so the draft can be written again. Discard stays refused. */
@@ -246,7 +257,7 @@ export const useComposerStore = ({
    */
   const writeContent = useCallback(
     async (
-      { createDraft, replaceDraft }: typeof import('../compose/draft-vault'),
+      { createDraft, replaceDraft }: typeof import('@yozz.app/mail/compose/draft-vault'),
       compose: Compose,
       isCurrent: () => boolean,
       store: RecordStore,
@@ -301,8 +312,8 @@ export const useComposerStore = ({
     async (store: RecordStore, runOn: RunOn, draftKey: string) => {
       if (draftKey === '' || isDemo()) return;
       const [{ readMirror }, { expungeMirror }] = await Promise.all([
-        import('../compose/draft-vault'),
-        import('../compose/draft-mirror'),
+        import('@yozz.app/mail/compose/draft-vault'),
+        import('@yozz.app/mail/compose/draft-mirror'),
       ]);
       const mirror = await readMirror(store, draftKey);
       const address = mirror?.mirror.locator?.account;
@@ -323,7 +334,10 @@ export const useComposerStore = ({
     ): SendEffects => ({
       store,
       submit: async (bytes, handle) => {
-        const { envelopeRecipients, submitBytes } = await import('../compose/send');
+        const [{ envelopeRecipients }, { submitBytes }] = await Promise.all([
+          import('@yozz.app/mail/compose/send'),
+          import('../compose/submit'),
+        ]);
         const { record } = handle;
         // Only a resumed send can lack it, and resume never submits.
         if (identity === undefined) {
@@ -342,7 +356,9 @@ export const useComposerStore = ({
       copyToSent: async (target, bytes, handle) => {
         const messageId = handle.record.send?.messageId ?? '';
         if (target === 'vault' || (identity !== undefined && !isInbound(identity))) {
-          const { sentRecordFrom, storeSentRecord } = await import('../compose/sent-vault');
+          const { sentRecordFrom, storeSentRecord } = await import(
+            '@yozz.app/mail/compose/sent-vault'
+          );
           await storeSentRecord(store, sentRecordFrom(handle.record, messageId, bytes, Date.now()));
           return { ok: true, value: null };
         }
@@ -350,7 +366,7 @@ export const useComposerStore = ({
         // a removal means the person dropped that mailbox, so the send finishes without a copy in it.
         const mailbox = currentAccount(handle.record.from);
         if (mailbox === undefined) return { ok: true, value: null };
-        const { storeSentCopy } = await import('../compose/send');
+        const { storeSentCopy } = await import('@yozz.app/mail/compose/send');
         const copied = await storeSentCopy(runOn(mailbox), bytes, messageId);
         if (!copied.ok) return copied;
         // The locator says which account and folder, so a later expunge or open needs no guessing.
@@ -382,8 +398,8 @@ export const useComposerStore = ({
       const end = activity.begin({ effect: 'write', priority: 'user' });
       try {
         const [{ driveSend }, { listSentRecords, sentRecordFrom }] = await Promise.all([
-          import('../compose/send-machine'),
-          import('../compose/sent-vault'),
+          import('@yozz.app/mail/compose/send-machine'),
+          import('@yozz.app/mail/compose/sent-vault'),
         ]);
         const progress = await driveSend(sendEffectsFor(store, runOn, identity), handle);
         if (!isCurrent()) return { state: 'ended' };
@@ -422,7 +438,7 @@ export const useComposerStore = ({
         if (progress.reason === 'refused') {
           // Re-listed first: the claim and its release moved the record on twice, so the handle this
           // device holds is two versions behind and reopening would be refused as a conflict.
-          const { listDrafts } = await import('../compose/draft-vault');
+          const { listDrafts } = await import('@yozz.app/mail/compose/draft-vault');
           const live = await listDrafts(store);
           if (!isCurrent()) return { state: 'ended' };
           setDrafts(live);
@@ -445,7 +461,12 @@ export const useComposerStore = ({
           setDrafts(dropSent);
           return { state: 'sent-with-caveat', detail };
         }
-        // Nobody saw SMTP's answer, so "Sent" would be invented. The draft stays listed with its phase.
+        // Nobody saw SMTP's answer, so "Sent" would be invented. Re-listed, as on a refusal, so this
+        // tab holds the version that says so and reopening offers to settle it.
+        const { listDrafts } = await import('@yozz.app/mail/compose/draft-vault');
+        const live = await listDrafts(store);
+        if (!isCurrent()) return { state: 'ended' };
+        setDrafts(live);
         const detail = "nobody saw the server's answer · check Sent before resending";
         setSentCopyError(detail);
         return { state: 'unsettled', detail };
@@ -504,8 +525,8 @@ export const useComposerStore = ({
         clearTimeout(autosaveTimerRef.current);
         const content = contentOf(draft, ownerAccountOf(draft));
         const [{ claimSend, createDraft }, { buildOutgoing }, { renderHtml }] = await Promise.all([
-          import('../compose/draft-vault'),
-          import('../compose/send'),
+          import('@yozz.app/mail/compose/draft-vault'),
+          import('@yozz.app/mail/compose/send'),
           import('@tanstack/markdown/html'),
         ]);
         // An ended session mints and claims nothing, so nothing goes out on its behalf.
@@ -639,8 +660,8 @@ export const useComposerStore = ({
           { buildOutgoing },
           { renderHtml },
         ] = await Promise.all([
-          import('../compose/draft-mirror'),
-          import('../compose/send'),
+          import('@yozz.app/mail/compose/draft-mirror'),
+          import('@yozz.app/mail/compose/send'),
           import('@tanstack/markdown/html'),
         ]);
         // The live connections are the next session's by now.
@@ -676,7 +697,7 @@ export const useComposerStore = ({
   useEffect(() => {
     const session = sessionRef.current;
     const unconfirmed = drafts.flatMap(handle =>
-      handle.record.unconfirmedSend === undefined ? [] : [handle],
+      unconfirmedSendOf(handle.record) === undefined ? [] : [handle],
     );
     if (session === null || unconfirmed.length === 0) return;
     // `<Message-ID>\0<from>` for every message in a Sent folder. Both halves: ids collide, and a
@@ -692,7 +713,7 @@ export const useComposerStore = ({
       ),
     );
     const settled = unconfirmed.filter(handle => {
-      const pending = handle.record.unconfirmedSend;
+      const pending = unconfirmedSendOf(handle.record);
       return (
         pending !== undefined &&
         sent.has(`${pending.messageId}\0${handle.record.from}`.toLowerCase())
@@ -701,9 +722,9 @@ export const useComposerStore = ({
     if (settled.length === 0) return;
     const isCurrent = watchSession(sessionGeneration);
     void (async () => {
-      const { completeSend, listDrafts } = await import('../compose/draft-vault');
+      const { completeSend, listDrafts } = await import('@yozz.app/mail/compose/draft-vault');
       for (const handle of settled) {
-        const messageId = handle.record.unconfirmedSend?.messageId;
+        const messageId = unconfirmedSendOf(handle.record)?.messageId;
         // Each one, since the last completion's round trip may have spanned a lock.
         if (!isCurrent()) return;
         if (messageId === undefined) continue;
@@ -740,7 +761,7 @@ export const useComposerStore = ({
           ) {
             return;
           }
-          const vault = await import('../compose/draft-vault');
+          const vault = await import('@yozz.app/mail/compose/draft-vault');
           if (!isCurrent()) return;
           // The first save of an ordinary compose mints the record.
           const outcome = await writeContent(
@@ -813,6 +834,7 @@ export const useComposerStore = ({
 
   const openSendState: 'sending' | 'unconfirmed' | null =
     openHandle === null ? null : openSendStateOf(openHandle.record, Date.now());
+  const isOpenDraftFrozen = openHandle !== null && isFrozenBySend(openHandle.record, Date.now());
 
   const sendAgain = useCallback(async () => {
     const session = sessionRef.current;
@@ -822,20 +844,20 @@ export const useComposerStore = ({
     const isCurrent = watchSession(sessionGeneration);
     const runOn = bindRunOn();
     const [{ reclaimSend }, { driveSend }] = await Promise.all([
-      import('../compose/draft-vault'),
-      import('../compose/send-machine'),
+      import('@yozz.app/mail/compose/draft-vault'),
+      import('@yozz.app/mail/compose/send-machine'),
     ]);
     // As `send`: an ended session claims nothing.
     if (!isCurrent()) return;
-    // Already claimed: carry on from the phase the record names.
+    // A lost answer goes back under a fresh claim; any other claim carries on from its phase.
     const claimed =
-      openHandle.record.send === undefined
+      unconfirmedSendOf(openHandle.record) !== undefined
         ? await reclaimSend(session.store, openHandle.draftId, Date.now())
         : openHandle;
     if (claimed === null) return;
     await driveSend(sendEffectsFor(session.store, runOn, identity), claimed);
     if (!isCurrent()) return;
-    const { listDrafts } = await import('../compose/draft-vault');
+    const { listDrafts } = await import('@yozz.app/mail/compose/draft-vault');
     const live = await listDrafts(session.store);
     if (isCurrent()) setDrafts(live);
   }, [openHandle, identities, bindRunOn, sendEffectsFor]);
@@ -844,7 +866,7 @@ export const useComposerStore = ({
     const session = sessionRef.current;
     if (openHandle === null || session === null) return;
     const isCurrent = watchSession(sessionGeneration);
-    const { listDrafts, unconfirmSend } = await import('../compose/draft-vault');
+    const { listDrafts, unconfirmSend } = await import('@yozz.app/mail/compose/draft-vault');
     if (!isCurrent()) return;
     await unconfirmSend(session.store, openHandle.draftId);
     const live = await listDrafts(session.store);
@@ -857,20 +879,20 @@ export const useComposerStore = ({
       // Before the first await: a send resumed below copies into this session's mailboxes or nowhere.
       const runOn = bindRunOn();
       // Drafts come from the vault too.
-      const { listDrafts, purgeExpiredDrafts } = await import('../compose/draft-vault');
+      const { listDrafts, purgeExpiredDrafts } = await import('@yozz.app/mail/compose/draft-vault');
       // Before listing, so an expired tombstone stops costing storage.
       await purgeExpiredDrafts(store, Date.now());
       const drafts = await listDrafts(store);
       if (isCancelled()) return;
       setDrafts(drafts);
-      const { listSentRecords } = await import('../compose/sent-vault');
+      const { listSentRecords } = await import('@yozz.app/mail/compose/sent-vault');
       const sent = await listSentRecords(store);
       // An ended session resumes nothing; the next unlock of this vault finds the same phases.
       if (isCancelled()) return;
       setVaultSent(sent);
       // A send this vault left in flight is finished before anything else touches the draft;
       // `submitting` is skipped inside `resumeSends`.
-      const { resumeSends } = await import('../compose/send-machine');
+      const { resumeSends } = await import('@yozz.app/mail/compose/send-machine');
       if (isCancelled()) return;
       // Asked again before each send: one that ran on finishes, but none starts after a lock.
       await resumeSends(drafts, handle => {
@@ -897,7 +919,7 @@ export const useComposerStore = ({
       draftKey: string,
       /** Handed `isCurrent`, so a tombstone that writes twice starts no second write after a lock. */
       tombstone: (
-        vault: typeof import('../compose/draft-vault'),
+        vault: typeof import('@yozz.app/mail/compose/draft-vault'),
         isCurrent: () => boolean,
       ) => Promise<DeleteOutcome>,
     ): Promise<DeleteOutcome | SessionEnded> => {
@@ -908,7 +930,7 @@ export const useComposerStore = ({
       setDrafts(current => current.filter(candidate => !isIt(candidate)));
       const outcome = await (async (): Promise<DeleteOutcome | SessionEnded> => {
         try {
-          const vault = await import('../compose/draft-vault');
+          const vault = await import('@yozz.app/mail/compose/draft-vault');
           // An ended session tombstones nothing; the draft stays in that vault's Drafts.
           if (!isCurrent()) return { outcome: 'ended' };
           return await tombstone(vault, isCurrent);
@@ -955,7 +977,9 @@ export const useComposerStore = ({
       }
     }
     const isCurrent = watchSession(sessionGeneration);
-    const { createDraft, listDrafts, replaceDraft } = await import('../compose/draft-vault');
+    const { createDraft, listDrafts, replaceDraft } = await import(
+      '@yozz.app/mail/compose/draft-vault'
+    );
     if (!isCurrent()) return { ok: false, reason: 'ended' };
     const outcome =
       draftId === undefined
@@ -997,6 +1021,7 @@ export const useComposerStore = ({
       draftError,
       resolveDraftConflict,
       openSendState,
+      isOpenDraftFrozen,
       sendAgain,
       backToEditing,
       seedDraft: (intent, seed) => {
@@ -1052,7 +1077,7 @@ export const useComposerStore = ({
               // An autosave is replacing the record with possibly older text; the snapshot stays.
               // One still minting it is shared, and this writes over what it mints.
               if (compose.isSaving && open.draftId !== undefined) return;
-              const vault = await import('../compose/draft-vault');
+              const vault = await import('@yozz.app/mail/compose/draft-vault');
               if (!isCurrent()) return;
               const outcome = await writeContent(
                 vault,
@@ -1082,7 +1107,7 @@ export const useComposerStore = ({
           const isCurrent = watchSession(sessionGeneration);
           const runOn = bindRunOn();
           void (async () => {
-            const { deleteDraft } = await import('../compose/draft-vault');
+            const { deleteDraft } = await import('@yozz.app/mail/compose/draft-vault');
             if (!isCurrent()) return;
             const gone = await deleteDraft(session.store, abandoned, Date.now());
             // Refused means another device wrote since.
@@ -1215,6 +1240,7 @@ export const useComposerStore = ({
       draftError,
       resolveDraftConflict,
       openSendState,
+      isOpenDraftFrozen,
       sendAgain,
       backToEditing,
       send,

@@ -1,9 +1,10 @@
 import 'fake-indexeddb/auto';
+import { VaultApiError } from '@yozz.app/mail/vault/api';
 import { deriveAccountKeys } from '@yozz.app/vault';
 import type { UnlockStatusResponse } from '@yozz.app/vault-contract';
 import { IDBFactory } from 'fake-indexeddb';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { type AccountVaultApi, type VaultApiClient, VaultApiError } from './api';
+import type { AccountVaultApi, VaultApiClient } from './api';
 import { createIndexedDbRevisionMarks } from './revision-marks';
 import {
   addPasskeyToSession,

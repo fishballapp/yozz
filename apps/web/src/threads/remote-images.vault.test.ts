@@ -1,10 +1,10 @@
 import 'fake-indexeddb/auto';
+import { type VaultApi, VaultApiError } from '@yozz.app/mail/vault/api';
 import { createVault, deriveAccountKeys, type EncryptedRecord, type Vault } from '@yozz.app/vault';
 import type { PutPrecondition, VaultRecordEnvelope } from '@yozz.app/vault-contract';
 import { IDBFactory } from 'fake-indexeddb';
 import { beforeAll, describe, expect, it } from 'vitest';
-import { type VaultApi, VaultApiError } from '../vault/api';
-import { createRecordStore } from '../vault/record-store';
+import { openDeviceRecordStore } from '../vault/device-record-store';
 import {
   forgetConsent,
   MAX_REMEMBERED_ID_LENGTH,
@@ -52,7 +52,7 @@ describe('consents over the real record store, after a write that never reached 
   const device = () => {
     const idbFactory = new IDBFactory();
     const { api, state } = casVaultApi();
-    const open = () => createRecordStore({ userId: 'u1', rawVault: vault, api, idbFactory });
+    const open = () => openDeviceRecordStore({ userId: 'u1', vault, api, idbFactory });
     return { open, state };
   };
 

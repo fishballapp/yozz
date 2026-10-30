@@ -7,6 +7,7 @@ import {
   DownloadSimpleIcon,
   XIcon,
 } from '@phosphor-icons/react';
+import type { Attachment } from '@yozz.app/mail/threads/thread';
 import { cn } from 'cn';
 import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import { Button, buttonClass } from '../ui/Button';
@@ -19,7 +20,6 @@ import {
   previewOf,
 } from './attachment-preview';
 import { attachmentTag, formatBytes } from './attachments';
-import type { Attachment } from './thread';
 
 type PdfPreview = Extract<Preview, { kind: 'pdf' }>;
 

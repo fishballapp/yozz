@@ -1,5 +1,5 @@
+import type { ComposeDraft } from '@yozz.app/mail/compose/draft';
 import { describe, expect, it } from 'vitest';
-import type { ComposeDraft } from './draft';
 import { clearDraft, loadDraft, saveDraft } from './draft-device';
 
 const draft: ComposeDraft = {

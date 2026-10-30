@@ -25,6 +25,7 @@
     "@tanstack/react-router": "catalog:",
     "@tanstack/react-virtual": "catalog:",
     "@yozz.app/imap": "workspace:*",
+    "@yozz.app/mail": "workspace:*",
     "@yozz.app/smtp": "workspace:*",
     "@yozz.app/tls": "workspace:*",
     "@yozz.app/vault": "workspace:*",
@@ -32,7 +33,6 @@
     "@yozz.app/x509": "workspace:*",
     "better-auth": "catalog:",
     "cn": "catalog:",
-    "postal-mime": "catalog:",
     "class-variance-authority": "catalog:",
     "dompurify": "catalog:",
     "react": "catalog:web",
@@ -51,6 +51,7 @@
     "@vitejs/plugin-react": "catalog:",
     "fake-indexeddb": "catalog:",
     "jsdom": "catalog:",
+    "postal-mime": "catalog:",
     "tailwindcss": "catalog:",
     "vite": "catalog:",
     "vitest": "catalog:"

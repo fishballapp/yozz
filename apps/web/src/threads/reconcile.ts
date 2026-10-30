@@ -1,4 +1,4 @@
-import { FOLDERS, type Folder } from './thread';
+import { FOLDERS, type Folder } from '@yozz.app/mail/threads/thread';
 
 /**
  * An op leaves the list when the server refused it, or when a sync of that account that started

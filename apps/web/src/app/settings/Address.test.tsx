@@ -1,9 +1,10 @@
 // @vitest-environment jsdom
+
+import type { AddressRecord } from '@yozz.app/mail/addresses/record';
+import type { MailConnectionFailure, Result } from '@yozz.app/mail/connection';
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { AddressRecord } from '../../addresses/record';
-import type { MailConnectionFailure, Result } from '../../relay/connection';
 import { Address } from './Address';
 
 // @ts-expect-error React reads it off the global
@@ -70,8 +71,7 @@ vi.mock('@tanstack/react-router', () => ({
   Link: ({ children }: { children: React.ReactNode }) => <a href="/">{children}</a>,
 }));
 
-vi.mock('../../threads/sync', () => ({ testImap: mocks.testImap }));
-vi.mock('../../compose/send', () => ({ testSmtp: mocks.testSmtp }));
+vi.mock('../../relay/probe', () => ({ testImap: mocks.testImap, testSmtp: mocks.testSmtp }));
 
 const OK = { ok: true, value: undefined } as const;
 const REFUSED = (error: MailConnectionFailure) => ({ ok: false, error }) as const;

@@ -1,6 +1,6 @@
+import type { Folder } from '@yozz.app/mail/threads/thread';
 import { describe, expect, it } from 'vitest';
 import { applyOps, canMoveTo, foldersAfterMove, type PendingOp, retireOps } from './reconcile';
-import type { Folder } from './thread';
 
 const thread = (
   id: string,

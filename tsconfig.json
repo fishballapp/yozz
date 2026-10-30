@@ -4,6 +4,7 @@
     { "path": "./packages/x509" },
     { "path": "./internal/vault-contract" },
     { "path": "./internal/vault" },
+    { "path": "./internal/mail" },
     { "path": "./packages/tls" },
     { "path": "./packages/smtp" },
     { "path": "./packages/imap" },

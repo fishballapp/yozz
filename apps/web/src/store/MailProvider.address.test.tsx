@@ -1,12 +1,16 @@
 // @vitest-environment jsdom
+
+import {
+  ADDRESS_RECORD_TYPE,
+  type AddressRecord,
+  parseAddressRecord,
+} from '@yozz.app/mail/addresses/record';
+import { fakeRecordStore } from '@yozz.app/mail/testing/fake-record-store';
+import type { RecordStore } from '@yozz.app/mail/vault/record-store';
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { ADDRESS_RECORD_TYPE, type AddressRecord, parseAddressRecord } from '../addresses/record';
 import type { LiveState } from '../relay/live';
-import { fakeRecordStore } from '../vault/fake-record-store';
-import type { RecordStore } from '../vault/record-store';
-import type { UnlockedVaultSession } from '../vault/unlock';
 import { MailProvider, useMail } from './MailProvider';
 
 // @ts-expect-error React reads it off the global
@@ -16,7 +20,8 @@ globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 type HeldSync = { isStale: () => boolean; finish: () => void };
 
 const mocks = vi.hoisted(() => ({
-  session: null as Pick<UnlockedVaultSession, 'userId' | 'store'> | null,
+  // What the mail store reads of the session.
+  session: null as { readonly userId: string; readonly store: RecordStore } | null,
   syncs: [] as HeldSync[],
   /** What reached the vault and the device cache, in order. */
   events: [] as string[],
@@ -57,11 +62,11 @@ vi.mock('../threads/cache', () => ({
   }),
   clearMailCache: async () => {},
 }));
-vi.mock('../threads/hydrate', () => ({
+vi.mock('@yozz.app/mail/threads/hydrate', () => ({
   cachedSummaries: async () => ({}),
   cachedPreviews: async () => ({}),
 }));
-vi.mock('../threads/sync', () => ({
+vi.mock('@yozz.app/mail/threads/sync', () => ({
   prefetchBodies: () => {},
   syncAccount: (_run: unknown, _cache: unknown, isStale: () => boolean) =>
     new Promise(resolve => {

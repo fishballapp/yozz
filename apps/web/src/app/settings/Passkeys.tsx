@@ -1,3 +1,4 @@
+import type { RecordStore } from '@yozz.app/mail/vault/record-store';
 import { PASSKEY_NAME_MAX_LENGTH } from '@yozz.app/vault-contract';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Button } from '../../ui/Button';
@@ -6,7 +7,6 @@ import { FieldRow, Input } from '../../ui/Field';
 import { PageSection } from '../../ui/PageSection';
 import { fullDate } from '../../ui/time';
 import { normalizePasskeyName } from '../../vault/passkey-name';
-import type { RecordStore } from '../../vault/record-store';
 import { vaultErrorMessage } from '../../vault/screen-policy';
 import { useVault } from '../../vault/session';
 import {

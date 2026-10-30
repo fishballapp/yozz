@@ -11,7 +11,13 @@ export type SmtpFailure =
   | { readonly kind: 'reply'; readonly code: number; readonly text: string }
   | { readonly kind: 'closed' }
   | { readonly kind: 'protocol'; readonly detail: string }
-  | { readonly kind: 'unsupported'; readonly detail: string };
+  | { readonly kind: 'unsupported'; readonly detail: string }
+  /**
+   * `send` only: the message's terminating `.` was written and no reply that says yes or no came
+   * back (none, an unreadable one, or a code outside 2xx, 4xx and 5xx), so the server may have
+   * accepted it. Every other failure of `send` means it did not.
+   */
+  | { readonly kind: 'unconfirmed'; readonly detail: string };
 
 export type SmtpResult<T> =
   | { readonly ok: true; readonly value: T }

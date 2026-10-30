@@ -1,9 +1,9 @@
+import type { RecordStore } from '@yozz.app/mail/vault/record-store';
 import { useEffect, useState } from 'react';
 import { useMail } from '../../store/MailProvider';
 import { ConfirmDialog } from '../../ui/ConfirmDialog';
 import { FieldRow, Input } from '../../ui/Field';
 import { checkPasskeyPrfCapability, type PrfCapability } from '../../vault/passkey-prf';
-import type { RecordStore } from '../../vault/record-store';
 import { PASSKEY_OFFER, vaultErrorMessage } from '../../vault/screen-policy';
 import { useVault } from '../../vault/session';
 import { confirmIdentity, needsFreshSession } from '../../vault/unlock';

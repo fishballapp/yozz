@@ -1,5 +1,5 @@
+import type { Attachment } from '@yozz.app/mail/threads/thread';
 import type { Preview } from './attachment-preview';
-import type { Attachment } from './thread';
 
 /** Short, unpadded, never more than one decimal. */
 export const formatBytes = (bytes: number) => {
@@ -13,15 +13,6 @@ export const formatBytes = (bytes: number) => {
   const value = bytes / 1024 ** exponent;
   const unit = units[exponent - 1] ?? 'GB';
   return `${value < 10 ? value.toFixed(1) : Math.round(value)} ${unit}`;
-};
-
-/** One classifier for both a picker `File` and a received MIME part. */
-export const attachmentKindOf = (mimeType: string): Attachment['kind'] => {
-  if (mimeType.startsWith('image/')) return 'image';
-  if (mimeType === 'application/pdf') return 'pdf';
-  if (/zip|tar|compressed/.test(mimeType)) return 'archive';
-  if (/sheet|excel|csv/.test(mimeType)) return 'sheet';
-  return 'other';
 };
 
 export const ATTACHMENT_LABEL: Record<Attachment['kind'], string> = {

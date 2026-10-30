@@ -1,7 +1,14 @@
-import type { ImapClient, ImapIdle, ImapResult, ImapSelected, ImapUntagged } from '@yozz.app/imap';
-import type { InboundAddress } from '../addresses/record';
+import type { ImapClient, ImapIdle, ImapSelected, ImapUntagged } from '@yozz.app/imap';
+import type { InboundAddress } from '@yozz.app/mail/addresses/record';
+import type {
+  MailClient,
+  MailConnectionFailure,
+  MailTask,
+  Result,
+  RunTask,
+} from '@yozz.app/mail/connection';
 import type { ActivityTracker } from './activity';
-import type { MailConnection, MailConnectionFailure, Result } from './connection';
+import type { MailConnection } from './connection';
 
 /**
  * Opened by the first task and kept open, hidden tab or not, holding `INBOX` in IDLE whenever
@@ -18,33 +25,13 @@ export type LiveState =
   /** The server or the network ended it; the next task, or a visibility/online event, retries. */
   | { readonly status: 'failed'; readonly failure: MailConnectionFailure; readonly at: number };
 
-export type LiveClient = ImapClient & {
-  /**
-   * SELECT only if `name` is not already the selected mailbox. Sync calls `client.select` directly
-   * because it wants fresh UIDVALIDITY/UIDNEXT; body fetches and flag writes use this.
-   */
-  readonly ensureSelected: (name: string) => Promise<ImapResult<ImapSelected>>;
-};
-
-export type LiveTask<T> = {
-  readonly run: (client: LiveClient) => Promise<Result<T, MailConnectionFailure>>;
-  /** User-initiated work (open a body, a flag write, a sync) runs before prefetch. */
-  readonly priority: 'user' | 'background';
-  /** A `write` changes the mailbox (a move, a flag, an APPEND); a reload must not drop it unasked. */
-  readonly effect: 'read' | 'write';
-  /** Whether the task may be re-run on a fresh connection after a transport failure. APPEND must not. */
-  readonly retry: boolean;
-};
-
 /** `LiveManager.run` for one account, as the mail store hands it out. */
-export type RunOn = (
-  account: InboundAddress,
-) => <T>(task: LiveTask<T>) => Promise<Result<T, MailConnectionFailure>>;
+export type RunOn = (account: InboundAddress) => RunTask;
 
 export type LiveManager = {
   readonly run: <T>(
     account: InboundAddress,
-    task: LiveTask<T>,
+    task: MailTask<T>,
   ) => Promise<Result<T, MailConnectionFailure>>;
   readonly close: (address: string) => Promise<void>;
   readonly closeAll: () => Promise<void>;
@@ -61,13 +48,13 @@ type ConnectFn = (
 ) => Promise<Result<MailConnection, MailConnectionFailure>>;
 
 type Queued = {
-  readonly task: LiveTask<unknown>;
+  readonly task: MailTask<unknown>;
   readonly resolve: (result: Result<unknown, MailConnectionFailure>) => void;
 };
 
 /** An open, authenticated connection. Replaced whole on reconnect, never mutated back to life. */
 type Socket = {
-  readonly client: LiveClient;
+  readonly client: MailClient;
   readonly close: () => Promise<void>;
   readonly resumed: boolean;
   idle: ImapIdle | null;
@@ -181,7 +168,7 @@ export const createLiveManager = (deps: {
     deps.onMailboxChanged(conn.address);
   };
 
-  const wrapClient = (socket: () => Socket, client: ImapClient): LiveClient => {
+  const wrapClient = (socket: () => Socket, client: ImapClient): MailClient => {
     const select: ImapClient['select'] = async mailbox => {
       // Always read-write: flag writes and APPEND need it, and EXAMINE would block them.
       const res = await client.select(mailbox, { readOnly: false });
@@ -369,7 +356,7 @@ export const createLiveManager = (deps: {
 
   const attempt = async (
     conn: Connection,
-    task: LiveTask<unknown>,
+    task: MailTask<unknown>,
     status: 'connecting' | 'reconnecting',
   ): Promise<Attempt> => {
     await dropStaleSocket(conn);
@@ -525,7 +512,7 @@ export const createLiveManager = (deps: {
         if (!hasWork(conn)) conn.progressAt = now();
         const end = deps.activity?.begin({ effect: task.effect, priority: task.priority });
         const queued: Queued = {
-          task: task as LiveTask<unknown>,
+          task: task as MailTask<unknown>,
           resolve: result => {
             end?.();
             resolve(result as Result<never, MailConnectionFailure>);

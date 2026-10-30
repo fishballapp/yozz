@@ -4,6 +4,7 @@ packages:
   - apps/worker-web
   - internal/email
   - internal/html-screenshot
+  - internal/mail
   - internal/vault
   - internal/vault-contract
   - internal/vite-plugins
@@ -65,6 +66,7 @@ catalog:
   hono: ^4.13.8
   jsdom: ^30.0.1
   kysely: ^0.29.5
+  parse5: ^8.0.1
   postal-mime: ^3.0.0
   puppeteer: ^25.13.0
   react-native: 0.86.3

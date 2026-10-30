@@ -1,3 +1,4 @@
+import { VaultApiError } from '@yozz.app/mail/vault/api';
 import {
   createVault,
   deriveAccountKeys,
@@ -8,7 +9,7 @@ import {
   VaultError,
 } from '@yozz.app/vault';
 import type { UnlockStatusResponse } from '@yozz.app/vault-contract';
-import { type AccountVaultApi, type VaultApiClient, VaultApiError, vaultApi } from './api';
+import { type AccountVaultApi, type VaultApiClient, vaultApi } from './api';
 import {
   addPasskeyAuthenticator as authAddPasskey,
   signInWithPasskey as authSignInPasskey,
@@ -18,6 +19,7 @@ import {
   listPasskeyAuthenticators,
   renamePasskeyAuthenticator,
 } from './auth-client';
+import { type DeviceRecordStore, openDeviceRecordStore } from './device-record-store';
 import { automaticPasskeyName, normalizePasskeyName } from './passkey-name';
 import {
   checkPasskeyPrfCapability,
@@ -28,7 +30,6 @@ import {
   isPrfEnabled,
   PasskeyPrfError,
 } from './passkey-prf';
-import { createRecordStore, type RecordStore } from './record-store';
 import { forgetRevisionMarks } from './revision-marks';
 import { forgetUnlockKeys, loadUnlockKeys, type UnlockKeys } from './unlock-keys';
 
@@ -72,7 +73,7 @@ export type UnlockedVaultSession = VaultAccount & {
   readonly encKey: CryptoKey;
   readonly wrappedDek: string;
   readonly vault: Vault;
-  readonly store: RecordStore;
+  readonly store: DeviceRecordStore;
 };
 
 /** A vault answer that arrived after its session ended; it belongs to that user, so nobody hears it. */
@@ -110,9 +111,9 @@ const openSession = async ({
   readonly api: VaultApiClient;
   readonly idbFactory?: IDBFactory;
 }): Promise<UnlockedVaultSession> => {
-  const store = await createRecordStore({
+  const store = await openDeviceRecordStore({
     userId: account.userId,
-    rawVault: vault,
+    vault,
     api: api.forAccount(account.userId),
     idbFactory,
   });
@@ -750,9 +751,9 @@ export const resumeSession = async ({
   }
 
   const vault = await openVault({ encKey: keys.encKey }, keys.wrappedDek);
-  const store = await createRecordStore({
+  const store = await openDeviceRecordStore({
     userId: user.id,
-    rawVault: vault,
+    vault,
     api: api.forAccount(user.id),
     idbFactory,
   });

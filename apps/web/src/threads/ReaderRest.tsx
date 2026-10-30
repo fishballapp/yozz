@@ -1,6 +1,6 @@
+import { unreadCount } from '@yozz.app/mail/threads/views';
 import { useMail } from '../store/MailProvider';
 import { Wordmark } from '../ui/Wordmark';
-import { unreadCount } from './views';
 
 /**
  * On a wide screen this pane is roughly a third of the first viewport and "Select a message."

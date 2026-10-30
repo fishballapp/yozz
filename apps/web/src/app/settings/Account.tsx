@@ -1,4 +1,5 @@
 import { Link, useNavigate } from '@tanstack/react-router';
+import type { RecordStore } from '@yozz.app/mail/vault/record-store';
 import { useState } from 'react';
 import { Button, buttonClass } from '../../ui/Button';
 import { ConfirmDialog } from '../../ui/ConfirmDialog';
@@ -6,7 +7,6 @@ import { FieldRow, Input } from '../../ui/Field';
 import { PageSection } from '../../ui/PageSection';
 import { getApiBaseUrl, isApiConfigured } from '../../vault/api-base-url';
 import { signOut } from '../../vault/auth-client';
-import type { RecordStore } from '../../vault/record-store';
 import { useVault } from '../../vault/session';
 import { deleteAccount } from '../../vault/unlock';
 import { PasskeysSection } from './Passkeys';

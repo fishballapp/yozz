@@ -1,9 +1,10 @@
 /** The browser half of the attachment gate: the real policy module and the real chips, in a page. */
+
+import type { Attachment } from '@yozz.app/mail/threads/thread';
 import { flushSync } from 'react-dom';
 import { createRoot } from 'react-dom/client';
 import { AttachmentList } from '../src/threads/AttachmentList';
 import * as policy from '../src/threads/attachment-preview';
-import type { Attachment } from '../src/threads/thread';
 
 export type ProbeFile = {
   readonly name: string;

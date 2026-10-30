@@ -1,11 +1,11 @@
 // @vitest-environment jsdom
 import 'fake-indexeddb/auto';
+import type { FlagTarget } from '@yozz.app/mail/threads/sync';
+import type { Folder, ThreadState } from '@yozz.app/mail/threads/thread';
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createMailCache } from '../threads/cache';
-import type { FlagTarget } from '../threads/sync';
-import type { Folder, ThreadState } from '../threads/thread';
 import { toast } from '../ui/Toast';
 import { MailProvider, useMail } from './MailProvider';
 
@@ -67,13 +67,13 @@ vi.mock('../relay/connection', () => ({ connectImap: vi.fn() }));
 vi.mock('../relay/live', () => ({
   createLiveManager: () => ({ run: vi.fn(), close: vi.fn(), closeAll: async () => {} }),
 }));
-vi.mock('../threads/sync', () => ({
+vi.mock('@yozz.app/mail/threads/sync', () => ({
   syncAccount,
   prefetchBodies,
   moveMessages,
   setFlag,
 }));
-vi.mock('../threads/summaries', () => ({
+vi.mock('@yozz.app/mail/threads/summaries', () => ({
   threadsFromAccounts: () => (shown.threads.length > 0 ? shown.threads : [thread]),
   withDrafts: (threads: unknown) => threads,
 }));

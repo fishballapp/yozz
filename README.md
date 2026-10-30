@@ -97,6 +97,7 @@ share, and `apps/` is what runs at yozz.app; both AGPL-3.0.
 | [`packages/smtp`](packages/smtp/) | Transport-agnostic SMTP client plus an RFC 5322 message builder. | MIT |
 | [`internal/vault`](internal/vault/) | The key schedule, DEK wrap and AES-GCM records for the encrypted settings store. | AGPL-3.0 |
 | [`internal/vault-contract`](internal/vault-contract/) | Wire schemas for the vault HTTP API. | AGPL-3.0 |
+| [`internal/mail`](internal/mail/) | The mail logic every client runs: threading, sync, MIME bodies, the vault's draft and sent records, reply seeding and the send state machine, behind ports for the IMAP session, the mail cache and the vault API. | AGPL-3.0 |
 | [`apps/worker-api`](apps/worker-api/) | Hono + Better Auth on Cloudflare Workers: the vault routes, the D1 migrations and the relay, a session-gated WebSocket-to-TCP pipe to ports 993 and 465 only. | AGPL-3.0 |
 | [`apps/web`](apps/web/) | The Vite/React app. | AGPL-3.0 |
 

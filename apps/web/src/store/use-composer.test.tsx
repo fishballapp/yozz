@@ -1,25 +1,25 @@
 // @vitest-environment jsdom
 import type { ImapMessageSummary } from '@yozz.app/imap';
-import PostalMime from 'postal-mime';
-import { act } from 'react';
-import { createRoot } from 'react-dom/client';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { InboundAddress } from '../addresses/record';
-import type { DraftContent } from '../compose/draft';
+import type { InboundAddress } from '@yozz.app/mail/addresses/record';
+import type { DraftContent } from '@yozz.app/mail/compose/draft';
 import {
   claimSend,
   createDraft,
   listDrafts,
   replaceDraft,
   unconfirmSend,
-} from '../compose/draft-vault';
-import type { SentCopyFailure } from '../compose/send';
+} from '@yozz.app/mail/compose/draft-vault';
+import type { SentCopyFailure } from '@yozz.app/mail/compose/send';
+import type { MailConnectionFailure, Result } from '@yozz.app/mail/connection';
+import { fakeRecordStore } from '@yozz.app/mail/testing/fake-record-store';
+import { threadsFromAccounts } from '@yozz.app/mail/threads/summaries';
+import { isOnServer } from '@yozz.app/mail/threads/thread';
+import type { RecordStore } from '@yozz.app/mail/vault/record-store';
+import PostalMime from 'postal-mime';
+import { act } from 'react';
+import { createRoot } from 'react-dom/client';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createActivityTracker } from '../relay/activity';
-import type { Result } from '../relay/connection';
-import { threadsFromAccounts } from '../threads/summaries';
-import { isOnServer } from '../threads/thread';
-import { fakeRecordStore } from '../vault/fake-record-store';
-import type { RecordStore } from '../vault/record-store';
 import { useComposerStore } from './use-composer';
 
 /** A point work stops at: `reached` once something waits there, which waits until `open`. */
@@ -47,16 +47,19 @@ const gate = (): Gate => {
 const network = vi.hoisted(() => ({
   submitted: [] as Uint8Array[],
   smtp: null as PromiseWithResolvers<void> | null,
+  submitAnswer: { ok: true, value: undefined } as Result<void, MailConnectionFailure>,
   sentCopy: { ok: true, value: null } as Result<null, SentCopyFailure>,
   copying: null as Gate | null,
 }));
-vi.mock('../compose/send', async importOriginal => ({
-  ...(await importOriginal<typeof import('../compose/send')>()),
+vi.mock('../compose/submit', () => ({
   submitBytes: async (_identity: unknown, bytes: Uint8Array) => {
     network.submitted.push(bytes);
     await network.smtp?.promise;
-    return { ok: true, value: undefined };
+    return network.submitAnswer;
   },
+}));
+vi.mock('@yozz.app/mail/compose/send', async importOriginal => ({
+  ...(await importOriginal<typeof import('@yozz.app/mail/compose/send')>()),
   storeSentCopy: async () => {
     await network.copying?.pass();
     return network.sentCopy;
@@ -144,6 +147,7 @@ const roots: Array<ReturnType<typeof createRoot>> = [];
 beforeEach(() => {
   network.submitted.length = 0;
   network.smtp = null;
+  network.submitAnswer = { ok: true, value: undefined };
   network.sentCopy = { ok: true, value: null };
   network.copying = null;
   storage.clear();
@@ -406,6 +410,67 @@ describe('a message just sent from an address with a mailbox', () => {
 
     await act(async () => hook().reset('user-1'));
     expect(hook().vaultSent).toEqual([]);
+  });
+});
+
+describe('a message whose SMTP answer was lost after its end', () => {
+  const sendLost = async () => {
+    network.submitAnswer = {
+      ok: false,
+      error: { kind: 'smtp', reason: { kind: 'unconfirmed', detail: 'connection closed' } },
+    };
+    const { settled, ...mounted } = await claimOne();
+    const report = await act(() => settled);
+    const [bytes] = network.submitted;
+    const [draft] = mounted.hook().shared.drafts;
+    if (bytes === undefined || draft === undefined) {
+      throw new Error('the send left nothing to open');
+    }
+    return { ...mounted, report, bytes, draft };
+  };
+
+  /** What the composer shows for a draft opened from Drafts. */
+  const reopen = async ({ hook }: Mounted, draftKey: string) => {
+    await act(async () => {
+      hook().composer.seedDraft(`draft:${draftKey}`, {});
+    });
+    const { openSendState, isOpenDraftFrozen } = hook().composer;
+    return { openSendState, isOpenDraftFrozen };
+  };
+
+  const SETTLE = { openSendState: 'unconfirmed', isOpenDraftFrozen: true };
+
+  it('offers to settle it as soon as the draft is opened again, frozen until then', async () => {
+    const lost = await sendLost();
+    expect(lost.report).toMatchObject({ state: 'unsettled' });
+    // The tab holds the version that says so, not the one from before the claim.
+    expect(lost.draft.record.send?.state).toBe('unconfirmed');
+    expect(await reopen(lost, lost.draft.draftKey)).toEqual(SETTLE);
+
+    // And after a reload, from the vault alone.
+    const reloaded = await mount(lost.vault.store);
+    expect(await reopen(reloaded, lost.draft.draftKey)).toEqual(SETTLE);
+    expect(network.submitted).toHaveLength(1);
+  });
+
+  it('is settled by the message turning up in Sent, from a provider that files its own copy', async () => {
+    const { rerender, vault, bytes } = await sendLost();
+    await rerender({
+      baseByAccount: {
+        [ACCOUNT.address]: { sent: { uidValidity: 7, summaries: [await serverCopyOf(bytes)] } },
+      },
+    });
+    await act(() => new Promise(resolve => setTimeout(resolve, 20)));
+    expect(await listDrafts(vault.store)).toEqual([]);
+  });
+
+  it('goes out again, the same bytes, under a fresh claim on Send again', async () => {
+    const lost = await sendLost();
+    await reopen(lost, lost.draft.draftKey);
+    network.submitAnswer = { ok: true, value: undefined };
+    await act(() => lost.hook().composer.sendAgain());
+    expect(network.submitted).toEqual([lost.bytes, lost.bytes]);
+    expect(await listDrafts(lost.vault.store)).toEqual([]);
   });
 });
 
