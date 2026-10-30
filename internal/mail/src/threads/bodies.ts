@@ -4,8 +4,10 @@ import PostalMime from 'postal-mime';
 import type { MailConnectionFailure, Result, RunTask } from '../connection.ts';
 import { attachmentKindOf } from './attachments.ts';
 import type { MailHeader } from './authentication-results.ts';
+import { MAX_CACHED_BODY_BYTES } from './body-state.ts';
 import { SAFE_INLINE_IMAGE_MIME_TYPES } from './image-types.ts';
-import { type Attachment, toParagraphs } from './thread.ts';
+import type { Location } from './thread.ts';
+import { type Attachment, renumberedText, toParagraphs } from './thread.ts';
 
 export type FetchedBody = {
   readonly paragraphs: string[];
@@ -265,4 +267,39 @@ export const fetchBody = async (
       }
     },
   });
+};
+
+/**
+ * Fetches the body of one copy, off its folder's sync mark, and caches it when the message is small
+ * enough. A copy read under another `UIDVALIDITY` is refused: its uid may now name other mail.
+ */
+export const fetchBodyAt = async (
+  run: RunTask,
+  /** The copy's folder in the mail cache: its sync mark, and where the body is kept. */
+  folderCache: {
+    readonly getSync: () => Promise<{ readonly name: string; readonly uidValidity: number } | null>;
+    readonly putBody: (uid: number, body: FetchedBody) => Promise<void>;
+  },
+  copy: Omit<Location, 'account'>,
+  expectedRawSize: number | undefined,
+  /** The cache this was fetched for has been cleared since (a lock, an address removed): keep nothing. */
+  isStale: () => boolean = () => false,
+): Promise<Result<FetchedBody, MailConnectionFailure>> => {
+  const mark = await folderCache.getSync();
+  if (mark === null) {
+    return { ok: false, error: { kind: 'error', detail: `${copy.folder} has not synced` } };
+  }
+  if (mark.uidValidity !== copy.uidValidity) {
+    return { ok: false, error: { kind: 'error', detail: renumberedText(copy.folder) } };
+  }
+  const res = await fetchBody(run, mark.name, copy.uid, expectedRawSize);
+  if (
+    res.ok &&
+    !isStale() &&
+    (expectedRawSize ?? Number.POSITIVE_INFINITY) <= MAX_CACHED_BODY_BYTES
+  ) {
+    // Best effort: a body that did not cache is fetched again next time.
+    await folderCache.putBody(copy.uid, res.value).catch(() => {});
+  }
+  return res;
 };

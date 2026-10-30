@@ -1,6 +1,14 @@
-import type { Folder } from '@yozz.app/mail/threads/thread';
 import { describe, expect, it } from 'vitest';
-import { applyOps, canMoveTo, foldersAfterMove, type PendingOp, retireOps } from './reconcile';
+import type { FolderSync } from './cache.ts';
+import {
+  applyOps,
+  canMoveTo,
+  flagTargets,
+  foldersAfterMove,
+  type PendingOp,
+  retireOps,
+} from './reconcile.ts';
+import type { Folder } from './thread.ts';
 
 const thread = (
   id: string,
@@ -124,5 +132,44 @@ describe('retireOps', () => {
 
   it('never retires an op the server has not answered', () => {
     expect(retireOps([pending], 'me@x', 999)).toEqual([pending]);
+  });
+});
+
+describe('flagTargets', () => {
+  const mark = (name: string, uidValidity: number): FolderSync => ({
+    name,
+    uidValidity,
+    lastUid: 99,
+    complete: false,
+  });
+
+  it('is one target per folder, named and numbered by its sync mark', () => {
+    const marks = new Map<Folder, FolderSync | null>([
+      ['inbox', mark('INBOX', 7)],
+      ['sent', mark('Sent Items', 3)],
+    ]);
+    expect(
+      flagTargets(
+        [
+          { folder: 'inbox', uidValidity: 7, uid: 4 },
+          { folder: 'sent', uidValidity: 3, uid: 9 },
+          { folder: 'inbox', uidValidity: 7, uid: 5 },
+        ],
+        marks,
+      ),
+    ).toEqual([
+      { folder: 'inbox', mailbox: 'INBOX', uidValidity: 7, uids: [4, 5] },
+      { folder: 'sent', mailbox: 'Sent Items', uidValidity: 3, uids: [9] },
+    ]);
+  });
+
+  it('refuses copies read under another UIDVALIDITY, or in a folder never synced', () => {
+    const marks = new Map<Folder, FolderSync | null>([['inbox', mark('INBOX', 8)]]);
+    expect(() => flagTargets([{ folder: 'inbox', uidValidity: 7, uid: 4 }], marks)).toThrow(
+      'inbox was renumbered',
+    );
+    expect(() => flagTargets([{ folder: 'archive', uidValidity: 7, uid: 4 }], marks)).toThrow(
+      'archive has not synced',
+    );
   });
 });

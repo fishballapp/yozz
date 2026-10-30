@@ -8,6 +8,7 @@ import {
   TrashIcon,
 } from '@phosphor-icons/react';
 import { useNavigate } from '@tanstack/react-router';
+import { canMoveTo, type MoveTarget } from '@yozz.app/mail/threads/reconcile';
 import type { ThreadState } from '@yozz.app/mail/threads/thread';
 import { isOnServer } from '@yozz.app/mail/threads/thread';
 import type { MailboxId } from '@yozz.app/mail/threads/views';
@@ -18,7 +19,6 @@ import { Button } from '../ui/Button';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
 import { reportProblem } from '../ui/Toast';
 import { discardDrafts, discardTitle, draftIdsOf } from './discard-drafts';
-import { canMoveTo, type MoveTarget } from './reconcile';
 import { useAdvancePast } from './use-advance';
 
 /** What the bar over the list does to every ticked thread; a group is set off by a rule. */

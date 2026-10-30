@@ -7,6 +7,7 @@
  * id         = HMAC(indexKey, [type, naturalKey])            → stored server-side
  * ciphertext = AES-GCM(recordKey, [revision, naturalKey, plaintext],
  *                      aad = [id, type])                     → stored server-side
+ * localKey   = HKDF(DEK, info <purpose>)                     → never leaves the device
  * ```
  */
 
@@ -20,6 +21,14 @@ export type EncryptedRecord = {
   /** base64 of `iv ‖ AES-GCM(recordKey, [revision, naturalKey, plaintext])`. */
   readonly ciphertext: string;
 };
+
+/**
+ * What a client keeps on its own device, each under its own key: the DEK is never a key itself, and
+ * a closed set keeps a purpose from naming the record or index key.
+ */
+export type LocalKeyPurpose = 'yozz-cli-cache';
+
+const LOCAL_KEY_PURPOSES = ['yozz-cli-cache'] as const satisfies readonly LocalKeyPurpose[];
 
 /** The revision is reported, never refused: refusing needs a per-record high-water mark, which `freshVault` owns. */
 export type OpenedRecord = {
@@ -47,6 +56,8 @@ export type Vault = {
     type: string,
     listed: { readonly id: string; readonly ciphertext: string },
   ) => Promise<OpenedRecord & { readonly naturalKey: string }>;
+  /** A non-extractable AES-GCM key for what a client stores locally for `purpose`; the same on every open. */
+  readonly localKey: (purpose: LocalKeyPurpose) => CryptoKey;
 };
 
 /** JSON rather than a separator: `${type}:${naturalKey}` is not injective. */
@@ -124,10 +135,21 @@ export const openVault = async (keys: VaultKey, wrappedDek: string): Promise<Vau
   const raw = new Uint8Array(
     await crypto.subtle.exportKey('raw', await unwrap(keys.encKey, wrappedDek)),
   );
-  const [recordKey, indexKey] = await Promise.all([
+  // Derived here, with the others, so the DEK's bytes are dropped once `openVault` returns.
+  const [recordKey, indexKey, localKeys] = await Promise.all([
     hkdf(raw, 'yozz-vault-record', { name: 'AES-GCM', length: 256 }, ['encrypt', 'decrypt']),
     hkdf(raw, 'yozz-vault-index', { name: 'HMAC', hash: 'SHA-256', length: 256 }, ['sign']),
+    Promise.all(
+      LOCAL_KEY_PURPOSES.map(
+        async purpose =>
+          [
+            purpose,
+            await hkdf(raw, purpose, { name: 'AES-GCM', length: 256 }, ['encrypt', 'decrypt']),
+          ] as const,
+      ),
+    ),
   ]);
+  const localKeyOf = new Map<LocalKeyPurpose, CryptoKey>(localKeys);
 
   const recordId = async (type: string, naturalKey: string): Promise<string> =>
     toBase64Url(
@@ -189,5 +211,11 @@ export const openVault = async (keys: VaultKey, wrappedDek: string): Promise<Vau
     },
 
     decryptListedRecord: async (type, { id, ciphertext }) => open(id, type, ciphertext),
+
+    localKey: purpose => {
+      const key = localKeyOf.get(purpose);
+      if (key === undefined) throw new VaultError('malformed', `no local key for ${purpose}`);
+      return key;
+    },
   };
 };

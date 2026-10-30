@@ -89,6 +89,7 @@ const createFakeClient = (capabilities: readonly string[] = ['IDLE']): FakeClien
       };
     },
     uidSearchHeader: async () => ({ ok: true, value: [] }),
+    uidSearchText: async () => ({ ok: true, value: [] }),
     logout: async () => {
       client.logouts += 1;
       return { ok: true, value: undefined };

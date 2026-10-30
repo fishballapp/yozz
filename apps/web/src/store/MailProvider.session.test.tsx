@@ -61,6 +61,10 @@ const mocks = vi.hoisted(() => ({
   answer: null as unknown,
   /** The next body written to the device cache waits here. */
   bodyWrite: null as Gate | null,
+  /** How many bodies were written to the device cache. */
+  bodiesWritten: 0,
+  /** The next task to reach a manager waits here before it answers. */
+  task: null as Gate | null,
   /**
    * Whether a sync lands (as failed, asking for no task) instead of never landing. A sync that never
    * lands is how most tests keep tasks out of the way, but an edit's teardown waits for the old
@@ -88,6 +92,9 @@ vi.mock('../relay/live', () => ({
       run: async (account: AddressRecord) => {
         mocks.runs.push({ manager, account: account.address });
         mocks.logins.push(account.imap?.password ?? '');
+        const held = mocks.task;
+        mocks.task = null;
+        await held?.pass();
         return mocks.answer ?? { ok: false, error: { kind: 'error', detail: 'offline' } };
       },
       close: async () => {},
@@ -102,6 +109,7 @@ vi.mock('../threads/cache', () => ({
     folder: () => ({
       getBody: async () => null,
       putBody: async () => {
+        mocks.bodiesWritten += 1;
         const write = mocks.bodyWrite;
         mocks.bodyWrite = null;
         await write?.pass();
@@ -117,7 +125,8 @@ vi.mock('../threads/cache', () => ({
   }),
   clearMailCache: async () => {},
 }));
-vi.mock('@yozz.app/mail/threads/hydrate', () => ({
+vi.mock('@yozz.app/mail/threads/hydrate', async importOriginal => ({
+  ...(await importOriginal<typeof import('@yozz.app/mail/threads/hydrate')>()),
   cachedSummaries: async () => ({}),
   cachedPreviews: async () => ({}),
 }));
@@ -331,6 +340,8 @@ beforeEach(() => {
   mocks.navigation = null;
   mocks.answer = null;
   mocks.bodyWrite = null;
+  mocks.bodiesWritten = 0;
+  mocks.task = null;
   mocks.syncLands = false;
   storage.clear();
 });
@@ -505,6 +516,33 @@ describe("an ended session's answers", () => {
     bodyWrite.open();
     expect(await act(() => loaded)).toEqual({ status: 'failed' });
     expect(mail().threads[0]?.messages[0]?.body).toEqual([]);
+  });
+
+  it('a body fetched across the end of its session is never written to the device cache', async () => {
+    const [message] = LUNCH.messages;
+    if (message === undefined) throw new Error('no message');
+    mocks.threads = [{ ...LUNCH, messages: [{ ...message, bodyStatus: 'pending', rawSize: 64 }] }];
+    mocks.answer = {
+      ok: true,
+      value: {
+        paragraphs: ['The code is 4417.'],
+        hasTextPart: true,
+        inlineImagesTruncated: false,
+        attachments: [],
+        senderHeaders: [],
+      },
+    };
+    const { mail, replaceSession } = await mount((await vault()).store);
+    const fetching = gate();
+    mocks.task = fetching;
+    const loaded = mail().loadBody('t1', 'm1');
+    await act(() => fetching.reached);
+
+    // The lock's teardown clears this user's cache while the server is still answering.
+    await replaceSession(await nextAccount());
+    fetching.open();
+    expect(await act(() => loaded)).toEqual({ status: 'failed' });
+    expect(mocks.bodiesWritten).toBe(0);
   });
 
   it("an older page that lands after the session ended leaves the next session's page loading", async () => {

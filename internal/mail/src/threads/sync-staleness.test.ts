@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { RETURN_SYNC_FRESH_MS, staleAccounts } from './sync-staleness';
+import { RETURN_SYNC_FRESH_MS, staleAccounts } from './sync-staleness.ts';
 
 const NOW = 10_000_000;
 const accounts = [{ address: 'a@x.test' }, { address: 'b@x.test' }, { address: 'c@x.test' }];

@@ -17,6 +17,8 @@ import * as PlatformError from 'effect/PlatformError';
 import * as ChildProcess from 'effect/process/ChildProcess';
 import * as ChildProcessSpawner from 'effect/process/ChildProcessSpawner';
 import { CliLayer, cli } from './app.ts';
+import type { FakeImapServer } from './mail/fake-imap-server.ts';
+import { MailServers } from './mail/servers.ts';
 import { runCommand } from './output.ts';
 
 // The CLI run in-process against a fake Worker that holds a real vault: the CLI key's wrap, its
@@ -178,6 +180,20 @@ const browserOpening = (opened: Deferred.Deferred<string>) =>
     ),
   );
 
+/** Mail servers by host name, each in memory; any other host cannot be reached. */
+const mailServersOf = (servers: Readonly<Record<string, FakeImapServer>>) =>
+  Layer.succeed(
+    MailServers,
+    MailServers.of({
+      open: async ({ host }) => {
+        const server = servers[host];
+        return server === undefined
+          ? { ok: false, error: { kind: 'tls', detail: `getaddrinfo ENOTFOUND ${host}` } }
+          : { ok: true, value: server.open() };
+      },
+    }),
+  );
+
 /** Runs `yozz <args>` in-process: its exit, stdout and stderr. */
 export const runCli = Effect.fnUntraced(function* (
   args: ReadonlyArray<string>,
@@ -186,12 +202,14 @@ export const runCli = Effect.fnUntraced(function* (
     homes,
     env = {},
     browser,
+    servers = {},
   }: {
     readonly fetch: typeof globalThis.fetch;
     readonly homes: Homes;
     /** `undefined` unsets one of the defaults below. */
     readonly env?: Record<string, string | undefined>;
     readonly browser?: Deferred.Deferred<string>;
+    readonly servers?: Readonly<Record<string, FakeImapServer>>;
   },
 ) {
   const stdout: string[] = [];
@@ -201,6 +219,7 @@ export const runCli = Effect.fnUntraced(function* (
       Layer.mergeAll(
         FetchHttpClient.layer.pipe(Layer.provide(Layer.succeed(FetchHttpClient.Fetch, fetch))),
         CliLayer,
+        mailServersOf(servers),
         browser === undefined ? Layer.empty : browserOpening(browser),
       ),
     ),

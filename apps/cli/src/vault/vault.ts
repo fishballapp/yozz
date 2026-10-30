@@ -58,6 +58,8 @@ export class Vault extends Context.Service<
   Vault,
   {
     readonly account: Account;
+    /** `HKDF(DEK, "yozz-cli-cache")`: what the mail cache on this machine is sealed with. */
+    readonly cacheKey: CryptoKey;
     /** Runs `f` over the record store, `@yozz.app/mail`'s port, with its failures as the CLI's errors. */
     readonly use: <A>(
       f: (records: RecordStore) => Promise<A>,
@@ -117,6 +119,7 @@ export class Vault extends Context.Service<
 
         return Vault.of({
           account: { userId, email, keyId, source },
+          cacheKey: vault.localKey('yozz-cli-cache'),
           use: f =>
             Effect.tryPromise(() => f(records)).pipe(
               Effect.catchTag('UnknownError', ({ cause }) => {

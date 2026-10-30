@@ -1,3 +1,4 @@
+import { BODY_CHARS, OUTPUT_CHARS, RECIPIENTS_LISTED } from '@yozz.app/mail/agent-budgets';
 import { addressList } from '@yozz.app/mail/compose/draft';
 import type { DraftRecord } from '@yozz.app/mail/compose/draft-record';
 import type { DraftHandle } from '@yozz.app/mail/compose/draft-vault';
@@ -9,13 +10,7 @@ import {
   VAULT_UID_VALIDITY,
 } from '@yozz.app/mail/threads/thread';
 import { describe, expect, it, vi } from 'vitest';
-import {
-  type AgentPort,
-  BODY_CHARS,
-  buildAgentTools,
-  OUTPUT_CHARS,
-  RECIPIENTS_LISTED,
-} from './tools';
+import { type AgentPort, buildAgentTools } from './tools';
 
 const message = (id: string, overrides: Partial<Message> = {}): Message => ({
   id,

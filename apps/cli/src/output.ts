@@ -20,12 +20,26 @@ export type Failure = {
 
 const line = (failure: Failure) => JSON.stringify({ error: failure });
 
-/** Fails the command with `failure` as its one JSON line on stderr, and exit 1. */
-export const fail = (failure: Failure) =>
-  Effect.fail(new CliError.UserError({ cause: failure, userMessage: line(failure) }));
+/** What a failed run still prints on stdout: only a partial failure's rows. */
+type Output = { readonly output?: unknown };
+
+/** The output a failure carries, read back where the run is reported. */
+const outputs = new WeakMap<CliError.UserError, Output>();
+
+/**
+ * Fails the command with `failure` as its one JSON line on stderr, and exit 1; `output`, when given,
+ * still prints on stdout before it.
+ */
+export const fail = (failure: Failure, { output }: Output = {}) => {
+  const error = new CliError.UserError({ cause: failure, userMessage: line(failure) });
+  if (output !== undefined) outputs.set(error, { output });
+  return Effect.fail(error);
+};
+
+const pretty = (value: unknown) => JSON.stringify(value, null, 2);
 
 /** A command's result: one pretty-printed JSON document on stdout. Progress goes to stderr. */
-export const printJson = (value: unknown) => Console.log(JSON.stringify(value, null, 2));
+export const printJson = (value: unknown) => Console.log(pretty(value));
 
 /** What a run prints: what it held for stdout, its one error line, or nothing (a defect, which the runtime logs on stderr). */
 const outputOf = (
@@ -33,14 +47,25 @@ const outputOf = (
   held: ReadonlyArray<ReadonlyArray<unknown>>,
 ):
   | { readonly stdout: ReadonlyArray<ReadonlyArray<unknown>> }
-  | { readonly stderr: string; readonly error: CliError.CliError }
+  | {
+      readonly stdout?: ReadonlyArray<ReadonlyArray<unknown>>;
+      readonly stderr: string;
+      readonly error: CliError.CliError;
+    }
   | null => {
   if (Exit.isSuccess(exit)) return { stdout: held };
   const error = Option.filter(Cause.findErrorOption(exit.cause), CliError.isCliError);
   if (Option.isNone(error)) return null;
   const { value } = error;
   if (value._tag === 'ShowHelp' && value.errors.length === 0) return { stdout: held };
-  if (value._tag === 'UserError') return { stderr: value.message, error: value };
+  if (value._tag === 'UserError') {
+    const kept = outputs.get(value);
+    return {
+      ...(kept === undefined ? {} : { stdout: [[pretty(kept.output)]] }),
+      stderr: value.message,
+      error: value,
+    };
+  }
   const errors = value._tag === 'ShowHelp' ? value.errors : [value];
   return {
     stderr: line({ code: 'UsageError', message: errors.map(({ message }) => message).join('; ') }),
@@ -72,9 +97,7 @@ export const runCommand =
         Effect.exit,
       );
       const output = outputOf(exit, held);
-      if (output !== null && 'stdout' in output) {
-        for (const parts of output.stdout) console.log(...parts);
-      }
+      for (const parts of output?.stdout ?? []) console.log(...parts);
       if (output !== null && 'stderr' in output) {
         console.error(output.stderr);
         // Reported here, so the runtime doesn't log it again (effect/cli marks it so when it prints).

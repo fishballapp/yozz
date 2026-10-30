@@ -42,6 +42,28 @@ export class LoginFailed extends Schema.TaggedError<LoginFailed>()('LoginFailed'
   message: Schema.String,
 }) {}
 
+/** An id that names nothing this machine's cache or the vault holds. */
+export class NotFound extends Schema.TaggedError<NotFound>()('NotFound', {
+  message: Schema.String,
+}) {}
+
+/** An IMAP, SMTP, TLS or sign-in failure, naming the address and saying what went wrong. */
+export class MailServerError extends Schema.TaggedError<MailServerError>()('MailServerError', {
+  message: Schema.String,
+  address: Schema.String,
+}) {}
+
+/** `list --wait` elapsed with no new mail. */
+export class WaitTimedOut extends Schema.TaggedError<WaitTimedOut>()('WaitTimedOut', {
+  message: Schema.String,
+}) {}
+
+/** Some of a batch failed: `output` still prints on stdout, each failed row carrying its error. */
+export class PartialFailure extends Schema.TaggedError<PartialFailure>()('PartialFailure', {
+  message: Schema.String,
+  output: Schema.Unknown,
+}) {}
+
 export type CliFailure =
   | UsageError
   | NotLoggedIn
@@ -49,7 +71,11 @@ export type CliFailure =
   | NetworkError
   | ApiError
   | VaultUnreadable
-  | LoginFailed;
+  | LoginFailed
+  | NotFound
+  | MailServerError
+  | WaitTimedOut
+  | PartialFailure;
 
 const LOGIN_FAILURE_CODES = {
   Denied: 'LoginDenied',
@@ -66,11 +92,15 @@ const toFailure = (error: ReportedError): Failure => {
   // A file the CLI could not read or write: the person's to fix.
   if (PlatformError.isPlatformError(error)) return { code: 'UsageError', message: error.message };
   if (error instanceof Config.ConfigError) return { code: 'UsageError', message: error.message };
+  if (error instanceof PartialFailure) return { code: error._tag, message: error.message };
   const { _tag, ...fields } = error;
   return { ...fields, code: _tag, message: error.message };
 };
 
-/** Turns a command's failure into its one error line. */
+/** Turns a command's failure into its one error line, after a partial failure's output. */
 export const reportFailure = <A, R>(
   effect: Effect.Effect<A, ReportedError, R>,
-): Effect.Effect<A, CliError.UserError, R> => Effect.catch(effect, error => fail(toFailure(error)));
+): Effect.Effect<A, CliError.UserError, R> =>
+  Effect.catch(effect, error =>
+    fail(toFailure(error), error instanceof PartialFailure ? { output: error.output } : {}),
+  );

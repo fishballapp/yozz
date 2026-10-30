@@ -21,6 +21,7 @@ import {
   buildStoreFlagsCommand,
   buildUidExpungeCommand,
   buildUidSearchHeaderCommand,
+  buildUidSearchTextCommand,
   type OutgoingCommand,
 } from './commands.ts';
 import type { ImapAddress, ImapEnvelope } from './envelope.ts';
@@ -130,6 +131,8 @@ export type ImapClient = {
     header: string,
     value: string,
   ) => Promise<ImapResult<readonly number[]>>;
+  /** The selected mailbox's uids whose header or body contains `text`, as the server matches it. */
+  readonly uidSearchText: (text: string) => Promise<ImapResult<readonly number[]>>;
   /** RFC 6851. Answers with the RFC 4315 `COPYUID`, or null when the server gave none. Refuses without MOVE. */
   readonly move: (uidSet: string, mailbox: string) => Promise<ImapResult<CopyUid | null>>;
   readonly create: (mailbox: string) => Promise<ImapResult<void>>;
@@ -862,6 +865,16 @@ export const createImapClient = (
     uidSearchHeader: (header, value) =>
       enqueueCommand(async () => {
         const res = await executeCommand(tag => buildUidSearchHeaderCommand(tag, header, value));
+        if (!res.ok) return res;
+        const found = res.value.untagged.flatMap(item =>
+          item.kind === 'search' ? [...item.uids] : [],
+        );
+        return { ok: true, value: found };
+      }),
+
+    uidSearchText: text =>
+      enqueueCommand(async () => {
+        const res = await executeCommand(tag => buildUidSearchTextCommand(tag, text));
         if (!res.ok) return res;
         const found = res.value.untagged.flatMap(item =>
           item.kind === 'search' ? [...item.uids] : [],

@@ -1,4 +1,6 @@
-import { FOLDERS, type Folder } from '@yozz.app/mail/threads/thread';
+import type { FolderSync } from './cache.ts';
+import type { FlagTarget } from './sync.ts';
+import { FOLDERS, type Folder, type Location, renumberedText } from './thread.ts';
 
 /**
  * An op leaves the list when the server refused it, or when a sync of that account that started
@@ -103,5 +105,25 @@ export const assertSameUidValidity = (
   locations: readonly { readonly uidValidity: number }[],
 ) => {
   if (locations.every(location => location.uidValidity === current)) return;
-  throw new Error(`${folder} was renumbered; reopen the conversation`);
+  throw new Error(renumberedText(folder));
 };
+
+/**
+ * One account's copies as the writes address them: one target per folder, off its sync mark.
+ * Throws when a folder has not synced or was renumbered since the copies were read.
+ */
+export const flagTargets = (
+  locations: readonly Omit<Location, 'account'>[],
+  marks: ReadonlyMap<Folder, FolderSync | null>,
+): readonly FlagTarget[] =>
+  [...Map.groupBy(locations, location => location.folder)].map(([folder, copies]) => {
+    const mark = marks.get(folder);
+    if (mark == null) throw new Error(`${folder} has not synced`);
+    assertSameUidValidity(folder, mark.uidValidity, copies);
+    return {
+      folder,
+      mailbox: mark.name,
+      uidValidity: mark.uidValidity,
+      uids: copies.map(({ uid }) => uid),
+    };
+  });

@@ -215,6 +215,14 @@ describe('IMAP Client transcripts and state machine', () => {
     });
   });
 
+  it('searches header and body for text, as a UTF-8 literal when it is not plain ASCII', async () => {
+    const steps = parseTranscript('uid-search-text.txt');
+    await runTranscriptSession(steps, async client => {
+      expect(await client.uidSearchText('invoice 4821')).toEqual({ ok: true, value: [7, 12] });
+      expect(await client.uidSearchText('Grüße')).toEqual({ ok: true, value: [] });
+    });
+  });
+
   it('UID MOVEs messages into another mailbox', async () => {
     const steps = parseTranscript('move.txt');
     await runTranscriptSession(steps, async client => {

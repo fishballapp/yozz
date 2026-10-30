@@ -1,0 +1,9 @@
+S: * OK [CAPABILITY IMAP4rev1] Server ready.
+C: A0001 UID SEARCH TEXT "invoice 4821"
+S: * SEARCH 7 12
+S: A0001 OK SEARCH completed.
+C: A0002 UID SEARCH CHARSET UTF-8 TEXT {7}
+S: + go ahead
+C: Grüße
+S: * SEARCH
+S: A0002 OK SEARCH completed.

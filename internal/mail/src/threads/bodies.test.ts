@@ -1,6 +1,9 @@
 import { DEFAULT_MAX_LITERAL_BYTES } from '@yozz.app/imap';
 import { describe, expect, it } from 'vitest';
-import { fetchBody, htmlToText, parseBody } from './bodies.ts';
+import { stubImapClient } from '../testing/fake-imap-client.ts';
+import { memoryMailCache } from '../testing/memory-mail-cache.ts';
+import { fetchBody, fetchBodyAt, htmlToText, parseBody } from './bodies.ts';
+import { MAX_CACHED_BODY_BYTES } from './body-state.ts';
 
 const raw = (text: string) => new TextEncoder().encode(text.replace(/\n/g, '\r\n'));
 
@@ -284,5 +287,87 @@ describe('fetchBody size boundary', () => {
       ok: false,
       error: { kind: 'error', detail: 'Message is too large to open safely' },
     });
+  });
+});
+
+describe('fetchBodyAt', () => {
+  const message = raw('From: a@x\nSubject: Hi\n\nHello there.');
+  const fetched: string[] = [];
+  const run: Parameters<typeof fetchBodyAt>[0] = task =>
+    task.run({
+      ...stubImapClient({
+        fetchRaw: async uid => {
+          fetched.push(`fetch ${uid}`);
+          return { ok: true, value: message };
+        },
+      }),
+      ensureSelected: async name => {
+        fetched.push(`select ${name}`);
+        return {
+          ok: true,
+          value: {
+            name,
+            exists: 1,
+            uidValidity: 7,
+            uidNext: 2,
+            flags: [],
+            permanentFlags: [],
+            readOnly: false,
+          },
+        };
+      },
+    });
+  const synced = async () => {
+    const folder = memoryMailCache().folder('archive');
+    await folder.putSync({ name: 'Archive', uidValidity: 7, lastUid: 1, complete: true });
+    return folder;
+  };
+
+  it('fetches the copy from its mailbox and caches a small body', async () => {
+    fetched.length = 0;
+    const folder = await synced();
+    const res = await fetchBodyAt(run, folder, { folder: 'archive', uidValidity: 7, uid: 1 }, 100);
+    expect(res).toMatchObject({ ok: true, value: { paragraphs: ['Hello there.'] } });
+    expect(fetched).toEqual(['select Archive', 'fetch 1']);
+    expect(await folder.getBody(1)).toMatchObject({ paragraphs: ['Hello there.'] });
+  });
+
+  it('keeps nothing once the cache it was fetched for has gone stale', async () => {
+    const folder = await synced();
+    const res = await fetchBodyAt(
+      run,
+      folder,
+      { folder: 'archive', uidValidity: 7, uid: 1 },
+      100,
+      () => true,
+    );
+    expect(res.ok).toBe(true);
+    expect(await folder.getBody(1)).toBeNull();
+  });
+
+  it('leaves a large body out of the cache', async () => {
+    const folder = await synced();
+    await fetchBodyAt(
+      run,
+      folder,
+      { folder: 'archive', uidValidity: 7, uid: 1 },
+      MAX_CACHED_BODY_BYTES + 1,
+    );
+    expect(await folder.getBody(1)).toBeNull();
+  });
+
+  it('refuses a copy whose folder was renumbered, without fetching', async () => {
+    fetched.length = 0;
+    const res = await fetchBodyAt(
+      run,
+      await synced(),
+      { folder: 'archive', uidValidity: 6, uid: 1 },
+      100,
+    );
+    expect(res).toEqual({
+      ok: false,
+      error: { kind: 'error', detail: 'archive was renumbered; reopen the conversation' },
+    });
+    expect(fetched).toEqual([]);
   });
 });

@@ -20,6 +20,7 @@ export {
 export {
   createVault,
   type EncryptedRecord,
+  type LocalKeyPurpose,
   type OpenedRecord,
   openVault,
   rewrapDek,

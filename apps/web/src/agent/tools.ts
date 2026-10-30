@@ -1,10 +1,29 @@
 import type { AddressRecord } from '@yozz.app/mail/addresses/record';
+import {
+  BATCH_MAX,
+  BODY_CHARS,
+  BODY_CHARS_MAX,
+  clip,
+  DEPTH,
+  fitting,
+  LIST_LIMIT_MAX,
+  OUTPUT_CHARS,
+  RECIPIENTS_LISTED,
+  SKIM_CHARS,
+  SNIPPET_CHARS,
+} from '@yozz.app/mail/agent-budgets';
 import type { DraftContent } from '@yozz.app/mail/compose/draft';
 import type { DeleteOutcome, DraftHandle, SaveOutcome } from '@yozz.app/mail/compose/draft-vault';
 import { quoteForReply, seedFor } from '@yozz.app/mail/compose/seed';
 import type { BodyOutcome } from '@yozz.app/mail/threads/body-state';
 import type { Recipient, ThreadState } from '@yozz.app/mail/threads/thread';
-import { inboxesOf, isArchived, isTrashed, threadByHandle } from '@yozz.app/mail/threads/thread';
+import {
+  inboxesOf,
+  isArchived,
+  isTrashed,
+  resolveHandles,
+  threadByHandle,
+} from '@yozz.app/mail/threads/thread';
 import { previewOf, visibleThreads } from '@yozz.app/mail/threads/views';
 import { z } from 'zod';
 
@@ -66,24 +85,6 @@ export type AgentTool = {
   readonly execute: (input: unknown) => Promise<unknown>;
 };
 
-/** Chrome's guidance is ~1.5K characters per tool output; ChatGPT quotes results verbatim. */
-export const LIST_LIMIT_DEFAULT = 20;
-export const LIST_LIMIT_MAX = 50;
-export const BATCH_MAX = 50;
-export const SNIPPET_CHARS = 120;
-export const BODY_CHARS = 1_500;
-export const BODY_CHARS_MAX = 6_000;
-export const OUTPUT_CHARS = 6_000;
-/** How deep each `body` mode goes. */
-export const DEPTH: Record<'none' | 'latest' | 'full', number> = { none: 50, latest: 10, full: 3 };
-/** A skim gets a short body per thread, so ten still fit one output. */
-export const SKIM_CHARS = 400;
-/** Per `to` / `cc` line: a list mail to hundreds must not spend the whole output on its header. */
-export const RECIPIENTS_LISTED = 10;
-
-const clip = (text: string, max: number) =>
-  text.length <= max ? text : `${text.slice(0, max)}…[truncated ${text.length - max} chars]`;
-
 const readOnly = { readOnlyHint: true, untrustedContentHint: true } as const;
 // Stated, not left absent: ChatGPT counts a tool as a write only when it says so.
 const write = { readOnlyHint: false, untrustedContentHint: true } as const;
@@ -136,20 +137,6 @@ const omittedFrom = (...lines: readonly (readonly Recipient[] | undefined)[]) =>
   return omitted === 0 ? {} : { recipientsOmitted: omitted };
 };
 
-/** The largest newest-first prefix that fits the budget, never fewer than one. */
-const fitting = <T>(items: readonly T[], budget: number): readonly T[] => {
-  const sizes = items.map(item => JSON.stringify(item).length);
-  const count = (() => {
-    let total = 0;
-    for (const [index, size] of sizes.entries()) {
-      total += size;
-      if (total > budget) return Math.max(1, index);
-    }
-    return items.length;
-  })();
-  return items.slice(0, count);
-};
-
 /** What a tool read belongs to a session that has ended, and what it would do next to the session after it. */
 const SESSION_ENDED =
   'You were signed out before this finished; try again once the user has signed in again.';
@@ -170,22 +157,6 @@ const idsSchema = z
   .describe(
     `Up to ${BATCH_MAX} thread ids from a previous get_threads. Any message id in a conversation names it too.`,
   );
-
-/** Each conversation once: two ids from different calls can name one thread, and a write resolved twice ran twice. */
-const resolve = (
-  threads: readonly ThreadState[],
-  ids: readonly string[],
-): readonly { readonly id: string; readonly thread: ThreadState | null }[] => {
-  const entries: { id: string; thread: ThreadState | null }[] = [];
-  for (const id of ids) {
-    const thread = threadByHandle(threads, id);
-    const seen = entries.some(entry =>
-      thread === null ? entry.id === id : entry.thread?.id === thread.id,
-    );
-    if (!seen) entries.push({ id, thread });
-  }
-  return entries;
-};
 
 /** The same order and rules as the list the user is looking at. */
 const selected = (
@@ -408,7 +379,7 @@ export const buildAgentTools = (port: () => AgentPort): readonly AgentTool[] => 
     }) => {
       const isCurrent = port().watchSession();
       const depth = body ?? 'none';
-      const resolved = ids === undefined ? null : resolve(port().threads, ids);
+      const resolved = ids === undefined ? null : resolveHandles(port().threads, ids);
       const matching =
         resolved === null
           ? selected(port(), { account, mailbox, query, unread, starred })
@@ -462,7 +433,7 @@ export const buildAgentTools = (port: () => AgentPort): readonly AgentTool[] => 
       ),
     annotations: write,
     run: ({ ids, read, starred, mailbox }) => {
-      const entries = resolve(port().threads, ids);
+      const entries = resolveHandles(port().threads, ids);
       const found = entries.flatMap(({ thread }) => (thread === null ? [] : [thread]));
       /** Why a conversation needs no move, or null when it does. */
       const unmoved = (thread: ThreadState): string | null => {

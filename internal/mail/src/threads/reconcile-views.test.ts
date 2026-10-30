@@ -1,7 +1,7 @@
-import type { Folder, Message, ThreadState } from '@yozz.app/mail/threads/thread';
-import { threadsIn, unreadCount } from '@yozz.app/mail/threads/views';
 import { describe, expect, it } from 'vitest';
-import { applyOps, type MoveTarget, type PendingOp } from './reconcile';
+import { applyOps, type MoveTarget, type PendingOp } from './reconcile.ts';
+import type { Folder, Message, ThreadState } from './thread.ts';
+import { threadsIn, unreadCount } from './views.ts';
 
 /** A pending op is what the views show until the sync lands, so its effect is checked through them. */
 

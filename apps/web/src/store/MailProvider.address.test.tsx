@@ -62,7 +62,8 @@ vi.mock('../threads/cache', () => ({
   }),
   clearMailCache: async () => {},
 }));
-vi.mock('@yozz.app/mail/threads/hydrate', () => ({
+vi.mock('@yozz.app/mail/threads/hydrate', async importOriginal => ({
+  ...(await importOriginal<typeof import('@yozz.app/mail/threads/hydrate')>()),
   cachedSummaries: async () => ({}),
   cachedPreviews: async () => ({}),
 }));

@@ -17,6 +17,7 @@ import {
 } from '@phosphor-icons/react';
 import { Link, useParams } from '@tanstack/react-router';
 import { replyAllCc } from '@yozz.app/mail/compose/seed';
+import { canMoveTo } from '@yozz.app/mail/threads/reconcile';
 import type { ThreadState } from '@yozz.app/mail/threads/thread';
 import {
   addresseesOf,
@@ -39,7 +40,6 @@ import { reportProblem } from '../ui/Toast';
 import { AttachmentList } from './AttachmentList';
 import { HtmlBody } from './HtmlBody';
 import { linkify } from './linkify';
-import { canMoveTo } from './reconcile';
 
 /**
  * Every message says who it was written to under its From line, the way Gmail does: one "to me,

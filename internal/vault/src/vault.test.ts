@@ -263,3 +263,52 @@ describe('createVault', () => {
     });
   });
 });
+
+describe('a local key', () => {
+  const seal = async (key: CryptoKey, plaintext: string) => {
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const body = new Uint8Array(
+      await crypto.subtle.encrypt(
+        { name: 'AES-GCM', iv },
+        key,
+        new TextEncoder().encode(plaintext),
+      ),
+    );
+    return { iv, body };
+  };
+  const open = async (
+    key: CryptoKey,
+    { iv, body }: { iv: Uint8Array<ArrayBuffer>; body: Uint8Array<ArrayBuffer> },
+  ) => new TextDecoder().decode(await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, key, body));
+
+  it('is the same key every time the vault opens', async () => {
+    const cached = await seal(vault.localKey('yozz-cli-cache'), 'a cached summary');
+    const reopened = await openVault(keys, wrappedDek);
+
+    expect(await open(reopened.localKey('yozz-cli-cache'), cached)).toBe('a cached summary');
+  });
+
+  it('is not the record key, so it cannot open a record', async () => {
+    const stored = await record('{"password":"hunter2"}');
+    const bytes = Uint8Array.fromBase64(stored.ciphertext);
+    const additionalData = new TextEncoder().encode(JSON.stringify([stored.id, stored.type]));
+
+    await expect(
+      crypto.subtle.decrypt(
+        { name: 'AES-GCM', iv: bytes.subarray(0, 12), additionalData },
+        vault.localKey('yozz-cli-cache'),
+        bytes.subarray(12),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("is another vault's own, and never leaves WebCrypto", async () => {
+    const cached = await seal(vault.localKey('yozz-cli-cache'), 'a cached summary');
+    const another = await createVault(keys);
+
+    await expect(open(another.vault.localKey('yozz-cli-cache'), cached)).rejects.toThrow();
+    await expect(
+      crypto.subtle.exportKey('raw', vault.localKey('yozz-cli-cache')),
+    ).rejects.toThrow();
+  });
+});

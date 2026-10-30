@@ -130,6 +130,29 @@ export const threadByHandle = <T extends { id: string; messages: readonly { id: 
   threads.find(thread => thread.messages.some(message => message.id === handle)) ??
   null;
 
+/**
+ * Each conversation once, in the order asked: two ids from different calls can name one thread, and
+ * a write resolved twice ran twice. A handle that names nothing comes back with `thread: null`.
+ */
+export const resolveHandles = <T extends { id: string; messages: readonly { id: string }[] }>(
+  threads: readonly T[],
+  ids: readonly string[],
+): readonly { readonly id: string; readonly thread: T | null }[] => {
+  const entries: { id: string; thread: T | null }[] = [];
+  for (const id of ids) {
+    const thread = threadByHandle(threads, id);
+    const seen = entries.some(entry =>
+      thread === null ? entry.id === id : entry.thread?.id === thread.id,
+    );
+    if (!seen) entries.push({ id, thread });
+  }
+  return entries;
+};
+
+/** Why a uid read under one UIDVALIDITY is not written or fetched under another: it may name other mail. */
+export const renumberedText = (folder: Folder) =>
+  `${folder} was renumbered; reopen the conversation`;
+
 /** The fallback for mail with no unique Message-ID: one physical copy, which changes when that copy moves. */
 export const physicalIdOf = ({ account, folder, uidValidity, uid }: Location) =>
   `${account}/${folder}/${uidValidity}/${uid}`;

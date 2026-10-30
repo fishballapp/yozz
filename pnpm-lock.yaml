@@ -347,9 +347,15 @@ importers:
       '@types/node':
         specifier: ^24.13.4
         version: 24.13.4
+      '@yozz.app/imap':
+        specifier: workspace:*
+        version: link:../../packages/imap
       '@yozz.app/mail':
         specifier: workspace:*
         version: link:../../internal/mail
+      '@yozz.app/smtp':
+        specifier: workspace:*
+        version: link:../../packages/smtp
       '@yozz.app/vault':
         specifier: workspace:*
         version: link:../../internal/vault

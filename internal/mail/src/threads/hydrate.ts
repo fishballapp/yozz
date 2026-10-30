@@ -1,7 +1,14 @@
-import { type Previews, previewKey } from './body-state.ts';
+import type { DraftHandle } from '../compose/draft-vault.ts';
+import { type BodyEntry, type Previews, previewKey, withBodies } from './body-state.ts';
 import type { MailCache } from './cache.ts';
-import type { FolderSummaries } from './summaries.ts';
-import { FOLDERS } from './thread.ts';
+import {
+  type AccountSummaries,
+  type FolderSummaries,
+  threadsFromAccounts,
+  type VaultSentMessage,
+  withDrafts,
+} from './summaries.ts';
+import { FOLDERS, type ThreadState } from './thread.ts';
 
 /** The list before the first sync of this unlock lands. Read all folders in parallel. */
 export const cachedSummaries = async (cache: MailCache): Promise<FolderSummaries> => {
@@ -44,3 +51,28 @@ export const cachedPreviews = async (cache: MailCache, account: string): Promise
   );
   return Object.fromEntries(folderEntries.flat());
 };
+
+/**
+ * The conversations a client shows: one grouping pass over every account, or a conversation two
+ * addresses are copied on splits in two; then the bodies on hand, the client's own overlay (the web
+ * app's pending writes) and the vault's drafts.
+ */
+export const threadList = ({
+  byAccount,
+  vaultSent = [],
+  bodies = {},
+  previews = {},
+  overlay = threads => threads,
+  drafts = [],
+}: {
+  readonly byAccount: AccountSummaries;
+  readonly vaultSent?: readonly VaultSentMessage[];
+  readonly bodies?: Readonly<Record<string, BodyEntry>>;
+  readonly previews?: Previews;
+  readonly overlay?: (threads: readonly ThreadState[]) => readonly ThreadState[];
+  readonly drafts?: readonly DraftHandle[];
+}): readonly ThreadState[] =>
+  withDrafts(
+    overlay(withBodies(threadsFromAccounts(byAccount, vaultSent), bodies, previews)),
+    drafts,
+  );

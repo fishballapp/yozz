@@ -8,7 +8,7 @@ import {
 import { ensureMailbox, resolveFolders } from '../addresses/mailboxes.ts';
 import type { MailConnectionFailure, Result, RunTask } from '../connection.ts';
 import { type FetchedBody, parseBody } from './bodies.ts';
-import type { FolderCache, MailCache } from './cache.ts';
+import type { FolderCache, FolderSync, MailCache } from './cache.ts';
 import type { FolderSummaries } from './summaries.ts';
 import { FOLDERS, type Folder, type Location } from './thread.ts';
 
@@ -115,7 +115,13 @@ const syncFolder = async (
   await folderCache.putSync({
     name,
     uidValidity,
-    lastUid: Math.max(mark?.lastUid ?? 0, ...all.map(summary => summary.uid)),
+    // Everything below UIDNEXT has been seen, whether or not it is still here: an empty inbox, or
+    // one whose newest message moved away, is caught up, not behind.
+    lastUid: Math.max(
+      mark?.lastUid ?? 0,
+      uidNext === null ? 0 : uidNext - 1,
+      ...all.map(summary => summary.uid),
+    ),
     complete,
   });
   return { ok: true, summaries: all, complete, uidValidity };
@@ -351,6 +357,42 @@ export const moveMessages = async (
       return { ok: true, value: moved };
     },
   });
+
+/**
+ * What a move did, written into the cache at once, so the next read shows it before any sync. Each
+ * copy leaves its folder; it is filed where the server said it went only when that folder has
+ * synced under the same `UIDVALIDITY`, and otherwise the next sync of that folder finds it. A copy
+ * filed above the mark's `lastUid` is fetched again then, by uid, which replaces it.
+ */
+export const recordMoves = async (
+  cache: MailCache,
+  moved: readonly MovedCopy[],
+): Promise<{ readonly isComplete: boolean }> => {
+  /** Cached copies that left their folder and were filed nowhere: only a sync can say where. */
+  let unfiled = 0;
+  for (const [folder, copies] of Map.groupBy(moved, ({ from }) => from.folder)) {
+    const source = cache.folder(folder);
+    const uids = new Set(copies.map(({ from }) => from.uid));
+    const summaries = (await source.listSummaries()).filter(summary => uids.has(summary.uid));
+    await source.deleteSummaries([...uids]);
+    const marks = new Map<Folder, FolderSync | null>();
+    for (const { to } of copies) {
+      if (to !== null && !marks.has(to.folder)) {
+        marks.set(to.folder, await cache.folder(to.folder).getSync());
+      }
+    }
+    const filed = summaries.flatMap(summary => {
+      const to = copies.find(({ from }) => from.uid === summary.uid)?.to ?? null;
+      const isFileable = to !== null && marks.get(to.folder)?.uidValidity === to.uidValidity;
+      if (!isFileable) unfiled += 1;
+      return isFileable ? [{ to, summary: { ...summary, uid: to.uid } }] : [];
+    });
+    for (const [to, landed] of Map.groupBy(filed, ({ to }) => to.folder)) {
+      await cache.folder(to).putSummaries(landed.map(({ summary }) => summary));
+    }
+  }
+  return { isComplete: unfiled === 0 };
+};
 
 /**
  * After a sync: the newest small bodies not yet cached, at background priority. Failures are

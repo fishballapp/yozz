@@ -6,6 +6,7 @@ import {
   isOnServer,
   isTrashed,
   type Message,
+  resolveHandles,
   toParagraphs,
   VAULT_UID_VALIDITY,
 } from './thread.ts';
@@ -139,5 +140,22 @@ describe('addresseesOf', () => {
 describe('toParagraphs', () => {
   it('splits on blank lines and keeps single line breaks inside a paragraph', () => {
     expect(toParagraphs('a\r\nb\r\n\r\n\r\nc\n')).toEqual(['a\nb', 'c']);
+  });
+});
+
+describe('resolveHandles', () => {
+  const threads = [
+    { id: 'mid/<a@x>', messages: [{ id: 'mid/<a@x>' }, { id: 'mid/<b@x>' }] },
+    { id: 'mid/<c@x>', messages: [{ id: 'mid/<c@x>' }] },
+  ];
+
+  it('names each conversation once, by its own id or any message in it', () => {
+    expect(
+      resolveHandles(threads, ['mid/<b@x>', 'mid/<a@x>', 'mid/<c@x>', 'nope', 'nope']),
+    ).toEqual([
+      { id: 'mid/<b@x>', thread: threads[0] },
+      { id: 'mid/<c@x>', thread: threads[1] },
+      { id: 'nope', thread: null },
+    ]);
   });
 });

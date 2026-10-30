@@ -198,15 +198,34 @@ describe('syncAccount', () => {
       status: 'synced',
       complete: ['sent', 'archive', 'trash', 'drafts'],
     });
+    // UIDNEXT 300 says every uid below it has been handed out: the mark is caught up to 299.
     expect(cache.read('inbox').sync).toEqual({
       name: 'INBOX',
       uidValidity: 5,
-      lastUid: 151,
+      lastUid: 299,
       complete: false,
     });
     // No Sent folder listed.
     expect(select).toHaveBeenCalledTimes(1);
     expect(cache.read('sent').sync).toBeNull();
+  });
+
+  it('marks an empty inbox caught up to UIDNEXT, so the next sync asks for nothing', async () => {
+    // Inbox zero: every message so far moved away, the next one will be uid 50.
+    selectAnswers({ INBOX: { uidValidity: 5, uidNext: 50, exists: 0 } });
+    const cache = fakeCache();
+    await syncAccount(run, cache);
+    expect(cache.read('inbox').sync).toMatchObject({ lastUid: 49 });
+
+    await syncAccount(run, cache);
+    expect(fetchSummaries).not.toHaveBeenCalled();
+
+    // Then mail arrives: the incremental sync asks from uid 50 on.
+    selectAnswers({ INBOX: { uidValidity: 5, uidNext: 51, exists: 1 } });
+    fetchSummaries.mockResolvedValue({ ok: true, value: [summary(50)] });
+    await syncAccount(run, cache);
+    expect(fetchSummaries).toHaveBeenCalledWith('50:*');
+    expect(cache.read('inbox').sync).toMatchObject({ lastUid: 50 });
   });
 
   it('reads a folder smaller than the window whole, and asks nothing of an empty one', async () => {
@@ -700,5 +719,63 @@ describe('setFlag', () => {
     );
     expect(res.ok).toBe(false);
     expect(cache.read('inbox').summaries[0]?.flags).toEqual([]);
+  });
+});
+
+describe('recordMoves', () => {
+  it('takes each copy out of its folder and files it where COPYUID said, under the same UIDVALIDITY', async () => {
+    const { recordMoves } = await import('./sync.ts');
+    const cache = fakeCache({
+      inbox: { summaries: [summary(4), summary(5), summary(6)] },
+      archive: { sync: { name: 'Archive', uidValidity: 30, lastUid: 10, complete: true } },
+    });
+    const complete = await recordMoves(cache, [
+      {
+        from: { folder: 'inbox', uidValidity: 1, uid: 6 },
+        to: { folder: 'archive', uidValidity: 30, uid: 12 },
+      },
+    ]);
+    expect(complete).toEqual({ isComplete: true });
+    const partial = await recordMoves(cache, [
+      {
+        from: { folder: 'inbox', uidValidity: 1, uid: 4 },
+        to: { folder: 'archive', uidValidity: 30, uid: 11 },
+      },
+      // The server did not say where this one went: only a sync can find it.
+      { from: { folder: 'inbox', uidValidity: 1, uid: 5 }, to: null },
+    ]);
+    expect(partial).toEqual({ isComplete: false });
+    expect(cache.read('inbox').summaries).toEqual([]);
+    expect(cache.read('archive').summaries).toEqual([
+      { ...summary(6), uid: 12 },
+      { ...summary(4), uid: 11 },
+    ]);
+  });
+
+  it('files nothing in a folder that has not synced, or that was renumbered', async () => {
+    const { recordMoves } = await import('./sync.ts');
+    const cache = fakeCache({
+      inbox: { summaries: [summary(4)] },
+      archive: { sync: { name: 'Archive', uidValidity: 31, lastUid: 10, complete: true } },
+    });
+    expect(
+      await recordMoves(cache, [
+        {
+          from: { folder: 'inbox', uidValidity: 1, uid: 4 },
+          to: { folder: 'archive', uidValidity: 30, uid: 11 },
+        },
+      ]),
+    ).toEqual({ isComplete: false });
+    expect(
+      await recordMoves(cache, [
+        {
+          from: { folder: 'inbox', uidValidity: 1, uid: 4 },
+          to: { folder: 'trash', uidValidity: 30, uid: 11 },
+        },
+      ]),
+    ).toEqual({ isComplete: true });
+    expect(cache.read('inbox').summaries).toEqual([]);
+    expect(cache.read('archive').summaries).toEqual([]);
+    expect(cache.read('trash').summaries).toEqual([]);
   });
 });

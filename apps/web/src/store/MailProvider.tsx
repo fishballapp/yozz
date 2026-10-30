@@ -12,16 +12,22 @@ import {
   MAX_CACHED_BODY_BYTES,
   type Previews,
   previewKey,
-  withBodies,
   withoutAccountPreviews,
 } from '@yozz.app/mail/threads/body-state';
 import type { MailCache } from '@yozz.app/mail/threads/cache';
+import { threadList } from '@yozz.app/mail/threads/hydrate';
 import {
-  type AccountSummaries,
-  threadsFromAccounts,
-  withDrafts,
-} from '@yozz.app/mail/threads/summaries';
+  applyOps,
+  flagTargets,
+  MOVE_SOURCES,
+  type MoveTarget,
+  type PendingChange,
+  type PendingOp,
+  retireOps,
+} from '@yozz.app/mail/threads/reconcile';
+import type { AccountSummaries } from '@yozz.app/mail/threads/summaries';
 import type { AccountSyncState, FlagTarget, MovedCopy } from '@yozz.app/mail/threads/sync';
+import { staleAccounts } from '@yozz.app/mail/threads/sync-staleness';
 import type { Location, ThreadState } from '@yozz.app/mail/threads/thread';
 import { type Folder, isArchived, isServerCopy } from '@yozz.app/mail/threads/thread';
 import { accountsShown, folderPaged, type MailboxId } from '@yozz.app/mail/threads/views';
@@ -39,20 +45,10 @@ import {
 import { type ActivityTracker, createActivityTracker, isUnsavedWork } from '../relay/activity';
 import type { LiveManager, RunOn } from '../relay/live';
 import { clearCachedFrames } from '../threads/frame-cache';
-import {
-  applyOps,
-  assertSameUidValidity,
-  MOVE_SOURCES,
-  type MoveTarget,
-  type PendingChange,
-  type PendingOp,
-  retireOps,
-} from '../threads/reconcile';
 import { isDemo } from '../ui/chrome';
 import { toast } from '../ui/Toast';
 import { vaultErrorMessage } from '../vault/screen-policy';
 import { useVault } from '../vault/session';
-import { staleAccounts } from './sync-staleness';
 import { type Composer, type ComposerShared, useComposerStore } from './use-composer';
 
 /**
@@ -936,14 +932,14 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
   // The server's last word, with bodies merged in and pending ops laid over it on every render.
   const threads = useMemo(() => {
     if (demo) return demoThreads;
-    // One grouping pass over every account, or a conversation two addresses are copied on splits in two.
-    return withDrafts(
-      applyOps(
-        withBodies(threadsFromAccounts(baseByAccount, vaultSent), bodiesById, previews),
-        ops,
-      ),
+    return threadList({
+      byAccount: baseByAccount,
+      vaultSent,
+      bodies: bodiesById,
+      previews,
+      overlay: threads => applyOps(threads, ops),
       drafts,
-    );
+    });
   }, [demo, demoThreads, baseByAccount, vaultSent, bodiesById, previews, ops, drafts]);
 
   threadsRef.current = threads;
@@ -1098,22 +1094,10 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
               void requestSync(account);
             }
             if (ready.length === 0) return;
-            const targets = [
-              ...Map.groupBy(
-                ready.flatMap(({ picked }) => picked),
-                location => location.folder,
-              ),
-            ].map(([folder, locations]): FlagTarget => {
-              const mark = marks.get(folder);
-              if (mark == null) throw new Error(`${folder} has not synced`);
-              assertSameUidValidity(folder, mark.uidValidity, locations);
-              return {
-                folder,
-                mailbox: mark.name,
-                uidValidity: mark.uidValidity,
-                uids: locations.map(({ uid }) => uid),
-              };
-            });
+            const targets = flagTargets(
+              ready.flatMap(({ picked }) => picked),
+              marks,
+            );
             const res = await command(runOn(account), targets, cache);
             // The session the command belonged to may have ended while the server answered.
             if (generation !== sessionGeneration.current) return;
@@ -1240,7 +1224,7 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
       const runOn = bindRunOn();
       const promise = (async (): Promise<BodyOutcome> => {
         try {
-          const [{ fetchBody }, { createMailCache }, { senderCheckOf }] = await Promise.all([
+          const [{ fetchBodyAt }, { createMailCache }, { senderCheckOf }] = await Promise.all([
             import('@yozz.app/mail/threads/bodies'),
             import('../threads/cache'),
             import('@yozz.app/mail/threads/authentication-results'),
@@ -1248,14 +1232,12 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
           const cache = createMailCache(userId, accountAddress).folder(folder);
           const cached = await cache.getBody(uid);
           if (isRetired()) return failed;
-          const fetchFresh = async () => {
+          const fetchFresh = () => {
             // Only the network says "Loading…": a body on the device replaces `pending` directly.
             setEntry(loadingEntry);
-            const mark = await cache.getSync();
-            if (mark === null) throw new Error(`${folder} has not synced`);
-            // Same guard as the writes: a stale uid would fetch whatever now holds that number.
-            assertSameUidValidity(folder, mark.uidValidity, [copy]);
-            return fetchBody(runOn(account), mark.name, uid, message.rawSize);
+            // Refused when the copy's folder was renumbered: a stale uid would fetch whatever now
+            // holds that number. Caches the body when it is small enough.
+            return fetchBodyAt(runOn(account), cache, copy, message.rawSize, isStale);
           };
           const res = cached !== null ? { ok: true as const, value: cached } : await fetchFresh();
           if (isRetired()) return failed;
@@ -1265,14 +1247,6 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
               `message not loaded · ${describeMailFailure(res.error, account.imap.host)}`,
             );
             return failed;
-          }
-          if (
-            cached === null &&
-            (message.rawSize ?? Number.POSITIVE_INFINITY) <= MAX_CACHED_BODY_BYTES
-          ) {
-            // Best effort: a body that did not cache is fetched again next time.
-            await cache.putBody(uid, res.value).catch(() => {});
-            if (isRetired()) return failed;
           }
           const loaded: BodyOutcome = {
             status: 'loaded',

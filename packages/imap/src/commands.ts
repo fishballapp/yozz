@@ -242,6 +242,23 @@ export const buildUidSearchHeaderCommand = (
   ],
 });
 
+/**
+ * RFC 9051 §6.4.4 `TEXT`: the header and body both. A printable-ASCII query is a quoted string in
+ * the default charset; anything else is a UTF-8 literal, which every server must accept.
+ */
+export const buildUidSearchTextCommand = (tag: string, text: string): OutgoingCommand =>
+  isSafeQuotedString(text)
+    ? { lines: [{ text: stringToBytes(`${tag} UID SEARCH TEXT ${quoteString(text)}\r\n`) }] }
+    : {
+        lines: [
+          {
+            text: stringToBytes(`${tag} UID SEARCH CHARSET UTF-8 TEXT `),
+            literal: stringToBytes(text),
+          },
+          { text: stringToBytes('\r\n') },
+        ],
+      };
+
 /** RFC 6851. */
 export const buildMoveCommand = (
   tag: string,

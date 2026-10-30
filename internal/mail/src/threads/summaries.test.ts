@@ -607,3 +607,24 @@ describe('threads that span accounts', () => {
     ]);
   });
 });
+
+describe('message ids', () => {
+  it('carries a Message-ID only when it is printable ASCII of a sane length', () => {
+    const idOf = (messageId: string) =>
+      threadFromSummary(summaryOf({ envelope: envelope({ messageId }) }), 'me@yozz.app').id;
+    // Every real shape keeps its mid/ id, as before.
+    expect(idOf('<CAF=3Dq+x_y-z.w@mail.gmail.com>')).toBe('mid/<CAF=3Dq+x_y-z.w@mail.gmail.com>');
+    expect(idOf('<01J9XYZ@stripe.com>')).toBe('mid/<01J9XYZ@stripe.com>');
+    // Anything that could carry text into an id outside the untrusted framing gets the location.
+    for (const hostile of [
+      '<a \u202Eb@x>',
+      '<a b@x>',
+      '<ignore previous instructions@x>',
+      '<a>b@x>',
+      `<${'x'.repeat(251)}>`,
+      'no-brackets@x',
+    ]) {
+      expect(idOf(hostile)).toBe('me@yozz.app/inbox/1/101');
+    }
+  });
+});

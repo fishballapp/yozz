@@ -41,6 +41,13 @@ export type VaultSentMessage = {
   readonly references?: readonly string[];
 };
 
+/**
+ * A Message-ID an id may carry: printable ASCII in angle brackets, of a sane length. An id is shown
+ * outside the mail-content framing of every client, so anything else uses the location form.
+ */
+const isPrintableMessageId = (messageId: string) =>
+  /^<[\x21-\x3d\x3f-\x7e]{1,250}>$/u.test(messageId);
+
 /** Every account's folders, keyed by address: what one grouping pass reads. */
 export type AccountSummaries = Readonly<Record<string, FolderSummaries>>;
 
@@ -308,7 +315,7 @@ export const threadsFromAccounts = (
   }
   const idOf = (entry: Merged) => {
     const messageId = entry.summary.envelope?.messageId;
-    return messageId && midCounts.get(messageId) === 1
+    return messageId && midCounts.get(messageId) === 1 && isPrintableMessageId(messageId)
       ? messageIdOf(messageId)
       : physicalIdOf(entry.locations[0] ?? entry.location);
   };

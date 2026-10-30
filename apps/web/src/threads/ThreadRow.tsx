@@ -7,6 +7,7 @@ import {
   TrashIcon,
 } from '@phosphor-icons/react';
 import { Link } from '@tanstack/react-router';
+import { canMoveTo } from '@yozz.app/mail/threads/reconcile';
 import type { ThreadState } from '@yozz.app/mail/threads/thread';
 import {
   attachmentsOf,
@@ -23,7 +24,6 @@ import { ConfirmDialog } from '../ui/ConfirmDialog';
 import { reportProblem } from '../ui/Toast';
 import { listTime } from '../ui/time';
 import { discardDrafts, discardTitle, draftIdsOf } from './discard-drafts';
-import { canMoveTo } from './reconcile';
 import { useAdvancePast } from './use-advance';
 
 /** One record in columns: a 34px line above `lg`, two lines below. Contrast figures and rationale are in DESIGN.md. */
