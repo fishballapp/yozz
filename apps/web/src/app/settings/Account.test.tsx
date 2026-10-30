@@ -2,6 +2,7 @@
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { listCliKeys, revokeCliKey } from '../../vault/cli-keys';
 import {
   type AccountPasskey,
   addPasskeyToSession,
@@ -72,6 +73,10 @@ vi.mock('../../vault/unlock', () => ({
   listPasskeys: vi.fn(async () => []),
   removePasskey: vi.fn(async () => {}),
   renamePasskey: vi.fn(async () => {}),
+}));
+vi.mock('../../vault/cli-keys', () => ({
+  listCliKeys: vi.fn(async () => []),
+  revokeCliKey: vi.fn(async () => {}),
 }));
 vi.mock('../../vault/auth-client', () => ({ signOut: () => mocks.signingOut.promise }));
 vi.mock('../../vault/passkey-prf', () => ({
@@ -280,6 +285,45 @@ describe('Account', () => {
       const [, retried] = vi.mocked(addPasskeyToSession).mock.calls;
       expect(retried?.[0].isCurrent()).toBe(true);
       expect(document.body.textContent).toContain('Added. That passkey can now sign you in.');
+    });
+
+    it('says the change is to how you sign in when a sign-in change asked', async () => {
+      vi.mocked(addPasskeyToSession).mockRejectedValueOnce('not fresh');
+      await mount();
+      await click('Add passkey');
+      expect(document.body.textContent).toContain('Changing how you sign in needs a fresh sign-in');
+    });
+
+    it('says the change is revoking a CLI key when Revoke asked, then revokes under it', async () => {
+      vi.mocked(listCliKeys).mockResolvedValue([
+        {
+          keyId: '0f8fad5b-d9cb-469f-a165-70867728950e',
+          name: 'jasons-mbp',
+          publicKey: 'unused',
+          pairingCode: 'K7Q2-M9XD',
+          createdAt: 0,
+          lastUsedAt: null,
+        },
+      ]);
+      vi.mocked(revokeCliKey).mockRejectedValueOnce('not fresh').mockResolvedValueOnce();
+      await mount();
+      await click('Revoke');
+      await click('Revoke key');
+      expect(document.body.textContent).toContain('Revoking a CLI key needs a fresh sign-in');
+      expect(document.body.textContent).not.toContain('Changing how you sign in');
+
+      await click('Confirm with your passkey');
+      expect(revokeCliKey).toHaveBeenCalledTimes(2);
+    });
+
+    it('says the change is deleting the account when Delete account asked', async () => {
+      vi.mocked(deleteAccount).mockRejectedValueOnce('not fresh');
+      await mount();
+      await click('Delete account');
+      await typeConfirmation('DELETE');
+      await click('Delete account');
+      expect(document.body.textContent).toContain('Deleting your account needs a fresh sign-in');
+      expect(document.body.textContent).not.toContain('Changing how you sign in');
     });
 
     it('keeps the question open with the reason when the current password is wrong', async () => {

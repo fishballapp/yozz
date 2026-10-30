@@ -3,6 +3,11 @@ import type { EncryptedRecord } from '@yozz.app/vault';
 import {
   ACCOUNT_HEADER,
   ApiErrorResponseSchema,
+  type CliKeySummary,
+  type CreateCliKeyRequest,
+  type CreateCliKeyResponse,
+  CreateCliKeyResponseSchema,
+  ListCliKeysResponseSchema,
   ListRecordsResponseSchema,
   PasskeyWrapResponseSchema,
   type PutPrecondition,
@@ -36,6 +41,11 @@ export type AccountVaultApi = VaultApi & {
   /** The passkey and its wrap of the DEK, together; refused for the last passkey that can sign in. Needs a fresh session. */
   readonly removePasskey: (credentialId: string) => Promise<void>;
   readonly resetVault: () => Promise<void>;
+  /** The DEK wrapped to a CLI's key; the bearer is answered this once. Needs a fresh session. */
+  readonly createCliKey: (input: CreateCliKeyRequest) => Promise<CreateCliKeyResponse>;
+  readonly listCliKeys: () => Promise<readonly CliKeySummary[]>;
+  /** Needs a fresh session. */
+  readonly revokeCliKey: (keyId: string) => Promise<void>;
   /** The signed-in user and everything stored for them; needs a fresh session. */
   readonly deleteAccount: () => Promise<void>;
 };
@@ -220,6 +230,34 @@ const createAccountVaultApi = (
     }
   };
 
+  const createCliKey: AccountVaultApi['createCliKey'] = async input => {
+    const res = await request('/api/v1/vault/cli-keys', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    });
+    if (!res.ok) {
+      throw await parseErrorResponse(res);
+    }
+    return CreateCliKeyResponseSchema.parse(await res.json());
+  };
+
+  const listCliKeys = async (): Promise<readonly CliKeySummary[]> => {
+    const res = await request('/api/v1/vault/cli-keys', { method: 'GET' });
+    if (!res.ok) {
+      throw await parseErrorResponse(res);
+    }
+    return ListCliKeysResponseSchema.parse(await res.json()).keys;
+  };
+
+  const revokeCliKey = async (keyId: string): Promise<void> => {
+    const res = await request(`/api/v1/vault/cli-keys/${encodeURIComponent(keyId)}`, {
+      method: 'DELETE',
+    });
+    if (!res.ok) {
+      throw await parseErrorResponse(res);
+    }
+  };
+
   const deleteAccount = async (): Promise<void> => {
     const res = await request('/api/v1/account', { method: 'DELETE' });
     if (!res.ok) {
@@ -239,6 +277,9 @@ const createAccountVaultApi = (
     finalizePasskeyUnlock,
     removePasskey,
     resetVault,
+    createCliKey,
+    listCliKeys,
+    revokeCliKey,
     deleteAccount,
   };
 };

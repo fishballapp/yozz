@@ -3,7 +3,23 @@
  * both dev servers up. Chromium only: its CDP virtual authenticator can do PRF headlessly.
  */
 import { execFileSync } from 'node:child_process';
+import { createServer } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { chromium, type Page } from '@playwright/test';
+import {
+  deriveCliKeys,
+  generateCliKeyPair,
+  openCliLogin,
+  openVault,
+  pairingCode,
+} from '@yozz.app/vault';
+import {
+  ACCOUNT_HEADER,
+  CliKeyWrapResponseSchema,
+  CliLoginCallbackSchema,
+  VaultRecordEnvelopeSchema,
+} from '@yozz.app/vault-contract';
+import { fullDate } from '../src/ui/time.ts';
 
 /** The page imports by the paths Vite serves, which TypeScript cannot resolve from here. */
 type UnlockModule = typeof import('../src/vault/unlock');
@@ -720,6 +736,178 @@ const passkeyRemoval = async (page: Page) => {
   );
 };
 
+/** `yozz login`'s one-shot listener, as a stand-in: each callback the browser lands on, in order. */
+const startLoopback = async () => {
+  const callbacks: URLSearchParams[] = [];
+  const waiting: ((query: URLSearchParams) => void)[] = [];
+  const server = createServer((req, res) => {
+    const url = new URL(req.url ?? '/', 'http://127.0.0.1');
+    // The browser asks for a favicon too.
+    if (url.pathname !== '/callback') {
+      res.writeHead(404).end();
+      return;
+    }
+    res.writeHead(200, { 'Content-Type': 'text/plain' }).end('Back to your terminal.');
+    const query = url.searchParams;
+    const next = waiting.shift();
+    if (next === undefined) {
+      callbacks.push(query);
+      return;
+    }
+    next(query);
+  });
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+  const { port } = server.address() as AddressInfo;
+  return {
+    port,
+    next: () =>
+      new Promise<URLSearchParams>(resolve => {
+        const ready = callbacks.shift();
+        if (ready === undefined) {
+          waiting.push(resolve);
+          return;
+        }
+        resolve(ready);
+      }),
+    close: () => new Promise(resolve => server.close(resolve)),
+  };
+};
+
+/** What `yozz login` would make: a key pair, a state, and the link it opens. */
+const cliLogin = async (port: number, name: string) => {
+  const pair = await generateCliKeyPair();
+  const state = Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString('base64url');
+  const query = new URLSearchParams({ port: String(port), state, publicKey: pair.publicKey, name });
+  return { ...pair, state, link: `${WEB}/cli/approve?${query}` };
+};
+
+/** The CLI's whole side, with nothing but the callback and its private key. */
+const openAsCli = async (
+  login: { readonly privateKey: string; readonly state: string },
+  callback: URLSearchParams,
+) => {
+  const answer = CliLoginCallbackSchema.parse(Object.fromEntries(callback));
+  if (!('sealedLogin' in answer)) return fail('the approval came back denied');
+  if (answer.state !== login.state) fail('the callback names another login');
+  const keys = await deriveCliKeys({
+    privateKey: login.privateKey,
+    ephemeralPublicKey: answer.ephemeralPublicKey,
+  });
+  const { token, userId } = await openCliLogin(keys.tokenKey, {
+    state: login.state,
+    sealedLogin: answer.sealedLogin,
+  });
+  const bearer = (path: string) =>
+    fetch(`${API}${path}`, {
+      headers: { Authorization: `Bearer ${token}`, [ACCOUNT_HEADER]: userId },
+    });
+  const wrap = await bearer('/api/v1/vault/cli-key');
+  if (!wrap.ok) return { token, userId, bearer, vault: null };
+  const { wrappedDek } = CliKeyWrapResponseSchema.parse(await wrap.json());
+  return { token, userId, bearer, vault: await openVault(keys, wrappedDek) };
+};
+
+/**
+ * `/cli/approve` through the real screens, with a loopback listener standing in for the CLI: a
+ * locked tab goes through Log in and back, Approve hands over a login the CLI opens into the same
+ * vault, Deny says so, a day-old sign-in confirms first, and Settings lists and revokes the keys.
+ */
+const cliApproval = async (page: Page) => {
+  const email = `drive-cli-${Date.now()}@example.com`;
+  const account = await signUp(page, email);
+  await page.evaluate(
+    async ({ account, record, UNLOCK }) => {
+      const u = (await import(UNLOCK)) as UnlockModule;
+      const s = await u.createPasswordVault({ account, password: 'correct horse' });
+      await s.store.put(record);
+    },
+    { account, record: RECORD, UNLOCK },
+  );
+  // Signed in, but this tab holds no keys: the vault is locked.
+  await page.reload();
+
+  const loopback = await startLoopback();
+  try {
+    await page.goto(`${WEB}/cli/approve?port=80&state=x`);
+    const invalid = page.getByRole('heading', { name: 'This link isn’t a YOZZ CLI approval' });
+    await invalid.waitFor();
+    assertEqual('cli: a link yozz login did not make says so', await invalid.count(), 1);
+
+    const first = await cliLogin(loopback.port, 'drive-laptop');
+    await page.goto(first.link);
+    await page.waitForURL(/\/login\?approve=/);
+    assertEqual('cli: a locked tab goes through Log in', true, true);
+    await page.getByLabel('Email address').fill(email);
+    await page.getByLabel('Password', { exact: true }).fill('correct horse');
+    await page.getByRole('button', { name: 'Log in', exact: true }).click();
+    await page.waitForURL(first.link, { timeout: 30_000 });
+    assertEqual('cli: and comes back to the approval with its query', page.url(), first.link);
+
+    const code = page.getByText(await pairingCode(first.publicKey), { exact: true });
+    await code.waitFor();
+    assertEqual('cli: the page shows the code the terminal shows', await code.count(), 1);
+
+    await page.getByRole('button', { name: 'Approve', exact: true }).click();
+    const approved = await openAsCli(first, await loopback.next());
+    assertEqual('cli: the sealed login names this account', approved.userId, account.userId);
+    if (approved.vault === null) return fail('the CLI key opened no wrap');
+    const id = await approved.vault.recordId(RECORD.type, RECORD.naturalKey);
+    const res = await approved.bearer(`/api/v1/vault/records/${RECORD.type}/${id}`);
+    const envelope = VaultRecordEnvelopeSchema.parse(await res.json());
+    const opened = await approved.vault.decryptRecord({ ...RECORD, ...envelope });
+    assertEqual(
+      'cli: the CLI opens the vault and reads the record',
+      opened.plaintext,
+      RECORD.plaintext,
+    );
+
+    const denied = await cliLogin(loopback.port, 'drive-stranger');
+    await page.goto(denied.link);
+    await page.getByRole('button', { name: 'Deny', exact: true }).click();
+    assertEqual(
+      'cli: Deny tells the CLI so, and nothing else',
+      Object.fromEntries(await loopback.next()),
+      { state: denied.state, error: 'denied' },
+    );
+
+    ageSessions();
+    const second = await cliLogin(loopback.port, 'drive-ci');
+    await page.goto(second.link);
+    await page.getByRole('button', { name: 'Approve', exact: true }).click();
+    await page.getByRole('heading', { name: 'Confirm it’s you' }).waitFor({ timeout: 30_000 });
+    assertEqual('cli: a day-old sign-in confirms before approving', true, true);
+    await page.getByLabel('Current password').fill('correct horse');
+    await page.getByRole('button', { name: 'Confirm', exact: true }).click();
+    const secondCli = await openAsCli(second, await loopback.next());
+    assertEqual('cli: then the approval goes through', secondCli.vault !== null, true);
+
+    await page.goto(`${WEB}/settings/account`);
+    const today = fullDate(Date.now());
+    const rows = page.getByRole('listitem').filter({ hasText: /^drive-/ });
+    await rows.first().waitFor();
+    assertEqual(
+      'cli: Settings lists both keys, with the codes and when each was used',
+      await rows.allTextContents(),
+      [
+        `drive-laptop${await pairingCode(first.publicKey)} · Added ${today} · Last used ${today}Revoke`,
+        `drive-ci${await pairingCode(second.publicKey)} · Added ${today} · Last used ${today}Revoke`,
+      ],
+    );
+
+    await page
+      .getByRole('button', { name: `Revoke drive-laptop (${await pairingCode(first.publicKey)})` })
+      .click();
+    await page.getByRole('alertdialog').getByRole('button', { name: 'Revoke key' }).click();
+    await page
+      .getByText('drive-laptop', { exact: true })
+      .waitFor({ state: 'detached', timeout: 30_000 });
+    const revoked = await approved.bearer('/api/v1/vault/cli-key');
+    assertEqual('cli: Revoke removes the key, and its bearer opens nothing', revoked.status, 401);
+  } finally {
+    await loopback.close();
+  }
+};
+
 /** `newPage` gives each call its own context. */
 const openPage = async (): Promise<Page> => {
   const page = await browser.newPage();
@@ -738,6 +926,7 @@ try {
     staleSession,
     accountDeletion,
     passkeyRemoval,
+    cliApproval,
   ]) {
     const page = await openPage();
     await mode(page);

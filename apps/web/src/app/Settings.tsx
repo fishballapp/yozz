@@ -106,7 +106,7 @@ const SettingsNav = () => {
           <span className="min-w-0">
             <span className="block truncate text-base">Sign-in</span>
             <span className="mt-0.5 block truncate text-2xs text-paper-faint">
-              Password, passkeys, sign out, delete
+              Password, passkeys, CLI keys, sign out, delete
             </span>
           </span>
           <span />

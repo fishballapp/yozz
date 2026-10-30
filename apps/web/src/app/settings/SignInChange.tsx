@@ -22,11 +22,18 @@ type PendingConfirmation<Area extends string> = {
   readonly store: RecordStore;
 };
 
+/** What **Confirm it's you** says when the change is to how the person signs in. */
+const SIGN_IN_CHANGE_REASON =
+  'You signed in more than a day ago. Changing how you sign in needs a fresh sign-in, so a session someone else got hold of cannot do it. Your change goes through right after.';
+
 /**
  * Every change to how a person signs in runs through here: a refused one asks **Confirm it's you**
  * in place, then runs again. Each area keeps its own failure, so it shows where the person acted.
+ * `reasons` names what asked, for an area whose change is not to how the person signs in.
  */
-export const useSignInChange = <Area extends string>() => {
+export const useSignInChange = <Area extends string>(
+  reasons: Partial<Record<Area, string>> = {},
+) => {
   const { session } = useVault();
   const { watchSession } = useMail();
 
@@ -113,7 +120,7 @@ export const useSignInChange = <Area extends string>() => {
           if (!open) closeConfirmation();
         }}
         title="Confirm it’s you"
-        description="You signed in more than a day ago. Changing how you sign in needs a fresh sign-in, so a session someone else got hold of cannot do it. Your change goes through right after."
+        description={reasons[pending.area] ?? SIGN_IN_CHANGE_REASON}
         confirmVariant="primary"
         confirmLabel={session.mode === 'passkey' ? 'Confirm with your passkey' : 'Confirm'}
         busyLabel={session.mode === 'passkey' ? 'Waiting for your authenticator…' : 'Confirming…'}

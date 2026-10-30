@@ -8,11 +8,14 @@ export const AuthColumn = ({
   description,
   children,
   footer,
+  status = 'No mailbox connected',
 }: {
   title: string;
-  description?: string;
+  description?: ReactNode;
   children: ReactNode;
   footer?: ReactNode;
+  /** The status line along the foot. */
+  status?: string;
 }) => {
   const isConfigured = isApiConfigured();
 
@@ -47,7 +50,7 @@ export const AuthColumn = ({
         )}
 
         <p className="mt-auto pt-10 font-mono text-2xs tracking-[0.08em] text-paper-faint uppercase">
-          No mailbox connected
+          {status}
         </p>
       </div>
     </div>

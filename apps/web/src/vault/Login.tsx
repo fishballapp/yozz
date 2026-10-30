@@ -8,7 +8,21 @@ import { vaultErrorMessage } from './screen-policy';
 import { useVault } from './session';
 import { loginWithPasskey, loginWithPassword } from './unlock';
 
-export const Login = ({ isAccountDeleted = false }: { isAccountDeleted?: boolean }) => {
+/**
+ * Only ever the approve page: the query is the one part of the URL a link to here can choose.
+ * ponytail: the router re-spells a query it navigates to through its own parse, so a name such as
+ * `1e3` arrives as `1000` and the page refuses the link; no hostname looks like that.
+ */
+const approvalHref = (query: string) => `/cli/approve?${query}`;
+
+export const Login = ({
+  isAccountDeleted = false,
+  cliApproval,
+}: {
+  isAccountDeleted?: boolean;
+  /** The query of the CLI approval that sent the person here, which an unlock goes back to. */
+  cliApproval?: string;
+}) => {
   const navigate = useNavigate();
   const { session, isResuming, setSession } = useVault();
 
@@ -25,10 +39,22 @@ export const Login = ({ isAccountDeleted = false }: { isAccountDeleted?: boolean
 
   const isBusy = busyKind !== null;
 
+  const navigateOnward = () =>
+    cliApproval === undefined
+      ? navigate({
+          to: '/m/$mailbox',
+          params: { mailbox: 'unified' },
+          search: previous => previous,
+        })
+      : navigate({ href: approvalHref(cliApproval), replace: true });
+
   // One session per tab for now: an unlocked vault has nowhere to log in to. Multi-account
   // sessions, when they come, replace this redirect with an account switch.
   if (isResuming) return null;
   if (session !== null) {
+    if (cliApproval !== undefined) {
+      return <Navigate to="/cli/approve" href={approvalHref(cliApproval)} replace />;
+    }
     return (
       <Navigate
         to="/m/$mailbox"
@@ -163,11 +189,7 @@ export const Login = ({ isAccountDeleted = false }: { isAccountDeleted?: boolean
               setError(null);
               try {
                 setSession(await loginWithPasskey());
-                void navigate({
-                  to: '/m/$mailbox',
-                  params: { mailbox: 'unified' },
-                  search: previous => previous,
-                });
+                void navigateOnward();
               } catch (err) {
                 setError(vaultErrorMessage(err));
                 setErrorPanel('passkey');
@@ -218,11 +240,7 @@ export const Login = ({ isAccountDeleted = false }: { isAccountDeleted?: boolean
               try {
                 const session = await loginWithPassword({ email, password });
                 setSession(session);
-                void navigate({
-                  to: '/m/$mailbox',
-                  params: { mailbox: 'unified' },
-                  search: previous => previous,
-                });
+                void navigateOnward();
               } catch (err) {
                 setError(vaultErrorMessage(err));
                 setErrorPanel('password');

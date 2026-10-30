@@ -164,6 +164,12 @@ const createMockWorker = () => {
           passkeyWraps.clear();
         }),
       ),
+      // The unlock flows never reach the CLI keys; `cli-keys.test.ts` drives them.
+      createCliKey: vi.fn(async () => {
+        throw new Error('not modelled');
+      }),
+      listCliKeys: vi.fn(async () => answer('listCliKeys', () => [])),
+      revokeCliKey: vi.fn(async () => answer('revokeCliKey', () => undefined)),
       deleteAccount: vi.fn(async () =>
         answer('deleteAccount', () => {
           mode = null;

@@ -71,7 +71,11 @@ count as debt, not a score.
 pnpm -F @yozz.app/web vault:drive       # both unlock modes through headless Chromium against wrangler
                                     #   dev + local D1, incl. a real WebAuthn PRF ceremony on CDP's
                                     #   virtual authenticator. Needs both dev servers up
-                                    #   (AGENTS.md, "Running the vault locally"). 13 steps, all ✓
+                                    #   (AGENTS.md, "Running the vault locally"). Ends with the CLI
+                                    #   approval: a loopback listener stands in for `yozz login`,
+                                    #   approve (from a locked tab, through Log in and back), deny,
+                                    #   a day-old sign-in confirming first, the CLI opening the
+                                    #   vault and reading a record, revoke in Settings. All ✓
 ```
 
 ## A vault draft in the composer

@@ -9,15 +9,20 @@ import { getApiBaseUrl, isApiConfigured } from '../../vault/api-base-url';
 import { signOut } from '../../vault/auth-client';
 import { useVault } from '../../vault/session';
 import { deleteAccount } from '../../vault/unlock';
+import { CLI_KEY_FRESH_SIGN_IN, CliKeysSection } from './CliKeys';
 import { PasskeysSection } from './Passkeys';
 import { SettingsPane } from './SettingsPane';
 import { usePasskeyOffer, useSignInChange } from './SignInChange';
 
 /** The sections that run an action here, each with its own place for a failure. */
-type Area = 'passkeys' | 'session' | 'delete';
+type Area = 'passkeys' | 'cliKeys' | 'session' | 'delete';
 
 /** Typed to confirm: a word autofill cannot supply and a thumb will not type by accident. */
 const DELETE_WORD = 'DELETE';
+
+/** What **Confirm it's you** says when deleting the account asked for it. */
+const DELETE_FRESH_SIGN_IN =
+  'You signed in more than a day ago. Deleting your account needs a fresh sign-in, so a session someone else got hold of cannot do it. It is deleted right after.';
 
 /** The notice a change leaves behind, read from the URL the change returns to. */
 export type SignInNotice = 'switched' | 'changed';
@@ -31,7 +36,10 @@ export const Account = ({ notice }: { notice?: SignInNotice }) => {
   const navigate = useNavigate();
   const { session, lock } = useVault();
   const offer = usePasskeyOffer();
-  const { busy, errors, run, confirmDialog } = useSignInChange<Area>();
+  const { busy, errors, run, confirmDialog } = useSignInChange<Area>({
+    cliKeys: CLI_KEY_FRESH_SIGN_IN,
+    delete: DELETE_FRESH_SIGN_IN,
+  });
   // The delete question belongs to the session that opened it: a pane that outlives its session
   // (a sign-in as someone else in this tab) finds it closed and empty, never ready to delete them.
   const [deletion, setDeletion] = useState<{ store: RecordStore; typed: string } | null>(null);
@@ -138,6 +146,8 @@ export const Account = ({ notice }: { notice?: SignInNotice }) => {
           run={run}
         />
       )}
+
+      <CliKeysSection session={session} isBusy={busy !== null} error={errors.cliKeys} run={run} />
 
       <PageSection
         label="Session"

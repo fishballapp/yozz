@@ -15,6 +15,7 @@ import { Route as EnrolRouteImport } from './routes/enrol'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as WelcomeRouteImport } from './routes/welcome'
 import { Route as AppSettingsRouteImport } from './routes/_app.settings'
+import { Route as CliApproveRouteImport } from './routes/cli.approve'
 import { Route as AppMMailboxRouteImport } from './routes/_app.m.$mailbox'
 import { Route as AppSettingsIndexRouteImport } from './routes/_app.settings.index'
 import { Route as AppSettingsAccountRouteImport } from './routes/_app.settings.account'
@@ -54,6 +55,11 @@ const AppSettingsRoute = AppSettingsRouteImport.update({
   id: '/settings',
   path: '/settings',
   getParentRoute: () => AppRoute,
+} as any)
+const CliApproveRoute = CliApproveRouteImport.update({
+  id: '/cli/approve',
+  path: '/cli/approve',
+  getParentRoute: () => rootRouteImport,
 } as any)
 const AppMMailboxRoute = AppMMailboxRouteImport.update({
   id: '/m/$mailbox',
@@ -114,6 +120,7 @@ export interface FileRoutesByFullPath {
   '/login': typeof LoginRoute
   '/welcome': typeof WelcomeRoute
   '/settings': typeof AppSettingsRouteWithChildren
+  '/cli/approve': typeof CliApproveRoute
   '/m/$mailbox': typeof AppMMailboxRouteWithChildren
   '/settings/account': typeof AppSettingsAccountRoute
   '/settings/images': typeof AppSettingsImagesRoute
@@ -130,6 +137,7 @@ export interface FileRoutesByTo {
   '/enrol': typeof EnrolRoute
   '/login': typeof LoginRoute
   '/welcome': typeof WelcomeRoute
+  '/cli/approve': typeof CliApproveRoute
   '/settings/account': typeof AppSettingsAccountRoute
   '/settings/images': typeof AppSettingsImagesRoute
   '/settings/new': typeof AppSettingsNewRoute
@@ -148,6 +156,7 @@ export interface FileRoutesById {
   '/login': typeof LoginRoute
   '/welcome': typeof WelcomeRoute
   '/_app/settings': typeof AppSettingsRouteWithChildren
+  '/cli/approve': typeof CliApproveRoute
   '/_app/m/$mailbox': typeof AppMMailboxRouteWithChildren
   '/_app/settings/account': typeof AppSettingsAccountRoute
   '/_app/settings/images': typeof AppSettingsImagesRoute
@@ -167,6 +176,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/welcome'
     | '/settings'
+    | '/cli/approve'
     | '/m/$mailbox'
     | '/settings/account'
     | '/settings/images'
@@ -183,6 +193,7 @@ export interface FileRouteTypes {
     | '/enrol'
     | '/login'
     | '/welcome'
+    | '/cli/approve'
     | '/settings/account'
     | '/settings/images'
     | '/settings/new'
@@ -200,6 +211,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/welcome'
     | '/_app/settings'
+    | '/cli/approve'
     | '/_app/m/$mailbox'
     | '/_app/settings/account'
     | '/_app/settings/images'
@@ -218,6 +230,7 @@ export interface RootRouteChildren {
   EnrolRoute: typeof EnrolRoute
   LoginRoute: typeof LoginRoute
   WelcomeRoute: typeof WelcomeRoute
+  CliApproveRoute: typeof CliApproveRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -263,6 +276,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/settings'
       preLoaderRoute: typeof AppSettingsRouteImport
       parentRoute: typeof AppRoute
+    }
+    '/cli/approve': {
+      id: '/cli/approve'
+      path: '/cli/approve'
+      fullPath: '/cli/approve'
+      preLoaderRoute: typeof CliApproveRouteImport
+      parentRoute: typeof rootRouteImport
     }
     '/_app/m/$mailbox': {
       id: '/_app/m/$mailbox'
@@ -393,6 +413,7 @@ const rootRouteChildren: RootRouteChildren = {
   EnrolRoute: EnrolRoute,
   LoginRoute: LoginRoute,
   WelcomeRoute: WelcomeRoute,
+  CliApproveRoute: CliApproveRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
