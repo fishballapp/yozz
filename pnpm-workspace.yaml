@@ -1,7 +1,9 @@
 packages:
+  - apps/cli
   - apps/web
   - apps/worker-api
   - apps/worker-web
+  - internal/cli-login
   - internal/email
   - internal/html-screenshot
   - internal/mail
@@ -43,6 +45,8 @@ catalog:
   "@biomejs/biome": ^2.5.13
   "@cloudflare/vitest-pool-workers": 0.22.0
   "@cloudflare/workers-types": ^5.20260915.1
+  "@effect/platform-node": 4.0.0
+  "@effect/vitest": 4.0.0
   "@fontsource-variable/geist": ^5.3.0
   "@fontsource-variable/geist-mono": ^5.3.0
   "@phosphor-icons/react": ^2.1.10
@@ -60,6 +64,7 @@ catalog:
   class-variance-authority: ^0.7.1
   cn: ^0.4.0
   dompurify: ^3.4.15
+  effect: 4.0.0
   expo: 57.0.22
   expo-file-system: ~57.0.7
   fake-indexeddb: ^6.2.5

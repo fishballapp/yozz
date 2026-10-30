@@ -11,6 +11,8 @@
     { "path": "./apps/worker-api" },
     { "path": "./apps/worker-api/scripts" },
     { "path": "./apps/web" },
+    { "path": "./apps/cli" },
+    { "path": "./internal/cli-login" },
     { "path": "./internal/email" },
     { "path": "./internal/vite-plugins" },
     { "path": "./internal/html-screenshot" }
