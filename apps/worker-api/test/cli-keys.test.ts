@@ -211,7 +211,10 @@ describe('CLI keys', () => {
       token_hash: hash,
       last_used_at: null,
     });
-    expect(JSON.stringify(stored)).not.toContain(token.split('_').at(-1));
+    // After the key id, not after the last `_`: base64url can put one inside the secret.
+    const secret = token.slice(`yozzcli_${keyId}_`.length);
+    expect(secret).toHaveLength(43);
+    expect(JSON.stringify(stored)).not.toContain(secret);
 
     const listBefore = ListCliKeysResponseSchema.parse(
       await (await request('/api/v1/vault/cli-keys', { headers: asSession(alice) })).json(),
