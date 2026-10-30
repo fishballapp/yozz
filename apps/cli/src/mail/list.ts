@@ -17,7 +17,7 @@ import * as Base64Url from 'effect/encoding/Base64Url';
 import * as Option from 'effect/Option';
 import * as Schema from 'effect/Schema';
 import { Cache, MailboxLayer } from '../cache/cache.ts';
-import { reportFailure, UsageError } from '../errors.ts';
+import { type MailServerError, reportFailure, UsageError } from '../errors.ts';
 import { printJson } from '../output.ts';
 import { Settings } from '../settings.ts';
 import { Mail } from './mail.ts';
@@ -137,7 +137,8 @@ export const listCommand = Command.make(
 
     /**
      * The mailbox's rows from what the cache holds, with matches from the servers of `searched`
-     * when searching, and whether any folder had more matches than were read.
+     * when searching, whether any folder had more matches than were read, and the addresses whose
+     * server failed to search.
      */
     const candidates = Effect.fnUntraced(function* (
       searched: readonly InboundAddress[],
@@ -148,10 +149,11 @@ export const listCommand = Command.make(
         return {
           found: page(visibleThreads(yield* cache.threads(), view, text).filter(isWanted)),
           hasMoreMatches: false,
+          failed: [],
         };
       }
       const folders = SEARCHED[isViewId(view) && view !== 'drafts' ? view : 'unified'];
-      const { extra, isHit, hasMoreMatches } = yield* searchMail({
+      const { extra, isHit, hasMoreMatches, failed } = yield* searchMail({
         accounts: searched,
         folders,
         text,
@@ -163,6 +165,7 @@ export const listCommand = Command.make(
           ),
         ),
         hasMoreMatches,
+        failed,
       };
     });
 
@@ -180,8 +183,7 @@ export const listCommand = Command.make(
       const { arrived, failed } = yield* waitForMail({
         accounts: shown,
         deadline: startedAt + wait.value * 1000,
-        rowsOf: (watched, isWanted) =>
-          Effect.map(candidates(watched, isWanted), ({ found }) => found),
+        rowsOf: candidates,
       });
       return yield* printJson({
         notice: NOTICE,
@@ -192,9 +194,9 @@ export const listCommand = Command.make(
       });
     }
 
-    const { failed } = yield* cache.syncSome(shown, { force: sync });
+    const { failed: unsynced } = yield* cache.syncSome(shown, { force: sync });
     // An address whose sync failed answers from its cache; it is not asked for more.
-    const live = shown.filter(({ address }) => !failed.some(error => error.address === address));
+    const live = shown.filter(({ address }) => !unsynced.some(error => error.address === address));
     // A short page reaches back as Older mail does, a few windows at most per call.
     const folder = folderPaged(view);
     const filled = (
@@ -204,22 +206,28 @@ export const listCommand = Command.make(
         readonly found: readonly ThreadState[];
         readonly hasOlder: boolean;
         readonly hasMoreMatches: boolean;
+        readonly failed: readonly MailServerError[];
       },
       | Effect.Error<ReturnType<typeof candidates>>
       | Effect.Error<ReturnType<typeof cache.loadOlder>>,
       Cache | Mail
     > =>
       Effect.gen(function* () {
-        const { found, hasMoreMatches } = yield* candidates(live, () => true);
+        const { found, hasMoreMatches, failed } = yield* candidates(live, () => true);
         const canPage = text === undefined && view !== 'drafts';
         const hasOlder = canPage && (yield* cache.hasOlder(live, folder));
         if (found.length >= limit || !hasOlder || windows === 0) {
-          return { found, hasOlder, hasMoreMatches };
+          return { found, hasOlder, hasMoreMatches, failed };
         }
         yield* cache.loadOlder(live, folder);
         return yield* filled(windows - 1);
       });
-    const { found, hasOlder, hasMoreMatches } = yield* filled(OLDER_WINDOWS_PER_PAGE);
+    const {
+      found,
+      hasOlder,
+      hasMoreMatches,
+      failed: unsearched,
+    } = yield* filled(OLDER_WINDOWS_PER_PAGE);
     // Every field of a row is capped, so --limit alone bounds the page.
     const rows = found.slice(0, limit);
     const last = rows.at(-1);
@@ -230,7 +238,7 @@ export const listCommand = Command.make(
       nextCursor: isMore && last !== undefined ? encodeCursor(last) : null,
       ...(hasMoreMatches ? { moreMatches: true } : {}),
       syncedAt: yield* cache.syncedAt(shown),
-      ...failedOf(failed),
+      ...failedOf([...unsynced, ...unsearched]),
     });
   }, reportFailure),
 ).pipe(

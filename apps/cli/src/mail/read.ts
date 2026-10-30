@@ -130,16 +130,17 @@ export const readCommand = Command.make(
         );
     }
 
-    const { failed } = yield* cache.syncSome(mail.accounts, { force: sync });
+    const { failed: unsynced } = yield* cache.syncSome(mail.accounts, { force: sync });
     // An id the cache does not hold (a search hit outside the window) is read from the server.
     const cached = resolveHandles(yield* cache.threads(), ids);
     const missing = cached.flatMap(({ id, thread }) => (thread === null ? [id] : []));
-    const extra = yield* lookUp({
+    const { extra, failed: unlooked } = yield* lookUp({
       accounts: mail.accounts.filter(
-        ({ address }) => !failed.some(error => error.address === address),
+        ({ address }) => !unsynced.some(error => error.address === address),
       ),
       ids: missing,
     });
+    const failed = [...unsynced, ...unlooked];
     const entries =
       missing.length === 0 ? cached : resolveHandles(yield* cache.threads(extra), ids);
     const found = entries.flatMap(({ thread }) => (thread === null ? [] : [thread]));

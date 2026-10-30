@@ -141,7 +141,10 @@ export const updateCommand = Command.make(
     const entries =
       remote.length === 0
         ? synced
-        : resolveHandles(yield* cache.threads(yield* lookUp({ accounts: live, ids: remote })), ids);
+        : resolveHandles(
+            yield* cache.threads((yield* lookUp({ accounts: live, ids: remote })).extra),
+            ids,
+          );
     const found = entries.flatMap(({ thread }) => (thread === null ? [] : [thread]));
 
     const ops: PendingOp[] = [];

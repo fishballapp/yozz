@@ -360,6 +360,87 @@ layer(NodeServices.layer)(it => {
       }),
     );
 
+    it.effect('survives a connection dropped mid-search, on a fresh one', () =>
+      Effect.gen(function* () {
+        const { world, homes, servers } = yield* makeMailWorld();
+        let isDropped = false;
+        const flaky = makeFakeImapServer({
+          username: ADDRESS,
+          password: 'secret',
+          quirks: {
+            dropsOn: command => {
+              if (!command.startsWith('UID SEARCH') || isDropped) return false;
+              isDropped = true;
+              return true;
+            },
+          },
+        });
+        flaky.deliver('INBOX', mail(1, { text: 'The needle is here.' }));
+
+        const { exit, stdout, stderr } = yield* runCli(['list', '--query', 'needle'], {
+          fetch: world.fetch,
+          homes,
+          servers: { ...servers, [IMAP_HOST]: flaky },
+        });
+
+        assert.isTrue(Exit.isSuccess(exit), stderr);
+        expect(idsOf(stdout)).toEqual(['mid/<m1@stripe.com>']);
+        expect(JSON.parse(stdout).failed).toBeUndefined();
+        // The sync's connection, then the one that replaced it.
+        assert.strictEqual(flaky.connections(), 2);
+      }),
+    );
+
+    it.effect('answers a unified query from the addresses whose server answers', () =>
+      Effect.gen(function* () {
+        const { world, homes, server, addSecond, servers } = yield* makeMailWorld();
+        yield* addSecond();
+        const dropsSearch = makeFakeImapServer({
+          username: SECOND,
+          password: 'secret',
+          quirks: { dropsOn: command => command.startsWith('UID SEARCH') },
+        });
+        server.deliver('INBOX', mail(1, { text: 'A payment.' }));
+        dropsSearch.deliver('INBOX', mail(2, { to: SECOND, text: 'A payment.' }));
+
+        const { exit, stdout, stderr } = yield* runCli(['list', '--query', 'payment'], {
+          fetch: world.fetch,
+          homes,
+          servers: { ...servers, [SECOND_HOST]: dropsSearch },
+        });
+
+        assert.isTrue(Exit.isSuccess(exit), stderr);
+        expect(idsOf(stdout)).toEqual(['mid/<m1@stripe.com>']);
+        expect(JSON.parse(stdout).failed).toEqual([
+          {
+            address: SECOND,
+            code: 'MailServerError',
+            message: `${SECOND}: ${SECOND_HOST}: closed`,
+          },
+        ]);
+      }),
+    );
+
+    it.effect('fails MailServerError when every address fails its search', () =>
+      Effect.gen(function* () {
+        const { world, homes } = yield* makeMailWorld();
+        const dropsSearch = makeFakeImapServer({
+          username: ADDRESS,
+          password: 'secret',
+          quirks: { dropsOn: command => command.startsWith('UID SEARCH') },
+        });
+
+        const { exit, stderr } = yield* runCli(['list', '--query', 'payment'], {
+          fetch: world.fetch,
+          homes,
+          servers: { [IMAP_HOST]: dropsSearch },
+        });
+
+        assert.isTrue(Exit.isFailure(exit));
+        expect(failureOf(stderr)).toMatchObject({ code: 'MailServerError' });
+      }),
+    );
+
     it.effect('says when a query matched more than it read, so the agent narrows it', () =>
       Effect.gen(function* () {
         const { world, homes, server, servers } = yield* makeMailWorld();

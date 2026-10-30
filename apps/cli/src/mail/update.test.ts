@@ -4,7 +4,16 @@ import * as Effect from 'effect/Effect';
 import * as Exit from 'effect/Exit';
 import { failureOf, runCli } from '../test-world.ts';
 import { makeFakeImapServer } from './fake-imap-server.ts';
-import { inbound, mail, makeMailWorld, minuteOf2026, SECOND, SECOND_HOST } from './mail-world.ts';
+import {
+  ADDRESS,
+  IMAP_HOST,
+  inbound,
+  mail,
+  makeMailWorld,
+  minuteOf2026,
+  SECOND,
+  SECOND_HOST,
+} from './mail-world.ts';
 
 const flagsIn = (server: ReturnType<typeof makeFakeImapServer>, mailbox: string) =>
   (server.mailboxes.get(mailbox)?.messages ?? []).map(({ uid, flags }) => [uid, [...flags]]);
@@ -115,6 +124,33 @@ layer(NodeServices.layer)(it => {
           });
           expect(flagsIn(server, 'Archive')).toEqual([[1, ['\\Flagged']]]);
         }),
+    );
+
+    it.effect('does not run a MOVE again on a fresh connection when it was cut off', () =>
+      Effect.gen(function* () {
+        const { world, homes, servers } = yield* makeMailWorld();
+        const dropsMove = makeFakeImapServer({
+          username: ADDRESS,
+          password: 'secret',
+          quirks: { dropsOn: command => command.startsWith('UID MOVE') },
+        });
+        dropsMove.deliver('INBOX', mail(1));
+
+        const { exit, stdout } = yield* runCli(
+          ['update', 'mid/<m1@stripe.com>', '--move', 'archive'],
+          {
+            fetch: world.fetch,
+            homes,
+            servers: { ...servers, [IMAP_HOST]: dropsMove },
+          },
+        );
+
+        assert.isTrue(Exit.isFailure(exit));
+        expect(JSON.parse(stdout).threads[0].error).toMatchObject({ code: 'MailServerError' });
+        expect(dropsMove.commands.filter(command => command.startsWith('UID MOVE'))).toHaveLength(
+          1,
+        );
+      }),
     );
 
     it.effect('prints every row and fails PartialFailure when one account refuses', () =>

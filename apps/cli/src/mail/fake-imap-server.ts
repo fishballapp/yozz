@@ -226,9 +226,11 @@ export const makeFakeImapServer = ({
   readonly password: string;
   readonly capabilities?: readonly string[];
   readonly mailboxes?: readonly { readonly name: string; readonly attributes: readonly string[] }[];
-  /** Misbehaviour to stage: a SELECT held this long. */
+  /** Misbehaviour to stage: a SELECT held this long, a connection dropped on a command. */
   readonly quirks?: {
     readonly selectDelayMs?: (mailbox: string, nth: number) => number;
+    /** True for a command (as `commands` lists it) that closes the connection, unanswered. */
+    readonly dropsOn?: (command: string) => boolean;
   };
 }): FakeImapServer => {
   const commands: string[] = [];
@@ -530,7 +532,9 @@ export const makeFakeImapServer = ({
         const line = await readLine();
         if (line === null) break;
         const [tag = '', command = '', ...rest] = line.split(' ');
-        commands.push(`${command.toUpperCase()} ${rest.join(' ')}`.trim());
+        const received = `${command.toUpperCase()} ${rest.join(' ')}`.trim();
+        commands.push(received);
+        if (quirks.dropsOn?.(received) === true) break;
         if (!(await handle(tag, command.toUpperCase(), rest.join(' ')))) break;
       }
       close();

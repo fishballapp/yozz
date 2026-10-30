@@ -124,12 +124,12 @@ const threadsWithBody = Effect.fnUntraced(function* (messageId: string) {
   const threads = holds(cached)
     ? cached
     : yield* cache.threads(
-        yield* lookUp({
+        (yield* lookUp({
           accounts: mail.accounts.filter(
             ({ address }) => !failed.some(error => error.address === address),
           ),
           ids: [messageId],
-        }),
+        })).extra,
       );
   const message = threads
     .flatMap(({ messages }) => messages)

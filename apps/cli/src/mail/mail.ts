@@ -30,7 +30,7 @@ const POLL_SECONDS = 30;
 /** What a server says while idling that means the inbox changed. */
 const CHANGES = new Set<ImapUntagged['kind']>(['exists', 'expunge', 'fetch']);
 
-/** A connection that failed like this is gone; one that answered NO or BAD is still good. */
+/** A connection that failed like this is gone, or never was; one that answered NO or BAD is still good. */
 const isBroken = (failure: MailConnectionFailure) =>
   failure.kind === 'tls' ||
   failure.kind === 'stalled' ||
@@ -177,17 +177,23 @@ export class Mail extends Context.Service<
           <T>(task: MailTask<T>) => {
             const lock = locks.get(account.address);
             if (lock === undefined) throw new Error(`${account.address} is not an inbound address`);
+            const attempt = async (): Promise<Result<T, MailConnectionFailure>> => {
+              const session = await sessionOf(account);
+              if (!session.ok) {
+                sessions.delete(account.address);
+                return session;
+              }
+              const res = await task.run(session.value.client);
+              // The next task opens a fresh connection rather than writing into a dead one.
+              if (!res.ok && isBroken(res.error)) await drop(account);
+              return res;
+            };
             return runPromise(
-              Effect.promise(async (): Promise<Result<T, MailConnectionFailure>> => {
-                const session = await sessionOf(account);
-                if (!session.ok) {
-                  sessions.delete(account.address);
-                  return session;
-                }
-                const res = await task.run(session.value.client);
-                // The next task opens a fresh connection rather than writing into a dead one.
-                if (!res.ok && isBroken(res.error)) await drop(account);
-                return res;
+              Effect.promise(async () => {
+                const res = await attempt();
+                // As the web app does: a task that may be run twice gets one more go on a fresh
+                // connection when the first was lost, or could not be made.
+                return !res.ok && task.retry && isBroken(res.error) ? attempt() : res;
               }).pipe(lock.withPermits(1)),
             );
           };

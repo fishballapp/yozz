@@ -40,8 +40,11 @@ export class MailServers extends Context.Service<
   static readonly layerTls = Layer.succeed(MailServers, MailServers.of({ open: openTls }));
 }
 
+/** An `AggregateError` (every address a host resolves to refused) has no message, only a code. */
 const errorText = (error: unknown): string =>
-  error instanceof Error ? error.message : String(error);
+  error instanceof Error
+    ? error.message || ('code' in error ? String(error.code) : '')
+    : String(error);
 
 /** A `TLSSocket` as a `ByteDuplex`: chunks queue until read, and every end of the socket reads as `null`. */
 const socketDuplex = (socket: TLSSocket): ByteDuplex => {

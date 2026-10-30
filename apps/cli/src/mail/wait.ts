@@ -57,11 +57,15 @@ export const waitForMail = Effect.fn('mail.waitForMail')(function* <E>({
 }: {
   readonly accounts: readonly InboundAddress[];
   readonly deadline: number;
-  /** The conversations to answer, searching the servers of `watched`. */
+  /** The conversations to answer, searching the servers of `watched`, and those that failed to. */
   readonly rowsOf: (
     watched: readonly InboundAddress[],
     isWanted: (thread: ThreadState) => boolean,
-  ) => Effect.Effect<readonly ThreadState[], E, Cache | Mail>;
+  ) => Effect.Effect<
+    { readonly found: readonly ThreadState[]; readonly failed: readonly MailServerError[] },
+    E,
+    Cache | Mail
+  >;
 }) {
   const cache = yield* Cache;
   const mail = yield* Mail;
@@ -74,7 +78,8 @@ export const waitForMail = Effect.fn('mail.waitForMail')(function* <E>({
   const isNew = arrivedSince(yield* inboxMarks(watched));
 
   const round = Effect.gen(function* () {
-    const found = yield* rowsOf(watched, isNew);
+    const { found, failed: unsearched } = yield* rowsOf(watched, isNew);
+    noteFailures(unsearched);
     if (found.length > 0) return Option.some(found);
     const now = yield* Clock.currentTimeMillis;
     if (now >= deadline) {

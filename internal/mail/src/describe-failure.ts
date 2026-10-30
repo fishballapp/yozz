@@ -8,7 +8,7 @@ export const describeMailFailure = (failure: MailConnectionFailure, host: string
     case 'error':
       return failure.detail;
     case 'tls':
-      return `Secure connection to ${host} failed: ${failure.detail}`;
+      return `Secure connection to ${host} failed: ${failure.detail === '' ? 'the connection dropped' : failure.detail}`;
     case 'auth':
       return `${host} rejected the username or password`;
     case 'stalled':
