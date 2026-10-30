@@ -54,9 +54,9 @@ export const discardCommand = Command.make(
   }, reportFailure),
 ).pipe(
   Command.withShortDescription('Throw a draft away'),
-  Command.withDescription(`Throw a draft away, as the composer's Discard does: it leaves every list at
-once, and is kept for 30 days (restorableUntil) before it is erased. Files it attached on this
+  Command.withDescription(`Throw a draft away, as the composer's Discard does: it leaves every list at once, and is kept for 30 days (restorableUntil) before it is erased. Files it attached on this
 machine are deleted.
+
 A draft changed since that draftId is a Conflict naming its newest version (currentDraftId); one
 whose send is in flight, or waits for you to settle it in yozz.app, is DraftSending.
 

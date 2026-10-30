@@ -1,11 +1,15 @@
 {
   "name": "@yozz.app/cli",
-  "version": "0.0.0",
-  "private": true,
+  "version": "0.1.0",
   "license": "AGPL-3.0-only",
   "type": "module",
   "description": "yozz: the mail in your YOZZ account, from a terminal, for coding agents and the person beside them.",
   "homepage": "https://yozz.app",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/fishballapp/yozz.git",
+    "directory": "apps/cli"
+  },
   "bin": {
     "yozz": "./dist/bin.js"
   },
@@ -13,11 +17,15 @@
     "dist",
     "README.md"
   ],
+  "publishConfig": {
+    "access": "public"
+  },
   "engines": {
     "node": ">=26"
   },
   "scripts": {
     "build": "tsdown",
+    "prepack": "pnpm build",
     "cli": "pnpm build && node dist/bin.js",
     "test": "vitest run",
     "check:effect": "effect-tsgo diagnostics --project tsconfig.json --format text"

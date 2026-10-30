@@ -352,8 +352,7 @@ export const draftCommand = Command.make(
   }, reportFailure),
 ).pipe(
   Command.withShortDescription('Write or change a draft; prints exactly what send will send'),
-  Command.withDescription(`Write a draft, or change one, and print it whole: exactly what \`yozz send\` will
-send. Every write makes a new version, so send the draftId the last draft printed.
+  Command.withDescription(`Write a draft, or change one, and print it whole: exactly what \`yozz send\` will send. Every write makes a new version, so send the draftId the last draft printed.
 
 --reply, --reply-all and --forward seed it as yozz.app's buttons do: the recipients (Reply-To
 first), the address the mail came to as From, "Re:" or "Fwd:", the quote, the reply headers, and a
@@ -369,6 +368,9 @@ The draft is saved in your vault, so yozz.app shows it on every device. Attached
 machine (a vault record is too small for them) until the draft is sent or discarded; yozz.app shows
 the draft without them. yozz does not copy drafts into your mail server's Drafts folder; yozz.app
 does, while a tab is open.
+
+A message much over half a megabyte can't be sent yet, since a send keeps it in one vault record
+(1 MB); draft says so before saving anything.
 
 Output:
   {

@@ -37,8 +37,7 @@ export const logoutCommand = Command.make(
   }, reportFailure),
 ).pipe(
   Command.withShortDescription('Revoke this CLI key, delete its cache and credentials'),
-  Command.withDescription(`Revoke this CLI key on YOZZ, then delete what it left on this machine: the
-credentials file (unless the key came from YOZZ_CLI_KEY), the revision marks, the files attached
+  Command.withDescription(`Revoke this CLI key on YOZZ, then delete what it left on this machine: the credentials file (unless the key came from YOZZ_CLI_KEY), the revision marks, the files attached
 to drafts and the mail cache.
 
 A key already revoked still logs out. When YOZZ cannot be reached, nothing is deleted, so running

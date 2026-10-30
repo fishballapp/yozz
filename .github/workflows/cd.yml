@@ -1,10 +1,10 @@
 name: CD
 
 # Every push to main runs every gate (ci.yml), then deploys yozz.app and publishes whatever library
-# versions npm does not have yet. This is the only path to production, so what is live is always a
-# commit on this branch.
+# versions npm does not have yet: the four libraries in lockstep and, on its own version, the CLI.
+# This is the only path to production, so what is live is always a commit on this branch.
 #
-# Keep this filename: npm trusted publishing validates it for all four packages.
+# Keep this filename: npm trusted publishing validates it for all five packages.
 on:
   push:
     branches: [main]
@@ -55,17 +55,17 @@ jobs:
           OP_TOKEN: ${{ secrets.YOZZ_OP_TOKEN }}
 
   # No token: npm trusted publishing over the workflow's OIDC identity, configured per package on
-  # npmjs.com. The apps are private and never publish.
+  # npmjs.com. The other apps are private and never publish.
   publish:
     name: Publish to npm
     needs: gates
     # GitHub-hosted on purpose: npm trusted publishing does not work on self-hosted runners.
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
     permissions:
       contents: read
       id-token: write
-    # Two releases pushed close together must not race `pnpm -r publish`'s read-then-write.
+    # Two releases pushed close together must not race `pnpm publish`'s read-then-write.
     concurrency:
       group: publish
       cancel-in-progress: false
@@ -91,4 +91,22 @@ jobs:
           VERSION=${VERSIONS%% *}
           TAG=$(echo "$VERSION" | grep -oE 'alpha|beta|rc' || true)
           echo "tag=${TAG:-latest}" >> "$GITHUB_OUTPUT"
-      - run: pnpm -r publish --tag ${{ steps.version.outputs.tag }}
+      - run: pnpm -r --filter './packages/*' publish --tag ${{ steps.version.outputs.tag }}
+      # The CLI releases on its own version. The filtered publish skips a version npm already has,
+      # and the tarball is built by the package's `prepack`.
+      - id: cli
+        run: |
+          VERSION=$(node -p "require('./apps/cli/package.json').version")
+          TAG=$(echo "$VERSION" | grep -oE 'alpha|beta|rc' || true)
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=${TAG:-latest}" >> "$GITHUB_OUTPUT"
+      - run: pnpm -F @yozz.app/cli publish --tag ${{ steps.cli.outputs.tag }}
+      # A green publish has reported a version npm did not record (docs/open-source.md), and a new
+      # version can take minutes to show, so ask the registry for this exact version for a while.
+      - name: Check npm has the CLI
+        run: |
+          for _ in $(seq 1 12); do
+            [ "$(npm view "@yozz.app/cli@${{ steps.cli.outputs.version }}" version)" = "${{ steps.cli.outputs.version }}" ] && exit 0
+            sleep 15
+          done
+          echo "npm does not have @yozz.app/cli@${{ steps.cli.outputs.version }}" >&2; exit 1

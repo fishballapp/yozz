@@ -289,8 +289,7 @@ export const updateCommand = Command.make(
   }, reportFailure),
 ).pipe(
   Command.withShortDescription('Mark read or unread, star, or move conversations'),
-  Command.withDescription(`Mark conversations read or unread, star or unstar them, or move them; only what
-is given changes, on every copy of the conversation in every account. Syncs the accounts it touches
+  Command.withDescription(`Mark conversations read or unread, star or unstar them, or move them; only what is given changes, on every copy of the conversation in every account. Syncs the accounts it touches
 first, then writes one command per account and folder. Each row says the state the conversation ends
 in. When some fail, the error is PartialFailure and the rows still print on stdout, each failed one
 with its own error: a conversation on an address whose mail server failed is not written, and its row

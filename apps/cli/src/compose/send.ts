@@ -210,8 +210,7 @@ export const sendCommand = Command.make(
   }, reportFailure),
 ).pipe(
   Command.withShortDescription('Send exactly the draft version named'),
-  Command.withDescription(`Send exactly the draft version named, from its From address's own mail server
-(SMTP), then keep a copy in its Sent folder. A draft changed since that draftId is a Conflict
+  Command.withDescription(`Send exactly the draft version named, from its From address's own mail server (SMTP), then keep a copy in its Sent folder. A draft changed since that draftId is a Conflict
 naming its newest version (currentDraftId): read it, then send that.
 
 Repeating it never sends twice. A send that went through answers "replayed": true, and one that

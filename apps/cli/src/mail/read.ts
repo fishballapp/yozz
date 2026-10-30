@@ -268,8 +268,7 @@ export const readCommand = Command.make(
   }, reportFailure),
 ).pipe(
   Command.withShortDescription('Whole conversations as plain text; marks nothing read'),
-  Command.withDescription(`Whole conversations, oldest message first, as plain text, with each sender's
-check (verified, unchecked or failed) and each message's attachments. Marks nothing read. A draft
+  Command.withDescription(`Whole conversations, oldest message first, as plain text, with each sender's check (verified, unchecked or failed) and each message's attachments. Marks nothing read. A draft
 in it shows its draftId, its cc and bcc, and the files attached to it on this machine: everything
 yozz send would send.
 
