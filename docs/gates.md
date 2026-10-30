@@ -7,14 +7,15 @@ a number moves, something changed underneath — find out what before updating i
 ## In `pnpm test`
 
 ```bash
-pnpm -F @yozz.app/vault test            # 47. The key schedule + record crypto. No network, no storage.
-                                    #   The OpenSSL control lives here: node:crypto re-derives the
-                                    #   whole schedule and opens a real record
-pnpm -F @yozz.app/vault-contract test   # 26. The wire schemas, incl. the strict refusal of
+pnpm -F @yozz.app/vault test            # 58. The key schedule, record crypto and the CLI key. No network,
+                                    #   no storage. The OpenSSL control lives here: node:crypto re-derives
+                                    #   the whole schedule and opens a real record, and the CLI key's
+                                    #   from RFC 7748's vector
+pnpm -F @yozz.app/vault-contract test   # 34. The wire schemas, incl. the strict refusal of
                                     #   `revision`, `deviceId`, plaintext and secrets
-pnpm -F @yozz.app/worker-api test       # 26. Against an ISOLATED LOCAL D1 with every migration
-                                    #   applied; migrations.test.ts pins vault_record's exact
-                                    #   column list, so a new plaintext column is a red test
+pnpm -F @yozz.app/worker-api test       # 230. Against an ISOLATED LOCAL D1 with every migration
+                                    #   applied; migrations.test.ts pins the vault tables' exact
+                                    #   column lists, so a new plaintext column is a red test
 pnpm -F @yozz.app/web test              # 298. Vault client + unlock (WebAuthn mocked), mail MIME,
                                     #   the WebMCP tools over a fake port + their mount, draft
                                     #   records under CAS, the send state machine and the draft

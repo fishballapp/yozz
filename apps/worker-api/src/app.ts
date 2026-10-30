@@ -6,6 +6,7 @@ import { getWebOrigin } from './env.ts';
 import { type AppEnv, apiError, isForeignKeyViolation, jsonBodyLimit } from './http.ts';
 import { accountRoute } from './routes/account.ts';
 import { autoconfigRoute } from './routes/autoconfig.ts';
+import { cliKeysRoute } from './routes/cli-keys.ts';
 import { recordsRoute } from './routes/records.ts';
 import { relayRoute } from './routes/relay.ts';
 import { unlockRoute } from './routes/unlock.ts';
@@ -18,7 +19,8 @@ export const createApp = (overrides?: CreateAuthOverrides) => {
     const corsHandler = cors({
       origin,
       allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-      allowHeaders: ['Content-Type', 'Authorization', ACCOUNT_HEADER],
+      // No `Authorization`: only the CLI sends a bearer, and it is no browser.
+      allowHeaders: ['Content-Type', ACCOUNT_HEADER],
       credentials: true,
     });
     return corsHandler(c, next);
@@ -35,6 +37,8 @@ export const createApp = (overrides?: CreateAuthOverrides) => {
 
   app.route('/api/v1/account', accountRoute);
   app.route('/api/v1/vault/records', recordsRoute);
+  // Before `unlockRoute`, whose session middleware covers every path under `/api/v1/vault`.
+  app.route('/api/v1/vault', cliKeysRoute);
   app.route('/api/v1/vault', unlockRoute);
   app.route('/api/v1/relay', relayRoute);
   app.route('/api/v1/autoconfig', autoconfigRoute);

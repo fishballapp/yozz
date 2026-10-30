@@ -11,7 +11,7 @@ import { nonShared, toBase64, utf8, VaultError } from './bytes.ts';
 /** OWASP's floor for PBKDF2-HMAC-SHA256 is 600,000; 1Password ships 650,000. */
 const PBKDF2_ITERATIONS = 650_000;
 
-/** RFC 5869 §3.1's default; the input material is already salted by the email. */
+/** RFC 5869 §3.1's default: a password's material is already salted by the email, and a PRF output or a DEK is uniformly random. */
 const NO_SALT = new Uint8Array(0);
 
 /**
@@ -37,9 +37,10 @@ export const hkdf = async (
   info: string,
   derived: AesKeyGenParams | HmacKeyGenParams,
   usages: readonly KeyUsage[],
+  salt: Uint8Array<ArrayBuffer> = NO_SALT,
 ): Promise<CryptoKey> =>
   crypto.subtle.deriveKey(
-    { name: 'HKDF', hash: 'SHA-256', salt: NO_SALT, info: utf8(info) },
+    { name: 'HKDF', hash: 'SHA-256', salt, info: utf8(info) },
     await crypto.subtle.importKey('raw', nonShared(inputKeyMaterial), 'HKDF', false, ['deriveKey']),
     derived,
     false,

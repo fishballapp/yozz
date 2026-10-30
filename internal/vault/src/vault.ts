@@ -10,20 +10,9 @@
  * ```
  */
 
-import {
-  concat,
-  fromBase64,
-  fromUtf8,
-  nonShared,
-  toBase64,
-  toBase64Url,
-  utf8,
-  VaultError,
-} from './bytes.ts';
+import { fromUtf8, toBase64Url, utf8, VaultError } from './bytes.ts';
 import { hkdf, type VaultKey } from './keys.ts';
-
-/** RFC 5116 §5.1. */
-const IV_BYTES = 12;
+import { freshIv, sealed, unseal } from './sealed.ts';
 
 export type EncryptedRecord = {
   readonly id: string;
@@ -85,22 +74,6 @@ const asRevision = (text: string, what: string): number => {
   }
   return revision;
 };
-
-const sealed = (iv: Uint8Array, body: Uint8Array): string => toBase64(concat(iv, body));
-
-const unseal = (
-  text: string,
-  what: string,
-): { iv: Uint8Array<ArrayBuffer>; body: Uint8Array<ArrayBuffer> } => {
-  const bytes = fromBase64(text, what);
-  if (bytes.length <= IV_BYTES) {
-    throw new VaultError('malformed', `${what} is ${bytes.length} bytes, too short to hold an IV`);
-  }
-  return { iv: nonShared(bytes.subarray(0, IV_BYTES)), body: nonShared(bytes.subarray(IV_BYTES)) };
-};
-
-/** Random, not a counter: several devices write under one DEK without seeing each other. NIST SP 800-38D bounds this at ~2^32 writes per DEK. */
-const freshIv = (): Uint8Array<ArrayBuffer> => crypto.getRandomValues(new Uint8Array(IV_BYTES));
 
 const wrap = async (encKey: CryptoKey, dek: CryptoKey): Promise<string> => {
   const iv = freshIv();

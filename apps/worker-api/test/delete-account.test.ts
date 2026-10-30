@@ -33,7 +33,7 @@ const signIn = async (email: string): Promise<Person> => {
   return { userId: user.id, email, cookie: verified.headers.get('set-cookie') ?? '' };
 };
 
-/** One of every kind of row an account owns: vault, passkey, password credential, challenges. */
+/** One of every kind of row an account owns: vault, passkey, CLI key, password credential, challenges. */
 const seedAccount = async ({ userId, email }: Person) => {
   await env.DB.batch([
     env.DB.prepare(
@@ -48,6 +48,10 @@ const seedAccount = async ({ userId, email }: Person) => {
       `INSERT INTO vault_passkey_wrap (user_id, passkey_id, wrapped_dek, created_at, updated_at)
        VALUES (?, ?, 'wrap', 1000, 1000)`,
     ).bind(userId, `pk-${userId}`),
+    env.DB.prepare(
+      `INSERT INTO vault_cli_key (id, user_id, name, public_key, ephemeral_public_key, wrapped_dek, token_hash, created_at)
+       VALUES (?, ?, 'box', 'pub', 'eph', 'wrap', 'hash', 1000)`,
+    ).bind(`key-${userId}`, userId),
     ...['rec-1', 'rec-2'].map(id =>
       env.DB.prepare(
         `INSERT INTO vault_record (user_id, id, type, ciphertext, updated_at, revision)
@@ -88,6 +92,7 @@ const TABLES = [
   'session',
   'user',
   'vault_account',
+  'vault_cli_key',
   'vault_passkey_wrap',
   'vault_record',
   'verification',

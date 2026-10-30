@@ -105,7 +105,7 @@ export const sessionExists = async (
     .bind(sessionId, userId)
     .first()) !== null;
 
-const SESSION_EXISTS = 'EXISTS (SELECT 1 FROM session WHERE id = ? AND userId = ?)';
+export const SESSION_EXISTS = 'EXISTS (SELECT 1 FROM session WHERE id = ? AND userId = ?)';
 
 /**
  * The credential row is written with the vault row, so a failure leaves neither: a half-done switch
@@ -193,8 +193,8 @@ export const getPasswordHash = async (db: D1Database, userId: string): Promise<s
 /**
  * A password-mode account's new credential and its DEK rewrapped under it, in one batch: a hash
  * that changed while the wrap did not would lock the person out of their data for good. Both
- * writes, and the sign-out of every other session, hold only while the hash is still the one the
- * caller verified, so a change that lost a race to another applies nothing and says so (`false`).
+ * writes, and the sign-out of every other session and every CLI key, hold only while the hash is
+ * still the one the caller verified, so a change that lost a race to another applies nothing and says so (`false`).
  */
 export const changePasswordUnlock = async (
   db: D1Database,
@@ -238,6 +238,16 @@ export const changePasswordUnlock = async (
                        WHERE userId = ? AND providerId = 'credential' AND password = ?)`,
       )
       .bind(userId, keepSessionId, userId, newHash),
+    // Signing the others out evicts their CLI keys too: one minted by an intruder's session would
+    // otherwise keep its bearer on the records.
+    db
+      .prepare(
+        `DELETE FROM vault_cli_key
+         WHERE user_id = ?
+           AND EXISTS (SELECT 1 FROM account
+                       WHERE userId = ? AND providerId = 'credential' AND password = ?)`,
+      )
+      .bind(userId, userId, newHash),
   ]);
   return results[1]?.meta.changes === 1;
 };
@@ -289,9 +299,11 @@ export const finalizePasskeyUnlock = async (
   ]);
 };
 
+/** Every way into the vault goes with it, CLI keys included: their wraps are of a DEK that no longer exists. */
 export const resetVault = async (db: D1Database, userId: string): Promise<void> => {
   await db.batch([
     db.prepare('DELETE FROM vault_record WHERE user_id = ?').bind(userId),
+    db.prepare('DELETE FROM vault_cli_key WHERE user_id = ?').bind(userId),
     db.prepare('DELETE FROM vault_passkey_wrap WHERE user_id = ?').bind(userId),
     db.prepare('DELETE FROM vault_account WHERE user_id = ?').bind(userId),
     db.prepare("DELETE FROM account WHERE userId = ? AND providerId = 'credential'").bind(userId),
@@ -304,7 +316,7 @@ export const resetVault = async (db: D1Database, userId: string): Promise<void> 
  * statement carries the same guard, read from server state the client cannot write: the caller's
  * session row is still there, the credential is this user's, and another passkey of theirs still
  * has a wrap (one without a wrap cannot sign in, so it does not count as left). The passkey row goes
- * last, so every statement reads the same rows; the other sessions go with it, never on a guess:
+ * last, so every statement reads the same rows; the other sessions and every CLI key go with it, never on a guess:
  * the guard is what proves the removal applies. Two removals racing
  * on the last two passkeys run one after the other, and the second finds one left and applies
  * nothing (`false`).
@@ -332,11 +344,15 @@ export const removePasskeyUnlock = async (
     db
       .prepare(`DELETE FROM session WHERE userId = ? AND id <> ? AND ${guard}`)
       .bind(userId, sessionId, ...expected),
+    // And every CLI key, which an intruder's session may have minted.
+    db
+      .prepare(`DELETE FROM vault_cli_key WHERE user_id = ? AND ${guard}`)
+      .bind(userId, ...expected),
     db
       .prepare(`DELETE FROM passkey WHERE userId = ? AND credentialID = ? AND ${guard}`)
       .bind(userId, credentialId, ...expected),
   ]);
-  return results[2]?.meta.changes === 1;
+  return results[3]?.meta.changes === 1;
 };
 
 /** Whether the passkey is this user's, by the WebAuthn credential id the remove route is given. */

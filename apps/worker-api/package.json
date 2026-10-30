@@ -29,6 +29,7 @@
     "@cloudflare/workers-types": "catalog:",
     "@types/node": "catalog:",
     "@varlock/1password-plugin": "catalog:",
+    "@yozz.app/vault": "workspace:*",
     "kysely": "catalog:",
     "varlock": "catalog:",
     "vitest": "catalog:workers-pool",

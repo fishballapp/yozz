@@ -1,9 +1,9 @@
 /**
  * Everything stored for one user, in one batch (D1 runs a batch as a transaction), so nothing of
  * them is left in the database. Every table is named rather than left to `ON DELETE CASCADE`, which
- * is what actually backs them up (migrations 0002, 0006 and 0007 give `session`, `account`,
- * `passkey` and the three vault tables a foreign key to `user`): the statements say what an
- * account is. The user row goes last. `delete-account.test.ts` walks the whole schema and fails for
+ * is what actually backs them up (migrations 0002, 0006, 0007 and 0008 give `session`, `account`,
+ * `passkey` and the four vault tables a foreign key to `user`): the statements say what an account
+ * is. The user row goes last. `delete-account.test.ts` walks the whole schema and fails for
  * a table this list does not reach.
  *
  * The same foreign keys refuse a write that passed its session check and lands after the batch.
@@ -20,6 +20,7 @@ export const deleteAccount = async (
   await db.batch([
     db.prepare('DELETE FROM vault_record WHERE user_id = ?').bind(userId),
     db.prepare('DELETE FROM vault_passkey_wrap WHERE user_id = ?').bind(userId),
+    db.prepare('DELETE FROM vault_cli_key WHERE user_id = ?').bind(userId),
     db.prepare('DELETE FROM vault_account WHERE user_id = ?').bind(userId),
     db.prepare('DELETE FROM passkey WHERE userId = ?').bind(userId),
     db.prepare('DELETE FROM account WHERE userId = ?').bind(userId),

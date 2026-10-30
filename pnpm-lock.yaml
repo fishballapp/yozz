@@ -469,6 +469,9 @@ importers:
       '@varlock/1password-plugin':
         specifier: 'catalog:'
         version: 2.0.5(varlock@1.23.0)
+      '@yozz.app/vault':
+        specifier: workspace:*
+        version: link:../../internal/vault
       kysely:
         specifier: 'catalog:'
         version: 0.29.5
@@ -507,6 +510,10 @@ importers:
         version: 24.13.4
 
   internal/vault:
+    dependencies:
+      '@yozz.app/vault-contract':
+        specifier: workspace:*
+        version: link:../vault-contract
     devDependencies:
       '@types/node':
         specifier: ^24.13.4

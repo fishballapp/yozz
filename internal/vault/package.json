@@ -9,6 +9,9 @@
   "exports": {
     ".": "./src/index.ts"
   },
+  "dependencies": {
+    "@yozz.app/vault-contract": "workspace:*"
+  },
   "devDependencies": {
     "@types/node": "catalog:"
   },

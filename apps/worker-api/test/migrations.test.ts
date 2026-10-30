@@ -67,6 +67,26 @@ describe('D1 migrations and schema invariants', () => {
     expect(columns).toEqual(['user_id', 'passkey_id', 'wrapped_dek', 'created_at', 'updated_at']);
   });
 
+  it('vault_cli_key has the EXACT columns specified, and no token in the clear', async () => {
+    const info = await env.DB.prepare('PRAGMA table_info(vault_cli_key)').all<{
+      name: string;
+      notnull: number;
+      pk: number;
+    }>();
+
+    expect(info.results.map(({ name, notnull, pk }) => ({ name, notnull, pk }))).toEqual([
+      { name: 'id', notnull: 0, pk: 1 },
+      { name: 'user_id', notnull: 1, pk: 0 },
+      { name: 'name', notnull: 1, pk: 0 },
+      { name: 'public_key', notnull: 1, pk: 0 },
+      { name: 'ephemeral_public_key', notnull: 1, pk: 0 },
+      { name: 'wrapped_dek', notnull: 1, pk: 0 },
+      { name: 'token_hash', notnull: 1, pk: 0 },
+      { name: 'created_at', notnull: 1, pk: 0 },
+      { name: 'last_used_at', notnull: 0, pk: 0 },
+    ]);
+  });
+
   it('enforces row check: password mode requires non-null password_wrapped_dek', async () => {
     await expect(
       env.DB.prepare(
@@ -158,7 +178,7 @@ describe('D1 migrations and schema invariants', () => {
         .all()
     ).results;
 
-  it.each(['vault_account', 'vault_passkey_wrap', 'vault_record'])(
+  it.each(['vault_account', 'vault_passkey_wrap', 'vault_record', 'vault_cli_key'])(
     '%s belongs to a user and goes with them',
     async table => {
       expect(await foreignKeysOf(table)).toEqual([
@@ -188,6 +208,12 @@ describe('D1 migrations and schema invariants', () => {
          VALUES ('ghost', 'password', 'wrap', 1000, 1000)`,
       ).run(),
     ).rejects.toThrow(/FOREIGN KEY/);
+    await expect(
+      env.DB.prepare(
+        `INSERT INTO vault_cli_key (id, user_id, name, public_key, ephemeral_public_key, wrapped_dek, token_hash, created_at)
+         VALUES ('key', 'ghost', 'box', 'pub', 'eph', 'wrap', 'hash', 1000)`,
+      ).run(),
+    ).rejects.toThrow(/FOREIGN KEY/);
   });
 
   it('deleting the user alone deletes their vault', async () => {
@@ -204,11 +230,15 @@ describe('D1 migrations and schema invariants', () => {
         `INSERT INTO vault_record (user_id, id, type, ciphertext, updated_at, revision)
          VALUES ('user-1', 'rec', 'draft', 'Y2lwaGVy', 1000, 1)`,
       ),
+      env.DB.prepare(
+        `INSERT INTO vault_cli_key (id, user_id, name, public_key, ephemeral_public_key, wrapped_dek, token_hash, created_at)
+         VALUES ('key', 'user-1', 'box', 'pub', 'eph', 'wrap', 'hash', 1000)`,
+      ),
     ]);
 
     await env.DB.prepare('DELETE FROM "user" WHERE id = ?').bind('user-1').run();
 
-    for (const table of ['vault_account', 'vault_passkey_wrap', 'vault_record']) {
+    for (const table of ['vault_account', 'vault_passkey_wrap', 'vault_record', 'vault_cli_key']) {
       expect((await env.DB.prepare(`SELECT * FROM ${table}`).all()).results, table).toEqual([]);
     }
   });

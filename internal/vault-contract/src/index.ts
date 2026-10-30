@@ -261,3 +261,132 @@ export const MailAutoconfigSchema = z
   })
   .strict();
 export type MailAutoconfig = z.infer<typeof MailAutoconfigSchema>;
+
+/**
+ * A raw 32-byte X25519 public key, base64url without padding. 43 characters carry 258 bits, so the
+ * last one is limited to those whose two spare bits are zero: one key has one spelling.
+ */
+export const X25519PublicKeySchema = z
+  .string()
+  .regex(/^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$/, 'A public key must be 32 bytes of base64url');
+
+export const CliKeyNameSchema = z.string().trim().min(1).max(PASSKEY_NAME_MAX_LENGTH);
+
+export const CliKeyIdSchema = z.uuid();
+
+const CLI_TOKEN =
+  /^yozzcli_(?<keyId>[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})_[A-Za-z0-9_-]{43}$/;
+
+/**
+ * The bearer a CLI key is used with, `yozzcli_<keyId>_<secret>`: the prefix names it in a leaked
+ * log, the key id finds its row, and the secret is 256 bits of base64url.
+ */
+export const formatCliToken = ({ keyId, secret }: { keyId: string; secret: string }): string =>
+  `yozzcli_${keyId}_${secret}`;
+
+/** Parses a bearer to the token and the key id it names. */
+export const CliTokenSchema = z.string().transform((token, context) => {
+  const keyId = CLI_TOKEN.exec(token)?.groups?.keyId;
+  if (keyId === undefined) {
+    context.addIssue({ code: 'custom', message: 'Not a CLI token' });
+    return z.NEVER;
+  }
+  return { token, keyId };
+});
+
+/** POST /api/v1/vault/cli-keys, under a fresh session: the DEK wrapped to a CLI key. */
+export const CreateCliKeyRequestSchema = z
+  .object({
+    name: CliKeyNameSchema,
+    publicKey: X25519PublicKeySchema,
+    ephemeralPublicKey: X25519PublicKeySchema,
+    wrappedDek: WrappedDekSchema,
+  })
+  .strict();
+export type CreateCliKeyRequest = z.infer<typeof CreateCliKeyRequestSchema>;
+
+/** The token is answered once; the Worker keeps only its hash. */
+export const CreateCliKeyResponseSchema = z
+  .object({
+    keyId: CliKeyIdSchema,
+    token: z.string().regex(CLI_TOKEN, 'Not a CLI token'),
+  })
+  .strict();
+export type CreateCliKeyResponse = z.infer<typeof CreateCliKeyResponseSchema>;
+
+export const CliKeySummarySchema = z
+  .object({
+    keyId: CliKeyIdSchema,
+    name: CliKeyNameSchema,
+    /** Its pairing code is computed from this, so Settings shows the code the terminal showed. */
+    publicKey: X25519PublicKeySchema,
+    createdAt: z.number().int().nonnegative(),
+    lastUsedAt: z.number().int().nonnegative().nullable(),
+  })
+  .strict();
+export type CliKeySummary = z.infer<typeof CliKeySummarySchema>;
+
+/** GET /api/v1/vault/cli-keys, under a session. */
+export const ListCliKeysResponseSchema = z
+  .object({
+    keys: z.array(CliKeySummarySchema),
+  })
+  .strict();
+export type ListCliKeysResponse = z.infer<typeof ListCliKeysResponseSchema>;
+
+/** GET /api/v1/vault/cli-key, under the key's own bearer: what that key opens the vault with. */
+export const CliKeyWrapResponseSchema = z
+  .object({
+    keyId: CliKeyIdSchema,
+    ephemeralPublicKey: X25519PublicKeySchema,
+    wrappedDek: WrappedDekSchema,
+  })
+  .strict();
+export type CliKeyWrapResponse = z.infer<typeof CliKeyWrapResponseSchema>;
+
+/** The nonce tying a loopback callback to one `yozz login`: 256 bits, base64url without padding. */
+export const CliLoginStateSchema = z.string().regex(/^[A-Za-z0-9_-]{43}$/, 'Not a login state');
+
+/** The approve page's query (`/cli/approve?port&state&publicKey&name`). */
+export const CliApproveQuerySchema = z
+  .object({
+    port: z.coerce.number().int().min(1024).max(65_535),
+    state: CliLoginStateSchema,
+    publicKey: X25519PublicKeySchema,
+    name: CliKeyNameSchema,
+  })
+  .strict();
+export type CliApproveQuery = z.infer<typeof CliApproveQuerySchema>;
+
+/**
+ * What an approval hands the CLI: the bearer, and the account it names in `Yozz-Account` and keeps in
+ * its credentials. Sealed, because the loopback URL lands in the browser's history.
+ */
+export const CliLoginPayloadSchema = z
+  .object({
+    token: z.string().regex(CLI_TOKEN, 'Not a CLI token'),
+    userId: z.string().min(1),
+    email: z.string().min(1),
+  })
+  .strict();
+export type CliLoginPayload = z.infer<typeof CliLoginPayloadSchema>;
+
+/**
+ * The loopback callback's query (`http://127.0.0.1:<port>/callback?…`): approved, or denied.
+ * `sealedLogin` is a `CliLoginPayload` sealed under the approval's token key with `state` as its
+ * additional data, so it opens for this one login only.
+ */
+export const CliLoginCallbackSchema = z.union([
+  z
+    .object({
+      state: CliLoginStateSchema,
+      ephemeralPublicKey: X25519PublicKeySchema,
+      sealedLogin: z
+        .string()
+        .max(2048)
+        .regex(/^[A-Za-z0-9+/]+={0,2}$/, 'A sealed login must be base64'),
+    })
+    .strict(),
+  z.object({ state: CliLoginStateSchema, error: z.literal('denied') }).strict(),
+]);
+export type CliLoginCallback = z.infer<typeof CliLoginCallbackSchema>;

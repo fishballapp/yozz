@@ -16,17 +16,11 @@ import {
   RecordConflictError,
   RecordStaleError,
 } from '../db/records.ts';
-import {
-  type AppEnv,
-  apiError,
-  readJsonBody,
-  requireNamedAccount,
-  requireSession,
-} from '../http.ts';
+import { apiError, type CallerEnv, readJsonBody, requireCaller } from '../http.ts';
 
 const RecordKeySchema = z.object({ type: RecordTypeSchema, id: BlindRecordIdSchema });
 
-const readRecordKey = (c: Context<AppEnv>) => {
+const readRecordKey = (c: Context<CallerEnv>) => {
   const parsed = RecordKeySchema.safeParse(c.req.param());
   return parsed.success
     ? parsed
@@ -36,14 +30,15 @@ const readRecordKey = (c: Context<AppEnv>) => {
       };
 };
 
-export const recordsRoute = new Hono<AppEnv>()
-  .use('*', requireSession, requireNamedAccount)
+/** A browser session or a CLI key: the records are what a CLI key exists to reach. */
+export const recordsRoute = new Hono<CallerEnv>()
+  .use('*', requireCaller)
   .get('/:type/:id', async c => {
     const key = readRecordKey(c);
     if (!key.success) return key.response;
 
-    const user = c.get('user');
-    const record = await getRecord(c.env.DB, user.id, key.data.type, key.data.id);
+    const { userId } = c.get('caller');
+    const record = await getRecord(c.env.DB, userId, key.data.type, key.data.id);
 
     if (!record) {
       return apiError(c, 404, 'NOT_FOUND', 'Record not found');
@@ -62,8 +57,8 @@ export const recordsRoute = new Hono<AppEnv>()
       return apiError(c, 400, 'BAD_REQUEST', 'Invalid query parameters');
     }
 
-    const user = c.get('user');
-    const result = await listRecords(c.env.DB, user.id, typeParsed.data, queryParsed.data.after);
+    const { userId } = c.get('caller');
+    const result = await listRecords(c.env.DB, userId, typeParsed.data, queryParsed.data.after);
 
     return c.json(result, 200);
   })
@@ -74,7 +69,7 @@ export const recordsRoute = new Hono<AppEnv>()
     const body = await readJsonBody(c, PutRecordRequestSchema, 'record payload');
     if (!body.ok) return body.response;
 
-    const user = c.get('user');
+    const { userId } = c.get('caller');
     const stated = body.data.precondition;
     const precondition = ((): PutPrecondition | undefined => {
       if (stated === undefined) return undefined;
@@ -84,7 +79,7 @@ export const recordsRoute = new Hono<AppEnv>()
     try {
       await putRecord(
         c.env.DB,
-        user.id,
+        userId,
         key.data.type,
         key.data.id,
         body.data.ciphertext,
@@ -112,9 +107,9 @@ export const recordsRoute = new Hono<AppEnv>()
       return apiError(c, 400, 'BAD_REQUEST', 'Invalid query parameters');
     }
 
-    const user = c.get('user');
+    const { userId } = c.get('caller');
     try {
-      await deleteRecord(c.env.DB, user.id, key.data.type, key.data.id, query.data.ifRevision);
+      await deleteRecord(c.env.DB, userId, key.data.type, key.data.id, query.data.ifRevision);
       return c.json({ ok: true as const }, 200);
     } catch (err) {
       if (err instanceof RecordStaleError) {
