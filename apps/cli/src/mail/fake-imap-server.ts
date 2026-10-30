@@ -2,8 +2,9 @@ import type { ByteDuplex, MailSocket } from './servers.ts';
 
 // An IMAP server in memory, for tests: the commands `@yozz.app/imap` sends on the CLI's paths
 // (AUTHENTICATE, LIST, SELECT, FETCH and UID FETCH, UID STORE, UID MOVE with COPYUID, CREATE,
-// APPEND with APPENDUID, UID SEARCH TEXT and HEADER, IDLE, NOOP, LOGOUT), over a byte pipe, so the
-// real client parses real responses.
+// APPEND with APPENDUID, UID SEARCH on SUBJECT, FROM, HEADER and TEXT, which matches the body alone as
+// Forward Email's does, IDLE, NOOP, LOGOUT), over a byte pipe, so the real client parses real
+// responses.
 
 export type FakeMessage = {
   readonly from: string;
@@ -473,23 +474,27 @@ export const makeFakeImapServer = ({
             return true;
           }
           if (verb === 'SEARCH') {
-            const quotedArgs = [...rest.matchAll(/"((?:[^"\\]|\\.)*)"/gu)].map(([, arg = '']) =>
-              arg.replace(/\\(.)/gu, '$1'),
-            );
-            const isHeader = / HEADER /u.test(rest);
-            const [header = '', value = ''] = quotedArgs;
-            const text = quotedArgs.at(-1) ?? '';
+            // The messages the key named matches (no OR: nothing sends one). TEXT is the body alone,
+            // as Forward Email's server matches it, so a subject is found only by a SUBJECT key.
+            const keys = [
+              ...rest.matchAll(
+                /HEADER "((?:[^"\\]|\\.)*)" "((?:[^"\\]|\\.)*)"|(SUBJECT|FROM|TEXT) "((?:[^"\\]|\\.)*)"/gu,
+              ),
+            ].map(([, headerName, headerValue, key, value]) => ({
+              name: headerName ?? key ?? '',
+              value: (headerValue ?? value ?? '').replace(/\\(.)/gu, '$1'),
+            }));
             const hits = mailbox.messages.filter(message => {
-              const raw = new TextDecoder().decode(message.raw);
-              if (!isHeader) return raw.toLowerCase().includes(text.toLowerCase());
-              const head = raw.slice(0, raw.indexOf('\r\n\r\n'));
-              return head
-                .split('\r\n')
-                .some(
-                  line =>
-                    line.toLowerCase().startsWith(`${header.toLowerCase()}:`) &&
-                    line.toLowerCase().includes(value.toLowerCase()),
-                );
+              const raw = new TextDecoder().decode(message.raw).toLowerCase();
+              const split = raw.indexOf('\r\n\r\n');
+              const head = raw.slice(0, split).split('\r\n');
+              const body = raw.slice(split + 4);
+              return keys.some(({ name, value }) => {
+                const needle = value.toLowerCase();
+                if (name === 'TEXT') return body.includes(needle);
+                const field = `${name.toLowerCase()}:`;
+                return head.some(line => line.startsWith(field) && line.includes(needle));
+              });
             });
             await send(`* SEARCH${hits.map(({ uid }) => ` ${uid}`).join('')}\r\n`);
             await ok('SEARCH completed');

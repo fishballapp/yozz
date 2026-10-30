@@ -131,7 +131,11 @@ export type ImapClient = {
     header: string,
     value: string,
   ) => Promise<ImapResult<readonly number[]>>;
-  /** The selected mailbox's uids whose header or body contains `text`, as the server matches it. */
+  /**
+   * The selected mailbox's uids whose subject, sender or body contains `text`, ascending. One
+   * search per field and a union: `TEXT` alone is the body on Forward Email's server, and its `OR`
+   * answers a subset of what the operands do.
+   */
   readonly uidSearchText: (text: string) => Promise<ImapResult<readonly number[]>>;
   /** RFC 6851. Answers with the RFC 4315 `COPYUID`, or null when the server gave none. Refuses without MOVE. */
   readonly move: (uidSet: string, mailbox: string) => Promise<ImapResult<CopyUid | null>>;
@@ -874,12 +878,15 @@ export const createImapClient = (
 
     uidSearchText: text =>
       enqueueCommand(async () => {
-        const res = await executeCommand(tag => buildUidSearchTextCommand(tag, text));
-        if (!res.ok) return res;
-        const found = res.value.untagged.flatMap(item =>
-          item.kind === 'search' ? [...item.uids] : [],
-        );
-        return { ok: true, value: found };
+        const found = new Set<number>();
+        for (const key of ['SUBJECT', 'FROM', 'TEXT'] as const) {
+          const res = await executeCommand(tag => buildUidSearchTextCommand(tag, key, text));
+          if (!res.ok) return res;
+          for (const item of res.value.untagged) {
+            if (item.kind === 'search') for (const uid of item.uids) found.add(uid);
+          }
+        }
+        return { ok: true, value: [...found].toSorted((a, b) => a - b) };
       }),
 
     move: (uidSet, mailbox) =>

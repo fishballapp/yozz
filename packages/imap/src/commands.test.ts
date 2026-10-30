@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { asciiToString } from './bytes.ts';
-import { buildAppendCommand, buildUidExpungeCommand, formatImapDateTime } from './commands.ts';
+import {
+  buildAppendCommand,
+  buildUidExpungeCommand,
+  buildUidSearchTextCommand,
+  formatImapDateTime,
+} from './commands.ts';
 
 describe('formatImapDateTime', () => {
   it('space-pads the day and names the month, in the local zone', () => {
@@ -38,5 +43,28 @@ describe('buildUidExpungeCommand', () => {
     expect(
       asciiToString(buildUidExpungeCommand('a1', '3,7:9').lines[0]?.text ?? new Uint8Array()),
     ).toBe('a1 UID EXPUNGE 3,7:9\r\n');
+  });
+});
+
+describe('buildUidSearchTextCommand', () => {
+  const sent = (query: string) =>
+    buildUidSearchTextCommand('a1', 'SUBJECT', query)
+      .lines.map(({ text, literal }) =>
+        literal === undefined
+          ? asciiToString(text)
+          : `${asciiToString(text)}{${literal.length}}<${new TextDecoder().decode(literal)}>`,
+      )
+      .join('');
+
+  it('searches the one key it is given', () => {
+    expect(sent('ICO')).toBe('a1 UID SEARCH SUBJECT "ICO"\r\n');
+  });
+
+  it('escapes quotes and backslashes', () => {
+    expect(sent('a "b" \\c')).toBe('a1 UID SEARCH SUBJECT "a \\"b\\" \\\\c"\r\n');
+  });
+
+  it('sends a query that is not printable ASCII as a UTF-8 literal', () => {
+    expect(sent('Grüße')).toBe('a1 UID SEARCH CHARSET UTF-8 SUBJECT {7}<Grüße>\r\n');
   });
 });
