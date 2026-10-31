@@ -1,7 +1,9 @@
+import { resolveTxt } from 'node:dns/promises';
 import { type TLSSocket, connect as tlsConnect } from 'node:tls';
 import { createImapClient, type ImapClient, type ImapUntagged } from '@yozz.app/imap';
 import type { AddressRecord } from '@yozz.app/mail/addresses/record';
 import type { MailConnectionFailure, Result } from '@yozz.app/mail/connection';
+import type { TxtLookup } from '@yozz.app/mail/threads/dkim';
 import { createSmtpClient, type SmtpClient, type SmtpFailure } from '@yozz.app/smtp';
 import * as Context from 'effect/Context';
 import * as Layer from 'effect/Layer';
@@ -29,15 +31,33 @@ export type MailSocket = {
 /** Work that waits this long with nothing crossing the connection has stalled. */
 export const QUIET_LIMIT_MS = 60_000;
 
+/** The system resolver: `[]` for a name with no TXT record, `null` for any other failure. */
+const lookupTxtOnDns: TxtLookup = async name => {
+  try {
+    return (await resolveTxt(name)).map(strings => strings.join(''));
+  } catch (error) {
+    const isAbsent =
+      error instanceof Error &&
+      'code' in error &&
+      ['ENOTFOUND', 'ENODATA'].includes(String(error.code));
+    return isAbsent ? [] : null;
+  }
+};
+
 export class MailServers extends Context.Service<
   MailServers,
   {
     /** A TLS connection to `host`, its certificate validated. */
     readonly open: (host: Host) => Promise<Result<MailSocket, MailConnectionFailure>>;
+    /** The DKIM keys a sender check reads. */
+    readonly lookupTxt: TxtLookup;
   }
 >()('@yozz.app/cli/MailServers') {
   /** `node:tls` with Node's own certificate validation: no relay, no YOZZ TLS stack on this path. */
-  static readonly layerTls = Layer.succeed(MailServers, MailServers.of({ open: openTls }));
+  static readonly layerTls = Layer.succeed(
+    MailServers,
+    MailServers.of({ open: openTls, lookupTxt: lookupTxtOnDns }),
+  );
 }
 
 /** An `AggregateError` (every address a host resolves to refused) has no message, only a code. */

@@ -290,6 +290,9 @@ const mount = async (store: RecordStore) => {
 const nextAccount = async () => ({ userId: 'user-2', store: (await vault()).store });
 
 /** Unread in ALICE's inbox, so a session holding that address holds it too. */
+/** The message the server hands over for LUNCH's body. */
+const LUNCH_RAW = new TextEncoder().encode('Subject: Lunch\r\n\r\nThe code is 4417.\r\n');
+
 const LUNCH: ThreadState = {
   id: 't1',
   accounts: [ALICE.address],
@@ -496,16 +499,7 @@ describe("an ended session's answers", () => {
     const [message] = LUNCH.messages;
     if (message === undefined) throw new Error('no message');
     mocks.threads = [{ ...LUNCH, messages: [{ ...message, bodyStatus: 'pending', rawSize: 64 }] }];
-    mocks.answer = {
-      ok: true,
-      value: {
-        paragraphs: ['The code is 4417.'],
-        html: null,
-        hasTextPart: true,
-        inlineImagesTruncated: false,
-        attachments: [],
-      },
-    };
+    mocks.answer = { ok: true, value: LUNCH_RAW };
     const { mail, replaceSession } = await mount((await vault()).store);
     const bodyWrite = gate();
     mocks.bodyWrite = bodyWrite;
@@ -522,16 +516,7 @@ describe("an ended session's answers", () => {
     const [message] = LUNCH.messages;
     if (message === undefined) throw new Error('no message');
     mocks.threads = [{ ...LUNCH, messages: [{ ...message, bodyStatus: 'pending', rawSize: 64 }] }];
-    mocks.answer = {
-      ok: true,
-      value: {
-        paragraphs: ['The code is 4417.'],
-        hasTextPart: true,
-        inlineImagesTruncated: false,
-        attachments: [],
-        senderHeaders: [],
-      },
-    };
+    mocks.answer = { ok: true, value: LUNCH_RAW };
     const { mail, replaceSession } = await mount((await vault()).store);
     const fetching = gate();
     mocks.task = fetching;
@@ -580,16 +565,7 @@ describe('an edited address', () => {
     const [message] = LUNCH.messages;
     if (message === undefined) throw new Error('no message');
     mocks.threads = [{ ...LUNCH, messages: [{ ...message, bodyStatus: 'pending', rawSize: 64 }] }];
-    mocks.answer = {
-      ok: true,
-      value: {
-        paragraphs: ['The code is 4417.'],
-        html: null,
-        hasTextPart: true,
-        inlineImagesTruncated: false,
-        attachments: [],
-      },
-    };
+    mocks.answer = { ok: true, value: LUNCH_RAW };
   };
 
   it('is never logged into again with the credentials it had, by work that began before the edit', async () => {

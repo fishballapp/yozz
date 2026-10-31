@@ -181,7 +181,7 @@ const AUTHORED: readonly Thread[] = [
         toAddress: 'jason@jyu.example',
         to: [{ address: 'jason@jyu.example' }],
         at: ago(4 * HOUR),
-        // An HTML body from a sender the provider verified.
+        // An HTML body from a sender whose DKIM signature checks out.
         hasTextPart: true,
         senderCheck: { status: 'verified' },
         body: [
@@ -225,9 +225,9 @@ const AUTHORED: readonly Thread[] = [
         toAddress: 'jason@northlane.example',
         to: [{ address: 'jason@northlane.example' }],
         at: ago(4 * HOUR + 40 * MINUTE),
-        // Sent through a mailing service the shop never aligned, so the provider's check failed.
+        // Sent through a mailing service whose signature is not the shop's own domain.
         hasTextPart: true,
-        senderCheck: { status: 'failed' },
+        senderCheck: { status: 'unverified' },
         body: [
           'Order #H-20931 is roasted and packed. 250 g Kiambu AA, whole bean, ships tomorrow by Royal Mail Tracked 48.',
         ],
@@ -567,7 +567,7 @@ const AUTHORED: readonly Thread[] = [
         to: [{ address: 'hello@stillwater.example' }],
         at: ago(14 * HOUR),
         hasTextPart: true,
-        senderCheck: { status: 'unchecked', imapHost: 'imap.migadu.com' },
+        senderCheck: { status: 'unverified' },
         body: [
           'This week: why most visitors skip your pricing page, three founders on charging from day one, and a tool for screenshotting App Store listings.',
         ],

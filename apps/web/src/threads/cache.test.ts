@@ -33,7 +33,7 @@ describe('mail cache', () => {
       hasTextPart: true,
       inlineImagesTruncated: false,
       attachments: [],
-      senderHeaders: [],
+      verifiedFrom: null,
     });
 
     expect(await inbox.getSync()).toEqual({
@@ -101,7 +101,7 @@ describe('mail cache', () => {
       hasTextPart: true,
       inlineImagesTruncated: false,
       attachments: [],
-      senderHeaders: [],
+      verifiedFrom: null,
     };
     expect(await inbox.listBodyUids()).toEqual(new Set());
     await inbox.putBody(10, body);

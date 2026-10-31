@@ -2,13 +2,13 @@ import { BODY_CHARS, clip, fitting, OUTPUT_CHARS, SKIM_CHARS } from '@yozz.app/m
 import { addressList } from '@yozz.app/mail/compose/draft';
 import { type DraftRecord, parseDraftId } from '@yozz.app/mail/compose/draft-record';
 import { listDrafts } from '@yozz.app/mail/compose/draft-vault';
-import { senderCheckOf } from '@yozz.app/mail/threads/authentication-results';
 import { fetchBodyAt } from '@yozz.app/mail/threads/bodies';
 import {
   draftIdOf,
   isServerCopy,
   type Message,
   resolveHandles,
+  senderCheckOf,
   type ThreadState,
 } from '@yozz.app/mail/threads/thread';
 import * as Argument from 'effect/cli/Argument';
@@ -200,7 +200,7 @@ export const readCommand = Command.make(
       const res =
         cached === null
           ? yield* usingCache(() =>
-              fetchBodyAt(mail.runOn(account), folderCache, copy, message.rawSize),
+              fetchBodyAt(mail.runOn(account), folderCache, copy, message.rawSize, mail.lookupTxt),
             )
           : { ok: true as const, value: cached };
       if (!res.ok) {
@@ -232,8 +232,7 @@ export const readCommand = Command.make(
       );
       return {
         ...common,
-        // Judged by the provider of the account whose copy this is: it stamped the headers.
-        sender: senderCheckOf(body.senderHeaders, account.imap.host, message.fromAddress).status,
+        sender: senderCheckOf(body.verifiedFrom, message.fromAddress).status,
         attachments,
         untrusted: { ...addressed, text: text(body.paragraphs) },
       };
@@ -269,7 +268,7 @@ export const readCommand = Command.make(
   }, reportFailure),
 ).pipe(
   Command.withShortDescription('Whole conversations as plain text; marks nothing read'),
-  Command.withDescription(`Whole conversations, oldest message first, as plain text, with each sender's check (verified, unchecked or failed) and each message's attachments. Marks nothing read. A draft
+  Command.withDescription(`Whole conversations, oldest message first, as plain text, with each sender's check (verified or unverified) and each message's attachments. Marks nothing read. A draft
 in it shows its draftId, its cc and bcc, and the files attached to it on this machine: everything
 yozz send would send.
 

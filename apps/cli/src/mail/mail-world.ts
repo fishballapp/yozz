@@ -1,7 +1,8 @@
 import type { AddressRecord } from '@yozz.app/mail/addresses/record';
+import { signMessage } from '@yozz.app/mail/testing/dkim-signer';
 import * as Effect from 'effect/Effect';
 import { makeHomes, makeWorld, writeCredentials } from '../test-world.ts';
-import { type FakeMessage, makeFakeImapServer } from './fake-imap-server.ts';
+import { type FakeMessage, makeFakeImapServer, rawOf } from './fake-imap-server.ts';
 
 // A logged-in machine with one inbound address whose IMAP server runs in memory.
 
@@ -25,6 +26,29 @@ export const mail = (n: number, overrides: Partial<FakeMessage> = {}): FakeMessa
   text: `Hi Jason, invoice ${n} is attached.`,
   ...overrides,
 });
+
+/** `message` signed by `stripe.com`, and the DNS zone that publishes the key it verifies under. */
+export const signedByStripe = async (message: FakeMessage) => {
+  const { privateKey, publicKey } = (await crypto.subtle.generateKey({ name: 'Ed25519' }, true, [
+    'sign',
+    'verify',
+  ])) as CryptoKeyPair;
+  const unsigned = new TextDecoder().decode(rawOf(message));
+  const signed = await signMessage(unsigned, {
+    key: privateKey,
+    algorithm: 'ed25519-sha256',
+    domain: 'stripe.com',
+    selector: 's',
+  });
+  const key = new Uint8Array(await crypto.subtle.exportKey('raw', publicKey)).toBase64();
+  return {
+    message: {
+      ...message,
+      dkimSignature: signed.slice(0, signed.length - unsigned.length).replace(/\r\n$/, ''),
+    },
+    dns: { 's._domainkey.stripe.com': [`v=DKIM1; k=ed25519; p=${key}`] },
+  };
+};
 
 /** An RFC 5322 date `n` minutes into 2026, for a mailbox of hundreds in order. */
 export const minuteOf2026 = (n: number) => new Date(Date.UTC(2026, 0, 1, 0, n)).toUTCString();

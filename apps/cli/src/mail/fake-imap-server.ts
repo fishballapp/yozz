@@ -24,8 +24,8 @@ export type FakeMessage = {
     readonly type: string;
     readonly content: string;
   }[];
-  /** `Authentication-Results` headers, top first. */
-  readonly authenticationResults?: readonly string[];
+  /** A whole `DKIM-Signature` field, placed above the others. */
+  readonly dkimSignature?: string;
 };
 
 type Stored = {
@@ -70,9 +70,9 @@ const addressList = (address: string, name?: string) => {
   return `((${name === undefined ? 'NIL' : quoted(encodedWord(name))} NIL ${quoted(address.slice(0, at))} ${quoted(address.slice(at + 1))}))`;
 };
 
-const rawOf = (message: FakeMessage): Uint8Array => {
+export const rawOf = (message: FakeMessage): Uint8Array => {
   const headers = [
-    ...(message.authenticationResults ?? []).map(value => `Authentication-Results: ${value}`),
+    ...(message.dkimSignature === undefined ? [] : [message.dkimSignature]),
     `From: ${message.fromName === undefined ? '' : `${encodedWord(message.fromName)} `}<${message.from}>`,
     `To: <${message.to}>`,
     ...(message.cc === undefined

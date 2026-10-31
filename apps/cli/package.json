@@ -1,6 +1,6 @@
 {
   "name": "@yozz.app/cli",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "license": "AGPL-3.0-only",
   "type": "module",
   "description": "yozz: the mail in your YOZZ account, from a terminal, for coding agents and the person beside them.",

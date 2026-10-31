@@ -3,8 +3,8 @@ import { type DefaultTreeAdapterTypes, html, parse } from 'parse5';
 import PostalMime from 'postal-mime';
 import type { MailConnectionFailure, Result, RunTask } from '../connection.ts';
 import { attachmentKindOf } from './attachments.ts';
-import type { MailHeader } from './authentication-results.ts';
 import { MAX_CACHED_BODY_BYTES } from './body-state.ts';
+import { type TxtLookup, verifySender } from './dkim.ts';
 import { SAFE_INLINE_IMAGE_MIME_TYPES } from './image-types.ts';
 import type { Location } from './thread.ts';
 import { type Attachment, renumberedText, toParagraphs } from './thread.ts';
@@ -19,13 +19,11 @@ export type FetchedBody = {
   readonly inlineImagesTruncated: boolean;
   readonly attachments: Attachment[];
   /**
-   * `From` and `Authentication-Results`, top to bottom: whether the sender is authenticated depends
-   * on the account that received the copy, so it is decided where the account is known.
+   * The From address a DKIM signature vouches for, or null. A property of the message, not of the
+   * account that received the copy; `senderCheckOf` compares it with the address the reader shows.
    */
-  readonly senderHeaders: readonly MailHeader[];
+  readonly verifiedFrom: string | null;
 };
-
-const SENDER_HEADERS = new Set(['from', 'authentication-results']);
 
 // RFC822.SIZE is checked before BODY.PEEK[], then the received byte count again before parsing.
 const MAX_RAW_MESSAGE_BYTES = DEFAULT_MAX_LITERAL_BYTES;
@@ -180,11 +178,11 @@ const inlineCidImages = (
   return { html: rendered, truncated };
 };
 
-export const parseBody = async (raw: Uint8Array): Promise<FetchedBody> => {
+export const parseBody = async (raw: Uint8Array, lookupTxt: TxtLookup): Promise<FetchedBody> => {
   if (raw.byteLength > MAX_RAW_MESSAGE_BYTES) {
     throw new Error('Message is too large to open safely');
   }
-  const mail = await PostalMime.parse(raw);
+  const [mail, verdict] = await Promise.all([PostalMime.parse(raw), verifySender(raw, lookupTxt)]);
   // The text part stays even when HTML renders: it is the snippet and the fallback.
   const senderText = mail.text?.trim() ? mail.text : null;
   const text =
@@ -219,9 +217,10 @@ export const parseBody = async (raw: Uint8Array): Promise<FetchedBody> => {
     ...(inlinedHtml === null ? {} : { html: inlinedHtml.html }),
     inlineImagesTruncated: inlinedHtml?.truncated ?? false,
     attachments,
-    senderHeaders: mail.headers
-      .filter(header => SENDER_HEADERS.has(header.key))
-      .map(({ key, value }) => ({ key, value })),
+    // ponytail: a lookup that failed (DNS down) stores unverified like any other, and the body
+    // cache keeps it: a missing badge on that message, fixed by clearing the cache. Un-park if
+    // senders are seen unverified for good after an outage.
+    verifiedFrom: verdict.status === 'verified' ? verdict.from : null,
   };
 };
 
@@ -232,6 +231,7 @@ export const fetchBody = async (
   mailbox: string,
   uid: number,
   expectedRawSize: number | undefined,
+  lookupTxt: TxtLookup,
 ): Promise<Result<FetchedBody, MailConnectionFailure>> => {
   if (
     expectedRawSize !== undefined &&
@@ -248,7 +248,7 @@ export const fetchBody = async (
       error: { kind: 'error', detail: 'Message is too large to open safely' },
     };
   }
-  return run({
+  const raw = await run({
     priority: 'user',
     effect: 'read',
     retry: true,
@@ -257,16 +257,19 @@ export const fetchBody = async (
       if (!selectRes.ok) return { ok: false, error: { kind: 'imap', reason: selectRes.reason } };
       const rawRes = await client.fetchRaw(uid);
       if (!rawRes.ok) return { ok: false, error: { kind: 'imap', reason: rawRes.reason } };
-      try {
-        return { ok: true, value: await parseBody(rawRes.value) };
-      } catch (error) {
-        return {
-          ok: false,
-          error: { kind: 'error', detail: error instanceof Error ? error.message : String(error) },
-        };
-      }
+      return rawRes;
     },
   });
+  if (!raw.ok) return raw;
+  // After the task: the connection is not held while DNS answers.
+  try {
+    return { ok: true, value: await parseBody(raw.value, lookupTxt) };
+  } catch (error) {
+    return {
+      ok: false,
+      error: { kind: 'error', detail: error instanceof Error ? error.message : String(error) },
+    };
+  }
 };
 
 /**
@@ -282,6 +285,7 @@ export const fetchBodyAt = async (
   },
   copy: Omit<Location, 'account'>,
   expectedRawSize: number | undefined,
+  lookupTxt: TxtLookup,
   /** The cache this was fetched for has been cleared since (a lock, an address removed): keep nothing. */
   isStale: () => boolean = () => false,
 ): Promise<Result<FetchedBody, MailConnectionFailure>> => {
@@ -292,7 +296,7 @@ export const fetchBodyAt = async (
   if (mark.uidValidity !== copy.uidValidity) {
     return { ok: false, error: { kind: 'error', detail: renumberedText(copy.folder) } };
   }
-  const res = await fetchBody(run, mark.name, copy.uid, expectedRawSize);
+  const res = await fetchBody(run, mark.name, copy.uid, expectedRawSize, lookupTxt);
   if (
     res.ok &&
     !isStale() &&

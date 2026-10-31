@@ -7,6 +7,7 @@ import {
   isTrashed,
   type Message,
   resolveHandles,
+  senderCheckOf,
   toParagraphs,
   VAULT_UID_VALIDITY,
 } from './thread.ts';
@@ -157,5 +158,29 @@ describe('resolveHandles', () => {
       { id: 'mid/<c@x>', thread: threads[1] },
       { id: 'nope', thread: null },
     ]);
+  });
+});
+
+describe('senderCheckOf', () => {
+  it('vouches for the address the reader shows, whatever the case', () => {
+    expect(senderCheckOf('Billing@Stripe.com', 'billing@stripe.com')).toEqual({
+      status: 'verified',
+    });
+  });
+
+  it('does not vouch for a message whose shown sender is another address', () => {
+    // Signed for one mailbox of the domain while the envelope shows another.
+    expect(senderCheckOf('billing@stripe.com', 'ceo@stripe.com')).toEqual({ status: 'unverified' });
+    expect(senderCheckOf('a+news@stripe.com', 'a@stripe.com')).toEqual({ status: 'unverified' });
+  });
+
+  it('does not vouch for a verdict about another domain than the address the server shows', () => {
+    // postal-mime may read a different mailbox from a header than the server's ENVELOPE does (RFC 5322
+    // comments); the shown address is the server's, so a signature for another From vouches for nothing.
+    expect(senderCheckOf('attacker@evil.com', 'ceo@victim.com')).toEqual({ status: 'unverified' });
+  });
+
+  it('has nothing to compare when no signature vouched for a From', () => {
+    expect(senderCheckOf(null, 'billing@stripe.com')).toEqual({ status: 'unverified' });
   });
 });

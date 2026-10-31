@@ -193,8 +193,7 @@ describe('isLoadedByTrust', () => {
     isVerifiedOnly,
   });
   const VERIFIED = { status: 'verified' } as const;
-  const UNCHECKED = { status: 'unchecked', imapHost: 'imap.example.org' } as const;
-  const FAILED = { status: 'failed' } as const;
+  const UNVERIFIED = { status: 'unverified' } as const;
 
   it('loads nothing from a sender nobody trusted', () => {
     expect(isLoadedByTrust(undefined, VERIFIED)).toBe(false);
@@ -202,13 +201,12 @@ describe('isLoadedByTrust', () => {
 
   it('loads only verified messages under a verified-only trust', () => {
     expect(isLoadedByTrust(sender(true), VERIFIED)).toBe(true);
-    expect(isLoadedByTrust(sender(true), UNCHECKED)).toBe(false);
-    expect(isLoadedByTrust(sender(true), FAILED)).toBe(false);
+    expect(isLoadedByTrust(sender(true), UNVERIFIED)).toBe(false);
     expect(isLoadedByTrust(sender(true), undefined)).toBe(false);
   });
 
   it('loads every message showing the address under a trust given through the warning', () => {
-    for (const check of [VERIFIED, UNCHECKED, FAILED, undefined]) {
+    for (const check of [VERIFIED, UNVERIFIED, undefined]) {
       expect(isLoadedByTrust(sender(false), check)).toBe(true);
     }
   });

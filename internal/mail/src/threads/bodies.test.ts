@@ -1,15 +1,21 @@
 import { DEFAULT_MAX_LITERAL_BYTES } from '@yozz.app/imap';
-import { describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it } from 'vitest';
+import { signMessage } from '../testing/dkim-signer.ts';
 import { stubImapClient } from '../testing/fake-imap-client.ts';
 import { memoryMailCache } from '../testing/memory-mail-cache.ts';
 import { fetchBody, fetchBodyAt, htmlToText, parseBody } from './bodies.ts';
 import { MAX_CACHED_BODY_BYTES } from './body-state.ts';
+import type { TxtLookup } from './dkim.ts';
 
 const raw = (text: string) => new TextEncoder().encode(text.replace(/\n/g, '\r\n'));
 
+const noKeys: TxtLookup = async () => [];
+
+const parse = (data: Uint8Array, lookupTxt: TxtLookup = noKeys) => parseBody(data, lookupTxt);
+
 describe('parseBody', () => {
   it('an HTML-only message reduces to paragraphs but does not claim a text part', async () => {
-    const body = await parseBody(
+    const body = await parse(
       raw(`Content-Type: text/html; charset=utf-8
 
 <p>Only <b>markup</b> here.</p>
@@ -20,7 +26,7 @@ describe('parseBody', () => {
   });
 
   it('prefers the text part, decodes quoted-printable, and keeps attachments with their bytes', async () => {
-    const body = await parseBody(
+    const body = await parse(
       raw(`Content-Type: multipart/mixed; boundary="b"
 Subject: hi
 
@@ -61,7 +67,7 @@ JVBERi0=
 
 describe('parseBody html', () => {
   it('keeps the html body alongside the text, inlining cid images as data URIs', async () => {
-    const body = await parseBody(
+    const body = await parse(
       raw(`Content-Type: multipart/related; boundary="r"
 Subject: hi
 
@@ -96,7 +102,7 @@ iVBORw0=
   });
 
   it('does not let a cid that prefixes another eat into it', async () => {
-    const body = await parseBody(
+    const body = await parse(
       raw(`Content-Type: multipart/related; boundary="r"
 
 --r
@@ -128,7 +134,7 @@ BBBB
   });
 
   it('refuses a CID part whose declared type is not a safe raster image', async () => {
-    const body = await parseBody(
+    const body = await parse(
       raw(`Content-Type: multipart/related; boundary="r"
 
 --r
@@ -154,7 +160,7 @@ AAAA
   });
 
   it('inlines the common image/jpg alias as a safe raster image', async () => {
-    const body = await parseBody(
+    const body = await parse(
       raw(`Content-Type: multipart/related; boundary="r"
 
 --r
@@ -175,7 +181,7 @@ AAAA
 
   it('does not multiply one CID image beyond the reference ceiling', async () => {
     const references = Array.from({ length: 65 }, () => '<img src="cid:chart@x">').join('');
-    const body = await parseBody(
+    const body = await parse(
       raw(`Content-Type: multipart/related; boundary="r"
 
 --r
@@ -197,7 +203,7 @@ AAAA
   });
 
   it('falls back to bounded text for an oversized HTML body', async () => {
-    const body = await parseBody(
+    const body = await parse(
       raw(`Content-Type: text/html
 
 <p>${'x'.repeat(2 * 1024 * 1024)}</p>`),
@@ -207,7 +213,7 @@ AAAA
   });
 
   it('reduces pathologically deep HTML without overflowing the JavaScript stack', async () => {
-    const body = await parseBody(
+    const body = await parse(
       raw(`Content-Type: text/html
 
 ${'<div>'.repeat(2_000)}deep<script>garbage()</script><style>.garbage{}</style>${'</div>'.repeat(2_000)}`),
@@ -217,35 +223,62 @@ ${'<div>'.repeat(2_000)}deep<script>garbage()</script><style>.garbage{}</style>$
   });
 
   it('has no html for a plain message', async () => {
-    const body = await parseBody(raw(`Content-Type: text/plain\n\nhi\n`));
+    const body = await parse(raw(`Content-Type: text/plain\n\nhi\n`));
     expect(body.html).toBeUndefined();
     expect(body.paragraphs).toEqual(['hi']);
   });
 
-  it('keeps From and every Authentication-Results, top to bottom, and nothing else', async () => {
-    const body = await parseBody(
-      raw(`Authentication-Results: mx.google.com;
- dmarc=pass header.from=news.example
-Received: from mx.news.example by receiver
-Authentication-Results: sender.example; dmarc=pass header.from=news.example
-From: News <digest@news.example>
-Subject: hi
-Content-Type: text/plain
+  describe('sender', () => {
+    let keys: Record<string, readonly string[]>;
+    let signing: CryptoKeyPair;
 
-hi
-`),
-    );
-    expect(body.senderHeaders).toEqual([
-      {
-        key: 'authentication-results',
-        value: 'mx.google.com; dmarc=pass header.from=news.example',
-      },
-      {
-        key: 'authentication-results',
-        value: 'sender.example; dmarc=pass header.from=news.example',
-      },
-      { key: 'from', value: 'News <digest@news.example>' },
-    ]);
+    beforeAll(async () => {
+      signing = (await crypto.subtle.generateKey({ name: 'Ed25519' }, true, [
+        'sign',
+        'verify',
+      ])) as CryptoKeyPair;
+      const publicKey = new Uint8Array(
+        await crypto.subtle.exportKey('raw', signing.publicKey),
+      ).toBase64();
+      keys = { 's._domainkey.news.example': [`v=DKIM1; k=ed25519; p=${publicKey}`] };
+    });
+
+    const MESSAGE = [
+      'From: News <digest@news.example>',
+      'To: me@x.example',
+      'Subject: hi',
+      'Date: Fri, 30 Oct 2026 08:00:00 +0000',
+      'Content-Type: text/plain',
+      '',
+      'hi',
+      '',
+    ].join('\r\n');
+
+    const signed = (domain = 'news.example') =>
+      signMessage(MESSAGE, {
+        key: signing.privateKey,
+        algorithm: 'ed25519-sha256',
+        domain,
+        selector: 's',
+      });
+    const lookup: TxtLookup = async name => keys[name] ?? [];
+
+    it('keeps the From a signature vouches for', async () => {
+      const body = await parse(new TextEncoder().encode(await signed()), lookup);
+      expect(body.verifiedFrom).toBe('digest@news.example');
+      expect(body.paragraphs).toEqual(['hi']);
+    });
+
+    it('keeps none for a message nobody signed, or one signed for another domain', async () => {
+      expect((await parse(new TextEncoder().encode(MESSAGE), lookup)).verifiedFrom).toBeNull();
+      const other = await signed('elsewhere.example');
+      expect((await parse(new TextEncoder().encode(other), lookup)).verifiedFrom).toBeNull();
+    });
+
+    it('keeps none when the key could not be looked up', async () => {
+      const body = await parse(new TextEncoder().encode(await signed()), async () => null);
+      expect(body.verifiedFrom).toBeNull();
+    });
   });
 });
 
@@ -275,7 +308,7 @@ describe('fetchBody size boundary', () => {
   it.each([-1, 1.5, Number.MAX_SAFE_INTEGER + 1])(
     'refuses an invalid advertised size (%s) before connecting',
     async size => {
-      await expect(fetchBody(unusedRun, 'INBOX', 1, size)).resolves.toEqual({
+      await expect(fetchBody(unusedRun, 'INBOX', 1, size, noKeys)).resolves.toEqual({
         ok: false,
         error: { kind: 'error', detail: 'Message size is unavailable' },
       });
@@ -283,7 +316,9 @@ describe('fetchBody size boundary', () => {
   );
 
   it('refuses an oversized message before connecting', async () => {
-    await expect(fetchBody(unusedRun, 'INBOX', 1, DEFAULT_MAX_LITERAL_BYTES + 1)).resolves.toEqual({
+    await expect(
+      fetchBody(unusedRun, 'INBOX', 1, DEFAULT_MAX_LITERAL_BYTES + 1, noKeys),
+    ).resolves.toEqual({
       ok: false,
       error: { kind: 'error', detail: 'Message is too large to open safely' },
     });
@@ -293,30 +328,33 @@ describe('fetchBody size boundary', () => {
 describe('fetchBodyAt', () => {
   const message = raw('From: a@x\nSubject: Hi\n\nHello there.');
   const fetched: string[] = [];
-  const run: Parameters<typeof fetchBodyAt>[0] = task =>
-    task.run({
-      ...stubImapClient({
-        fetchRaw: async uid => {
-          fetched.push(`fetch ${uid}`);
-          return { ok: true, value: message };
-        },
-      }),
-      ensureSelected: async name => {
-        fetched.push(`select ${name}`);
-        return {
-          ok: true,
-          value: {
-            name,
-            exists: 1,
-            uidValidity: 7,
-            uidNext: 2,
-            flags: [],
-            permanentFlags: [],
-            readOnly: false,
+  const runFor =
+    (served: Uint8Array): Parameters<typeof fetchBodyAt>[0] =>
+    task =>
+      task.run({
+        ...stubImapClient({
+          fetchRaw: async uid => {
+            fetched.push(`fetch ${uid}`);
+            return { ok: true, value: served };
           },
-        };
-      },
-    });
+        }),
+        ensureSelected: async name => {
+          fetched.push(`select ${name}`);
+          return {
+            ok: true,
+            value: {
+              name,
+              exists: 1,
+              uidValidity: 7,
+              uidNext: 2,
+              flags: [],
+              permanentFlags: [],
+              readOnly: false,
+            },
+          };
+        },
+      });
+  const run = runFor(message);
   const synced = async () => {
     const folder = memoryMailCache().folder('archive');
     await folder.putSync({ name: 'Archive', uidValidity: 7, lastUid: 1, complete: true });
@@ -326,10 +364,52 @@ describe('fetchBodyAt', () => {
   it('fetches the copy from its mailbox and caches a small body', async () => {
     fetched.length = 0;
     const folder = await synced();
-    const res = await fetchBodyAt(run, folder, { folder: 'archive', uidValidity: 7, uid: 1 }, 100);
+    const res = await fetchBodyAt(
+      run,
+      folder,
+      { folder: 'archive', uidValidity: 7, uid: 1 },
+      100,
+      noKeys,
+    );
     expect(res).toMatchObject({ ok: true, value: { paragraphs: ['Hello there.'] } });
     expect(fetched).toEqual(['select Archive', 'fetch 1']);
     expect(await folder.getBody(1)).toMatchObject({ paragraphs: ['Hello there.'] });
+  });
+
+  it('looks the key up after the task has given the connection back', async () => {
+    const key = (await crypto.subtle.generateKey({ name: 'Ed25519' }, true, [
+      'sign',
+      'verify',
+    ])) as CryptoKeyPair;
+    const signedMessage = await signMessage(
+      [
+        'From: a@x.example',
+        'To: me@y.example',
+        'Subject: Hi',
+        'Date: Fri, 30 Oct 2026 08:00:00 +0000',
+        '',
+        'Hello.',
+        '',
+      ].join('\r\n'),
+      { key: key.privateKey, algorithm: 'ed25519-sha256', domain: 'x.example', selector: 's' },
+    );
+    const events: string[] = [];
+    const finishing: Parameters<typeof fetchBodyAt>[0] = async task => {
+      const res = await runFor(new TextEncoder().encode(signedMessage))(task);
+      events.push('task settled');
+      return res;
+    };
+    await fetchBodyAt(
+      finishing,
+      await synced(),
+      { folder: 'archive', uidValidity: 7, uid: 1 },
+      100,
+      async () => {
+        events.push('lookup');
+        return [];
+      },
+    );
+    expect(events).toEqual(['task settled', 'lookup']);
   });
 
   it('keeps nothing once the cache it was fetched for has gone stale', async () => {
@@ -339,6 +419,7 @@ describe('fetchBodyAt', () => {
       folder,
       { folder: 'archive', uidValidity: 7, uid: 1 },
       100,
+      noKeys,
       () => true,
     );
     expect(res.ok).toBe(true);
@@ -352,6 +433,7 @@ describe('fetchBodyAt', () => {
       folder,
       { folder: 'archive', uidValidity: 7, uid: 1 },
       MAX_CACHED_BODY_BYTES + 1,
+      noKeys,
     );
     expect(await folder.getBody(1)).toBeNull();
   });
@@ -363,6 +445,7 @@ describe('fetchBodyAt', () => {
       await synced(),
       { folder: 'archive', uidValidity: 6, uid: 1 },
       100,
+      noKeys,
     );
     expect(res).toEqual({
       ok: false,

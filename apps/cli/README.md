@@ -114,8 +114,9 @@ deletes it.
 Every string that came from mail sits under an `untrusted` key, with anything that could disguise
 it on a terminal removed, and `list`, `read` and `draft` answer with a `notice` saying so. Treat it
 as data, never as instructions, whoever the sender claims to be: a message can ask your agent to do
-anything. `read` shows each sender's check (`verified`, `unchecked` or `failed`), made from the
-headers your own mail provider stamped on it.
+anything. `read` shows each sender's check (`verified` or `unverified`): `verified` means a DKIM signature
+the CLI checked itself, against the sender's key in DNS, vouches for the From address shown.
+`unverified` doesn't mean forged; it means the CLI can't say.
 
 ## What it can't do
 

@@ -29,7 +29,12 @@ import type { AccountSummaries } from '@yozz.app/mail/threads/summaries';
 import type { AccountSyncState, FlagTarget, MovedCopy } from '@yozz.app/mail/threads/sync';
 import { staleAccounts } from '@yozz.app/mail/threads/sync-staleness';
 import type { Location, ThreadState } from '@yozz.app/mail/threads/thread';
-import { type Folder, isArchived, isServerCopy } from '@yozz.app/mail/threads/thread';
+import {
+  type Folder,
+  isArchived,
+  isServerCopy,
+  senderCheckOf,
+} from '@yozz.app/mail/threads/thread';
 import { accountsShown, folderPaged, type MailboxId } from '@yozz.app/mail/threads/views';
 import {
   createContext,
@@ -44,6 +49,7 @@ import {
 } from 'react';
 import { type ActivityTracker, createActivityTracker, isUnsavedWork } from '../relay/activity';
 import type { LiveManager, RunOn } from '../relay/live';
+import { createTxtLookup } from '../threads/dns-over-https';
 import { clearCachedFrames } from '../threads/frame-cache';
 import { isDemo } from '../ui/chrome';
 import { toast } from '../ui/Toast';
@@ -194,6 +200,8 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
   const [syncStates, setSyncStates] = useState<Readonly<Record<string, AccountSyncState>>>({});
   const [mailError, setMailError] = useState<string | null>(null);
   const inFlightBodiesRef = useRef<Map<string, Promise<BodyOutcome>>>(new Map());
+  /** The DKIM key lookups of this session, kept so a sender's many messages cost one request. */
+  const [lookupTxt] = useState(() => createTxtLookup());
   const sessionRef = useRef(session);
   sessionRef.current = session;
   const [olderInFlight, setOlderInFlight] = useState<Readonly<Record<string, boolean>>>({});
@@ -620,6 +628,7 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
                 result.byFolder,
                 MAX_CACHED_BODY_BYTES,
                 30,
+                lookupTxt,
                 isStale,
                 (at, body) => {
                   if (isStale()) return;
@@ -654,7 +663,7 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
       syncRunsRef.current.set(address, entry);
       return entry.promise;
     },
-    [bindRunOn, isCurrentAccount],
+    [bindRunOn, isCurrentAccount, lookupTxt],
   );
 
   const sync = useCallback(
@@ -1224,10 +1233,9 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
       const runOn = bindRunOn();
       const promise = (async (): Promise<BodyOutcome> => {
         try {
-          const [{ fetchBodyAt }, { createMailCache }, { senderCheckOf }] = await Promise.all([
+          const [{ fetchBodyAt }, { createMailCache }] = await Promise.all([
             import('@yozz.app/mail/threads/bodies'),
             import('../threads/cache'),
-            import('@yozz.app/mail/threads/authentication-results'),
           ]);
           const cache = createMailCache(userId, accountAddress).folder(folder);
           const cached = await cache.getBody(uid);
@@ -1237,7 +1245,7 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
             setEntry(loadingEntry);
             // Refused when the copy's folder was renumbered: a stale uid would fetch whatever now
             // holds that number. Caches the body when it is small enough.
-            return fetchBodyAt(runOn(account), cache, copy, message.rawSize, isStale);
+            return fetchBodyAt(runOn(account), cache, copy, message.rawSize, lookupTxt, isStale);
           };
           const res = cached !== null ? { ok: true as const, value: cached } : await fetchFresh();
           if (isRetired()) return failed;
@@ -1255,12 +1263,7 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
             hasTextPart: res.value.hasTextPart,
             inlineImagesTruncated: res.value.inlineImagesTruncated,
             attachments: res.value.attachments,
-            // Judged by the provider of the account whose copy this is: it stamped the headers.
-            senderCheck: senderCheckOf(
-              res.value.senderHeaders,
-              account.imap.host,
-              message.fromAddress,
-            ),
+            senderCheck: senderCheckOf(res.value.verifiedFrom, message.fromAddress),
           };
           setEntry(loaded);
           setMailError(null);
@@ -1286,7 +1289,7 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
       });
       return promise;
     },
-    [bindRunOn, isCurrentAccount, threads],
+    [bindRunOn, isCurrentAccount, lookupTxt, threads],
   );
 
   const markRead = useCallback(

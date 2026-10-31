@@ -14,6 +14,7 @@ import type {
   RunTask,
 } from '@yozz.app/mail/connection';
 import { describeMailFailure } from '@yozz.app/mail/describe-failure';
+import type { TxtLookup } from '@yozz.app/mail/threads/dkim';
 import * as Console from 'effect/Console';
 import * as Context from 'effect/Context';
 import * as Effect from 'effect/Effect';
@@ -59,6 +60,8 @@ export class Mail extends Context.Service<
     readonly accounts: readonly InboundAddress[];
     /** `@yozz.app/mail`'s port: the account's one connection, opened by its first task. */
     readonly runOn: (account: InboundAddress) => RunTask;
+    /** The DNS side of a sender check. */
+    readonly lookupTxt: TxtLookup;
     /** Runs `f` on the account's connection; a failure names the address. */
     readonly use: <A>(
       account: InboundAddress,
@@ -251,6 +254,7 @@ export class Mail extends Context.Service<
           identities,
           accounts: identities.filter(isInbound),
           runOn,
+          lookupTxt: servers.lookupTxt,
           use,
           waitForInbox: Effect.fn('Mail.waitForInbox')(function* (account, lastUid) {
             const hasIdle = yield* Effect.tryPromise(signal =>

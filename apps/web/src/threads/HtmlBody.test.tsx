@@ -331,8 +331,7 @@ describe('HtmlBody remembered consent', () => {
   });
 
   const VERIFIED = { status: 'verified' } as const;
-  const FAILED = { status: 'failed' } as const;
-  const UNCHECKED = { status: 'unchecked', imapHost: 'imap.example.org' } as const;
+  const UNVERIFIED = { status: 'unverified' } as const;
   const senderRecord = (rows: Map<string, { plaintext: string }>, id: string) =>
     JSON.parse(rows.get(id)?.plaintext ?? 'null');
   const dialogText = () => document.querySelector('[role="alertdialog"]')?.textContent ?? '';
@@ -375,26 +374,25 @@ describe('HtmlBody remembered consent', () => {
     const forged = await mountWithheld(html, {
       store,
       messageId: 'mid/<m3@sender.example>',
-      senderCheck: FAILED,
+      senderCheck: UNVERIFIED,
     });
     await settle();
     expect(loaded(forged.srcdoc())).toBe(false);
     expect(forged.button('Load remote images')).toBeDefined();
     await act(async () => forged.button('Always from news@sender.example')?.click());
-    expect(dialogText()).toContain('This message may be forged');
+    expect(dialogText()).toContain("YOZZ couldn't verify this sender.");
     forged.container.remove();
   });
 
-  it('warns before trusting a sender whose message did not pass, and Cancel trusts nobody', async () => {
+  it('warns before trusting an unverified sender, and Cancel trusts nobody', async () => {
     const { store, rows, key } = fakeRecordStore();
-    const reader = await mountWithheld(html, { store, senderCheck: FAILED });
+    const reader = await mountWithheld(html, { store, senderCheck: UNVERIFIED });
     await settle();
     await act(async () => reader.button('Always from news@sender.example')?.click());
-    expect(dialogText()).toContain('This message may be forged');
-    expect(dialogText()).toContain('It failed sender verification.');
+    expect(dialogText()).toContain('Always load images from news@sender.example?');
+    expect(dialogText()).toContain("YOZZ couldn't verify this sender.");
     expect(dialogText()).toContain('Fakes from this address would load images too.');
-    // The safer answer is not outshone by the risky one.
-    expect(reader.dialogButton('Always load')?.className).not.toContain('bg-signal');
+    expect(dialogText()).not.toContain('forged');
     await act(async () => reader.dialogButton('Cancel')?.click());
     await settle();
     expect(rows.has(key(IMAGE_SENDER_RECORD_TYPE, 'news@sender.example'))).toBe(false);
@@ -413,7 +411,7 @@ describe('HtmlBody remembered consent', () => {
     reader.container.remove();
 
     // Every message showing that From now loads, verified or not.
-    for (const senderCheck of [VERIFIED, UNCHECKED, FAILED]) {
+    for (const senderCheck of [VERIFIED, UNVERIFIED]) {
       const next = await mountWithheld(html, {
         store,
         messageId: `mid/<${senderCheck.status}@sender.example>`,
@@ -437,7 +435,7 @@ describe('HtmlBody remembered consent', () => {
         return store.put(input);
       },
     };
-    const reader = await mountWithheld(html, { store: flaky, senderCheck: FAILED });
+    const reader = await mountWithheld(html, { store: flaky, senderCheck: UNVERIFIED });
     await settle();
     problems.length = 0;
     await act(async () => reader.button('Always from news@sender.example')?.click());
@@ -460,17 +458,6 @@ describe('HtmlBody remembered consent', () => {
     reader.container.remove();
   });
 
-  it("names the provider it can't check senders on, and asks with a plain decision", async () => {
-    const reader = await mountWithheld(html, { senderCheck: UNCHECKED });
-    await act(async () => reader.button('Always from news@sender.example')?.click());
-    expect(dialogText()).toContain('Always load images from news@sender.example?');
-    expect(dialogText()).toContain("YOZZ can't verify senders on imap.example.org.");
-    expect(dialogText()).not.toContain('forged');
-    expect(reader.dialogButton('Always load')?.className).toContain('bg-signal');
-    await act(async () => reader.dialogButton('Cancel')?.click());
-    reader.container.remove();
-  });
-
   it('widens a verified-only trust given again through the warning', async () => {
     const { store, rows, key } = fakeRecordStore();
     rows.set(key(IMAGE_SENDER_RECORD_TYPE, 'news@sender.example'), {
@@ -478,7 +465,7 @@ describe('HtmlBody remembered consent', () => {
       plaintext: JSON.stringify({ address: 'news@sender.example', addedAt: 1 }),
       revision: 1,
     });
-    const reader = await mountWithheld(html, { store, senderCheck: UNCHECKED });
+    const reader = await mountWithheld(html, { store, senderCheck: UNVERIFIED });
     await settle();
     expect(loaded(reader.srcdoc())).toBe(false);
     await act(async () => reader.button('Always from news@sender.example')?.click());
@@ -512,13 +499,13 @@ describe('HtmlBody remembered consent', () => {
     const unverified = await mountWithheld(html, {
       store,
       fromAddress: 'other@sender.example',
-      senderCheck: FAILED,
+      senderCheck: UNVERIFIED,
     });
     await settle();
     await act(async () => unverified.button('Load remote images')?.click());
     await settle();
     await act(async () => unverified.button('Always from other@sender.example')?.click());
-    expect(dialogText()).toContain('This message may be forged');
+    expect(dialogText()).toContain("YOZZ couldn't verify this sender.");
     await act(async () => unverified.dialogButton('Cancel')?.click());
     unverified.container.remove();
   });

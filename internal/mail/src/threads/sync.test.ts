@@ -31,6 +31,8 @@ const fakeClient = {
   create,
 } as unknown as MailClient;
 
+const noKeys = async () => [];
+
 const run = <T>(task: MailTask<T>): Promise<Result<T, MailConnectionFailure>> =>
   task.run(fakeClient);
 
@@ -439,6 +441,7 @@ describe('prefetchBodies', () => {
       { inbox: { uidValidity: 1, summaries: cache.read('inbox').summaries } },
       1024 * 1024,
       30,
+      noKeys,
     );
     await vi.waitFor(() => expect(fetchRaw).toHaveBeenCalledTimes(1));
     expect(fetchRaw).toHaveBeenCalledWith(1);
@@ -468,6 +471,7 @@ describe('prefetchBodies', () => {
       { inbox: { uidValidity: 1, summaries: cache.read('inbox').summaries } },
       1024 * 1024,
       2,
+      noKeys,
     );
     await vi.waitFor(() => expect(fetchRaw).toHaveBeenCalledTimes(2));
     expect(fetchRaw.mock.calls.map(([uid]) => uid)).toEqual([2, 1]);
@@ -492,6 +496,7 @@ describe('prefetchBodies', () => {
       { inbox: { uidValidity: 1, summaries: cache.read('inbox').summaries } },
       1024 * 1024,
       30,
+      noKeys,
       () => false,
       onBody,
     );

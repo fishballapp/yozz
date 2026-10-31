@@ -147,7 +147,7 @@ const threadsWithBody = Effect.fnUntraced(function* (messageId: string) {
   const fetched = yield* usingCache(async () => {
     const body = await folder.getBody(copy.uid);
     return body === null
-      ? fetchBodyAt(mail.runOn(account), folder, copy, message.rawSize)
+      ? fetchBodyAt(mail.runOn(account), folder, copy, message.rawSize, mail.lookupTxt)
       : { ok: true as const, value: body };
   });
   if (!fetched.ok) {

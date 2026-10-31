@@ -9,6 +9,7 @@ import { ensureMailbox, resolveFolders } from '../addresses/mailboxes.ts';
 import type { MailConnectionFailure, Result, RunTask } from '../connection.ts';
 import { type FetchedBody, parseBody } from './bodies.ts';
 import type { FolderCache, FolderSync, MailCache } from './cache.ts';
+import type { TxtLookup } from './dkim.ts';
 import type { FolderSummaries } from './summaries.ts';
 import { FOLDERS, type Folder, type Location } from './thread.ts';
 
@@ -404,6 +405,7 @@ export const prefetchBodies = (
   byFolder: FolderSummaries,
   ceilingBytes: number,
   perFolder: number,
+  lookupTxt: TxtLookup,
   isStale: () => boolean = () => false,
   onBody: (at: Omit<Location, 'account'>, body: FetchedBody) => void = () => {},
 ): void => {
@@ -423,29 +425,34 @@ export const prefetchBodies = (
         if (summary.size === null || summary.size > ceilingBytes) continue;
         if (cachedUids.has(summary.uid)) continue;
         queued += 1;
-        void run({
-          priority: 'background',
-          effect: 'read',
-          retry: true,
-          run: async client => {
-            if (isStale()) return { ok: true, value: undefined };
-            const selected = await client.ensureSelected(mark.name);
-            if (!selected.ok) {
-              return { ok: false, error: { kind: 'imap', reason: selected.reason } };
-            }
-            const raw = await client.fetchRaw(summary.uid);
-            if (!raw.ok) return { ok: false, error: { kind: 'imap', reason: raw.reason } };
-            if (isStale()) return { ok: true, value: undefined };
-            try {
-              const body = await parseBody(raw.value);
-              await folderCache.putBody(summary.uid, body);
-              onBody({ folder, uidValidity, uid: summary.uid }, body);
-            } catch {
-              // Best effort.
-            }
-            return { ok: true, value: undefined };
-          },
-        });
+        void (async () => {
+          const raw = await run({
+            priority: 'background',
+            effect: 'read',
+            retry: true,
+            run: async client => {
+              if (isStale()) return { ok: true, value: null };
+              const selected = await client.ensureSelected(mark.name);
+              if (!selected.ok) {
+                return { ok: false, error: { kind: 'imap', reason: selected.reason } };
+              }
+              const fetched = await client.fetchRaw(summary.uid);
+              if (!fetched.ok) {
+                return { ok: false, error: { kind: 'imap', reason: fetched.reason } };
+              }
+              return fetched;
+            },
+          });
+          // After the task: the connection is not held while DNS answers.
+          if (!raw.ok || raw.value === null || isStale()) return;
+          try {
+            const body = await parseBody(raw.value, lookupTxt);
+            await folderCache.putBody(summary.uid, body);
+            onBody({ folder, uidValidity, uid: summary.uid }, body);
+          } catch {
+            // Best effort.
+          }
+        })();
       }
     })();
   }

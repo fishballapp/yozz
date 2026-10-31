@@ -11,7 +11,7 @@ export class DeviceDbError extends Error {
 }
 
 const DB_NAME = 'yozz-device-state';
-const DB_VERSION = 8;
+const DB_VERSION = 9;
 
 type StoreSpec = { readonly name: string; readonly keyPath: string | string[] };
 
@@ -33,6 +33,8 @@ const REKEYED: readonly { readonly since: number; readonly names: readonly strin
   { since: 6, names: [STORES.mailBodies.name] },
   // A body without its sender headers could never be authenticated; refetched, it can.
   { since: 8, names: [STORES.mailBodies.name] },
+  // A body without its DKIM verdict could never be checked; refetched, it can.
+  { since: 9, names: [STORES.mailBodies.name] },
 ];
 
 type StoreName = (typeof STORES)[keyof typeof STORES]['name'];

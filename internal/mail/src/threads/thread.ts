@@ -18,24 +18,25 @@ export type Recipient = { readonly name?: string; readonly address: string };
 export type BodyStatus = 'pending' | 'loading' | 'failed';
 
 /**
- * Whether the receiving account's provider vouched for a message's From (`senderCheckOf`).
- * `unchecked` is a blind spot: the provider is not one YOZZ can read, so it said nothing either
- * way. `failed` is a forgery signal: the provider's verdict is missing or another, its
- * `header.from` names another domain, the From is not one mailbox, or it is not the address the
- * reader shows, so a verdict never vouches for a sender other than the one on screen.
+ * Whether a DKIM signature the reader checked itself (`verifySender`) vouches for a message's From,
+ * and for the address the reader shows. `unverified` is not `forged`: a forger can strip a
+ * signature, and lists and forwards break real ones, so it only means YOZZ cannot say.
  */
-export type SenderCheck =
-  | { readonly status: 'verified' }
-  | { readonly status: 'unchecked'; readonly imapHost: string }
-  | { readonly status: 'failed' };
+export type SenderCheck = { readonly status: 'verified' } | { readonly status: 'unverified' };
 
 /**
  * A sender as compared: the whole address, lowercased. The domain is case-insensitive by RFC 5321;
- * the local part is folded too, because no provider YOZZ authenticates for treats it otherwise,
- * and DMARC vouches for the domain only, so case in the local part could protect nothing. No other
+ * the local part is folded too, because no mail server treats it otherwise in practice, and DKIM
+ * vouches for the domain, so case in the local part could protect nothing. No other
  * normalisation: `a+news@` and `a@` are two senders.
  */
 export const senderKeyOf = (address: string): string => address.trim().toLowerCase();
+
+/** Verified only for the address the reader shows: a signature for another From vouches for nothing here. */
+export const senderCheckOf = (verifiedFrom: string | null, shownFrom: string): SenderCheck =>
+  verifiedFrom !== null && senderKeyOf(verifiedFrom) === senderKeyOf(shownFrom)
+    ? { status: 'verified' }
+    : { status: 'unverified' };
 
 export type Message = {
   id: string;
@@ -56,7 +57,7 @@ export type Message = {
   hasTextPart?: boolean;
   /** A CID allocation ceiling left one or more inline images unavailable. */
   inlineImagesTruncated?: boolean;
-  /** Whether the receiving account's own provider vouched for From. Read with the body. */
+  /** Whether DKIM vouches for From. Read with the body. */
   senderCheck?: SenderCheck;
   bodyStatus?: BodyStatus;
   /** RFC822.SIZE from the summary fetch; checked before requesting the raw message. */

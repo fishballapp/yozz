@@ -60,27 +60,9 @@ const VaultActionButton = ({
   );
 };
 
-/** Why YOZZ cannot vouch for an unverified sender, said before trusting one anyway. */
-const warningOf = (check: Exclude<SenderCheck, { status: 'verified' }>, address: string) => {
-  const cost = 'Fakes from this address would load images too.';
-  if (check.status === 'unchecked') {
-    return {
-      title: `Always load images from ${address}?`,
-      description: `YOZZ can't verify senders on ${check.imapHost}. ${cost}`,
-      confirmVariant: 'primary',
-    } as const;
-  }
-  return {
-    title: 'This message may be forged',
-    description: `It failed sender verification. ${cost}`,
-    // The safer answer is Cancel, so Always load is no louder than it.
-    confirmVariant: 'ghost',
-  } as const;
-};
-
 /**
- * "Always from <address>": one click for a sender the provider verified, which trusts only their
- * verified mail; for any other, a warning first, and the trust covers all mail showing that From.
+ * "Always from <address>": one click for a verified sender, which trusts only their verified mail;
+ * for an unverified one, a warning first, and the trust covers all mail showing that From.
  */
 const AlwaysFromButton = ({
   address,
@@ -111,7 +93,6 @@ const AlwaysFromButton = ({
       />
     );
   }
-  const warning = warningOf(check, address);
   return (
     <ConfirmDialog
       trigger={
@@ -124,10 +105,10 @@ const AlwaysFromButton = ({
           {label}
         </Button>
       }
-      title={warning.title}
-      description={warning.description}
+      title={`Always load images from ${address}?`}
+      description="YOZZ couldn't verify this sender. Fakes from this address would load images too."
       confirmLabel="Always load"
-      confirmVariant={warning.confirmVariant}
+      confirmVariant="primary"
       busyLabel="Saving…"
       onConfirm={async () => {
         setError(null);

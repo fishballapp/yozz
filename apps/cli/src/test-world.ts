@@ -230,11 +230,15 @@ const browserOpening = (opened: Deferred.Deferred<string>) =>
 /** A mail server in memory: the fake IMAP or SMTP server. */
 type FakeServer = { readonly open: () => MailSocket };
 
-/** Mail servers by host name, each in memory; any other host cannot be reached. */
-const mailServersOf = (servers: Readonly<Record<string, FakeServer>>) =>
+/** Mail servers by host name, each in memory; any other host cannot be reached. `dns`: TXT records by name. */
+const mailServersOf = (
+  servers: Readonly<Record<string, FakeServer>>,
+  dns: Readonly<Record<string, readonly string[]>>,
+) =>
   Layer.succeed(
     MailServers,
     MailServers.of({
+      lookupTxt: async name => dns[name] ?? [],
       open: async ({ host }) => {
         const server = servers[host];
         return server === undefined
@@ -253,6 +257,7 @@ export const runCli = Effect.fnUntraced(function* (
     env = {},
     browser,
     servers = {},
+    dns = {},
     stdin,
   }: {
     readonly fetch: typeof globalThis.fetch;
@@ -261,6 +266,8 @@ export const runCli = Effect.fnUntraced(function* (
     readonly env?: Record<string, string | undefined>;
     readonly browser?: Deferred.Deferred<string>;
     readonly servers?: Readonly<Record<string, FakeServer>>;
+    /** TXT records by name, for the DKIM keys a sender check reads. */
+    readonly dns?: Readonly<Record<string, readonly string[]>>;
     /** What the command reads on stdin. */
     readonly stdin?: string;
   },
@@ -272,7 +279,7 @@ export const runCli = Effect.fnUntraced(function* (
       Layer.mergeAll(
         FetchHttpClient.layer.pipe(Layer.provide(Layer.succeed(FetchHttpClient.Fetch, fetch))),
         CliLayer,
-        mailServersOf(servers),
+        mailServersOf(servers, dns),
         browser === undefined ? Layer.empty : browserOpening(browser),
         stdin === undefined
           ? Layer.empty

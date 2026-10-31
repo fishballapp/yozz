@@ -4,6 +4,7 @@ import * as Effect from 'effect/Effect';
 import * as Exit from 'effect/Exit';
 import * as FileSystem from 'effect/FileSystem';
 import * as Path from 'effect/Path';
+import { seal, writePrivateFile } from '../files.ts';
 import { makeFakeImapServer } from '../mail/fake-imap-server.ts';
 import { ADDRESS, inbound, mail, makeMailWorld } from '../mail/mail-world.ts';
 import { failureOf, runCli, USER_ID } from '../test-world.ts';
@@ -171,6 +172,62 @@ layer(NodeServices.layer)(it => {
             'Someone else entirely.',
           );
         }),
+    );
+
+    it.effect('reads a body cached before the DKIM check as absent, and fetches it again', () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const dir = yield* fs.makeTempDirectoryScoped();
+        const key = yield* Effect.promise(() =>
+          crypto.subtle.generateKey({ name: 'AES-GCM', length: 256 }, false, [
+            'encrypt',
+            'decrypt',
+          ]),
+        );
+        const cache = yield* accountCache({ dir, key, account: ADDRESS });
+        const inbox = cache.mail.folder('inbox');
+        yield* Effect.promise(() =>
+          inbox.putSync({ name: 'INBOX', uidValidity: 100, lastUid: 1, complete: true }),
+        );
+        // A body as the CLI wrote it before it checked DKIM: the sender's headers, no verdict.
+        const name = path.join('bodies', 'inbox-100-1.bin');
+        yield* fs.makeDirectory(path.join(dir, 'bodies'), { recursive: true });
+        const plaintext = new TextEncoder().encode(
+          JSON.stringify({
+            paragraphs: ['Old.'],
+            hasTextPart: true,
+            inlineImagesTruncated: false,
+            attachments: [],
+            senderHeaders: [{ key: 'from', value: 'a@x' }],
+          }),
+        );
+        const content = yield* seal({
+          key,
+          additionalData: new TextEncoder().encode(
+            JSON.stringify(['yozz-cli-cache', ADDRESS, name]),
+          ),
+          plaintext,
+        });
+        yield* writePrivateFile(path.join(dir, name), content);
+
+        expect(yield* Effect.promise(() => inbox.getBody(1))).toBeNull();
+        expect(yield* fs.exists(path.join(dir, name))).toBe(false);
+        // A body with a verdict, verified or not, is kept.
+        yield* Effect.promise(() =>
+          inbox.putBody(1, {
+            paragraphs: ['New.'],
+            hasTextPart: true,
+            inlineImagesTruncated: false,
+            attachments: [],
+            verifiedFrom: null,
+          }),
+        );
+        expect(yield* Effect.promise(() => inbox.getBody(1))).toMatchObject({
+          paragraphs: ['New.'],
+          verifiedFrom: null,
+        });
+      }),
     );
 
     it.effect('fails a write the disk refuses as a UsageError, not a defect', () =>

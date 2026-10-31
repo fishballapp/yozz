@@ -86,7 +86,8 @@ const BodySchema = Schema.Struct({
       content: Schema.optionalKey(Schema.Uint8ArrayFromBase64),
     }),
   ),
-  senderHeaders: Schema.Array(Schema.Struct({ key: Schema.String, value: Schema.String })),
+  /** A body cached before the DKIM check has none, so it no longer decodes and is fetched again. */
+  verifiedFrom: NullableString,
 });
 
 const AccountFileSchema = Schema.Struct({

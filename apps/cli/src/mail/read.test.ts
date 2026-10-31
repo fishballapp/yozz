@@ -6,7 +6,7 @@ import * as FileSystem from 'effect/FileSystem';
 import * as Path from 'effect/Path';
 import { failureOf, runCli } from '../test-world.ts';
 import { safeFileName } from './attachments.ts';
-import { mail, makeMailWorld, SECOND } from './mail-world.ts';
+import { mail, makeMailWorld, SECOND, signedByStripe } from './mail-world.ts';
 import { mimeTypeOf } from './rows.ts';
 
 const reply = (n: number, to: number, text: string) =>
@@ -54,8 +54,8 @@ layer(NodeServices.layer)(it => {
           {
             id: 'mid/<m1@stripe.com>',
             at: '2026-10-01T08:00:00.000Z',
-            // stripe.com's mail through an unknown provider: nobody vouched either way.
-            sender: 'unchecked',
+            // Nobody signed it, so there is nothing to vouch for the sender.
+            sender: 'unverified',
             attachments: [
               {
                 index: 0,
@@ -80,6 +80,38 @@ layer(NodeServices.layer)(it => {
         expect([...(server.mailboxes.get('INBOX')?.messages ?? [])].map(m => [...m.flags])).toEqual(
           [[], []],
         );
+      }),
+    );
+
+    it.effect('calls a sender verified when their domain signed the message', () =>
+      Effect.gen(function* () {
+        const { world, homes, server, servers } = yield* makeMailWorld();
+        const { message, dns } = yield* Effect.promise(() => signedByStripe(mail(1)));
+        server.deliver('INBOX', message);
+        const read = (zone: typeof dns) =>
+          runCli(['read', 'mid/<m1@stripe.com>'], {
+            fetch: world.fetch,
+            homes,
+            servers,
+            dns: zone,
+          });
+
+        const { stdout } = yield* read(dns);
+        expect(JSON.parse(stdout).threads[0].messages[0].sender).toBe('verified');
+      }),
+    );
+
+    it.effect('calls it unverified when the signer publishes no such key', () =>
+      Effect.gen(function* () {
+        const { world, homes, server, servers } = yield* makeMailWorld();
+        const { message } = yield* Effect.promise(() => signedByStripe(mail(1)));
+        server.deliver('INBOX', message);
+        const { stdout } = yield* runCli(['read', 'mid/<m1@stripe.com>'], {
+          fetch: world.fetch,
+          homes,
+          servers,
+        });
+        expect(JSON.parse(stdout).threads[0].messages[0].sender).toBe('unverified');
       }),
     );
 
