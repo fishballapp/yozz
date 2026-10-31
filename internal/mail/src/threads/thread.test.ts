@@ -8,6 +8,7 @@ import {
   type Message,
   resolveHandles,
   senderCheckOf,
+  signedByOf,
   toParagraphs,
   VAULT_UID_VALIDITY,
 } from './thread.ts';
@@ -162,25 +163,44 @@ describe('resolveHandles', () => {
 });
 
 describe('senderCheckOf', () => {
-  it('vouches for the address the reader shows, whatever the case', () => {
-    expect(senderCheckOf('Billing@Stripe.com', 'billing@stripe.com')).toEqual({
-      status: 'verified',
-    });
+  it('vouches for the address the reader shows, whatever the case, naming who signed', () => {
+    expect(
+      senderCheckOf({ from: 'Billing@Stripe.com', domain: 'stripe.com' }, 'billing@stripe.com'),
+    ).toEqual({ status: 'verified', signedBy: 'stripe.com' });
+  });
+
+  it('names the signing domain even when it is not the From domain', () => {
+    expect(
+      senderCheckOf({ from: 'a@mail.stripe.com', domain: 'stripe.com' }, 'a@mail.stripe.com'),
+    ).toEqual({ status: 'verified', signedBy: 'stripe.com' });
   });
 
   it('does not vouch for a message whose shown sender is another address', () => {
     // Signed for one mailbox of the domain while the envelope shows another.
-    expect(senderCheckOf('billing@stripe.com', 'ceo@stripe.com')).toEqual({ status: 'unverified' });
-    expect(senderCheckOf('a+news@stripe.com', 'a@stripe.com')).toEqual({ status: 'unverified' });
+    const signed = { from: 'billing@stripe.com', domain: 'stripe.com' };
+    expect(senderCheckOf(signed, 'ceo@stripe.com')).toEqual({ status: 'unverified' });
+    expect(
+      senderCheckOf({ from: 'a+news@stripe.com', domain: 'stripe.com' }, 'a@stripe.com'),
+    ).toEqual({ status: 'unverified' });
   });
 
   it('does not vouch for a verdict about another domain than the address the server shows', () => {
     // postal-mime may read a different mailbox from a header than the server's ENVELOPE does (RFC 5322
     // comments); the shown address is the server's, so a signature for another From vouches for nothing.
-    expect(senderCheckOf('attacker@evil.com', 'ceo@victim.com')).toEqual({ status: 'unverified' });
+    expect(
+      senderCheckOf({ from: 'attacker@evil.com', domain: 'evil.com' }, 'ceo@victim.com'),
+    ).toEqual({ status: 'unverified' });
   });
 
   it('has nothing to compare when no signature vouched for a From', () => {
     expect(senderCheckOf(null, 'billing@stripe.com')).toEqual({ status: 'unverified' });
+  });
+});
+
+describe('signedByOf', () => {
+  it('is the signing domain when verified, null otherwise or when not checked yet', () => {
+    expect(signedByOf({ status: 'verified', signedBy: 'stripe.com' })).toBe('stripe.com');
+    expect(signedByOf({ status: 'unverified' })).toBeNull();
+    expect(signedByOf(undefined)).toBeNull();
   });
 });

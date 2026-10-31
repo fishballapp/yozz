@@ -330,7 +330,7 @@ describe('HtmlBody remembered consent', () => {
     reader.container.remove();
   });
 
-  const VERIFIED = { status: 'verified' } as const;
+  const VERIFIED = { status: 'verified', signedBy: 'sender.example' } as const;
   const UNVERIFIED = { status: 'unverified' } as const;
   const senderRecord = (rows: Map<string, { plaintext: string }>, id: string) =>
     JSON.parse(rows.get(id)?.plaintext ?? 'null');

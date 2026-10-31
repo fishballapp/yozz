@@ -22,7 +22,9 @@ export type BodyStatus = 'pending' | 'loading' | 'failed';
  * and for the address the reader shows. `unverified` is not `forged`: a forger can strip a
  * signature, and lists and forwards break real ones, so it only means YOZZ cannot say.
  */
-export type SenderCheck = { readonly status: 'verified' } | { readonly status: 'unverified' };
+export type SenderCheck =
+  | { readonly status: 'verified'; readonly signedBy: string }
+  | { readonly status: 'unverified' };
 
 /**
  * A sender as compared: the whole address, lowercased. The domain is case-insensitive by RFC 5321;
@@ -33,10 +35,21 @@ export type SenderCheck = { readonly status: 'verified' } | { readonly status: '
 export const senderKeyOf = (address: string): string => address.trim().toLowerCase();
 
 /** Verified only for the address the reader shows: a signature for another From vouches for nothing here. */
-export const senderCheckOf = (verifiedFrom: string | null, shownFrom: string): SenderCheck =>
-  verifiedFrom !== null && senderKeyOf(verifiedFrom) === senderKeyOf(shownFrom)
-    ? { status: 'verified' }
+export const senderCheckOf = (
+  dkim: { readonly from: string; readonly domain: string } | null,
+  shownFrom: string,
+): SenderCheck =>
+  dkim !== null && senderKeyOf(dkim.from) === senderKeyOf(shownFrom)
+    ? { status: 'verified', signedBy: dkim.domain }
     : { status: 'unverified' };
+
+/** The domain that signed the message, or null: what every surface (panel, CLI, agent tools) reports of a `SenderCheck`. */
+export const signedByOf = (check: SenderCheck | undefined): string | null =>
+  check?.status === 'verified' ? check.signedBy : null;
+
+/** The one description of `signedBy`, so the CLI and the agent tools cannot word it differently. */
+export const SIGNED_BY_DESCRIPTION =
+  "the domain whose DKIM signature vouches for From, or null when it couldn't be verified. It says who sent the message, not that it is safe.";
 
 export type Message = {
   id: string;

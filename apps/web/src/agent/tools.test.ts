@@ -62,12 +62,13 @@ const handle = (draftKey: string, record = draftRecord()): DraftHandle => ({
 const fakePort = (threads: ThreadState[], overrides: Partial<AgentPort> = {}) => {
   /** Bumped by `endSession`, as a lock or a sign-in bumps the store's. */
   const state = { threads, drafts: [] as DraftHandle[], written: [] as unknown[], generation: 0 };
-  const loadedBody = (body: string[]): BodyOutcome => ({
+  const loadedBody = (body: string[], senderCheck: Message['senderCheck']): BodyOutcome => ({
     status: 'loaded',
     body,
     hasTextPart: true,
     inlineImagesTruncated: false,
     attachments: [],
+    senderCheck,
   });
   const port: AgentPort = {
     addresses: [
@@ -90,7 +91,10 @@ const fakePort = (threads: ThreadState[], overrides: Partial<AgentPort> = {}) =>
         ?.messages.find(m => m.id === messageId);
       if (found === undefined) return { status: 'failed' } as const;
       // The fake never publishes a render: the tool must not need one.
-      return loadedBody(found.bodyStatus === undefined ? found.body : ['Loaded body.']);
+      return loadedBody(
+        found.bodyStatus === undefined ? found.body : ['Loaded body.'],
+        found.senderCheck,
+      );
     }),
     setRead: vi.fn((threadIds: readonly string[]) => new Set(threadIds)),
     setStar: vi.fn((threadIds: readonly string[]) => new Set(threadIds)),
@@ -289,6 +293,27 @@ describe('get_threads', () => {
     expect(message0).not.toHaveProperty('deliveredTo');
     expect(message0).not.toHaveProperty('cc');
     expect(message0).not.toHaveProperty('recipientsOmitted');
+  });
+
+  it('names the domain that signed a message, or null, beside its body', async () => {
+    const mail = thread('s', ['inbox'], {
+      messages: [
+        message('s/1', { senderCheck: { status: 'verified', signedBy: 'example.com' } }),
+        message('s/2', { senderCheck: { status: 'unverified' } }),
+      ],
+    });
+    const { tools } = fakePort([mail]);
+    const result = await call(tools, 'get_threads', { ids: ['s'], body: 'full' });
+    const [newest, oldest] =
+      (result as { threads: { messages: Record<string, unknown>[] }[] }).threads[0]?.messages ?? [];
+    expect(newest).toMatchObject({ id: 's/2', signedBy: null });
+    expect(oldest).toMatchObject({ id: 's/1', signedBy: 'example.com' });
+
+    // Without a body there was nothing to check, and the row says nothing rather than null.
+    const skim = await call(tools, 'get_threads', { ids: ['s'], body: 'none' });
+    const [row] =
+      (skim as { threads: { messages: Record<string, unknown>[] }[] }).threads[0]?.messages ?? [];
+    expect(row).not.toHaveProperty('signedBy');
   });
 
   it('lists a capped number of recipients and says how many it left out', async () => {

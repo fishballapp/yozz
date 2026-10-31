@@ -192,7 +192,7 @@ describe('isLoadedByTrust', () => {
     addedAt: 1,
     isVerifiedOnly,
   });
-  const VERIFIED = { status: 'verified' } as const;
+  const VERIFIED = { status: 'verified', signedBy: 'sender.example' } as const;
   const UNVERIFIED = { status: 'unverified' } as const;
 
   it('loads nothing from a sender nobody trusted', () => {

@@ -54,8 +54,8 @@ layer(NodeServices.layer)(it => {
           {
             id: 'mid/<m1@stripe.com>',
             at: '2026-10-01T08:00:00.000Z',
-            // Nobody signed it, so there is nothing to vouch for the sender.
-            sender: 'unverified',
+            // Nobody signed it, so no domain vouches for the sender.
+            signedBy: null,
             attachments: [
               {
                 index: 0,
@@ -83,7 +83,7 @@ layer(NodeServices.layer)(it => {
       }),
     );
 
-    it.effect('calls a sender verified when their domain signed the message', () =>
+    it.effect('names the domain that signed the message', () =>
       Effect.gen(function* () {
         const { world, homes, server, servers } = yield* makeMailWorld();
         const { message, dns } = yield* Effect.promise(() => signedByStripe(mail(1)));
@@ -97,11 +97,11 @@ layer(NodeServices.layer)(it => {
           });
 
         const { stdout } = yield* read(dns);
-        expect(JSON.parse(stdout).threads[0].messages[0].sender).toBe('verified');
+        expect(JSON.parse(stdout).threads[0].messages[0].signedBy).toBe('stripe.com');
       }),
     );
 
-    it.effect('calls it unverified when the signer publishes no such key', () =>
+    it.effect('has no signing domain when the signer publishes no such key', () =>
       Effect.gen(function* () {
         const { world, homes, server, servers } = yield* makeMailWorld();
         const { message } = yield* Effect.promise(() => signedByStripe(mail(1)));
@@ -111,7 +111,7 @@ layer(NodeServices.layer)(it => {
           homes,
           servers,
         });
-        expect(JSON.parse(stdout).threads[0].messages[0].sender).toBe('unverified');
+        expect(JSON.parse(stdout).threads[0].messages[0].signedBy).toBeNull();
       }),
     );
 

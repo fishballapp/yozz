@@ -190,7 +190,7 @@ layer(NodeServices.layer)(it => {
         yield* Effect.promise(() =>
           inbox.putSync({ name: 'INBOX', uidValidity: 100, lastUid: 1, complete: true }),
         );
-        // A body as the CLI wrote it before it checked DKIM: the sender's headers, no verdict.
+        // A body as the CLI wrote it before it kept the signing domain: the verified From alone.
         const name = path.join('bodies', 'inbox-100-1.bin');
         yield* fs.makeDirectory(path.join(dir, 'bodies'), { recursive: true });
         const plaintext = new TextEncoder().encode(
@@ -199,7 +199,7 @@ layer(NodeServices.layer)(it => {
             hasTextPart: true,
             inlineImagesTruncated: false,
             attachments: [],
-            senderHeaders: [{ key: 'from', value: 'a@x' }],
+            verifiedFrom: 'a@x',
           }),
         );
         const content = yield* seal({
@@ -213,19 +213,19 @@ layer(NodeServices.layer)(it => {
 
         expect(yield* Effect.promise(() => inbox.getBody(1))).toBeNull();
         expect(yield* fs.exists(path.join(dir, name))).toBe(false);
-        // A body with a verdict, verified or not, is kept.
+        // A body with its DKIM record, verified or not, is kept.
         yield* Effect.promise(() =>
           inbox.putBody(1, {
             paragraphs: ['New.'],
             hasTextPart: true,
             inlineImagesTruncated: false,
             attachments: [],
-            verifiedFrom: null,
+            dkim: null,
           }),
         );
         expect(yield* Effect.promise(() => inbox.getBody(1))).toMatchObject({
           paragraphs: ['New.'],
-          verifiedFrom: null,
+          dkim: null,
         });
       }),
     );

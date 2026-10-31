@@ -27,6 +27,7 @@ import {
   type Message,
   newestInbound,
   type Recipient,
+  signedByOf,
 } from '@yozz.app/mail/threads/thread';
 import { fullTime } from '@yozz.app/mail/time';
 import { cn } from 'cn';
@@ -105,6 +106,7 @@ const MessageDetails = ({
 }) => {
   const addressees = addresseesOf(message, ownedAddresses);
   const inboxes = inboxesOf(message);
+  const signedBy = signedByOf(message.senderCheck);
   const summary =
     addressees.length === 0
       ? 'undisclosed recipients'
@@ -160,7 +162,7 @@ const MessageDetails = ({
             aria-label="Message details"
             className="max-h-[var(--available-height)] w-max max-w-[min(36rem,var(--available-width))] overflow-y-auto border border-rule bg-ink-raised px-4 py-3 outline-none"
           >
-            <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-1.5 text-2xs">
+            <dl className="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-4 gap-y-1.5 text-2xs">
               {/* First: across several addresses, which one this landed in is the first question. */}
               {inboxes.length > 0 && (
                 <Detail term="inbox">
@@ -179,6 +181,18 @@ const MessageDetails = ({
                   ownedAddresses={ownedAddresses}
                 />
               </Detail>
+              {/* Received mail whose body has been checked: your own copies and drafts have no sender to check. */}
+              {inboxes.length > 0 && message.senderCheck !== undefined && (
+                <Detail term="signed by">
+                  {signedBy === null ? (
+                    "couldn't be verified"
+                  ) : (
+                    <span className="font-mono text-paper-dim [overflow-wrap:anywhere]">
+                      {signedBy}
+                    </span>
+                  )}
+                </Detail>
+              )}
               {message.replyTo !== undefined && (
                 <Detail term="reply-to">
                   <RecipientList recipients={message.replyTo} ownedAddresses={ownedAddresses} />

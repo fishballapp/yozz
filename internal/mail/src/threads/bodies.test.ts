@@ -263,21 +263,21 @@ ${'<div>'.repeat(2_000)}deep<script>garbage()</script><style>.garbage{}</style>$
       });
     const lookup: TxtLookup = async name => keys[name] ?? [];
 
-    it('keeps the From a signature vouches for', async () => {
+    it('keeps the From a signature vouches for, and the domain that signed it', async () => {
       const body = await parse(new TextEncoder().encode(await signed()), lookup);
-      expect(body.verifiedFrom).toBe('digest@news.example');
+      expect(body.dkim).toEqual({ from: 'digest@news.example', domain: 'news.example' });
       expect(body.paragraphs).toEqual(['hi']);
     });
 
     it('keeps none for a message nobody signed, or one signed for another domain', async () => {
-      expect((await parse(new TextEncoder().encode(MESSAGE), lookup)).verifiedFrom).toBeNull();
+      expect((await parse(new TextEncoder().encode(MESSAGE), lookup)).dkim).toBeNull();
       const other = await signed('elsewhere.example');
-      expect((await parse(new TextEncoder().encode(other), lookup)).verifiedFrom).toBeNull();
+      expect((await parse(new TextEncoder().encode(other), lookup)).dkim).toBeNull();
     });
 
     it('keeps none when the key could not be looked up', async () => {
       const body = await parse(new TextEncoder().encode(await signed()), async () => null);
-      expect(body.verifiedFrom).toBeNull();
+      expect(body.dkim).toBeNull();
     });
   });
 });

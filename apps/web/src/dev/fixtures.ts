@@ -183,7 +183,7 @@ const AUTHORED: readonly Thread[] = [
         at: ago(4 * HOUR),
         // An HTML body from a sender whose DKIM signature checks out.
         hasTextPart: true,
-        senderCheck: { status: 'verified' },
+        senderCheck: { status: 'verified', signedBy: 'duneanddown.example' },
         body: [
           'Our summer savings end tonight. Save up to 30% on sleep favourites, and spend over £49 for a free pack of tealights.',
         ],

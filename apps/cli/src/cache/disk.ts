@@ -86,8 +86,8 @@ const BodySchema = Schema.Struct({
       content: Schema.optionalKey(Schema.Uint8ArrayFromBase64),
     }),
   ),
-  /** A body cached before the DKIM check has none, so it no longer decodes and is fetched again. */
-  verifiedFrom: NullableString,
+  /** A body cached before the signing domain was kept has none, so it no longer decodes and is fetched again. */
+  dkim: Schema.NullOr(Schema.Struct({ from: Schema.String, domain: Schema.String })),
 });
 
 const AccountFileSchema = Schema.Struct({

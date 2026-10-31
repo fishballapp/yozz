@@ -1263,7 +1263,7 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
             hasTextPart: res.value.hasTextPart,
             inlineImagesTruncated: res.value.inlineImagesTruncated,
             attachments: res.value.attachments,
-            senderCheck: senderCheckOf(res.value.verifiedFrom, message.fromAddress),
+            senderCheck: senderCheckOf(res.value.dkim, message.fromAddress),
           };
           setEntry(loaded);
           setMailError(null);

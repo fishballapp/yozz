@@ -19,10 +19,11 @@ export type FetchedBody = {
   readonly inlineImagesTruncated: boolean;
   readonly attachments: Attachment[];
   /**
-   * The From address a DKIM signature vouches for, or null. A property of the message, not of the
-   * account that received the copy; `senderCheckOf` compares it with the address the reader shows.
+   * The From address a DKIM signature vouches for and the domain that signed it, or null. A property
+   * of the message, not of the account that received the copy; `senderCheckOf` compares `from` with
+   * the address the reader shows.
    */
-  readonly verifiedFrom: string | null;
+  readonly dkim: { readonly from: string; readonly domain: string } | null;
 };
 
 // RFC822.SIZE is checked before BODY.PEEK[], then the received byte count again before parsing.
@@ -220,7 +221,7 @@ export const parseBody = async (raw: Uint8Array, lookupTxt: TxtLookup): Promise<
     // ponytail: a lookup that failed (DNS down) stores unverified like any other, and the body
     // cache keeps it: a missing badge on that message, fixed by clearing the cache. Un-park if
     // senders are seen unverified for good after an outage.
-    verifiedFrom: verdict.status === 'verified' ? verdict.from : null,
+    dkim: verdict.status === 'verified' ? { from: verdict.from, domain: verdict.domain } : null,
   };
 };
 
