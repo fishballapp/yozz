@@ -16,10 +16,11 @@ pnpm -F @yozz.app/vault-contract test   # 34. The wire schemas, incl. the strict
 pnpm -F @yozz.app/worker-api test       # 230. Against an ISOLATED LOCAL D1 with every migration
                                     #   applied; migrations.test.ts pins the vault tables' exact
                                     #   column lists, so a new plaintext column is a red test
-pnpm -F @yozz.app/mail test             # 191. Threading, sync over a fake IMAP client, MIME and the
+pnpm -F @yozz.app/mail test             # 310. Threading, sync over a fake IMAP client, MIME and the
                                     #   HTML-to-text reduction (in Node), draft records under CAS,
                                     #   the send state machine (a lost SMTP answer is recorded unconfirmed),
-                                    #   the draft mirror, reply seeding, the record store's marks
+                                    #   the draft mirror, reply seeding, the record store's marks,
+                                    #   DKIM verification (RFC 8463's vectors, a mailauth-signed message)
 pnpm -F @yozz.app/web test              # 575. Vault client + unlock (WebAuthn mocked), the IndexedDB
                                     #   cache, the live connection, the WebMCP tools over a fake
                                     #   port + their mount, ceilings, sanitizer policy, image

@@ -82,6 +82,7 @@ catalog:
   react-native-worklets: 0.10.1
   repojj: ^2026.7.29
   tailwindcss: ^4.3.3
+  tldts: ^7.4.16
   tsdown: ^0.23.0
   typescript: ~7.0.2
   varlock: ^1.23.0

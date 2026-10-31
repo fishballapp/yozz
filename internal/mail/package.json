@@ -17,6 +17,7 @@
     "@yozz.app/vault-contract": "workspace:*",
     "parse5": "catalog:",
     "postal-mime": "catalog:",
+    "tldts": "catalog:",
     "zod": "catalog:"
   },
   "devDependencies": {
