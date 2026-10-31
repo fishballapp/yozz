@@ -31,11 +31,11 @@ import {
 } from '@yozz.app/mail/threads/thread';
 import { fullTime } from '@yozz.app/mail/time';
 import { cn } from 'cn';
-import { Fragment, type ReactNode, useState } from 'react';
+import { Fragment, type ReactNode, useId, useState } from 'react';
 import { withCompose } from '../compose/intent';
 import { useMail } from '../store/MailProvider';
 import { Button, buttonClass } from '../ui/Button';
-import { useChromePref } from '../ui/chrome';
+import { useChromePref, useMediaQuery } from '../ui/chrome';
 import { IconSwitch } from '../ui/IconSwitch';
 import { reportProblem } from '../ui/Toast';
 import { AttachmentList } from './AttachmentList';
@@ -90,9 +90,71 @@ const Detail = ({ term, children }: { term: string; children: ReactNode }) => (
   </div>
 );
 
+/** Who and where, as one table: the popover and the inline block both show these rows. */
+const DetailsTable = ({
+  message,
+  ownedAddresses,
+}: {
+  message: Message;
+  ownedAddresses: readonly string[];
+}) => {
+  const inboxes = inboxesOf(message);
+  const signedBy = signedByOf(message.senderCheck);
+
+  return (
+    <dl className="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-4 gap-y-1.5 text-2xs">
+      {/* First: across several addresses, which one this landed in is the first question. */}
+      {inboxes.length > 0 && (
+        <Detail term="inbox">
+          <span className="font-mono text-paper-dim [overflow-wrap:anywhere]">
+            {inboxes.join(', ')}
+          </span>
+        </Detail>
+      )}
+      <Detail term="from">
+        <RecipientList
+          recipients={[
+            message.fromName.toLowerCase() === message.fromAddress.toLowerCase()
+              ? { address: message.fromAddress }
+              : { name: message.fromName, address: message.fromAddress },
+          ]}
+          ownedAddresses={ownedAddresses}
+        />
+      </Detail>
+      {/* Received mail whose body has been checked: your own copies and drafts have no sender to check. */}
+      {inboxes.length > 0 && message.senderCheck !== undefined && (
+        <Detail term="signed by">
+          {signedBy === null ? (
+            "couldn't be verified"
+          ) : (
+            <span className="font-mono text-paper-dim [overflow-wrap:anywhere]">{signedBy}</span>
+          )}
+        </Detail>
+      )}
+      {message.replyTo !== undefined && (
+        <Detail term="reply-to">
+          <RecipientList recipients={message.replyTo} ownedAddresses={ownedAddresses} />
+        </Detail>
+      )}
+      {message.to !== undefined && message.to.length > 0 && (
+        <Detail term="to">
+          <RecipientList recipients={message.to} ownedAddresses={ownedAddresses} />
+        </Detail>
+      )}
+      {message.cc !== undefined && message.cc.length > 0 && (
+        <Detail term="cc">
+          <RecipientList recipients={message.cc} ownedAddresses={ownedAddresses} />
+        </Detail>
+      )}
+    </dl>
+  );
+};
+
 /**
- * "to me, Alice ▾": To and Cc on one line, the whole line the trigger. The panel answers who and
- * where; the date and subject are already on screen in full.
+ * "to me, Alice ▾": To and Cc on one line, the whole line the trigger. The details answer who and
+ * where; the date and subject are already on screen in full. From `lg` up they float in a popover;
+ * on a phone they open inline, pushing the body down, since a popover would cover the message it
+ * describes.
  */
 const MessageDetails = ({
   message,
@@ -101,44 +163,78 @@ const MessageDetails = ({
 }: {
   message: Message;
   ownedAddresses: readonly string[];
-  /** The reader's scroll area, which the panel stays inside rather than spilling over the list. */
+  /** The reader's scroll area, which the popover stays inside rather than spilling over the list. */
   pane: HTMLElement | null;
 }) => {
+  const isWide = useMediaQuery('(min-width: 64rem)');
+  const [isOpen, setIsOpen] = useState(false);
+  const regionId = useId();
   const addressees = addresseesOf(message, ownedAddresses);
-  const inboxes = inboxesOf(message);
-  const signedBy = signedByOf(message.senderCheck);
   const summary =
     addressees.length === 0
       ? 'undisclosed recipients'
       : addressees.map(entry => (entry === 'me' ? 'me' : (entry.name ?? entry.address))).join(', ');
+  const label = `To ${summary}. Details`;
+  const toLine = (
+    <span className="truncate">
+      to{' '}
+      {addressees.length === 0
+        ? summary
+        : addressees.map((entry, index) => {
+            const addressee = (() => {
+              if (entry === 'me') return <span className="text-paper-dim">me</span>;
+              if (entry.name !== undefined) {
+                return <bdi className="text-paper-dim">{entry.name}</bdi>;
+              }
+              return <span className="font-mono text-paper-dim">{entry.address}</span>;
+            })();
+            return (
+              <Fragment key={entry === 'me' ? 'me' : entry.address}>
+                {index > 0 && ', '}
+                {addressee}
+              </Fragment>
+            );
+          })}
+    </span>
+  );
+  const triggerClass =
+    'group flex max-w-full items-center gap-1 text-left text-2xs text-paper-faint';
+
+  if (!isWide) {
+    return (
+      <>
+        <button
+          type="button"
+          // 44px tall; the negative margin keeps the line box at the text's height.
+          className={cn(triggerClass, '-my-3.5 py-3.5')}
+          aria-label={label}
+          aria-expanded={isOpen}
+          aria-controls={regionId}
+          onClick={() => setIsOpen(wasOpen => !wasOpen)}
+        >
+          {toLine}
+          <CaretDownIcon
+            size={11}
+            aria-hidden
+            className="shrink-0 transition-transform group-aria-expanded:rotate-180 group-aria-expanded:text-paper"
+          />
+        </button>
+        <section
+          id={regionId}
+          aria-label="Message details"
+          hidden={!isOpen}
+          className="mt-4 border border-rule bg-ink-raised px-4 py-3"
+        >
+          <DetailsTable message={message} ownedAddresses={ownedAddresses} />
+        </section>
+      </>
+    );
+  }
 
   return (
     <Popover.Root>
-      <Popover.Trigger
-        // 44px tall on touch; the negative margin keeps the line box at the text's height.
-        className="group -my-3.5 flex max-w-full items-center gap-1 py-3.5 text-left text-2xs text-paper-faint lg:my-0 lg:py-0"
-        aria-label={`To ${summary}. Show details`}
-      >
-        <span className="truncate">
-          to{' '}
-          {addressees.length === 0
-            ? summary
-            : addressees.map((entry, index) => {
-                const addressee = (() => {
-                  if (entry === 'me') return <span className="text-paper-dim">me</span>;
-                  if (entry.name !== undefined) {
-                    return <bdi className="text-paper-dim">{entry.name}</bdi>;
-                  }
-                  return <span className="font-mono text-paper-dim">{entry.address}</span>;
-                })();
-                return (
-                  <Fragment key={entry === 'me' ? 'me' : entry.address}>
-                    {index > 0 && ', '}
-                    {addressee}
-                  </Fragment>
-                );
-              })}
-        </span>
+      <Popover.Trigger className={triggerClass} aria-label={label}>
+        {toLine}
         <CaretDownIcon
           size={11}
           aria-hidden
@@ -162,53 +258,7 @@ const MessageDetails = ({
             aria-label="Message details"
             className="max-h-[var(--available-height)] w-max max-w-[min(36rem,var(--available-width))] overflow-y-auto border border-rule bg-ink-raised px-4 py-3 outline-none"
           >
-            <dl className="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-4 gap-y-1.5 text-2xs">
-              {/* First: across several addresses, which one this landed in is the first question. */}
-              {inboxes.length > 0 && (
-                <Detail term="inbox">
-                  <span className="font-mono text-paper-dim [overflow-wrap:anywhere]">
-                    {inboxes.join(', ')}
-                  </span>
-                </Detail>
-              )}
-              <Detail term="from">
-                <RecipientList
-                  recipients={[
-                    message.fromName.toLowerCase() === message.fromAddress.toLowerCase()
-                      ? { address: message.fromAddress }
-                      : { name: message.fromName, address: message.fromAddress },
-                  ]}
-                  ownedAddresses={ownedAddresses}
-                />
-              </Detail>
-              {/* Received mail whose body has been checked: your own copies and drafts have no sender to check. */}
-              {inboxes.length > 0 && message.senderCheck !== undefined && (
-                <Detail term="signed by">
-                  {signedBy === null ? (
-                    "couldn't be verified"
-                  ) : (
-                    <span className="font-mono text-paper-dim [overflow-wrap:anywhere]">
-                      {signedBy}
-                    </span>
-                  )}
-                </Detail>
-              )}
-              {message.replyTo !== undefined && (
-                <Detail term="reply-to">
-                  <RecipientList recipients={message.replyTo} ownedAddresses={ownedAddresses} />
-                </Detail>
-              )}
-              {message.to !== undefined && message.to.length > 0 && (
-                <Detail term="to">
-                  <RecipientList recipients={message.to} ownedAddresses={ownedAddresses} />
-                </Detail>
-              )}
-              {message.cc !== undefined && message.cc.length > 0 && (
-                <Detail term="cc">
-                  <RecipientList recipients={message.cc} ownedAddresses={ownedAddresses} />
-                </Detail>
-              )}
-            </dl>
+            <DetailsTable message={message} ownedAddresses={ownedAddresses} />
           </Popover.Popup>
         </Popover.Positioner>
       </Popover.Portal>
