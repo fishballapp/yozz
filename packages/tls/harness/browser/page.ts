@@ -43,6 +43,8 @@ const webSocketTransport = (socket: WebSocket): BridgeTransport => {
 
   socket.binaryType = 'arraybuffer';
   socket.addEventListener('message', event => {
+    // The production relay's write acknowledgements: a handshake is far too small to need pacing.
+    if (typeof event.data === 'string' && /^\d+$/.test(event.data)) return;
     // An in-band text frame corrupts the stream, so it ends the stream instead of being thrown:
     // a throw inside a listener escapes as a `pageerror` while `startTls` stays parked on `read()`.
     if (typeof event.data !== 'object' || !(event.data instanceof ArrayBuffer)) {

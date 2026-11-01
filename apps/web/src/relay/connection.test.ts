@@ -12,8 +12,15 @@ vi.mock('@yozz.app/tls', async importOriginal => ({
   startTls: (options: StartTlsOptions) => startTls(options),
 }));
 vi.mock('./anchors', () => ({ trustAnchors: async () => ({ anchors: [] }) }));
+const relayFlush = vi.fn(async () => {});
+const openRelayTransport = vi.fn(async (..._args: unknown[]) => ({
+  read: async () => null,
+  write: async () => {},
+  flush: relayFlush,
+  close() {},
+}));
 vi.mock('./transport', () => ({
-  openRelayTransport: async () => ({ read: async () => null, write: async () => {}, close() {} }),
+  openRelayTransport: (...args: unknown[]) => openRelayTransport(...args),
 }));
 
 const { openTlsDuplex } = await import('./connection');
@@ -113,5 +120,15 @@ describe('openTlsDuplex', () => {
     });
     await openTlsDuplex(HOST, 993, 'IMAPS');
     expect((await takeSession(PEER))?.ticket).toEqual(new Uint8Array([1]));
+  });
+
+  it("carries the relay's flush, and counts its acknowledgements as traffic", async () => {
+    startTls.mockImplementationOnce(async (o: StartTlsOptions) => completed(o));
+    const onTraffic = () => {};
+    const res = await openTlsDuplex(HOST, 993, 'IMAPS', onTraffic);
+    if (!res.ok) throw new Error('the connection did not open');
+    expect(openRelayTransport.mock.lastCall?.[3]).toBe(onTraffic);
+    await res.value.duplex.flush?.();
+    expect(relayFlush).toHaveBeenCalledOnce();
   });
 });

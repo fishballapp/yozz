@@ -1,7 +1,7 @@
-import type { ByteDuplex } from '@yozz.app/tls';
 import { describe, expect, it } from 'vitest';
 import { createSmtpClient, dotStuff } from './client.ts';
 import { createLineReader, readReply } from './reply.ts';
+import type { ByteDuplex } from './transport.ts';
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
@@ -263,6 +263,92 @@ describe('client session', () => {
         expect(await client.authenticate('u', 'p'), label).toMatchObject({ ok: false });
         expect(await client.quit(), label).toEqual(abandoned);
       }
+    });
+
+    /** A relay's `write` resolves with the bytes still on their way; `flush` says whether they went. */
+    describe('over a transport that flushes', () => {
+      const flushing = (
+        steps: readonly Step[],
+        flush: () => Promise<void>,
+        writes: string[] = [],
+      ): ByteDuplex => {
+        const { duplex } = scriptedDuplex(steps);
+        return {
+          read: duplex.read,
+          write: async bytes => {
+            writes.push(decoder.decode(bytes));
+            await duplex.write(bytes);
+          },
+          flush,
+        };
+      };
+
+      it('writes the dot only once the message has gone', async () => {
+        const events: string[] = [];
+        const duplex = flushing(
+          [...throughData, { expect: '.\r\n', reply: '250 queued\r\n' }],
+          async () => {
+            events.push('flushed');
+          },
+          events,
+        );
+        expect((await send(createSmtpClient(duplex))).ok).toBe(true);
+        expect(events.slice(-3)).toEqual(['Subject: hi\r\n\r\nbody\r\n', 'flushed', '.\r\n']);
+      });
+
+      it('is a refusal when the message was dropped, and the dot never goes', async () => {
+        const writes: string[] = [];
+        const client = createSmtpClient(
+          flushing(
+            throughData,
+            async () => {
+              throw new Error('Relay connection closed');
+            },
+            writes,
+          ),
+        );
+        expect(await send(client)).toMatchObject({
+          ok: false,
+          reason: { kind: 'protocol', detail: expect.stringContaining('Relay connection closed') },
+        });
+        expect(writes).not.toContain('.\r\n');
+        expect(await client.quit()).toEqual({
+          ok: false,
+          reason: { kind: 'protocol', detail: 'connection abandoned inside DATA' },
+        });
+      });
+
+      it('is unconfirmed when the connection drops after the dot', async () => {
+        const client = createSmtpClient(
+          flushing([...throughData, { expect: '.\r\n', reply: '' }], async () => {}),
+        );
+        expect(await send(client)).toMatchObject({ ok: false, reason: { kind: 'unconfirmed' } });
+      });
+
+      it('is unconfirmed when the message has gone and writing the dot fails', async () => {
+        const { duplex } = scriptedDuplex(throughData);
+        const client = createSmtpClient({
+          read: duplex.read,
+          write: async bytes => {
+            if (decoder.decode(bytes) === '.\r\n') throw new Error('Relay connection closed');
+            await duplex.write(bytes);
+          },
+          flush: async () => {},
+        });
+        expect(await send(client)).toMatchObject({ ok: false, reason: { kind: 'unconfirmed' } });
+      });
+    });
+
+    it('needs no flush over a plain socket', async () => {
+      const { duplex } = scriptedDuplex([
+        ...throughData,
+        { expect: '.\r\n', reply: '250 queued\r\n' },
+      ]);
+      expect('flush' in duplex).toBe(false);
+      expect(await send(createSmtpClient(duplex))).toEqual({
+        ok: true,
+        value: { code: 250, lines: ['queued'] },
+      });
     });
 
     it('is a refusal when the server answers the dot with an error', async () => {

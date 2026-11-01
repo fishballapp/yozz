@@ -4,6 +4,8 @@ export const WS_CLOSE_TOO_LARGE = 1009;
 export const WS_CLOSE_INTERNAL_ERROR = 1011;
 
 export const MAX_QUEUED_BYTES = 1024 * 1024;
+/** How far the written total may run ahead of the last acknowledgement while the queue has a backlog. */
+export const ACK_BATCH_BYTES = 64 * 1024;
 
 type RelayTargetInfo = { readonly hostname: string; readonly port: number };
 
@@ -29,6 +31,8 @@ export const pipeSocket = (
   let isWsClosed = false;
   let isWriterEnded = false;
   let queuedBytes = 0;
+  let writtenBytes = 0;
+  let ackedBytes = 0;
   let writeChain: Promise<void> = Promise.resolve();
 
   const log = (reason: string, error?: unknown) => {
@@ -53,6 +57,18 @@ export const pipeSocket = (
       server.close(code, reason);
     } catch {
       // already closed by the peer
+    }
+  };
+
+  /** The running total in a text frame, outside the ciphertext. A drained queue flushes a small tail. */
+  const acknowledge = () => {
+    if (isWsClosed || writtenBytes === ackedBytes) return;
+    if (queuedBytes > 0 && writtenBytes - ackedBytes < ACK_BATCH_BYTES) return;
+    ackedBytes = writtenBytes;
+    try {
+      server.send(String(writtenBytes));
+    } catch {
+      // The peer closed in the same moment; the writes behind this still drain to the FIN.
     }
   };
 
@@ -98,6 +114,7 @@ export const pipeSocket = (
         const bytes = await toBytes(frame);
         if (bytes === null) throw new Error('unsupported frame type');
         await writer.write(bytes);
+        writtenBytes += size;
       })
       .catch(error => {
         if (isWriterEnded) return;
@@ -106,6 +123,7 @@ export const pipeSocket = (
       })
       .finally(() => {
         queuedBytes -= size;
+        acknowledge();
       });
   });
 

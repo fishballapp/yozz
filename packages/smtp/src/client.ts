@@ -181,12 +181,14 @@ export const createSmtpClient = (transport: ByteDuplex): SmtpClient => {
     }
     const data = await expect('DATA', 354);
     if (!data.ok) return data;
-    // The terminator is written on its own: a message the server never saw end is one it discards
-    // (RFC 5321 §4.1.1.4), so only a failure from here on can have delivered anything.
+    // The terminator is written on its own, and only once the message has gone: a message the server
+    // never saw end is one it discards (RFC 5321 §4.1.1.4), so only a failure from here on can have
+    // delivered anything.
     const stuffed = dotStuff(envelope.data);
     const terminatorAt = stuffed.length - DATA_TERMINATOR_BYTES;
     try {
       await transport.write(stuffed.subarray(0, terminatorAt));
+      await transport.flush?.();
     } catch (error) {
       // The server is still inside DATA, waiting for an end it never saw: nothing went out.
       isAbandoned = true;

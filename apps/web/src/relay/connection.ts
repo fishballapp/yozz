@@ -1,14 +1,13 @@
 import { createImapClient, type ImapClient, type ImapUntagged } from '@yozz.app/imap';
 import type { AddressRecord } from '@yozz.app/mail/addresses/record';
 import type { MailConnectionFailure, Result } from '@yozz.app/mail/connection';
-import { createSmtpClient, type SmtpClient, type SmtpFailure } from '@yozz.app/smtp';
 import {
   type ByteDuplex,
-  startTls,
-  type TlsConnection,
-  type TlsFailure,
-  type TlsSession,
-} from '@yozz.app/tls';
+  createSmtpClient,
+  type SmtpClient,
+  type SmtpFailure,
+} from '@yozz.app/smtp';
+import { startTls, type TlsConnection, type TlsFailure, type TlsSession } from '@yozz.app/tls';
 import { type TrustAnchorSource, YOZZ_VALIDATOR } from '@yozz.app/x509';
 import { trustAnchors } from './anchors';
 import { peerKey, saveSession, takeSession } from './session-store';
@@ -73,7 +72,7 @@ export const openTlsDuplex = async (
   { host, port }: Host,
   expectedPort: 993 | 465,
   protocol: string,
-  /** Called whenever bytes cross the connection, either way. */
+  /** Called whenever bytes cross the connection, either way, and whenever the relay acknowledges a write. */
   onTraffic: () => void = () => {},
   /** Ends the connection at once, from the handshake on: no LOGOUT waiting behind a silent command. */
   signal?: AbortSignal,
@@ -111,7 +110,7 @@ export const openTlsDuplex = async (
   ): Promise<Result<Handshake, MailConnectionFailure>> => {
     let transport: RelayTransport;
     try {
-      transport = await openRelayTransport(host, port, signal);
+      transport = await openRelayTransport(host, port, signal, onTraffic);
     } catch (error) {
       return { ok: false, error: { kind: 'relay', detail: errorText(error) } };
     }
@@ -179,6 +178,8 @@ export const openTlsDuplex = async (
         throw new Error(`TLS write error: ${describeTlsFailure(res.reason)}`);
       }
     },
+    // A TLS write is done once its records are on the transport, so only the relay can still hold them.
+    flush: transport.flush,
   };
 
   return { ok: true, value: { duplex, close, resumed } };
