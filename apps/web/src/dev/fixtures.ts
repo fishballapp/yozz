@@ -71,7 +71,7 @@ export const DEMO_ADDRESSES: readonly AddressRecord[] = [
   {
     address: 'hello@stillwater.example',
     senderName: 'Stillwater',
-    // A provider YOZZ cannot check senders on, so its mail shows the unverified "Always from".
+    // Its mail is unverified, so it offers no "Always from".
     smtp: {
       host: 'smtp.migadu.com',
       port: 465,

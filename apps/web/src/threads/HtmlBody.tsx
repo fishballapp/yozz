@@ -61,72 +61,30 @@ const VaultActionButton = ({
 };
 
 /**
- * "Always from <address>": one click for a verified sender, which trusts only their verified mail;
- * for an unverified one, a warning first, and the trust covers all mail showing that From.
+ * "Always from <address>": one click, offered only on a verified message. The trust covers that
+ * address's verified mail and nothing else.
  */
 const AlwaysFromButton = ({
   address,
-  check,
   variant,
   onTrusted,
 }: {
   address: string;
-  check: SenderCheck;
   variant?: 'ghost' | 'secondary';
   onTrusted: () => void;
 }) => {
   const remoteImages = useRemoteImages();
-  // Why the last save in the warning failed, shown in the sheet, which stays open to retry.
-  const [error, setError] = useState<string | null>(null);
-  const label = <span className="truncate">Always from {address}</span>;
-  if (check.status === 'verified') {
-    return (
-      <VaultActionButton
-        label={label}
-        busyLabel="Saving…"
-        failure="Sender not saved"
-        variant={variant}
-        onClick={async () => {
-          await remoteImages.trust({ address, isVerifiedOnly: true });
-          onTrusted();
-        }}
-      />
-    );
-  }
   return (
-    <ConfirmDialog
-      trigger={
-        <Button
-          variant={variant ?? 'ghost'}
-          size="sm"
-          onClick={() => setError(null)}
-          className="h-11 max-w-full lg:h-7"
-        >
-          {label}
-        </Button>
-      }
-      title={`Always load images from ${address}?`}
-      description="YOZZ couldn't verify this sender. Fakes from this address would load images too."
-      confirmLabel="Always load"
-      confirmVariant="primary"
+    <VaultActionButton
+      label={<span className="truncate">Always from {address}</span>}
       busyLabel="Saving…"
-      onConfirm={async () => {
-        setError(null);
-        try {
-          await remoteImages.trust({ address, isVerifiedOnly: false });
-        } catch (failure) {
-          setError(`Sender not saved. ${vaultErrorMessage(failure)}`);
-          throw failure;
-        }
+      failure="Sender not saved"
+      variant={variant}
+      onClick={async () => {
+        await remoteImages.trust(address);
         onTrusted();
       }}
-    >
-      {error !== null && (
-        <p role="alert" className="mt-3 text-base text-danger">
-          {error}
-        </p>
-      )}
-    </ConfirmDialog>
+    />
   );
 };
 
@@ -137,7 +95,7 @@ const AlwaysFromButton = ({
  *
  * Remote images load when this message was consented to before, on any device (the pixel has
  * fired and the address has leaked, so asking again buys nothing), or when its shown From is
- * trusted and, for a trust given from a verified message, `senderCheck` says this one is verified.
+ * trusted and `senderCheck` says this message is verified.
  */
 export const HtmlBody = ({
   html,
@@ -152,7 +110,7 @@ export const HtmlBody = ({
   messageId: string;
   fromName: string;
   fromAddress: string;
-  /** Undefined offers no "Always from": nothing is known about this From. */
+  /** "Always from" is offered only when this is `verified`; undefined means not known yet. */
   senderCheck: SenderCheck | undefined;
   inlineImagesTruncated: boolean;
   fallback: ReactNode;
@@ -160,8 +118,8 @@ export const HtmlBody = ({
   const remoteImages = useRemoteImages();
   // From props alone, so a component React reuses for the next message holds nothing of this one.
   const consent = { messageId, sender: fromAddress };
-  const trustedSender = remoteImages.trustOf(fromAddress);
-  const isTrustedSender = isLoadedByTrust(trustedSender, senderCheck);
+  const isVerified = senderCheck?.status === 'verified';
+  const isTrustedSender = isLoadedByTrust(remoteImages.trustOf(fromAddress), senderCheck);
   const isRemoteAllowed = remoteImages.isConsented(consent) || isTrustedSender;
   const allowRemoteImages = () => remoteImages.consent(consent);
   // A withheld picture looks like a picture, so the first click on one explains what loading costs.
@@ -230,13 +188,7 @@ export const HtmlBody = ({
               <ImageIcon size={13} />
               Load remote images
             </Button>
-            {senderCheck !== undefined && (
-              <AlwaysFromButton
-                address={fromAddress}
-                check={senderCheck}
-                onTrusted={allowRemoteImages}
-              />
-            )}
+            {isVerified && <AlwaysFromButton address={fromAddress} onTrusted={allowRemoteImages} />}
           </div>
           <span className="font-mono text-2xs text-paper-faint">
             The sender may learn you opened this message.
@@ -248,12 +200,11 @@ export const HtmlBody = ({
         hasRemoteImages &&
         isRemoteAllowed &&
         !isTrustedSender &&
-        senderCheck !== undefined && (
+        isVerified && (
           // The bar's order, the offer before the note, so a phone wraps the note and not the offer.
           <div className="flex min-h-11 flex-wrap items-center gap-x-3 lg:min-h-7">
             <AlwaysFromButton
               address={fromAddress}
-              check={senderCheck}
               variant="secondary"
               onTrusted={allowRemoteImages}
             />
@@ -267,11 +218,7 @@ export const HtmlBody = ({
           <span className="flex min-w-0 font-mono text-2xs whitespace-pre text-paper-faint">
             <span className="shrink-0">Images from </span>
             <span className="truncate">{fromAddress}</span>
-            <span className="shrink-0">
-              {trustedSender?.isVerifiedOnly === false
-                ? ' always load, verified or not.'
-                : ' always load.'}
-            </span>
+            <span className="shrink-0"> always load.</span>
           </span>
           <VaultActionButton
             label="Stop"

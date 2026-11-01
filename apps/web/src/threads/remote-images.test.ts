@@ -138,12 +138,12 @@ describe('forgetConsent', () => {
 describe('trusted senders', () => {
   it('stores one record per address, keyed case-insensitively, and forgets it', async () => {
     const { store } = fakeRecordStore();
-    await trustSender(store, { address: 'News@Sender.example', addedAt: 2, isVerifiedOnly: true });
-    await trustSender(store, { address: 'first@a.example', addedAt: 1, isVerifiedOnly: true });
-    await trustSender(store, { address: 'news@sender.EXAMPLE', addedAt: 3, isVerifiedOnly: true });
+    await trustSender(store, { address: 'News@Sender.example', addedAt: 2 });
+    await trustSender(store, { address: 'first@a.example', addedAt: 1 });
+    await trustSender(store, { address: 'news@sender.EXAMPLE', addedAt: 3 });
     expect(await listTrustedSenders(store)).toEqual([
-      { address: 'first@a.example', addedAt: 1, isVerifiedOnly: true },
-      { address: 'News@Sender.example', addedAt: 2, isVerifiedOnly: true },
+      { address: 'first@a.example', addedAt: 1 },
+      { address: 'news@sender.EXAMPLE', addedAt: 3 },
     ]);
     await forgetSender(store, 'NEWS@sender.example');
     expect((await listTrustedSenders(store)).map(sender => senderKeyOf(sender.address))).toEqual([
@@ -151,47 +151,25 @@ describe('trusted senders', () => {
     ]);
   });
 
-  it('reads a record written before unverified trust existed as verified-only', async () => {
+  it('reads a record saved with isVerifiedOnly: false like any other', async () => {
     const { store } = fakeRecordStore();
     await store.put({
       type: IMAGE_SENDER_RECORD_TYPE,
       naturalKey: 'news@sender.example',
-      plaintext: JSON.stringify({ address: 'news@sender.example', addedAt: 1 }),
+      plaintext: JSON.stringify({
+        address: 'news@sender.example',
+        addedAt: 1,
+        isVerifiedOnly: false,
+      }),
     });
     expect(await listTrustedSenders(store)).toEqual([
-      { address: 'news@sender.example', addedAt: 1, isVerifiedOnly: true },
+      { address: 'news@sender.example', addedAt: 1 },
     ]);
-  });
-
-  it('widens a verified-only trust when the address is trusted again through the warning', async () => {
-    const { store } = fakeRecordStore();
-    await trustSender(store, { address: 'news@sender.example', addedAt: 1, isVerifiedOnly: true });
-    await trustSender(store, { address: 'News@sender.example', addedAt: 2, isVerifiedOnly: false });
-    expect(await listTrustedSenders(store)).toEqual([
-      { address: 'News@sender.example', addedAt: 2, isVerifiedOnly: false },
-    ]);
-  });
-
-  it('keeps a wider trust when a device that has not seen it trusts the address verified-only', async () => {
-    const { store } = fakeRecordStore();
-    await trustSender(store, { address: 'news@sender.example', addedAt: 1, isVerifiedOnly: false });
-    const held = await trustSender(store, {
-      address: 'news@sender.example',
-      addedAt: 2,
-      isVerifiedOnly: true,
-    });
-    const kept = { address: 'news@sender.example', addedAt: 1, isVerifiedOnly: false };
-    expect(held).toEqual(kept);
-    expect(await listTrustedSenders(store)).toEqual([kept]);
   });
 });
 
 describe('isLoadedByTrust', () => {
-  const sender = (isVerifiedOnly: boolean) => ({
-    address: 'news@sender.example',
-    addedAt: 1,
-    isVerifiedOnly,
-  });
+  const sender = { address: 'news@sender.example', addedAt: 1 };
   const VERIFIED = { status: 'verified', signedBy: 'sender.example' } as const;
   const UNVERIFIED = { status: 'unverified' } as const;
 
@@ -199,15 +177,9 @@ describe('isLoadedByTrust', () => {
     expect(isLoadedByTrust(undefined, VERIFIED)).toBe(false);
   });
 
-  it('loads only verified messages under a verified-only trust', () => {
-    expect(isLoadedByTrust(sender(true), VERIFIED)).toBe(true);
-    expect(isLoadedByTrust(sender(true), UNVERIFIED)).toBe(false);
-    expect(isLoadedByTrust(sender(true), undefined)).toBe(false);
-  });
-
-  it('loads every message showing the address under a trust given through the warning', () => {
-    for (const check of [VERIFIED, UNVERIFIED, undefined]) {
-      expect(isLoadedByTrust(sender(false), check)).toBe(true);
-    }
+  it("loads only a trusted sender's verified messages", () => {
+    expect(isLoadedByTrust(sender, VERIFIED)).toBe(true);
+    expect(isLoadedByTrust(sender, UNVERIFIED)).toBe(false);
+    expect(isLoadedByTrust(sender, undefined)).toBe(false);
   });
 });

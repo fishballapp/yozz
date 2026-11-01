@@ -140,24 +140,15 @@ export const forgetConsent = (store: RecordStore, consent: ImageConsent, held: H
 
 export const IMAGE_SENDER_RECORD_TYPE = 'image-sender';
 
-const senderSchema = z.object({
-  address: z.string(),
-  addedAt: z.number(),
-  /**
-   * Trusted from a message the provider verified: only verified messages from the address load.
-   * False when trusted through the warning: every message showing this From loads. Absent on a
-   * record from before the warning existed, when every trust was verified-only.
-   */
-  isVerifiedOnly: z.boolean().default(true),
-});
+const senderSchema = z.object({ address: z.string(), addedAt: z.number() });
 
 export type TrustedSender = z.infer<typeof senderSchema>;
 
-/** A message loads by trust when its shown From is trusted, and verified if the trust needs it. */
+/** A trust means one thing: the address's verified mail loads. */
 export const isLoadedByTrust = (
   sender: TrustedSender | undefined,
   check: SenderCheck | undefined,
-): boolean => sender !== undefined && (!sender.isVerifiedOnly || check?.status === 'verified');
+): boolean => sender !== undefined && check?.status === 'verified';
 
 const parseSender = (plaintext: string): TrustedSender | null => {
   try {
@@ -177,39 +168,12 @@ export const listTrustedSenders = async (store: RecordStore): Promise<readonly T
     })
     .toSorted((a, b) => a.addedAt - b.addedAt);
 
-/**
- * Resolves to the trust the vault now holds. Trusting through the warning replaces any record, so
- * the trust widens. A verified-only trust writes only where there is none: a record already there
- * is as wide or wider, and a device that hasn't seen it yet must not narrow it.
- */
-export const trustSender = async (
-  store: RecordStore,
-  sender: TrustedSender,
-): Promise<TrustedSender> => {
-  const naturalKey = senderKeyOf(sender.address);
-  const plaintext = JSON.stringify(sender);
-  if (!sender.isVerifiedOnly) {
-    await store.put({ type: IMAGE_SENDER_RECORD_TYPE, naturalKey, plaintext });
-    return sender;
-  }
-  try {
-    await store.put({
-      type: IMAGE_SENDER_RECORD_TYPE,
-      naturalKey,
-      plaintext,
-      precondition: { expect: 'absent' },
-    });
-    return sender;
-  } catch (error) {
-    if (!isConflict(error)) throw error;
-  }
-  const opened = await store.get(IMAGE_SENDER_RECORD_TYPE, naturalKey);
-  const held = opened === null ? null : parseSender(opened.plaintext);
-  if (held !== null) return held;
-  // Removed or unreadable since: nothing wider to keep.
-  await store.put({ type: IMAGE_SENDER_RECORD_TYPE, naturalKey, plaintext });
-  return sender;
-};
+export const trustSender = (store: RecordStore, sender: TrustedSender): Promise<void> =>
+  store.put({
+    type: IMAGE_SENDER_RECORD_TYPE,
+    naturalKey: senderKeyOf(sender.address),
+    plaintext: JSON.stringify(sender),
+  });
 
 export const forgetSender = (store: RecordStore, address: string): Promise<void> =>
   store.remove(IMAGE_SENDER_RECORD_TYPE, senderKeyOf(address));

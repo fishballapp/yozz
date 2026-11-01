@@ -127,21 +127,18 @@ it('keeps a message stopped while its earlier consent is still on its way, and i
   await tab.unmount();
 });
 
-it('remembers how a trust was given, and widens a verified-only one given again through the warning', async () => {
+it('trusts an address once whatever its case, and another session reads it back', async () => {
   const { store } = fakeRecordStore();
   const tab = await mount(store);
   await settle();
-  await act(() => tab.remoteImages().trust({ address: 'News@x.example', isVerifiedOnly: true }));
-  expect(tab.remoteImages().trustOf('news@x.example')?.isVerifiedOnly).toBe(true);
-
-  await act(() => tab.remoteImages().trust({ address: 'news@x.example', isVerifiedOnly: false }));
+  await act(() => tab.remoteImages().trust('News@x.example'));
+  await act(() => tab.remoteImages().trust('news@x.example'));
   expect(tab.remoteImages().trustedSenders).toHaveLength(1);
-  expect(tab.remoteImages().trustOf('NEWS@x.example')?.isVerifiedOnly).toBe(false);
+  expect(tab.remoteImages().trustOf('NEWS@x.example')?.address).toBe('news@x.example');
   await tab.unmount();
 
-  // Another session reads the widened record back from the vault.
   const next = await mount(store);
   await settle();
-  expect(next.remoteImages().trustOf('news@x.example')?.isVerifiedOnly).toBe(false);
+  expect(next.remoteImages().trustOf('news@x.example')).toBeDefined();
   await next.unmount();
 });
