@@ -13,6 +13,12 @@ export const WEBAUTHN_TIMEOUT_MS = 300_000;
 /** Below D1's 2 MB row limit. */
 export const MAX_CIPHERTEXT_BYTES = 1_000_000;
 
+/** 25 MiB of file, what one message may carry and still fit the relay as base64, plus its IV and tag. */
+export const MAX_FILE_CIPHERTEXT_BYTES = 25 * 1024 * 1024 + 28;
+
+/** Everything one account keeps in the file store, ciphertext sizes summed. */
+export const MAX_STORED_BYTES_PER_USER = 1024 * 1024 * 1024;
+
 export const BlindRecordIdSchema = z
   .string()
   .min(1)
@@ -60,6 +66,8 @@ export const ApiErrorCodeSchema = z.enum([
   'CONFLICT',
   'BAD_REQUEST',
   'PAYLOAD_TOO_LARGE',
+  'FILE_TOO_LARGE',
+  'STORAGE_FULL',
   'INTERNAL_ERROR',
   'INVALID_MODE',
   'SESSION_NOT_FRESH',
@@ -230,6 +238,37 @@ export const ListRecordsResponseSchema = z
   })
   .strict();
 export type ListRecordsResponse = z.infer<typeof ListRecordsResponseSchema>;
+
+/** A random UUID from the client. The route parses it, so an id can never name a path in the bucket. */
+export const FileIdSchema = z.uuid();
+
+/** GET /api/v1/vault/files. */
+export const ListFilesQuerySchema = z
+  .object({
+    after: FileIdSchema.optional(),
+  })
+  .strict();
+export type ListFilesQuery = z.infer<typeof ListFilesQuerySchema>;
+
+export const VaultFileSummarySchema = z
+  .object({
+    id: FileIdSchema,
+    /** Of the ciphertext. */
+    size: z.number().int().positive(),
+    createdAt: z.number().int().nonnegative(),
+  })
+  .strict();
+export type VaultFileSummary = z.infer<typeof VaultFileSummarySchema>;
+
+export const ListFilesResponseSchema = z
+  .object({
+    files: z.array(VaultFileSummarySchema),
+    nextCursor: FileIdSchema.nullable(),
+    usedBytes: z.number().int().nonnegative(),
+    capBytes: z.number().int().positive(),
+  })
+  .strict();
+export type ListFilesResponse = z.infer<typeof ListFilesResponseSchema>;
 
 export const OkResponseSchema = z
   .object({

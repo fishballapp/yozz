@@ -7,6 +7,7 @@ import { type AppEnv, apiError, isForeignKeyViolation, jsonBodyLimit } from './h
 import { accountRoute } from './routes/account.ts';
 import { autoconfigRoute } from './routes/autoconfig.ts';
 import { cliKeysRoute } from './routes/cli-keys.ts';
+import { filesRoute } from './routes/files.ts';
 import { recordsRoute } from './routes/records.ts';
 import { relayRoute } from './routes/relay.ts';
 import { unlockRoute } from './routes/unlock.ts';
@@ -25,6 +26,9 @@ export const createApp = (overrides?: CreateAuthOverrides) => {
     });
     return corsHandler(c, next);
   });
+
+  // Ahead of the JSON limit: a file is the one body larger than it, and its route has its own.
+  app.route('/api/v1/vault/files', filesRoute);
 
   app.use('*', jsonBodyLimit);
 

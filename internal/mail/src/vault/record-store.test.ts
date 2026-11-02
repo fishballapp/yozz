@@ -7,10 +7,10 @@ import {
 } from '@yozz.app/vault';
 import type { VaultRecordEnvelope } from '@yozz.app/vault-contract';
 import { beforeEach, describe, expect, it } from 'vitest';
-import type { VaultApi } from './api.ts';
+import type { VaultRecordApi } from './api.ts';
 import { createRecordStore } from './record-store.ts';
 
-class InMemoryVaultApi implements VaultApi {
+class InMemoryVaultApi implements VaultRecordApi {
   private records = new Map<string, VaultRecordEnvelope>();
 
   async get(type: string, id: string): Promise<VaultRecordEnvelope | null> {

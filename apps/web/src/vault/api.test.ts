@@ -236,4 +236,77 @@ describe('Vault API client', () => {
       status: 403,
     });
   });
+
+  describe('files', () => {
+    const FILE_ID = '6f9619ff-8b86-4011-b42d-00c04fc964ff';
+
+    it('uploads raw bytes, naming the account', async () => {
+      const mockFetch = vi.fn().mockResolvedValue(new Response('{"ok":true}', { status: 200 }));
+      const client = createVaultApiClient('https://api.test', mockFetch).forAccount('user-123');
+      const bytes = new Uint8Array([1, 2, 3]);
+
+      await client.putFile(FILE_ID, bytes);
+
+      const [url, init] = mockFetch.mock.calls[0] ?? [];
+      expect(url).toBe(`https://api.test/api/v1/vault/files/${FILE_ID}`);
+      expect(init).toMatchObject({ method: 'PUT', body: bytes, credentials: 'include' });
+      expect(init.headers.get('Content-Type')).toBe('application/octet-stream');
+      expect(init.headers.get(ACCOUNT_HEADER)).toBe('user-123');
+    });
+
+    it('reads bytes back, and null for a 404', async () => {
+      const mockFetch = vi
+        .fn()
+        .mockResolvedValueOnce(new Response(new Uint8Array([9, 8, 7]), { status: 200 }))
+        .mockResolvedValueOnce(new Response('{}', { status: 404 }));
+      const client = createVaultApiClient('https://api.test', mockFetch).forAccount('user-123');
+
+      expect(await client.getFile(FILE_ID)).toEqual(new Uint8Array([9, 8, 7]));
+      expect(await client.getFile(FILE_ID)).toBeNull();
+    });
+
+    it('names a download cut off mid-body a network error', async () => {
+      const cutOff = new ReadableStream({
+        start: controller => controller.error(new TypeError('terminated')),
+      });
+      const mockFetch = vi.fn().mockResolvedValue(new Response(cutOff, { status: 200 }));
+      const client = createVaultApiClient('https://api.test', mockFetch).forAccount('user-123');
+
+      await expect(client.getFile(FILE_ID)).rejects.toMatchObject({
+        name: 'VaultApiError',
+        code: 'NETWORK_ERROR',
+      });
+    });
+
+    it('names a refused upload by its code', async () => {
+      const mockFetch = vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ error: { code: 'STORAGE_FULL', message: 'Full' } }), {
+          status: 413,
+        }),
+      );
+      const client = createVaultApiClient('https://api.test', mockFetch).forAccount('user-123');
+
+      await expect(client.putFile(FILE_ID, new Uint8Array([1]))).rejects.toMatchObject({
+        code: 'STORAGE_FULL',
+        status: 413,
+      });
+    });
+
+    it('lists a page after a cursor, and removes', async () => {
+      const page = { files: [], nextCursor: null, usedBytes: 0, capBytes: 1024 };
+      const mockFetch = vi
+        .fn()
+        .mockResolvedValueOnce(new Response(JSON.stringify(page), { status: 200 }))
+        .mockResolvedValueOnce(new Response('{"ok":true}', { status: 200 }));
+      const client = createVaultApiClient('https://api.test', mockFetch).forAccount('user-123');
+
+      expect(await client.listFiles(FILE_ID)).toEqual(page);
+      await client.removeFile(FILE_ID);
+
+      expect(mockFetch.mock.calls[0]?.[0]).toBe(
+        `https://api.test/api/v1/vault/files?after=${FILE_ID}`,
+      );
+      expect(mockFetch.mock.calls[1]?.[1]).toMatchObject({ method: 'DELETE' });
+    });
+  });
 });

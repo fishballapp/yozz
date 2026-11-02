@@ -40,6 +40,8 @@ const apiAnswering = (status: keyof typeof ERRORS) =>
     ),
   );
 
+const FILE_ID = '6f9619ff-8b86-4011-b42d-00c04fc964ff';
+
 const record = { id: 'r1', type: 'address', ciphertext: 'c2VhbGVk' };
 
 const CALLS = {
@@ -47,6 +49,10 @@ const CALLS = {
   list: api => Array.fromAsync(api.list('address')),
   put: api => api.put(record, 2, { expect: 'revision', revision: 1 }),
   remove: api => api.remove('address', 'r1', 1),
+  putFile: api => api.putFile(FILE_ID, new Uint8Array([1, 2, 3])),
+  getFile: api => api.getFile(FILE_ID),
+  listFiles: api => api.listFiles(),
+  removeFile: api => api.removeFile(FILE_ID),
 } satisfies Record<string, (api: ReturnType<typeof bearerVaultApi>) => Promise<unknown>>;
 
 const EXPECTED = {
@@ -75,4 +81,86 @@ describe('the bearer VaultApi', () => {
       );
     }
   }
+
+  it.effect('sends a file as raw bytes, and reads one back the same', () =>
+    Effect.gen(function* () {
+      const seen: { url: string; contentType: string | null; bytes: number[] }[] = [];
+      const api = yield* Effect.gen(function* () {
+        return bearerVaultApi(
+          HttpClient.mapRequest(
+            yield* HttpClient.HttpClient,
+            HttpClientRequest.prependUrl('https://api.yozz.test'),
+          ),
+        );
+      }).pipe(
+        Effect.provide(
+          FetchHttpClient.layer.pipe(
+            Layer.provide(
+              Layer.succeed(FetchHttpClient.Fetch, (async (input, init) => {
+                const request = new Request(input, init);
+                if (request.method === 'GET') return new Response(new Uint8Array([9, 8, 7]));
+                const contentType = request.headers.get('content-type');
+                const bytes = [...new Uint8Array(await request.arrayBuffer())];
+                seen.push({ url: request.url, contentType, bytes });
+                return new Response('{"ok":true}', {
+                  headers: { 'content-type': 'application/json' },
+                });
+              }) as typeof globalThis.fetch),
+            ),
+          ),
+        ),
+      );
+
+      yield* Effect.promise(() => api.putFile(FILE_ID, new Uint8Array([1, 2, 3])));
+      const read = yield* Effect.promise(() => api.getFile(FILE_ID));
+
+      assert.deepStrictEqual(seen, [
+        {
+          url: `https://api.yozz.test/api/v1/vault/files/${FILE_ID}`,
+          contentType: 'application/octet-stream',
+          bytes: [1, 2, 3],
+        },
+      ]);
+      assert.deepStrictEqual(read, new Uint8Array([9, 8, 7]));
+    }),
+  );
+
+  it.effect('names a download cut off mid-body a network error', () =>
+    Effect.gen(function* () {
+      const api = yield* Effect.gen(function* () {
+        return bearerVaultApi(
+          HttpClient.mapRequest(
+            yield* HttpClient.HttpClient,
+            HttpClientRequest.prependUrl('https://api.yozz.test'),
+          ),
+        );
+      }).pipe(
+        Effect.provide(
+          FetchHttpClient.layer.pipe(
+            Layer.provide(
+              Layer.succeed(
+                FetchHttpClient.Fetch,
+                (async () =>
+                  new Response(
+                    new ReadableStream({
+                      start: controller => controller.error(new TypeError('terminated')),
+                    }),
+                  )) as typeof globalThis.fetch,
+              ),
+            ),
+          ),
+        ),
+      );
+
+      const rejected = yield* Effect.promise(() =>
+        api.getFile(FILE_ID).then(
+          () => undefined,
+          (error: unknown) => error,
+        ),
+      );
+
+      assert.instanceOf(rejected, VaultApiError);
+      assert.strictEqual(rejected.code, 'NETWORK_ERROR');
+    }),
+  );
 });

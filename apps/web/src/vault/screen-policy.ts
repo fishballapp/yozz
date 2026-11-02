@@ -30,6 +30,8 @@ const API_ERROR_MESSAGES: Record<ApiErrorCode | 'NETWORK_ERROR', string> = {
     'Another tab or device set up your account first. Sign in there instead of setting it up again.',
   BAD_REQUEST: 'The server rejected that request as malformed.',
   PAYLOAD_TOO_LARGE: 'That was too large to store.',
+  FILE_TOO_LARGE: 'That file is too large to attach.',
+  STORAGE_FULL: 'Your file storage is full.',
   INTERNAL_ERROR: 'The server failed on that request. Try again.',
   INVALID_MODE: 'This account is not in that login method.',
   SESSION_NOT_FRESH: 'Sign in again to change how you sign in.',

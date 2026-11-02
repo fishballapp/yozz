@@ -1,4 +1,4 @@
-import type { VaultApi } from '@yozz.app/mail/vault/api';
+import type { VaultRecordApi } from '@yozz.app/mail/vault/api';
 import { createRecordStore, type RecordStore } from '@yozz.app/mail/vault/record-store';
 import type { Vault } from '@yozz.app/vault';
 import { createIndexedDbRevisionMarks } from './revision-marks';
@@ -17,7 +17,7 @@ export const openDeviceRecordStore = async ({
 }: {
   readonly userId: string;
   readonly vault: Vault;
-  readonly api: VaultApi;
+  readonly api: VaultRecordApi;
   readonly idbFactory?: IDBFactory;
 }): Promise<DeviceRecordStore> => {
   const marks = createIndexedDbRevisionMarks(userId, idbFactory);

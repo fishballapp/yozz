@@ -33,6 +33,30 @@ describe('D1 migrations and schema invariants', () => {
     expect(columns).not.toContain('deviceId');
   });
 
+  it('vault_file keys a file by its user and goes with them', async () => {
+    const info = await env.DB.prepare('PRAGMA table_info(vault_file)').all<{
+      name: string;
+      pk: number;
+    }>();
+    expect(info.results.map(col => col.name)).toEqual(['user_id', 'file_id', 'size', 'created_at']);
+    expect(info.results.filter(col => col.pk > 0).map(col => col.name)).toEqual([
+      'user_id',
+      'file_id',
+    ]);
+
+    await env.DB.prepare(
+      'INSERT INTO vault_file (user_id, file_id, size, created_at) VALUES (?, ?, 1, 1000)',
+    )
+      .bind('user-1', 'file-1')
+      .run();
+    await env.DB.prepare('DELETE FROM "user" WHERE id = ?').bind('user-1').run();
+
+    const left = await env.DB.prepare('SELECT COUNT(*) AS n FROM vault_file').first<{
+      n: number;
+    }>();
+    expect(left?.n).toBe(0);
+  });
+
   it('vault_account has the EXACT five columns specified', async () => {
     const info = await env.DB.prepare('PRAGMA table_info(vault_account)').all<{
       cid: number;

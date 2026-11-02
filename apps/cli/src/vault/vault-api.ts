@@ -2,6 +2,7 @@ import { type VaultApi, VaultApiError } from '@yozz.app/mail/vault/api';
 import {
   ACCOUNT_HEADER,
   ApiErrorResponseSchema,
+  ListFilesResponseSchema,
   ListRecordsResponseSchema,
   type VaultRecordEnvelope,
   VaultRecordEnvelopeSchema,
@@ -27,7 +28,7 @@ const errorOf = Effect.fnUntraced(function* (response: HttpClientResponse.HttpCl
 });
 
 /**
- * The vault's record routes for `client`, which already carries the CLI key's bearer and names its
+ * The vault's record and file routes for `client`, which already carries the CLI key's bearer and names its
  * account. The port is promises, so each call runs its own effect: the client needs nothing more.
  */
 export const bearerVaultApi = (client: HttpClient.HttpClient): VaultApi => {
@@ -47,6 +48,7 @@ export const bearerVaultApi = (client: HttpClient.HttpClient): VaultApi => {
   });
   const recordPath = (type: string, id: string) =>
     `/api/v1/vault/records/${encodeURIComponent(type)}/${encodeURIComponent(id)}`;
+  const filePath = (fileId: string) => `/api/v1/vault/files/${encodeURIComponent(fileId)}`;
   const run = <A>(effect: Effect.Effect<A, VaultApiError>) => Effect.runPromise(effect);
 
   /** The cursor is the recursion. */
@@ -92,6 +94,46 @@ export const bearerVaultApi = (client: HttpClient.HttpClient): VaultApi => {
             urlParams: ifRevision === undefined ? {} : { ifRevision: String(ifRevision) },
           }),
         ).pipe(Effect.flatMap(okJson), Effect.asVoid),
+      ),
+    putFile: (fileId, ciphertext) =>
+      run(
+        send(
+          HttpClientRequest.put(filePath(fileId)).pipe(
+            HttpClientRequest.bodyUint8Array(ciphertext, 'application/octet-stream'),
+          ),
+        ).pipe(Effect.flatMap(okJson), Effect.asVoid),
+      ),
+    getFile: fileId =>
+      run(
+        Effect.gen(function* () {
+          const response = yield* send(HttpClientRequest.get(filePath(fileId)));
+          if (response.status === 404) return null;
+          if (response.status < 200 || response.status >= 300) {
+            return yield* Effect.fail(yield* errorOf(response));
+          }
+          return new Uint8Array(
+            yield* response.arrayBuffer.pipe(
+              Effect.mapError(
+                error => new VaultApiError('NETWORK_ERROR', `Network error: ${error.message}`, 0),
+              ),
+            ),
+          );
+        }),
+      ),
+    listFiles: after =>
+      run(
+        send(
+          HttpClientRequest.get('/api/v1/vault/files', {
+            urlParams: after === undefined ? {} : { after },
+          }),
+        ).pipe(Effect.flatMap(okJson), Effect.map(ListFilesResponseSchema.parse)),
+      ),
+    removeFile: fileId =>
+      run(
+        send(HttpClientRequest.make('DELETE')(filePath(fileId))).pipe(
+          Effect.flatMap(okJson),
+          Effect.asVoid,
+        ),
       ),
   };
 };

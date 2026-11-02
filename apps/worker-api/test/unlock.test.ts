@@ -8,6 +8,7 @@ import {
   removePasskeyUnlock,
 } from '../src/db/unlock.ts';
 import { applyMigrations } from './apply-migrations.ts';
+import { settledRequest } from './settled-request.ts';
 
 /** base64 of 32 bytes, the shape of `authValue`. */
 const AUTH_VALUE = 'q0dGZ0Z0RGZnZGZnZGZnZGZnZGZnZGZnZGZnZGZnZGY=';
@@ -668,7 +669,6 @@ describe('Worker unlock and finalisation routes', () => {
 
   it('DELETE /api/v1/vault performs recovery reset, retaining user and session', async () => {
     const { userId, headers } = await loginWithMagicLink('unlock5@example.com');
-    const app = createApp();
 
     await env.DB.prepare(
       'INSERT INTO vault_account (user_id, unlock_mode, password_wrapped_dek, created_at, updated_at) VALUES (?, ?, ?, ?, ?)',
@@ -681,11 +681,10 @@ describe('Worker unlock and finalisation routes', () => {
       .bind(userId, 'rec-1', 'account', 'cipher-1', 1000)
       .run();
 
-    const res = await app.request(
-      'http://localhost/api/v1/vault',
-      { method: 'DELETE', headers },
-      env,
-    );
+    const res = await settledRequest('http://localhost/api/v1/vault', {
+      method: 'DELETE',
+      headers,
+    });
 
     expect(res.status).toBe(200);
 

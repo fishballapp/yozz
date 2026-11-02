@@ -88,6 +88,14 @@ describe('deriveAccountKeys', () => {
         additionalData: Buffer.from(JSON.stringify([id, 'account'])),
       }).toString(),
     ).toBe(JSON.stringify(['7', 'jason@posteo.de', '{"password":"hunter2"}']));
+
+    const fileId = '6f9619ff-8b86-4011-b42d-00c04fc964ff';
+    const file = await vault.encryptFile(fileId, new TextEncoder().encode('the attachment'));
+    expect(
+      opensslOpen(Buffer.from(file), child('yozz-vault-file'), {
+        additionalData: Buffer.from(JSON.stringify([fileId])),
+      }).toString(),
+    ).toBe('the attachment');
   });
 
   it('folds the email so a second device typing it differently still opens the vault', async () => {

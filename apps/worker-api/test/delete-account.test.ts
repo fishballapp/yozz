@@ -3,9 +3,11 @@ import { ACCOUNT_HEADER } from '@yozz.app/vault-contract';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { createApp } from '../src/app.ts';
 import { deleteAccount as deleteAccountRows } from '../src/db/account.ts';
+import { fileObjectKey, reserveFile } from '../src/db/files.ts';
 import { putRecord } from '../src/db/records.ts';
 import { finalizePasswordUnlock } from '../src/db/unlock.ts';
 import { applyMigrations } from './apply-migrations.ts';
+import { settledRequest } from './settled-request.ts';
 
 type Person = { readonly userId: string; readonly email: string; readonly cookie: string };
 
@@ -33,8 +35,14 @@ const signIn = async (email: string): Promise<Person> => {
   return { userId: user.id, email, cookie: verified.headers.get('set-cookie') ?? '' };
 };
 
+const FILE_ID = '6f9619ff-8b86-4011-b42d-00c04fc964ff';
+
+const objectKeysOf = async (userId: string): Promise<string[]> =>
+  (await env.FILES.list({ prefix: `${userId}/` })).objects.map(({ key }) => key);
+
 /** One of every kind of row an account owns: vault, passkey, CLI key, password credential, challenges. */
 const seedAccount = async ({ userId, email }: Person) => {
+  await env.FILES.put(fileObjectKey(userId, FILE_ID), 'seal');
   await env.DB.batch([
     env.DB.prepare(
       `INSERT INTO vault_account (user_id, unlock_mode, password_wrapped_dek, created_at, updated_at)
@@ -52,6 +60,9 @@ const seedAccount = async ({ userId, email }: Person) => {
       `INSERT INTO vault_cli_key (id, user_id, name, public_key, ephemeral_public_key, wrapped_dek, token_hash, created_at)
        VALUES (?, ?, 'box', 'pub', 'eph', 'wrap', 'hash', 1000)`,
     ).bind(`key-${userId}`, userId),
+    env.DB.prepare(
+      `INSERT INTO vault_file (user_id, file_id, size, created_at) VALUES (?, ?, 4, 1000)`,
+    ).bind(userId, FILE_ID),
     ...['rec-1', 'rec-2'].map(id =>
       env.DB.prepare(
         `INSERT INTO vault_record (user_id, id, type, ciphertext, updated_at, revision)
@@ -93,6 +104,7 @@ const TABLES = [
   'user',
   'vault_account',
   'vault_cli_key',
+  'vault_file',
   'vault_passkey_wrap',
   'vault_record',
   'verification',
@@ -139,18 +151,14 @@ describe('DELETE /api/v1/account', () => {
     { cookie }: Pick<Person, 'cookie'>,
     account: string | undefined,
   ): Promise<Response> =>
-    await createApp().request(
-      'http://localhost/api/v1/account',
-      {
-        method: 'DELETE',
-        headers: {
-          Cookie: cookie,
-          Origin: 'https://yozz.app',
-          ...(account === undefined ? {} : { [ACCOUNT_HEADER]: account }),
-        },
+    await settledRequest('http://localhost/api/v1/account', {
+      method: 'DELETE',
+      headers: {
+        Cookie: cookie,
+        Origin: 'https://yozz.app',
+        ...(account === undefined ? {} : { [ACCOUNT_HEADER]: account }),
       },
-      env,
-    );
+    });
 
   const makeSessionsStale = async (userId: string) => {
     const twoDaysAgo = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000);
@@ -180,6 +188,55 @@ describe('DELETE /api/v1/account', () => {
     const aliceAfter = await mentionsOf(alice);
     for (const table of TABLES) expect(aliceAfter[table], table).toHaveLength(0);
     expect(await mentionsOf(bob)).toEqual(bobBefore);
+    expect(await objectKeysOf(alice.userId)).toEqual([]);
+    expect(await objectKeysOf(bob.userId)).toEqual([fileObjectKey(bob.userId, FILE_ID)]);
+  });
+
+  it('deletes every object, past one listing, and one whose row is already gone', async () => {
+    const alice = await signIn('alice@example.com');
+    // One more than `list` answers and `delete` takes at once.
+    await Promise.all(
+      Array.from({ length: 1001 }, (_, index) =>
+        env.FILES.put(fileObjectKey(alice.userId, `no-row-${index}`), 'x'),
+      ),
+    );
+
+    expect((await deleteAccount(alice, alice.userId)).status).toBe(200);
+
+    expect(await objectKeysOf(alice.userId)).toEqual([]);
+    // Over 1000 writes: well under a second here, past the 5 s default on a loaded CI runner.
+  }, 60_000);
+
+  it('keeps every row when the bucket fails, so a retry still knows the account', async () => {
+    const alice = await signIn('alice@example.com');
+    await seedAccount(alice);
+    const before = await mentionsOf(alice);
+    const failing = new Proxy(env.FILES, {
+      get: (target, property) => {
+        if (property === 'delete') return () => Promise.reject(new Error('R2 is down'));
+        const value = Reflect.get(target, property);
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
+    });
+
+    const response = await settledRequest(
+      'http://localhost/api/v1/account',
+      {
+        method: 'DELETE',
+        headers: {
+          Cookie: alice.cookie,
+          Origin: 'https://yozz.app',
+          [ACCOUNT_HEADER]: alice.userId,
+        },
+      },
+      { ...env, FILES: failing },
+    );
+
+    expect(response.status).toBe(500);
+    expect(await mentionsOf(alice)).toEqual(before);
+
+    expect((await deleteAccount(alice, alice.userId)).status).toBe(200);
+    expect(await objectKeysOf(alice.userId)).toEqual([]);
   });
 
   it('expires the session cookie it just deleted the session of', async () => {
@@ -374,6 +431,15 @@ describe('DELETE /api/v1/account', () => {
       expect(response.status).toBe(401);
       expect(await response.json()).toMatchObject({ error: { code: 'UNAUTHORIZED' } });
       for (const rows of Object.values(await mentionsOf(alice))) expect(rows).toHaveLength(0);
+    });
+
+    it('is refused for a file reservation too', async () => {
+      const alice = await signIn('alice@example.com');
+      await deleteAccountRows(env.DB, alice);
+
+      await expect(
+        reserveFile(env.DB, { userId: alice.userId, fileId: FILE_ID, size: 4, now: 1000 }),
+      ).rejects.toThrow(REFUSED);
     });
 
     it('is refused for a record, an enrolment and a rewrap alike', async () => {

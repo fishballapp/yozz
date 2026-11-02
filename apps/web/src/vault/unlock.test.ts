@@ -94,6 +94,12 @@ const createMockWorker = () => {
       list: vi.fn(() => (async function* () {})()),
       put: vi.fn(async () => answer('put', () => undefined)),
       remove: vi.fn(async () => answer('remove', () => undefined)),
+      putFile: vi.fn(async () => answer('putFile', () => undefined)),
+      getFile: vi.fn(async () => answer('getFile', () => null)),
+      listFiles: vi.fn(async () =>
+        answer('listFiles', () => ({ files: [], nextCursor: null, usedBytes: 0, capBytes: 1 })),
+      ),
+      removeFile: vi.fn(async () => answer('removeFile', () => undefined)),
       getUnlockStatus: vi.fn(async () =>
         answer('getUnlockStatus', (): UnlockStatusResponse => {
           if (mode === 'password') return { mode: 'password', wrappedDek, updatedAt };

@@ -45,6 +45,9 @@ export const freshVault = (vault: Vault, marks: RevisionMarks): Vault => {
     decryptListedRecord: async (type, listed) =>
       checked(listed.id, await vault.decryptListedRecord(type, listed)),
 
+    encryptFile: vault.encryptFile,
+    decryptFile: vault.decryptFile,
+
     localKey: vault.localKey,
   };
 };

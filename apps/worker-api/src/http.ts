@@ -23,7 +23,7 @@ export type AppEnv = {
 
 export const apiError = (
   c: Context,
-  status: 400 | 401 | 403 | 404 | 409 | 413 | 426 | 429 | 500 | 502,
+  status: 400 | 401 | 403 | 404 | 409 | 411 | 413 | 426 | 429 | 500 | 502,
   code: ApiErrorCode,
   message: string,
 ) => {
@@ -114,8 +114,8 @@ export const readJsonBody = async <S extends z.ZodType>(
 };
 
 /**
- * Who a route that a CLI key may reach is acting for. A CLI key reaches the record routes and its
- * own key, nothing else: every other route takes `requireSession`, which reads the cookie alone.
+ * Who a route that a CLI key may reach is acting for. A CLI key reaches the record and file routes
+ * and its own key, nothing else: every other route takes `requireSession`, which reads the cookie alone.
  */
 export type Caller =
   | {

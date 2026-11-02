@@ -29,6 +29,13 @@
       "migrations_dir": "migrations"
     }
   ],
+  // Private: no public domain and no CORS. Every byte goes through `routes/files.ts`.
+  "r2_buckets": [
+    {
+      "binding": "FILES",
+      "bucket_name": "yozz-files"
+    }
+  ],
   "ratelimits": [
     {
       "name": "RELAY_RATE_LIMIT",

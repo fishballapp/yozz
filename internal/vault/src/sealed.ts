@@ -10,8 +10,14 @@ export const sealed = (iv: Uint8Array, body: Uint8Array): string => toBase64(con
 export const unseal = (
   text: string,
   what: string,
+): { iv: Uint8Array<ArrayBuffer>; body: Uint8Array<ArrayBuffer> } =>
+  unsealBytes(fromBase64(text, what), what);
+
+/** The same format unencoded, for a file: base64 would add a third to what R2 stores. */
+export const unsealBytes = (
+  bytes: Uint8Array,
+  what: string,
 ): { iv: Uint8Array<ArrayBuffer>; body: Uint8Array<ArrayBuffer> } => {
-  const bytes = fromBase64(text, what);
   if (bytes.length <= IV_BYTES) {
     throw new VaultError('malformed', `${what} is ${bytes.length} bytes, too short to hold an IV`);
   }

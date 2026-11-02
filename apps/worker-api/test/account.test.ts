@@ -3,6 +3,7 @@ import { ACCOUNT_HEADER } from '@yozz.app/vault-contract';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { createApp } from '../src/app.ts';
 import { applyMigrations } from './apply-migrations.ts';
+import { settledRequest } from './settled-request.ts';
 
 /** base64 of 32 bytes, the shape of `authValue`. */
 const AUTH_VALUE = 'q0dGZ0Z0RGZnZGZnZGZnZGZnZGZnZGZnZGZnZGZnZGY=';
@@ -190,20 +191,16 @@ describe('An account-scoped request', () => {
     { path, method, body }: (typeof ENDPOINTS)[number],
     { cookie, account }: { readonly cookie: string; readonly account?: string },
   ) =>
-    createApp().request(
-      `http://localhost${path}`,
-      {
-        method,
-        headers: {
-          'Content-Type': 'application/json',
-          Cookie: cookie,
-          Origin: 'https://yozz.app',
-          ...(account === undefined ? {} : { [ACCOUNT_HEADER]: account }),
-        },
-        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    settledRequest(`http://localhost${path}`, {
+      method,
+      headers: {
+        'Content-Type': 'application/json',
+        Cookie: cookie,
+        Origin: 'https://yozz.app',
+        ...(account === undefined ? {} : { [ACCOUNT_HEADER]: account }),
       },
-      env,
-    );
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    });
 
   it.each(ENDPOINTS)('cannot $name in the account of whoever signed in since', async endpoint => {
     const alice = await signIn('alice@example.com');

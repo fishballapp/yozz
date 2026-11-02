@@ -7,13 +7,15 @@
  * id         = HMAC(indexKey, [type, naturalKey])            → stored server-side
  * ciphertext = AES-GCM(recordKey, [revision, naturalKey, plaintext],
  *                      aad = [id, type])                     → stored server-side
+ * fileKey    = HKDF(DEK, info "yozz-vault-file")
+ * file       = iv ‖ AES-GCM(fileKey, bytes, aad = [fileId])   → stored server-side, unencoded
  * localKey   = HKDF(DEK, info <purpose>)                     → never leaves the device
  * ```
  */
 
-import { fromUtf8, toBase64Url, utf8, VaultError } from './bytes.ts';
+import { concat, fromUtf8, toBase64Url, utf8, VaultError } from './bytes.ts';
 import { hkdf, type VaultKey } from './keys.ts';
-import { freshIv, sealed, unseal } from './sealed.ts';
+import { freshIv, sealed, unseal, unsealBytes } from './sealed.ts';
 
 export type EncryptedRecord = {
   readonly id: string;
@@ -56,6 +58,12 @@ export type Vault = {
     type: string,
     listed: { readonly id: string; readonly ciphertext: string },
   ) => Promise<OpenedRecord & { readonly naturalKey: string }>;
+  /** `iv ‖ ciphertext`, bound to `fileId`, so the store cannot answer one file for another. */
+  readonly encryptFile: (
+    fileId: string,
+    bytes: Uint8Array<ArrayBuffer>,
+  ) => Promise<Uint8Array<ArrayBuffer>>;
+  readonly decryptFile: (fileId: string, stored: Uint8Array) => Promise<Uint8Array<ArrayBuffer>>;
   /** A non-extractable AES-GCM key for what a client stores locally for `purpose`; the same on every open. */
   readonly localKey: (purpose: LocalKeyPurpose) => CryptoKey;
 };
@@ -136,9 +144,10 @@ export const openVault = async (keys: VaultKey, wrappedDek: string): Promise<Vau
     await crypto.subtle.exportKey('raw', await unwrap(keys.encKey, wrappedDek)),
   );
   // Derived here, with the others, so the DEK's bytes are dropped once `openVault` returns.
-  const [recordKey, indexKey, localKeys] = await Promise.all([
+  const [recordKey, indexKey, fileKey, localKeys] = await Promise.all([
     hkdf(raw, 'yozz-vault-record', { name: 'AES-GCM', length: 256 }, ['encrypt', 'decrypt']),
     hkdf(raw, 'yozz-vault-index', { name: 'HMAC', hash: 'SHA-256', length: 256 }, ['sign']),
+    hkdf(raw, 'yozz-vault-file', { name: 'AES-GCM', length: 256 }, ['encrypt', 'decrypt']),
     Promise.all(
       LOCAL_KEY_PURPOSES.map(
         async purpose =>
@@ -211,6 +220,26 @@ export const openVault = async (keys: VaultKey, wrappedDek: string): Promise<Vau
     },
 
     decryptListedRecord: async (type, { id, ciphertext }) => open(id, type, ciphertext),
+
+    encryptFile: async (fileId, bytes) => {
+      const iv = freshIv();
+      const body = await crypto.subtle.encrypt(
+        { name: 'AES-GCM', iv, additionalData: tuple(fileId) },
+        fileKey,
+        bytes,
+      );
+      return concat(iv, new Uint8Array(body));
+    },
+
+    decryptFile: async (fileId, stored) => {
+      const { iv, body } = unsealBytes(stored, `file ${fileId}`);
+      const opened = await crypto.subtle
+        .decrypt({ name: 'AES-GCM', iv, additionalData: tuple(fileId) }, fileKey, body)
+        .catch(() => {
+          throw new VaultError('unreadable', `file ${fileId} did not authenticate`);
+        });
+      return new Uint8Array(opened);
+    },
 
     localKey: purpose => {
       const key = localKeyOf.get(purpose);

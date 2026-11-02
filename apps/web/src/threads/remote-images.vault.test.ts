@@ -1,5 +1,5 @@
 import 'fake-indexeddb/auto';
-import { type VaultApi, VaultApiError } from '@yozz.app/mail/vault/api';
+import { VaultApiError, type VaultRecordApi } from '@yozz.app/mail/vault/api';
 import { createVault, deriveAccountKeys, type EncryptedRecord, type Vault } from '@yozz.app/vault';
 import type { PutPrecondition, VaultRecordEnvelope } from '@yozz.app/vault-contract';
 import { IDBFactory } from 'fake-indexeddb';
@@ -16,7 +16,7 @@ import {
 const casVaultApi = () => {
   const rows = new Map<string, VaultRecordEnvelope>();
   const state = { failNextPut: false };
-  const api: VaultApi = {
+  const api: VaultRecordApi = {
     get: async (type, id) => rows.get(`${type}:${id}`) ?? null,
     list: async function* () {},
     put: async (record: EncryptedRecord, revision: number, precondition?: PutPrecondition) => {

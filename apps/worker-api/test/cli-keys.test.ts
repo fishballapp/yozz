@@ -20,6 +20,7 @@ import { createAuth } from '../src/auth.ts';
 import { createCliKey } from '../src/db/cli-keys.ts';
 import { changePasswordUnlock } from '../src/db/unlock.ts';
 import { applyMigrations } from './apply-migrations.ts';
+import { settledRequest } from './settled-request.ts';
 
 type Person = {
   readonly userId: string;
@@ -84,15 +85,11 @@ const request = (
     body,
   }: { method?: string; headers: Record<string, string>; body?: unknown },
 ) =>
-  createApp().request(
-    `http://localhost${path}`,
-    {
-      method,
-      headers: { 'Content-Type': 'application/json', Origin: 'https://yozz.app', ...headers },
-      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-    },
-    env,
-  );
+  settledRequest(`http://localhost${path}`, {
+    method,
+    headers: { 'Content-Type': 'application/json', Origin: 'https://yozz.app', ...headers },
+    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+  });
 
 const asSession = ({ cookie, userId }: Person) => ({ Cookie: cookie, [ACCOUNT_HEADER]: userId });
 

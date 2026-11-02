@@ -2,6 +2,7 @@
 
 interface Env {
   DB: D1Database;
+  FILES: R2Bucket;
   RELAY_RATE_LIMIT: RateLimit;
   BETTER_AUTH_SECRET: string;
   FORWARD_EMAIL_ALIAS_PASSWORD: string;
@@ -17,6 +18,8 @@ declare module '*.sql?raw' {
 declare module 'cloudflare:test' {
   export const env: Env;
   export function reset(): Promise<void>;
+  export function createExecutionContext(): ExecutionContext;
+  export function waitOnExecutionContext(ctx: ExecutionContext): Promise<void>;
   export interface D1Migration {
     name: string;
     queries: string[];

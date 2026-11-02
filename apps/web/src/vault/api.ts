@@ -8,6 +8,7 @@ import {
   type CreateCliKeyResponse,
   CreateCliKeyResponseSchema,
   ListCliKeysResponseSchema,
+  ListFilesResponseSchema,
   ListRecordsResponseSchema,
   PasskeyWrapResponseSchema,
   type PutPrecondition,
@@ -163,6 +164,50 @@ const createAccountVaultApi = (
     }
   };
 
+  const filePath = (fileId: string) => `/api/v1/vault/files/${encodeURIComponent(fileId)}`;
+
+  const putFile: AccountVaultApi['putFile'] = async (fileId, ciphertext) => {
+    const res = await request(filePath(fileId), {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/octet-stream' },
+      body: ciphertext,
+    });
+    if (!res.ok) {
+      throw await parseErrorResponse(res);
+    }
+  };
+
+  const getFile: AccountVaultApi['getFile'] = async fileId => {
+    const res = await request(filePath(fileId), { method: 'GET' });
+    if (res.status === 404) {
+      return null;
+    }
+    if (!res.ok) {
+      throw await parseErrorResponse(res);
+    }
+    try {
+      return new Uint8Array(await res.arrayBuffer());
+    } catch (err) {
+      throw new VaultApiError('NETWORK_ERROR', `Network error: ${String(err)}`, 0);
+    }
+  };
+
+  const listFiles: AccountVaultApi['listFiles'] = async after => {
+    const query = after === undefined ? '' : `?after=${encodeURIComponent(after)}`;
+    const res = await request(`/api/v1/vault/files${query}`, { method: 'GET' });
+    if (!res.ok) {
+      throw await parseErrorResponse(res);
+    }
+    return ListFilesResponseSchema.parse(await res.json());
+  };
+
+  const removeFile: AccountVaultApi['removeFile'] = async fileId => {
+    const res = await request(filePath(fileId), { method: 'DELETE' });
+    if (!res.ok) {
+      throw await parseErrorResponse(res);
+    }
+  };
+
   const getUnlockStatus = async (): Promise<UnlockStatusResponse> => {
     const res = await request('/api/v1/vault/unlock', { method: 'GET' });
     if (!res.ok) {
@@ -270,6 +315,10 @@ const createAccountVaultApi = (
     list,
     put,
     remove,
+    putFile,
+    getFile,
+    listFiles,
+    removeFile,
     getUnlockStatus,
     getPasskeyWrap,
     finalizePasswordUnlock,

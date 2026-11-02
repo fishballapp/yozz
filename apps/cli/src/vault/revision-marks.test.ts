@@ -13,6 +13,12 @@ const openingAt = (revision: number): Vault => ({
   encryptRecord: ({ type }) => Promise.resolve({ id: 'record_1', type, ciphertext: 'c' }),
   decryptRecord: () => Promise.resolve({ revision, plaintext: '' }),
   decryptListedRecord: () => Promise.resolve({ revision, plaintext: '', naturalKey: 'k' }),
+  encryptFile: () => {
+    throw new Error('not used');
+  },
+  decryptFile: () => {
+    throw new Error('not used');
+  },
   localKey: () => {
     throw new Error('not used');
   },

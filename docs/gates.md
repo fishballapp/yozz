@@ -7,21 +7,21 @@ a number moves, something changed underneath — find out what before updating i
 ## In `pnpm test`
 
 ```bash
-pnpm -F @yozz.app/vault test            # 58. The key schedule, record crypto and the CLI key. No network,
+pnpm -F @yozz.app/vault test            # 66. The key schedule, record crypto and the CLI key. No network,
                                     #   no storage. The OpenSSL control lives here: node:crypto re-derives
                                     #   the whole schedule and opens a real record, and the CLI key's
                                     #   from RFC 7748's vector
 pnpm -F @yozz.app/vault-contract test   # 34. The wire schemas, incl. the strict refusal of
                                     #   `revision`, `deviceId`, plaintext and secrets
-pnpm -F @yozz.app/worker-api test       # 230. Against an ISOLATED LOCAL D1 with every migration
+pnpm -F @yozz.app/worker-api test       # 276. Against an ISOLATED LOCAL D1 with every migration
                                     #   applied; migrations.test.ts pins the vault tables' exact
                                     #   column lists, so a new plaintext column is a red test
-pnpm -F @yozz.app/mail test             # 298. Threading, sync over a fake IMAP client, MIME and the
+pnpm -F @yozz.app/mail test             # 306. Threading, sync over a fake IMAP client, MIME and the
                                     #   HTML-to-text reduction (in Node), draft records under CAS,
                                     #   the send state machine (a lost SMTP answer is recorded unconfirmed),
                                     #   the draft mirror, reply seeding, the record store's marks,
                                     #   DKIM verification (RFC 8463's vectors, a mailauth-signed message)
-pnpm -F @yozz.app/web test              # 575. Vault client + unlock (WebAuthn mocked), the IndexedDB
+pnpm -F @yozz.app/web test              # 606. Vault client + unlock (WebAuthn mocked), the IndexedDB
                                     #   cache, the live connection, the WebMCP tools over a fake
                                     #   port + their mount, ceilings, sanitizer policy, image
                                     #   consent, the screens, and architecture.test.ts

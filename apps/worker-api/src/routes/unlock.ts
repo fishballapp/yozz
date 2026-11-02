@@ -6,6 +6,7 @@ import {
 } from '@yozz.app/vault-contract';
 import { type Context, Hono } from 'hono';
 import { createAuth } from '../auth.ts';
+import { deleteAllFileObjects } from '../db/files.ts';
 import {
   CredentialNotFoundError,
   changePasswordUnlock,
@@ -157,6 +158,10 @@ export const unlockRoute = new Hono<AppEnv>()
   })
   .delete('/', requireFreshSession, async c => {
     const user = c.get('user');
+    // Objects first, as for an account: a new DEK leaves the old files unreadable for good.
+    await deleteAllFileObjects(c.env.FILES, user.id);
     await resetVault(c.env.DB, user.id);
+    // An upload whose `put` landed before the batch saw its row; the reset answers either way.
+    c.executionCtx.waitUntil(deleteAllFileObjects(c.env.FILES, user.id));
     return c.json({ ok: true as const }, 200);
   });

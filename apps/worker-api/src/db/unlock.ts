@@ -303,6 +303,7 @@ export const finalizePasskeyUnlock = async (
 export const resetVault = async (db: D1Database, userId: string): Promise<void> => {
   await db.batch([
     db.prepare('DELETE FROM vault_record WHERE user_id = ?').bind(userId),
+    db.prepare('DELETE FROM vault_file WHERE user_id = ?').bind(userId),
     db.prepare('DELETE FROM vault_cli_key WHERE user_id = ?').bind(userId),
     db.prepare('DELETE FROM vault_passkey_wrap WHERE user_id = ?').bind(userId),
     db.prepare('DELETE FROM vault_account WHERE user_id = ?').bind(userId),

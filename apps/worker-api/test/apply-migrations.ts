@@ -7,6 +7,7 @@ import migration0005 from '../migrations/0005_vault_record_revision.sql?raw';
 import migration0006 from '../migrations/0006_remove_better_auth_account_issuer.sql?raw';
 import migration0007 from '../migrations/0007_vault_user_foreign_keys.sql?raw';
 import migration0008 from '../migrations/0008_vault_cli_key.sql?raw';
+import migration0009 from '../migrations/0009_vault_file.sql?raw';
 
 const splitSql = (sql: string): string[] => {
   const statements: string[] = [];
@@ -75,6 +76,10 @@ const MIGRATIONS = [
   {
     name: '0008_vault_cli_key.sql',
     queries: splitSql(migration0008),
+  },
+  {
+    name: '0009_vault_file.sql',
+    queries: splitSql(migration0009),
   },
 ];
 

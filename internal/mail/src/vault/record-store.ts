@@ -1,6 +1,6 @@
 import { freshVault, type OpenedRecord, type RevisionMarks, type Vault } from '@yozz.app/vault';
 import type { PutPrecondition, VaultRecordEnvelope } from '@yozz.app/vault-contract';
-import type { VaultApi } from './api.ts';
+import type { VaultRecordApi } from './api.ts';
 
 /** The clear-text revision is not the one sealed inside the ciphertext; the client writes both from one number. */
 export class VaultStoreDisagreementError extends Error {
@@ -32,7 +32,7 @@ export const createRecordStore = ({
   marks,
 }: {
   readonly vault: Vault;
-  readonly api: VaultApi;
+  readonly api: VaultRecordApi;
   readonly marks: RevisionMarks;
 }): RecordStore => {
   const vault = freshVault(rawVault, marks);

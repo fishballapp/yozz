@@ -312,3 +312,56 @@ describe('a local key', () => {
     ).rejects.toThrow();
   });
 });
+
+describe('files', () => {
+  const FILE_ID = '6f9619ff-8b86-4011-b42d-00c04fc964ff';
+  const OTHER_ID = '7c9e6679-7425-40de-944b-e07fc1f90ae7';
+  const BYTES = new TextEncoder().encode('the attachment');
+
+  it('round-trips and reopens under the same DEK', async () => {
+    const stored = await vault.encryptFile(FILE_ID, BYTES);
+    const reopened = await openVault(await deriveAccountKeys(ACCOUNT), wrappedDek);
+
+    expect(await reopened.decryptFile(FILE_ID, stored)).toEqual(BYTES);
+  });
+
+  it('is iv ‖ ciphertext ‖ tag, with a fresh IV each time', async () => {
+    const [first, second] = await Promise.all([
+      vault.encryptFile(FILE_ID, BYTES),
+      vault.encryptFile(FILE_ID, BYTES),
+    ]);
+
+    expect(first.length).toBe(12 + BYTES.length + 16);
+    expect(first.subarray(0, 12)).not.toEqual(second.subarray(0, 12));
+  });
+
+  it('refuses a ciphertext swapped from another id', async () => {
+    const stored = await vault.encryptFile(FILE_ID, BYTES);
+
+    await expect(vault.decryptFile(OTHER_ID, stored)).rejects.toMatchObject({
+      code: 'unreadable',
+    });
+  });
+
+  it('refuses a changed byte, a cut file and a stub too short for an IV', async () => {
+    const stored = await vault.encryptFile(FILE_ID, BYTES);
+    const flipped = stored.map((byte, index) => (index === 20 ? byte ^ 0x01 : byte));
+
+    await expect(vault.decryptFile(FILE_ID, flipped)).rejects.toMatchObject({ code: 'unreadable' });
+    await expect(vault.decryptFile(FILE_ID, stored.subarray(0, -1))).rejects.toMatchObject({
+      code: 'unreadable',
+    });
+    await expect(vault.decryptFile(FILE_ID, stored.subarray(0, 12))).rejects.toMatchObject({
+      code: 'malformed',
+    });
+  });
+
+  it('opens under no other vault', async () => {
+    const { vault: another } = await createVault(other);
+    const stored = await vault.encryptFile(FILE_ID, BYTES);
+
+    await expect(another.decryptFile(FILE_ID, stored)).rejects.toMatchObject({
+      code: 'unreadable',
+    });
+  });
+});
