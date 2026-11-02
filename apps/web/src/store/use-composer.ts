@@ -6,8 +6,11 @@ import {
 import {
   addressList,
   type ComposeDraft,
+  type ComposeSeed,
   contentOf,
   type DraftContent,
+  type DraftFile,
+  draftFileOf,
   ownerAccountFor,
   sameDraftContent,
 } from '@yozz.app/mail/compose/draft';
@@ -24,6 +27,8 @@ import type { MailConnectionFailure, Result } from '@yozz.app/mail/connection';
 import { describeMailFailure } from '@yozz.app/mail/describe-failure';
 import type { AccountSummaries, VaultSentMessage } from '@yozz.app/mail/threads/summaries';
 import type { Attachment, ThreadState } from '@yozz.app/mail/threads/thread';
+import { VaultApiError } from '@yozz.app/mail/vault/api';
+import type { FileStore } from '@yozz.app/mail/vault/file-store';
 import type { RecordStore } from '@yozz.app/mail/vault/record-store';
 import { type RefObject, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { SendReport } from '../compose/draft';
@@ -79,11 +84,42 @@ type Compose = {
   isDiscarded: boolean;
   /** The record a new compose is minted as, by whichever write needs one first. Cleared by a refusal, which minted nothing. */
   minting: Promise<SaveOutcome> | null;
-  /** An autosave is writing; one at a time, since each names the version it read. */
-  isSaving: boolean;
+  /** The autosave writing now; one at a time, since each names the version it read. */
+  saving: Promise<void> | null;
+  /** The version this opening last wrote, ahead of the render that puts it in the draft. */
+  writtenDraftId: string | undefined;
+  /** A Send is waiting or claiming: nothing else writes the record, or the claim names a stale version. */
+  isSendPending: boolean;
   /** The latest Send, from its press: its claim writes the newest text itself, so the closing flush waits for it. */
   sending: Promise<SendClaim> | null;
+  /** How each upload this opening started went, by file id. A Send and the closing flush wait on these. */
+  readonly uploads: Map<string, Promise<DraftFile['upload']>>;
 };
+
+/** `files` with every upload under way settled: what a write may state, whenever the state last rendered. */
+const withUploadsSettled = (compose: Compose, files: readonly DraftFile[]) =>
+  Promise.all(
+    files.map(async file => {
+      const upload = await compose.uploads.get(file.id);
+      return upload === undefined ? file : { ...file, upload };
+    }),
+  );
+
+/** A file as an intent seeds it: a file already in R2 is named again rather than copied. */
+const draftFileOfSeed = (file: Attachment, isDemoSend: boolean): DraftFile => {
+  if (file.fileId !== undefined) {
+    const { fileId, content: _content, ...rest } = file;
+    return { ...rest, id: fileId, upload: 'uploaded' };
+  }
+  const upload = (() => {
+    if (isDemoSend) return 'uploaded';
+    return file.content === undefined ? 'failed' : 'uploading';
+  })();
+  return { ...file, id: crypto.randomUUID(), upload };
+};
+
+/** What a send reads files through: the session's stores. */
+type VaultStores = { readonly store: RecordStore; readonly files: FileStore };
 
 const composeOf = (intent: ComposeIntent, opened: ComposeDraft, isFresh: boolean): Compose => ({
   intent,
@@ -91,8 +127,11 @@ const composeOf = (intent: ComposeIntent, opened: ComposeDraft, isFresh: boolean
   isFresh,
   isDiscarded: false,
   minting: null,
-  isSaving: false,
+  saving: null,
+  writtenDraftId: undefined,
+  isSendPending: false,
   sending: null,
+  uploads: new Map(),
 });
 
 /**
@@ -118,6 +157,8 @@ export type ComposerShared = {
    * composer outlives the session, so an answer that lands after it ended is shown nowhere.
    */
   watchSession: () => () => boolean;
+  /** A file kept in R2, when something on screen asks for it. */
+  readStoredFile: (fileId: string) => Promise<Uint8Array<ArrayBuffer> | null>;
 };
 
 /** The open draft and what edits and sends it, carried by `useComposer` alone: it moves on every keystroke. */
@@ -133,7 +174,7 @@ export type Composer = {
   openSendState: 'sending' | 'unconfirmed' | null;
   /** No write may change the open draft: a send is running, or its lost answer waits on the person. */
   isOpenDraftFrozen: boolean;
-  /** Re-runs the unconfirmed send with the same bytes. */
+  /** Re-runs the unconfirmed send with the same message. */
   sendAgain: () => Promise<void>;
   /** Puts the unconfirmed send aside so the draft can be written again. Discard stays refused. */
   backToEditing: () => Promise<void>;
@@ -141,10 +182,7 @@ export type Composer = {
    * `?compose=` decides whether the composer is on screen; this follows it. A device-stored draft
    * for the same intent wins over the seed.
    */
-  seedDraft: (
-    intent: ComposeIntent | undefined,
-    seed: Partial<ComposeDraft>,
-  ) => ComposeDraft | null;
+  seedDraft: (intent: ComposeIntent | undefined, seed: ComposeSeed) => ComposeDraft | null;
   updateDraft: (changes: Partial<ComposeDraft>) => void;
   /**
    * Throws the open draft away before anything awaits, so the caller closes the composer straight
@@ -152,14 +190,17 @@ export type Composer = {
    */
   discardDraft: () => Promise<DeleteOutcome | SessionEnded>;
   /**
-   * Sends the draft over its identity's SMTP. Resolves at the claim, where the bytes are frozen
-   * into the record; a refusal before then is an error the composer shows, and everything after is
+   * Sends the draft over its identity's SMTP. Waits for uploads under way, and resolves at the
+   * claim, where the message is frozen into the record; a refusal before then is an error the composer shows, and everything after is
    * reported through `settled`. A send claimed as its session ends still goes out, and settles as
    * `ended`.
    */
   send: () => Promise<Result<{ readonly settled: Promise<SendReport> }, MailConnectionFailure>>;
+  /** Each file uploads at once, under a fresh id. */
   attach: (attachments: readonly Attachment[]) => void;
-  detach: (name: string) => void;
+  detach: (fileId: string) => void;
+  /** A new upload under a new id: a retried attempt whose answer was lost may still land under the old one. */
+  retryUpload: (fileId: string) => void;
 };
 
 export const useComposerStore = ({
@@ -240,6 +281,7 @@ export const useComposerStore = ({
         }
         if (!isCurrent()) return created;
         const { draftKey, draftId } = created.handle;
+        compose.writtenDraftId = draftId;
         setDrafts(current => [...current, created.handle]);
         if (composeRef.current === compose) {
           setDraft(current => (current === null ? current : { ...current, draftKey, draftId }));
@@ -327,12 +369,15 @@ export const useComposerStore = ({
   /** One implementation of each phase for a live send and a resumed one, in the session it began in. */
   const sendEffectsFor = useCallback(
     (
-      store: RecordStore,
+      { store, files }: VaultStores,
       runOn: RunOn,
       /** None when the address was removed after the send was claimed. */
       identity: AddressRecord | undefined,
+      /** Files this tab holds already, so a send from it doesn't download what it just uploaded. */
+      held: ReadonlyMap<string, Uint8Array> = new Map(),
     ): SendEffects => ({
       store,
+      readFile: async fileId => held.get(fileId) ?? files.get(fileId),
       submit: async (bytes, handle) => {
         const [{ envelopeRecipients }, { submitBytes }] = await Promise.all([
           import('@yozz.app/mail/compose/send'),
@@ -353,13 +398,16 @@ export const useComposerStore = ({
           }),
         );
       },
-      copyToSent: async (target, bytes, handle) => {
+      copyToSent: async (target, { message, assemble }, handle) => {
         const messageId = handle.record.send?.messageId ?? '';
         if (target === 'vault' || (identity !== undefined && !isInbound(identity))) {
           const { sentRecordFrom, storeSentRecord } = await import(
             '@yozz.app/mail/compose/sent-vault'
           );
-          await storeSentRecord(store, sentRecordFrom(handle.record, messageId, bytes, Date.now()));
+          await storeSentRecord(
+            store,
+            sentRecordFrom(handle.record, messageId, message, Date.now()),
+          );
           return { ok: true, value: null };
         }
         // The record the address has now: an edit since the claim may have changed its login, and
@@ -367,7 +415,9 @@ export const useComposerStore = ({
         const mailbox = currentAccount(handle.record.from);
         if (mailbox === undefined) return { ok: true, value: null };
         const { storeSentCopy } = await import('@yozz.app/mail/compose/send');
-        const copied = await storeSentCopy(runOn(mailbox), bytes, messageId);
+        const assembled = await assemble();
+        if (!assembled.ok) return assembled;
+        const copied = await storeSentCopy(runOn(mailbox), assembled.value, messageId);
         if (!copied.ok) return copied;
         // The locator says which account and folder, so a later expunge or open needs no guessing.
         return {
@@ -388,12 +438,14 @@ export const useComposerStore = ({
    */
   const settleSend = useCallback(
     async (
-      store: RecordStore,
+      stores: VaultStores,
       runOn: RunOn,
       identity: AddressRecord,
       handle: DraftHandle,
       isCurrent: () => boolean,
+      held: ReadonlyMap<string, Uint8Array>,
     ): Promise<SendReport> => {
+      const { store } = stores;
       // Counted across a lock too: the send is on the network either way, and a reload asks first.
       const end = activity.begin({ effect: 'write', priority: 'user' });
       try {
@@ -401,7 +453,7 @@ export const useComposerStore = ({
           import('@yozz.app/mail/compose/send-machine'),
           import('@yozz.app/mail/compose/sent-vault'),
         ]);
-        const progress = await driveSend(sendEffectsFor(store, runOn, identity), handle);
+        const progress = await driveSend(sendEffectsFor(stores, runOn, identity, held), handle);
         if (!isCurrent()) return { state: 'ended' };
         // SMTP refused the message; the account's IMAP host is where the Sent copy was going.
         const smtpHost = identity.smtp.host;
@@ -411,13 +463,13 @@ export const useComposerStore = ({
         // Shown before Drafts lets go of it, so no render has the message in neither.
         const showSent = () => {
           const { send } = handle.record;
-          if (send?.bytes === undefined) return;
-          const { bytes: _bytes, ...message } = sentRecordFrom(
-            handle.record,
-            send.messageId,
-            Uint8Array.fromBase64(send.bytes),
-            Date.now(),
-          );
+          if (send?.message === undefined) return;
+          // Text and headers only: the mailbox's own copy holds the files.
+          const {
+            message: _message,
+            attachments: _files,
+            ...message
+          } = sentRecordFrom(handle.record, send.messageId, send.message, Date.now());
           setJustSent(current => [...current, message]);
         };
 
@@ -444,7 +496,10 @@ export const useComposerStore = ({
           setDrafts(live);
           return {
             state: 'refused',
-            detail: describeMailFailure(progress.error, smtpHost),
+            // Only here: the draft is back, so its Reopen is there to press. The copy path has neither.
+            detail: progress.isFileUnreadable
+              ? `${describeMailFailure(progress.error, smtpHost)}. Reopen the draft and try again.`
+              : describeMailFailure(progress.error, smtpHost),
             draftKey: handle.draftKey,
           };
         }
@@ -509,22 +564,37 @@ export const useComposerStore = ({
    * account's Sent copy syncs.
    */
   const sendCompose = useCallback(
-    async (compose: Compose, draft: ComposeDraft): Promise<SendClaim> => {
-      const identity = identities.find(candidate => candidate.address === draft.identityId);
-      const messageId = `<${crypto.randomUUID()}@${draft.identityId.slice(draft.identityId.indexOf('@') + 1)}>`;
-
+    async (compose: Compose, pressed: ComposeDraft): Promise<SendClaim> => {
       if (!isDemo()) {
-        if (identity === undefined) {
-          return { ok: false, error: { kind: 'error', detail: 'Pick an address to send as.' } };
-        }
         const session = sessionRef.current;
         if (session === null) return lockedBeforeSend;
         // Taken before the first await and carried into the settling, which may outlive the session.
         const isCurrent = watchSession(sessionGeneration);
         const runOn = bindRunOn();
         clearTimeout(autosaveTimerRef.current);
+        const uploaded = await withUploadsSettled(compose, pressed.attachments);
+        // A save already under way moves the version the claim has to name.
+        await compose.saving;
+        if (!isCurrent()) return lockedBeforeSend;
+        const notUploaded = uploaded.find(({ upload }) => upload !== 'uploaded');
+        if (notUploaded !== undefined) {
+          return {
+            ok: false,
+            error: {
+              kind: 'error',
+              detail: `${notUploaded.name} failed to upload. Retry or remove it before sending.`,
+            },
+          };
+        }
+        // Waiting for an upload left the composer open, so the newest text is what goes.
+        const newest = composeRef.current === compose ? (draftRef.current ?? pressed) : pressed;
+        const draft = { ...newest, attachments: uploaded };
+        const identity = identities.find(candidate => candidate.address === draft.identityId);
+        if (identity === undefined) {
+          return { ok: false, error: { kind: 'error', detail: 'Pick an address to send as.' } };
+        }
         const content = contentOf(draft, ownerAccountOf(draft));
-        const [{ claimSend, createDraft }, { buildOutgoing }] = await Promise.all([
+        const [{ claimSend, createDraft }, { claimOf }] = await Promise.all([
           import('@yozz.app/mail/compose/draft-vault'),
           import('@yozz.app/mail/compose/send'),
         ]);
@@ -533,7 +603,8 @@ export const useComposerStore = ({
         // Every send owns a record. A compose sent inside the debounce has none yet; minting it here
         // makes a crash resumable and stops a second device sending its own copy.
         const draftId = await (async () => {
-          if (draft.draftId !== undefined) return draft.draftId;
+          const written = compose.writtenDraftId ?? draft.draftId;
+          if (written !== undefined) return written;
           const created = await mintRecord(compose, isCurrent, () =>
             createDraft(session.store, content, Date.now()),
           );
@@ -547,35 +618,11 @@ export const useComposerStore = ({
           };
         }
 
-        const built = buildOutgoing(identity, {
-          to: addressList(draft.to),
-          cc: addressList(draft.cc),
-          bcc: addressList(draft.bcc),
-          subject: draft.subject,
-          text: draft.body,
-          messageId,
-          inReplyTo: draft.inReplyTo,
-          references: draft.references,
-          attachments: draft.attachments,
-        });
-        if (!built.ok) return built;
+        const claim = claimOf(identity, parseDraftId(draftId)?.key ?? '', content, Date.now());
+        if (!claim.ok) return claim;
 
-        // Phase (0): the bytes go into the record before SMTP sees them, so a resend is the same message.
-        const claimed = await claimSend(
-          session.store,
-          draftId,
-          {
-            messageId,
-            opId: crypto.randomUUID(),
-            state: 'submitting',
-            claimedAt: Date.now(),
-            bytes: built.value.toBase64(),
-            // The logical folder; the name is resolved against LIST at copy time.
-            target: isInbound(identity) ? { account: identity.address, folder: 'sent' } : 'vault',
-          },
-          Date.now(),
-          content,
-        );
+        // Phase (0): the message goes into the record before SMTP sees it, so a resend is the same one.
+        const claimed = await claimSend(session.store, draftId, claim.value, Date.now(), content);
         if (!claimed.ok) {
           return {
             ok: false,
@@ -599,7 +646,20 @@ export const useComposerStore = ({
         return {
           ok: true,
           // Claimed, so it goes out even if the session ended under the claim; never a second time.
-          value: { settled: settleSend(session.store, runOn, identity, claimed.handle, isCurrent) },
+          value: {
+            settled: settleSend(
+              session,
+              runOn,
+              identity,
+              claimed.handle,
+              isCurrent,
+              new Map(
+                uploaded.flatMap(({ id, content }) =>
+                  content === undefined ? [] : [[id, content]],
+                ),
+              ),
+            ),
+          },
         };
       }
 
@@ -615,8 +675,23 @@ export const useComposerStore = ({
     if (draft === null || compose === null) {
       return { ok: false, error: { kind: 'error', detail: 'There is nothing to send.' } };
     }
+    compose.isSendPending = true;
     // Held before anything awaits, so a close under way waits for the claim.
-    compose.sending = sendCompose(compose, draft);
+    compose.sending = (async () => {
+      let claimed: SendClaim | undefined;
+      try {
+        claimed = await sendCompose(compose, draft);
+        return claimed;
+      } finally {
+        if (claimed?.ok !== true) {
+          compose.isSendPending = false;
+          // Whatever was typed during the wait is unsaved, and only a change to the draft re-arms it.
+          if (composeRef.current === compose) {
+            setDraft(current => (current === null ? current : { ...current }));
+          }
+        }
+      }
+    })();
     return compose.sending;
   }, [draft, sendCompose]);
 
@@ -665,6 +740,7 @@ export const useComposerStore = ({
         // A send-only address belongs to no mailbox, so it has no mirror.
         if (account === undefined) return;
         const { record } = openHandle;
+        // The mirror holds no files, so the head is the whole message.
         const built = buildOutgoing(identity, {
           to: addressList(record.to),
           cc: addressList(record.cc),
@@ -678,7 +754,13 @@ export const useComposerStore = ({
           attachments: [],
         });
         if (!built.ok) return;
-        await mirrorDraft(runOn(account), session.store, openHandle, built.value, account.address);
+        await mirrorDraft(
+          runOn(account),
+          session.store,
+          openHandle,
+          built.value.head,
+          account.address,
+        );
       })();
     }, DRAFT_MIRROR_MS);
     return () => clearTimeout(timer);
@@ -733,13 +815,24 @@ export const useComposerStore = ({
     if (draft === null || compose === null || session === null || isDemo()) return;
     // A send in flight freezes the content on every device.
     if (openHandleRef.current?.record.send !== undefined) return;
-    if (draft.body === '' && draft.subject === '' && draft.to === '') return;
+    // Its claim writes the newest text itself; an upload settling meanwhile would re-arm this.
+    if (compose.isSendPending) return;
+    if (
+      draft.body === '' &&
+      draft.subject === '' &&
+      draft.to === '' &&
+      !draft.attachments.some(({ upload }) => upload === 'uploaded')
+    ) {
+      return;
+    }
     const pending = draft;
     const timer = setTimeout(() => {
       // One save at a time; a compose closed under the timer is its closing flush's to file.
-      if (compose.isSaving || composeRef.current !== compose) return;
-      compose.isSaving = true;
+      if (compose.saving !== null || composeRef.current !== compose) return;
       const isCurrent = watchSession(sessionGeneration);
+      // Its own promise: a save that finds nothing to do ends before an `async` call could return one.
+      const saved = Promise.withResolvers<void>();
+      compose.saving = saved.promise;
       void (async () => {
         try {
           const content = contentOf(pending, ownerAccountOf(pending));
@@ -780,6 +873,7 @@ export const useComposerStore = ({
             return;
           }
           if (isOpen) setDraftError(null);
+          compose.writtenDraftId = outcome.handle.draftId;
           // The next save must name the new version.
           setDraft(current =>
             current === null || current.draftKey !== outcome.handle.draftKey
@@ -792,7 +886,8 @@ export const useComposerStore = ({
             ),
           );
         } finally {
-          compose.isSaving = false;
+          compose.saving = null;
+          saved.resolve();
         }
       })();
     }, DRAFT_AUTOSAVE_MS);
@@ -803,6 +898,7 @@ export const useComposerStore = ({
   const resolveDraftConflict = useCallback((choice: 'theirs' | 'mine') => {
     setDraftConflict(theirs => {
       if (theirs === null) return null;
+      if (composeRef.current !== null) composeRef.current.writtenDraftId = theirs.draftId;
       setDraft(current => {
         if (current === null || current.draftKey !== theirs.draftKey) return current;
         // Either way the editor now names the version that won.
@@ -817,6 +913,7 @@ export const useComposerStore = ({
               bcc: theirs.record.bcc,
               subject: theirs.record.subject,
               body: theirs.record.body,
+              attachments: (theirs.record.attachments ?? []).map(draftFileOf),
             };
       });
       return null;
@@ -846,7 +943,7 @@ export const useComposerStore = ({
         ? await reclaimSend(session.store, openHandle.draftId, Date.now())
         : openHandle;
     if (claimed === null) return;
-    await driveSend(sendEffectsFor(session.store, runOn, identity), claimed);
+    await driveSend(sendEffectsFor(session, runOn, identity), claimed);
     if (!isCurrent()) return;
     const { listDrafts } = await import('@yozz.app/mail/compose/draft-vault');
     const live = await listDrafts(session.store);
@@ -866,11 +963,15 @@ export const useComposerStore = ({
 
   /** The vault's drafts and sent records, then the sends this vault left in flight. */
   const load = useCallback(
-    async (store: RecordStore, records: readonly AddressRecord[], isCancelled: () => boolean) => {
+    async (stores: VaultStores, records: readonly AddressRecord[], isCancelled: () => boolean) => {
+      const { store, files } = stores;
       // Before the first await: a send resumed below copies into this session's mailboxes or nowhere.
       const runOn = bindRunOn();
       // Drafts come from the vault too.
-      const { listDrafts, purgeExpiredDrafts } = await import('@yozz.app/mail/compose/draft-vault');
+      const [{ listDrafts, purgeExpiredDrafts }, { collectFiles }] = await Promise.all([
+        import('@yozz.app/mail/compose/draft-vault'),
+        import('@yozz.app/mail/vault/collect-files'),
+      ]);
       // Before listing, so an expired tombstone stops costing storage.
       await purgeExpiredDrafts(store, Date.now());
       const drafts = await listDrafts(store);
@@ -890,11 +991,18 @@ export const useComposerStore = ({
         if (isCancelled()) return null;
         const identity = records.find(record => record.address === handle.record.from);
         // An address removed since the claim still gets its send finished, without a copy.
-        return sendEffectsFor(store, runOn, identity);
+        return sendEffectsFor(stores, runOn, identity);
       });
       // Checked after the read: one that spans a lock holds this user's drafts.
       const live = await listDrafts(store);
-      if (!isCancelled()) setDrafts(live);
+      if (isCancelled()) return;
+      setDrafts(live);
+      // A resume may have moved a send-only message out of Drafts and into Sent.
+      const sentNow = await listSentRecords(store);
+      if (isCancelled()) return;
+      setVaultSent(sentNow);
+      // Last, and in the background: nothing on screen waits for it, and the next unlock tries again.
+      void collectFiles(store, files, Date.now()).catch(() => undefined);
     },
     [bindRunOn, sendEffectsFor],
   );
@@ -1000,9 +1108,60 @@ export const useComposerStore = ({
 
   const watchOpenSession = useCallback(() => watchSession(sessionGeneration), []);
 
+  /** Uploads one file of a compose, and says how it went on its chip while that compose is open. */
+  const startUpload = useCallback(
+    (compose: Compose, { id, content }: DraftFile) => {
+      const files = sessionRef.current?.files;
+      const isCurrent = watchSession(sessionGeneration);
+      const uploading = (async (): Promise<DraftFile['upload']> => {
+        if (files === undefined || content === undefined) return 'failed';
+        // Something the person asked for, whose bytes a reload would lose. Counted across a lock too.
+        const end = activity.begin({ effect: 'write', priority: 'user' });
+        try {
+          await files.put(id, content);
+          return 'uploaded';
+        } catch (error) {
+          return error instanceof VaultApiError && error.code === 'STORAGE_FULL'
+            ? 'storage-full'
+            : 'failed';
+        } finally {
+          end();
+        }
+      })();
+      compose.uploads.set(id, uploading);
+      void (async () => {
+        const upload = await uploading;
+        if (!isCurrent() || composeRef.current !== compose) return;
+        setDraft(current =>
+          current === null
+            ? current
+            : {
+                ...current,
+                attachments: current.attachments.map(file =>
+                  file.id === id ? { ...file, upload } : file,
+                ),
+              },
+        );
+      })();
+    },
+    [activity],
+  );
+
+  const readStoredFile = useCallback<ComposerShared['readStoredFile']>(
+    async fileId => (await sessionRef.current?.files.get(fileId)) ?? null,
+    [],
+  );
+
   const shared = useMemo<ComposerShared>(
-    () => ({ drafts, sentCopyError, writeDraft, removeDraft, watchSession: watchOpenSession }),
-    [drafts, sentCopyError, writeDraft, removeDraft, watchOpenSession],
+    () => ({
+      drafts,
+      sentCopyError,
+      writeDraft,
+      removeDraft,
+      watchSession: watchOpenSession,
+      readStoredFile,
+    }),
+    [drafts, sentCopyError, writeDraft, removeDraft, watchOpenSession, readStoredFile],
   );
 
   const composer = useMemo<Composer>(
@@ -1048,7 +1207,8 @@ export const useComposerStore = ({
             if (
               saved !== null &&
               saved.draftId === open.draftId &&
-              sameDraftContent(saved.record, content)
+              sameDraftContent(saved.record, content) &&
+              !open.attachments.some(({ upload }) => upload === 'uploading')
             ) {
               // The vault already holds exactly this.
               if (userId !== null) clearDraft(userId);
@@ -1067,7 +1227,9 @@ export const useComposerStore = ({
               }
               // An autosave is replacing the record with possibly older text; the snapshot stays.
               // One still minting it is shared, and this writes over what it mints.
-              if (compose.isSaving && open.draftId !== undefined) return;
+              if (compose.saving !== null && open.draftId !== undefined) return;
+              // A file still uploading is one the person attached, so it is worth the wait.
+              const attachments = await withUploadsSettled(compose, open.attachments);
               const vault = await import('@yozz.app/mail/compose/draft-vault');
               if (!isCurrent()) return;
               const outcome = await writeContent(
@@ -1076,7 +1238,7 @@ export const useComposerStore = ({
                 isCurrent,
                 session.store,
                 open.draftId,
-                content,
+                contentOf({ ...open, attachments }, ownerAccountOf(open)),
               );
               if (!isCurrent()) return;
               if (!outcome.ok) {
@@ -1126,7 +1288,7 @@ export const useComposerStore = ({
             bcc: record.bcc,
             subject: record.subject,
             body: record.body,
-            attachments: [],
+            attachments: (record.attachments ?? []).map(draftFileOf),
             ...(record.inReplyTo === undefined ? {} : { inReplyTo: record.inReplyTo }),
             ...(record.references === undefined ? {} : { references: record.references }),
             draftKey: handle.draftKey,
@@ -1150,7 +1312,7 @@ export const useComposerStore = ({
           restored === null || live === undefined
             ? restored
             : { ...restored, draftId: live.draftId };
-        const merged = seed;
+        const { attachments: seeded = [], ...merged } = seed;
         const next: ComposeDraft = stored ?? {
           // The intent's seed says whether a quoted original opened with it, not the agent's text.
           startedAsReply: seed.body !== undefined && seed.body !== '',
@@ -1159,13 +1321,17 @@ export const useComposerStore = ({
           bcc: '',
           subject: '',
           body: '',
-          attachments: [],
+          attachments: seeded.map(file => draftFileOfSeed(file, demo)),
           ...merged,
           // Resolved last: an identity can be deleted, and a seed may pass `undefined`.
           identityId: merged.identityId ?? identities[0]?.address ?? '',
         };
-        composeRef.current = composeOf(intent, next, stored === null);
+        const opening = composeOf(intent, next, stored === null);
+        composeRef.current = opening;
         setDraft(next);
+        for (const file of next.attachments) {
+          if (file.upload === 'uploading') startUpload(opening, file);
+        }
         return next;
       },
       updateDraft: changes =>
@@ -1205,7 +1371,10 @@ export const useComposerStore = ({
         );
       },
       send,
-      attach: added =>
+      attach: added => {
+        const compose = composeRef.current;
+        if (compose === null) return;
+        const files = added.map(file => draftFileOfSeed(file, demo));
         setDraft(current =>
           current === null
             ? current
@@ -1214,16 +1383,37 @@ export const useComposerStore = ({
                 // Same filename twice is a re-pick.
                 attachments: [
                   ...current.attachments.filter(a => !added.some(b => b.name === a.name)),
-                  ...added,
+                  ...files,
                 ],
               },
-        ),
-      detach: name =>
+        );
+        for (const file of files) {
+          if (file.upload === 'uploading') startUpload(compose, file);
+        }
+      },
+      // The record that named it may come back with another device's version, so R2 keeps it;
+      // once nothing names it, collection takes it.
+      detach: fileId =>
         setDraft(current =>
           current === null
             ? current
-            : { ...current, attachments: current.attachments.filter(a => a.name !== name) },
+            : { ...current, attachments: current.attachments.filter(a => a.id !== fileId) },
         ),
+      retryUpload: fileId => {
+        const compose = composeRef.current;
+        const failed = draftRef.current?.attachments.find(({ id }) => id === fileId);
+        if (compose === null || failed === undefined) return;
+        const retried: DraftFile = { ...failed, id: crypto.randomUUID(), upload: 'uploading' };
+        setDraft(current =>
+          current === null
+            ? current
+            : {
+                ...current,
+                attachments: current.attachments.map(file => (file.id === fileId ? retried : file)),
+              },
+        );
+        startUpload(compose, retried);
+      },
     }),
     [
       draft,
@@ -1242,6 +1432,7 @@ export const useComposerStore = ({
       ownerAccountOf,
       dropDraft,
       writeContent,
+      startUpload,
     ],
   );
 

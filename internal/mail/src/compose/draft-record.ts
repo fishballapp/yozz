@@ -14,6 +14,27 @@ const locatorSchema = z.object({
   uid: z.number().int().nonnegative(),
 });
 
+/** A file a record names; its bytes are in R2 under `id`, sealed to it. */
+export const fileReferenceSchema = z.object({
+  id: z.string().min(1),
+  name: z.string(),
+  size: z.number().int().nonnegative(),
+  mimeType: z.string().optional(),
+  kind: z.enum(['pdf', 'image', 'archive', 'sheet', 'other']),
+});
+export type FileReference = z.infer<typeof fileReferenceSchema>;
+
+/**
+ * A message frozen by its claim: `head` (base64) is every byte but the attachments' bodies, and each
+ * splice says where a file's body goes. A new field, not `bytes` and optional splices: a client that
+ * knows neither stops, where one that knew `bytes` alone would send empty attachments.
+ */
+export const frozenMessageSchema = z.object({
+  head: z.string(),
+  splices: z.array(z.object({ at: z.number().int().nonnegative(), fileId: z.string().min(1) })),
+});
+export type FrozenMessage = z.infer<typeof frozenMessageSchema>;
+
 /**
  * Present only while sending; every device refuses to edit or discard it. The phases are recovery
  * instructions after a crash. `submitting` is the one nobody can resolve automatically, and
@@ -25,8 +46,8 @@ const sendSchema = z.object({
   state: z.enum(['submitting', 'unconfirmed', 'submitted', 'copied']),
   /** A send not finished within `SEND_CLAIM_STALE_MS` did not finish; this is what says so. */
   claimedAt: z.number().int().nonnegative(),
-  /** The exact RFC 5322 bytes, base64, so a resend is the same message. */
-  bytes: z.string().optional(),
+  /** So a resend is the same message. */
+  message: frozenMessageSchema.optional(),
   /** An account's folder, or the vault for a send-only address. */
   target: z
     .union([
@@ -51,6 +72,8 @@ export const draftRecordSchema = z.object({
   inReplyTo: z.string().optional(),
   references: z.array(z.string()).optional(),
   threadId: z.string().optional(),
+  /** Absent reads as none. A save that does not state it keeps what the record has. */
+  attachments: z.array(fileReferenceSchema).optional(),
   /** Bumped on every content write; half of a `draftId`. */
   contentVersion: z.number().int().nonnegative(),
   /** Orders a draft among the mail around it. */
@@ -102,6 +125,15 @@ const parser =
   };
 
 export const parseDraftRecord = parser(draftRecordSchema);
+
+/** Every file a draft record names, a tombstone's too: what it holds, and what its sends froze. */
+export const fileIdsOfDraft = (record: DraftRecord): readonly string[] => [
+  ...(record.attachments ?? []).map(({ id }) => id),
+  ...[record.send, record.unconfirmedSend].flatMap(
+    send => send?.message?.splices.map(({ fileId }) => fileId) ?? [],
+  ),
+];
+
 export const parseDraftMirrorRecord = parser(draftMirrorRecordSchema);
 
 /** Longer than any SMTP attempt this client makes. */

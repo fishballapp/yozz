@@ -5,13 +5,18 @@ import {
   type AddressRecord,
   parseAddressRecord,
 } from '@yozz.app/mail/addresses/record';
+import { fakeFileStore } from '@yozz.app/mail/testing/fake-file-store';
 import { fakeRecordStore } from '@yozz.app/mail/testing/fake-record-store';
+import type { FileStore } from '@yozz.app/mail/vault/file-store';
 import type { RecordStore } from '@yozz.app/mail/vault/record-store';
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { LiveState } from '../relay/live';
 import { MailProvider, useMail } from './MailProvider';
+
+/** The vault's file half, which these tests do not exercise. */
+const noFiles = fakeFileStore().store;
 
 // @ts-expect-error React reads it off the global
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
@@ -21,7 +26,11 @@ type HeldSync = { isStale: () => boolean; finish: () => void };
 
 const mocks = vi.hoisted(() => ({
   // What the mail store reads of the session.
-  session: null as { readonly userId: string; readonly store: RecordStore } | null,
+  session: null as {
+    readonly userId: string;
+    readonly files: FileStore;
+    readonly store: RecordStore;
+  } | null,
   syncs: [] as HeldSync[],
   /** What reached the vault and the device cache, in order. */
   events: [] as string[],
@@ -142,7 +151,7 @@ const storedNames = (rows: readonly { plaintext: string }[]) =>
 const unmounts: (() => Promise<void>)[] = [];
 
 const mount = async (store: RecordStore) => {
-  mocks.session = { userId: 'user-1', store };
+  mocks.session = { userId: 'user-1', files: noFiles, store };
   let mail: ReturnType<typeof useMail> | null = null;
   const Probe = () => {
     mail = useMail();
@@ -356,7 +365,7 @@ describe('removeAddress', () => {
     act(() => {
       removing = mail().removeAddress(ALICE.address);
     });
-    await replaceSession({ userId: 'user-2', store: await vaultWith([ALICE]) });
+    await replaceSession({ userId: 'user-2', files: noFiles, store: await vaultWith([ALICE]) });
     await vi.waitFor(() => expect(mocks.syncs).toHaveLength(2));
 
     await act(async () => {
@@ -376,7 +385,7 @@ describe('removeAddress', () => {
     await vi.waitFor(() => expect(mocks.syncs).toHaveLength(1));
 
     await act(() => mail().removeAddress(ALICE.address));
-    await replaceSession({ userId: 'user-2', store: await vaultWith([ALICE]) });
+    await replaceSession({ userId: 'user-2', files: noFiles, store: await vaultWith([ALICE]) });
     await vi.waitFor(() => expect(mocks.syncs).toHaveLength(2));
 
     await act(async () => mocks.syncs[0]?.finish());
@@ -398,7 +407,11 @@ describe('removeAddress', () => {
       first = mail().removeAddress(ALICE.address);
     });
     const next = await vaultWith([ALICE]);
-    await replaceSession({ userId: 'user-2', store: { ...next, put: logged(next).put } });
+    await replaceSession({
+      userId: 'user-2',
+      files: noFiles,
+      store: { ...next, put: logged(next).put },
+    });
     await vi.waitFor(() => expect(mocks.syncs).toHaveLength(2));
 
     await act(() => mail().removeAddress(ALICE.address));
@@ -430,7 +443,7 @@ describe('removeAddress', () => {
     act(() => {
       readding = mail().putAddress(ALICE);
     });
-    await replaceSession({ userId: 'user-2', store: await vaultWith([BOB]) });
+    await replaceSession({ userId: 'user-2', files: noFiles, store: await vaultWith([BOB]) });
     await vi.waitFor(() => expect(addressesOf(mail())).toEqual([BOB.address]));
 
     await act(async () => {
@@ -551,7 +564,7 @@ describe('replaceAddress', () => {
     act(() => {
       replacing = mail().replaceAddress(edited({ host: 'imap.other.example' }));
     });
-    await replaceSession({ userId: 'user-2', store: await vaultWith([ALICE]) });
+    await replaceSession({ userId: 'user-2', files: noFiles, store: await vaultWith([ALICE]) });
     await vi.waitFor(() => expect(mocks.syncs).toHaveLength(2));
 
     await act(async () => {

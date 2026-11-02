@@ -1,6 +1,6 @@
 import { VaultApiError } from '../vault/api.ts';
 import type { RecordStore } from '../vault/record-store.ts';
-import type { DraftRecord } from './draft-record.ts';
+import type { DraftRecord, FrozenMessage } from './draft-record.ts';
 import { parseSentRecord, SENT_RECORD_TYPE, type SentRecord } from './sent-record.ts';
 
 /** Sent mail from an address with no mailbox; the vault holds the only copy, so never purged. */
@@ -21,22 +21,27 @@ export const storeSentRecord = async (store: RecordStore, record: SentRecord): P
   }
 };
 
-/** Read back from the bytes: a formatted clock reading and the header it produced are not reliably the same string. */
-const dateHeaderOf = (bytes: Uint8Array): string => {
-  const headerBlock = new TextDecoder().decode(bytes.subarray(0, 4096));
-  return /^Date: (.*)$/m.exec(headerBlock)?.[1]?.trim() ?? '';
+/**
+ * Read back from the head: a formatted clock reading and the header it produced are not reliably the
+ * same string. Up to the first blank line, the headers, however long a recipient list made them.
+ */
+const dateHeaderOf = (message: FrozenMessage): string => {
+  const headers = new TextDecoder()
+    .decode(Uint8Array.fromBase64(message.head))
+    .split('\r\n\r\n', 1)[0];
+  return /^Date: (.*)$/m.exec(headers ?? '')?.[1]?.trim() ?? '';
 };
 
 /** Built from the record the send froze, not from what the composer holds now. */
 export const sentRecordFrom = (
   record: DraftRecord,
   messageId: string,
-  bytes: Uint8Array,
+  message: FrozenMessage,
   at: number,
 ): SentRecord => ({
   messageId,
   at,
-  date: dateHeaderOf(bytes),
+  date: dateHeaderOf(message),
   from: record.from,
   to: record.to,
   cc: record.cc,
@@ -44,7 +49,8 @@ export const sentRecordFrom = (
   body: record.body,
   ...(record.inReplyTo === undefined ? {} : { inReplyTo: record.inReplyTo }),
   ...(record.references === undefined ? {} : { references: [...record.references] }),
-  bytes: bytes.toBase64(),
+  message,
+  ...(record.attachments === undefined ? {} : { attachments: record.attachments }),
 });
 
 export const listSentRecords = async (store: RecordStore): Promise<readonly SentRecord[]> => {

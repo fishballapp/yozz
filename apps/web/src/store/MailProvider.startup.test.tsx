@@ -2,6 +2,7 @@
 import 'fake-indexeddb/auto';
 import type { ImapMessageSummary } from '@yozz.app/imap';
 import { ADDRESS_RECORD_TYPE, type AddressRecord } from '@yozz.app/mail/addresses/record';
+import { fakeFileStore } from '@yozz.app/mail/testing/fake-file-store';
 import type { syncAccount } from '@yozz.app/mail/threads/sync';
 import type { RecordStore } from '@yozz.app/mail/vault/record-store';
 import { act, type ReactNode } from 'react';
@@ -9,6 +10,9 @@ import { createRoot } from 'react-dom/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createMailCache } from '../threads/cache';
 import { MailProvider, useMail } from './MailProvider';
+
+/** The vault's file half, which these tests do not exercise. */
+const noFiles = fakeFileStore().store;
 
 // The TLS stack never arrives: whatever renders below rendered without it.
 vi.mock('../relay/connection', () => new Promise(() => {}));
@@ -46,7 +50,7 @@ const store: RecordStore = {
   remove: async () => {},
 };
 
-const vault = { session: { userId: 'u1', store } };
+const vault = { session: { userId: 'u1', files: noFiles, store } };
 
 vi.mock('../vault/session', () => ({ useVault: () => vault }));
 
@@ -106,7 +110,7 @@ const renderProvider = async (children: ReactNode) => {
 
 afterEach(async () => {
   await Promise.all(unmounts.splice(0).map(unmount => unmount()));
-  vault.session = { userId: 'u1', store };
+  vault.session = { userId: 'u1', files: noFiles, store };
   mail = null;
   transport.syncAccount.mockClear();
   vi.restoreAllMocks();
@@ -162,7 +166,7 @@ describe('MailProvider startup', () => {
     await vi.waitFor(() => expect(frames).toHaveLength(1));
 
     // A lock and unlock while the first sync waits for its frame.
-    vault.session = { userId: 'u3', store };
+    vault.session = { userId: 'u3', files: noFiles, store };
     await render();
     await vi.waitFor(() => expect(frames).toHaveLength(2));
     // The old session's sync resumes after its frame and finds itself stale.
@@ -184,6 +188,7 @@ describe('MailProvider startup', () => {
   it('syncs an address added after the address list was refused', async () => {
     vault.session = {
       userId: 'u2',
+      files: noFiles,
       store: {
         ...store,
         list: async () => {

@@ -1,12 +1,17 @@
 // @vitest-environment jsdom
 
 import { ADDRESS_RECORD_TYPE, type AddressRecord } from '@yozz.app/mail/addresses/record';
+import { fakeFileStore } from '@yozz.app/mail/testing/fake-file-store';
 import { fakeRecordStore } from '@yozz.app/mail/testing/fake-record-store';
+import type { FileStore } from '@yozz.app/mail/vault/file-store';
 import type { RecordStore } from '@yozz.app/mail/vault/record-store';
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, expect, it, vi } from 'vitest';
 import { MailProvider, useMail } from './MailProvider';
+
+/** The vault's file half, which these tests do not exercise. */
+const noFiles = fakeFileStore().store;
 
 // @ts-expect-error React reads it off the global
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
@@ -16,7 +21,7 @@ globalThis.IS_REACT_ACT_ENVIRONMENT = true;
  * TLS stack in the app, is held here until the test lets it go.
  */
 const mocks = vi.hoisted(() => ({
-  session: null as { userId: string; store: RecordStore } | null,
+  session: null as { userId: string; files: FileStore; store: RecordStore } | null,
   stack: Promise.withResolvers<void>(),
 }));
 
@@ -85,12 +90,20 @@ it("a first sync whose stack loaded after the session ended names nothing in the
   unmounts.push(() => act(async () => root.unmount()));
   const states = () => Object.keys(mail?.syncStates ?? {});
 
-  mocks.session = { userId: 'user-1', store: await vaultHolding(inbound('alice@example.com')) };
+  mocks.session = {
+    userId: 'user-1',
+    files: noFiles,
+    store: await vaultHolding(inbound('alice@example.com')),
+  };
   await render();
   await vi.waitFor(() => expect(mail?.identities).toHaveLength(1));
   // Past the cached list's frame, so the sync waits on the stack alone.
   await act(() => new Promise(resolve => setTimeout(resolve, 50)));
-  mocks.session = { userId: 'user-2', store: await vaultHolding(inbound('bob@example.org')) };
+  mocks.session = {
+    userId: 'user-2',
+    files: noFiles,
+    store: await vaultHolding(inbound('bob@example.org')),
+  };
   await render();
   await vi.waitFor(() =>
     expect(mail?.identities.map(record => record.address)).toEqual(['bob@example.org']),

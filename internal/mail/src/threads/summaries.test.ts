@@ -605,6 +605,15 @@ describe('threads that span accounts', () => {
     expect(alone.find(thread => thread.id === 'draft/k1')?.messages[0]?.body).toEqual([
       'Half a thought',
     ]);
+    // No files, no field; a draft's files are opened from R2, as a send-only copy's are.
+    expect(alone.find(thread => thread.id === 'draft/k1')?.messages[0]).not.toHaveProperty(
+      'attachments',
+    );
+    const file = { id: 'file-1', name: 'r.pdf', size: 3, kind: 'pdf' as const };
+    const withFile = withDrafts(threads, [draft({ attachments: [file] })]);
+    expect(withFile.find(thread => thread.id === 'draft/k1')?.messages[0]?.attachments).toEqual([
+      { name: 'r.pdf', size: 3, kind: 'pdf', fileId: 'file-1' },
+    ]);
   });
 });
 

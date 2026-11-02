@@ -9,14 +9,15 @@ import {
   XIcon,
 } from '@phosphor-icons/react';
 import { useNavigate, useSearch } from '@tanstack/react-router';
-import { MAX_ATTACHMENT_BYTES } from '@yozz.app/mail/compose/draft';
+import { type DraftFile, MAX_ATTACHMENT_BYTES } from '@yozz.app/mail/compose/draft';
 import type { DeleteOutcome } from '@yozz.app/mail/compose/draft-vault';
 import { seedFor } from '@yozz.app/mail/compose/seed';
 import { describeMailFailure } from '@yozz.app/mail/describe-failure';
 import { cn } from 'cn';
 import { useEffect, useRef, useState } from 'react';
 import { useComposer, useMail } from '../store/MailProvider';
-import { displayName } from '../threads/attachment-preview';
+import type { LoadStoredFile } from '../threads/AttachmentList';
+import { displayName, download } from '../threads/attachment-preview';
 import { ATTACHMENT_LABEL, formatBytes } from '../threads/attachments';
 import { Button } from '../ui/Button';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
@@ -89,7 +90,14 @@ const reportSend = (settled: Promise<SendReport>, reopen: (draftKey: string) => 
       timeout: 0,
       priority: 'high',
       // Nothing else on screen knows which draft this was.
-      actionProps: { children: 'Reopen', onClick: () => reopen(report.draftKey) },
+      // Closed too: it stays until told otherwise, and would sit on the Send button it reopens.
+      actionProps: {
+        children: 'Reopen',
+        onClick: () => {
+          toast.close(id);
+          reopen(report.draftKey);
+        },
+      },
     });
   });
 };
@@ -108,6 +116,116 @@ const reportDiscard = async (discarded: Promise<DeleteOutcome | SessionEnded>) =
   reportProblem('Draft not discarded', DISCARD_REFUSALS[outcome]);
 };
 
+/** One sentence under the chips, for what a chip's own word can't say. */
+const uploadProblemOf = (files: readonly DraftFile[]): string | null => {
+  // ponytail: no next step to offer, since nobody can free storage on demand. Accepted until the
+  // first full account: docs/attachment-storage.md, "Accepted".
+  if (files.some(({ upload }) => upload === 'storage-full')) {
+    return 'Failed to upload. Your file storage is full (1 GB).';
+  }
+  return files.some(({ upload }) => upload === 'failed')
+    ? 'Failed to upload. Retry or remove the file.'
+    : null;
+};
+
+const UPLOAD_WORDS: Record<Exclude<DraftFile['upload'], 'uploaded'>, string> = {
+  uploading: 'Uploading…',
+  failed: 'Upload failed',
+  'storage-full': 'Storage full',
+};
+
+/**
+ * A file on the open draft: uploading, failed with a retry, or stored. A stored one opens by
+ * downloading, from this tab's bytes or from R2 on any other device.
+ */
+const DraftFileChip = ({
+  file,
+  isFrozen,
+  loadFile,
+  onRemove,
+  onRetry,
+}: {
+  file: DraftFile;
+  /** A send holds the draft, so its files can't change. */
+  isFrozen: boolean;
+  loadFile: LoadStoredFile;
+  onRemove: () => void;
+  onRetry: () => void;
+}) => {
+  const name = displayName(file.name);
+  const [isDownloading, setIsDownloading] = useState(false);
+  const [hasDownloadFailed, setHasDownloadFailed] = useState(false);
+  const facts = (
+    <>
+      <span className="text-paper-faint">{ATTACHMENT_LABEL[file.kind]}</span>
+      <span dir="auto" className="max-w-56 truncate text-paper">
+        {name}
+      </span>
+      <span className="text-paper-faint">{formatBytes(file.size)}</span>
+    </>
+  );
+  return (
+    <li className="flex items-center gap-2 bg-ink px-2 py-1 font-mono text-2xs text-paper-dim">
+      {file.upload === 'uploaded' ? (
+        <button
+          type="button"
+          disabled={isDownloading}
+          onClick={async () => {
+            setIsDownloading(true);
+            setHasDownloadFailed(false);
+            try {
+              const content = file.content ?? (await loadFile(file.id));
+              if (content === null) throw new Error(`${file.id} is gone`);
+              download({ ...file, content });
+            } catch {
+              setHasDownloadFailed(true);
+            } finally {
+              setIsDownloading(false);
+            }
+          }}
+          className="flex items-center gap-2 -outline-offset-2 hover:text-paper"
+          aria-label={`Download ${name}, ${formatBytes(file.size)}`}
+        >
+          {facts}
+        </button>
+      ) : (
+        facts
+      )}
+      {isDownloading && <span className="text-paper-faint">Downloading…</span>}
+      {hasDownloadFailed && <span className="text-signal">Couldn’t download</span>}
+      {file.upload !== 'uploaded' && (
+        <span
+          role={file.upload === 'uploading' ? 'status' : undefined}
+          className={file.upload === 'uploading' ? 'text-paper-faint' : 'text-signal'}
+        >
+          {UPLOAD_WORDS[file.upload]}
+        </span>
+      )}
+      {(file.upload === 'failed' || file.upload === 'storage-full') &&
+        file.content !== undefined && (
+          <button
+            type="button"
+            onClick={onRetry}
+            className="-outline-offset-2 text-paper underline underline-offset-2 hover:text-signal"
+            aria-label={`Retry ${name}`}
+          >
+            Retry
+          </button>
+        )}
+      {!isFrozen && (
+        <button
+          type="button"
+          onClick={onRemove}
+          className="-m-1 flex size-6 items-center justify-center -outline-offset-2 text-paper-faint hover:text-paper"
+          aria-label={`Remove ${name}`}
+        >
+          <XIcon size={11} />
+        </button>
+      )}
+    </li>
+  );
+};
+
 export const Compose = () => {
   const { compose } = useSearch({ from: '__root__' });
   const navigate = useNavigate();
@@ -118,6 +236,7 @@ export const Compose = () => {
     send,
     attach,
     detach,
+    retryUpload,
     draftConflict,
     draftError,
     resolveDraftConflict,
@@ -127,7 +246,7 @@ export const Compose = () => {
     backToEditing,
     discardDraft,
   } = useComposer();
-  const { threads, identities, ownedAddresses, drafts, watchSession } = useMail();
+  const { threads, identities, ownedAddresses, drafts, watchSession, readStoredFile } = useMail();
   // `to: '.'` only drops the param. `replace`, or Back after closing re-opened a blank draft.
   const close = () => {
     void navigate({ to: '.', search: withoutCompose, replace: true });
@@ -187,6 +306,14 @@ export const Compose = () => {
     // Both deps are fixed for the life of a draft.
   }, [isOpen, startedAsReply]);
 
+  const uploadProblem = uploadProblemOf(draft?.attachments ?? []);
+  const sendLabel = (() => {
+    if (!isSending) return 'Send';
+    return draft?.attachments.some(({ upload }) => upload === 'uploading')
+      ? 'Uploading…'
+      : 'Sending…';
+  })();
+
   return (
     <Dialog.Root
       // Open once there is a draft to show, not merely an intent: the intent is there during the
@@ -238,14 +365,21 @@ export const Compose = () => {
                 <p role="alert" className="text-base text-paper-dim">
                   Edited on another device.
                 </p>
+                {/* Not while a Send waits on uploads: their text would go with your files. */}
                 <Button
                   variant="secondary"
                   size="sm"
+                  disabled={isSending}
                   onClick={() => resolveDraftConflict('theirs')}
                 >
                   Load theirs
                 </Button>
-                <Button variant="ghost" size="sm" onClick={() => resolveDraftConflict('mine')}>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  disabled={isSending}
+                  onClick={() => resolveDraftConflict('mine')}
+                >
                   Keep mine
                 </Button>
               </div>
@@ -384,28 +518,25 @@ export const Compose = () => {
                 </Tabs.Root>
 
                 {draft.attachments.length > 0 && (
-                  <ul className="flex shrink-0 flex-wrap gap-2 border-t border-rule-soft px-4 py-2.5">
-                    {draft.attachments.map(file => (
-                      <li
-                        key={file.name}
-                        className="flex items-center gap-2 bg-ink px-2 py-1 font-mono text-2xs text-paper-dim"
-                      >
-                        <span className="text-paper-faint">{ATTACHMENT_LABEL[file.kind]}</span>
-                        <span dir="auto" className="max-w-56 truncate text-paper">
-                          {displayName(file.name)}
-                        </span>
-                        <span className="text-paper-faint">{formatBytes(file.size)}</span>
-                        <button
-                          type="button"
-                          onClick={() => detach(file.name)}
-                          className="-m-1 flex size-6 items-center justify-center -outline-offset-2 text-paper-faint hover:text-paper"
-                          aria-label={`Remove ${displayName(file.name)}`}
-                        >
-                          <XIcon size={11} />
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
+                  <div className="shrink-0 border-t border-rule-soft px-4 py-2.5">
+                    <ul className="flex flex-wrap gap-2">
+                      {draft.attachments.map(file => (
+                        <DraftFileChip
+                          key={file.id}
+                          file={file}
+                          isFrozen={isSending || isOpenDraftFrozen}
+                          loadFile={readStoredFile}
+                          onRemove={() => detach(file.id)}
+                          onRetry={() => retryUpload(file.id)}
+                        />
+                      ))}
+                    </ul>
+                    {uploadProblem !== null && (
+                      <p className="mt-2 text-2xs text-signal" role="alert">
+                        {uploadProblem}
+                      </p>
+                    )}
+                  </div>
                 )}
 
                 <div className="flex shrink-0 flex-col gap-2 border-t border-rule-soft px-4 py-3">
@@ -463,6 +594,7 @@ export const Compose = () => {
                         variant="ghost"
                         size="sm"
                         className="h-11 lg:h-7"
+                        disabled={isSending || isOpenDraftFrozen}
                         onClick={() => fileInput.current?.click()}
                       >
                         <PaperclipIcon size={13} />
@@ -541,7 +673,7 @@ export const Compose = () => {
                       }
                     >
                       <PaperPlaneRightIcon size={13} weight="fill" />
-                      {isSending ? 'Sending…' : 'Send'}
+                      {sendLabel}
                     </Button>
                   </div>
                   {sendError !== null && (

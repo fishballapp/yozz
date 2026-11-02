@@ -19,10 +19,23 @@ export type MessageInput = {
   readonly extraHeaders?: readonly (readonly [string, string])[];
 };
 
-export type MessageAttachment = {
+/** A file named in the message, without its body. */
+export type MessageAttachmentHead = {
   readonly filename: string;
   readonly mimeType: string;
+};
+
+export type MessageAttachment = MessageAttachmentHead & {
   readonly content: Uint8Array;
+};
+
+/**
+ * A message with each attachment's body left out. `head` is every other byte; the body of the
+ * attachment at index `i` belongs at byte offset `splices[i]`, in the order they were given.
+ */
+export type MessageParts = {
+  readonly head: Uint8Array<ArrayBuffer>;
+  readonly splices: readonly number[];
 };
 
 const encoder = new TextEncoder();
@@ -111,18 +124,26 @@ const filenameParameter = (filename: string): string =>
         ch => `%${ch.charCodeAt(0).toString(16).toUpperCase()}`,
       )}`;
 
-const attachmentPartOf = ({ filename, mimeType, content }: MessageAttachment): string =>
+/**
+ * A body as a frozen message's splice holds it. Its line format is part of what a claim froze: a
+ * resend rebuilds the message from this, so changing it changes messages already claimed.
+ */
+export const encodeAttachmentBody = (content: Uint8Array): Uint8Array<ArrayBuffer> =>
+  encoder.encode(base64Lines(content));
+
+const attachmentHeadOf = ({ filename, mimeType }: MessageAttachmentHead): string =>
   [
     `Content-Type: ${mimeType}`,
     `Content-Disposition: attachment; ${filenameParameter(filename)}`,
     'Content-Transfer-Encoding: base64',
     '',
-    base64Lines(content),
     '',
   ].join('\r\n');
 
+const newBoundary = () => `=_yozz_${crypto.randomUUID()}`;
+
 const multipartOf = (subtype: string, parts: readonly string[]): string => {
-  const boundary = `=_yozz_${crypto.randomUUID()}`;
+  const boundary = newBoundary();
   return [
     `Content-Type: multipart/${subtype}; boundary="${boundary}"`,
     '',
@@ -130,6 +151,22 @@ const multipartOf = (subtype: string, parts: readonly string[]): string => {
     `--${boundary}--`,
     '',
   ].join('\r\n');
+};
+
+/** The text around each attachment body: one more piece than there are attachments. */
+const mixedPiecesOf = (
+  bodyPart: string,
+  attachments: readonly MessageAttachmentHead[],
+): readonly string[] => {
+  const boundary = newBoundary();
+  const opening = `Content-Type: multipart/mixed; boundary="${boundary}"\r\n\r\n--${boundary}\r\n${bodyPart}\r\n`;
+  return [
+    ...attachments.map(
+      (attachment, index) =>
+        `${index === 0 ? opening : '\r\n\r\n'}--${boundary}\r\n${attachmentHeadOf(attachment)}`,
+    ),
+    `\r\n\r\n--${boundary}--\r\n`,
+  ];
 };
 
 /** RFC 2047 §2: an encoded-word is at most 75 characters; minus `=?utf-8?B?` and `?=` that is 63 of base64, 45 bytes. */
@@ -191,7 +228,11 @@ const assertNoLineBreak = (field: string, value: string) => {
   if (/[\r\n]/.test(value)) throw new Error(`${field} contains a line break`);
 };
 
-export const buildMessage = (input: MessageInput): Uint8Array => {
+export const buildMessageParts = (
+  input: Omit<MessageInput, 'attachments'> & {
+    readonly attachments?: readonly MessageAttachmentHead[];
+  },
+): MessageParts => {
   for (const recipient of input.to) assertNoLineBreak('To', recipient);
   for (const recipient of input.cc ?? []) assertNoLineBreak('Cc', recipient);
   assertNoLineBreak('From', input.from.address);
@@ -238,11 +279,47 @@ export const buildMessage = (input: MessageInput): Uint8Array => {
       ? textPart
       : multipartOf('alternative', [textPart, textPartOf('text/html', input.html)]);
   const attachments = input.attachments ?? [];
-  const body =
-    attachments.length === 0
-      ? bodyPart
-      : multipartOf('mixed', [bodyPart, ...attachments.map(attachmentPartOf)]);
-
   const headerBlock = headers.map(([name, value]) => `${name}: ${value}`).join('\r\n');
-  return encoder.encode(`${headerBlock}\r\n${body}`);
+  if (attachments.length === 0) {
+    return { head: encoder.encode(`${headerBlock}\r\n${bodyPart}`), splices: [] };
+  }
+
+  const pieces = mixedPiecesOf(bodyPart, attachments).map((piece, index) =>
+    encoder.encode(index === 0 ? `${headerBlock}\r\n${piece}` : piece),
+  );
+  const head = new Uint8Array(pieces.reduce((sum, piece) => sum + piece.length, 0));
+  let written = 0;
+  const ends = pieces.map(piece => {
+    head.set(piece, written);
+    written += piece.length;
+    return written;
+  });
+  return { head, splices: ends.slice(0, -1) };
 };
+
+/** The whole message: `parts` with each body at its splice, in the order the attachments were given. */
+export const spliceMessage = (
+  { head, splices }: MessageParts,
+  bodies: readonly Uint8Array[],
+): Uint8Array<ArrayBuffer> => {
+  const whole = new Uint8Array(bodies.reduce((sum, body) => sum + body.length, head.length));
+  let written = 0;
+  let read = 0;
+  for (const [index, at] of splices.entries()) {
+    const body = bodies[index];
+    if (body === undefined) throw new Error(`No body for attachment ${index}`);
+    whole.set(head.subarray(read, at), written);
+    written += at - read;
+    whole.set(body, written);
+    written += body.length;
+    read = at;
+  }
+  whole.set(head.subarray(read), written);
+  return whole;
+};
+
+export const buildMessage = (input: MessageInput): Uint8Array =>
+  spliceMessage(
+    buildMessageParts(input),
+    (input.attachments ?? []).map(({ content }) => encodeAttachmentBody(content)),
+  );

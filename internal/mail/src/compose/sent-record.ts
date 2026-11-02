@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { fileReferenceSchema, frozenMessageSchema } from './draft-record.ts';
 
 /**
  * A message sent from an address with no mailbox; the vault is the only copy, so it is never
@@ -21,10 +22,17 @@ export const sentRecordSchema = z.object({
   body: z.string(),
   inReplyTo: z.string().optional(),
   references: z.array(z.string()).optional(),
-  /** The exact RFC 5322 bytes, base64. */
-  bytes: z.string(),
+  /** The message as its claim froze it; its files stay in R2, named here, so they count against the cap. */
+  message: frozenMessageSchema.optional(),
+  attachments: z.array(fileReferenceSchema).optional(),
 });
 export type SentRecord = z.infer<typeof sentRecordSchema>;
+
+/** Every file a sent record names. */
+export const fileIdsOfSent = (record: SentRecord): readonly string[] => [
+  ...(record.attachments ?? []).map(({ id }) => id),
+  ...(record.message?.splices.map(({ fileId }) => fileId) ?? []),
+];
 
 /** Total: a record this build cannot read is skipped. */
 export const parseSentRecord = (plaintext: string): SentRecord | null => {

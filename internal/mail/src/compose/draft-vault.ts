@@ -146,9 +146,12 @@ export const replaceDraft = async (
   }
   // Which conversation the draft belongs to is not text in the editor, so the composer's saves do not carry it.
   const threadId = content.threadId ?? current.record.threadId;
+  // Nor do an agent's: a whole snapshot of the text, which says nothing about the files.
+  const attachments = content.attachments ?? current.record.attachments;
   const record: DraftRecord = {
     ...content,
     ...(threadId === undefined ? {} : { threadId }),
+    ...(attachments === undefined ? {} : { attachments }),
     contentVersion: current.version + 1,
     updatedAt: now,
     // Editing does not settle an unconfirmed send: the bytes and the refusal to discard survive.
@@ -179,8 +182,11 @@ export const claimSend = async (
   if (!current.isCurrent) {
     return { ok: false, reason: 'conflict', currentDraftId: current.currentId };
   }
+  // Which conversation it belongs to is not text in the editor, as in `replaceDraft`.
+  const threadId = content?.threadId ?? current.record.threadId;
   const record: DraftRecord = {
     ...(content ?? current.record),
+    ...(threadId === undefined ? {} : { threadId }),
     contentVersion: current.version + 1,
     send,
   };
@@ -244,18 +250,25 @@ export const reclaimSend = (
     return { ...rest, send: { ...pending, state: 'submitting', claimedAt: now } };
   });
 
-/** Phase (3): the draft becomes a tombstone. Unlike `deleteDraft`, allowed on a record carrying a `send`. */
+/**
+ * Phase (3): the draft becomes a tombstone. Unlike `deleteDraft`, allowed on a record carrying a
+ * `send`. It stops naming its files, which is what frees them, now that the Sent copy is safe.
+ */
 export const completeSend = async (
   store: RecordStore,
   draftId: string,
   sentMessageId: string,
   now: number,
 ): Promise<void> => {
-  await bumpVersion(store, draftId, ({ send: _done, unconfirmedSend: _settled, ...rest }) => ({
-    ...rest,
-    deletedAt: now,
-    sentMessageId,
-  }));
+  await bumpVersion(
+    store,
+    draftId,
+    ({ send: _done, unconfirmedSend: _settled, attachments: _freed, ...rest }) => ({
+      ...rest,
+      deletedAt: now,
+      sentMessageId,
+    }),
+  );
 };
 
 export type DeleteOutcome =

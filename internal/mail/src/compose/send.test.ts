@@ -1,5 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import { buildOutgoing, envelopeRecipients, isUnconfirmedSubmission } from './send.ts';
+import type { AddressRecord } from '../addresses/record.ts';
+import type { FileReference } from './draft-record.ts';
+import {
+  assembleMessage,
+  buildOutgoing,
+  claimOf,
+  envelopeRecipients,
+  isUnconfirmedSubmission,
+} from './send.ts';
+import { sentRecordFrom } from './sent-vault.ts';
 
 /**
  * The envelope is where Bcc exists. Nothing in the message bytes names a blind recipient, so if
@@ -34,6 +43,146 @@ describe('envelopeRecipients', () => {
   });
 });
 
+const IDENTITY: AddressRecord = {
+  address: 'jason@fishball.ltd',
+  smtp: { host: 'smtp.fishball.ltd', port: 465, username: 'jason', password: 'secret' },
+};
+
+const draftFields = {
+  from: IDENTITY.address,
+  to: 'kate@example.com',
+  cc: '',
+  bcc: '',
+  subject: 'Notes',
+  body: 'Hello',
+};
+
+const receipt: FileReference = {
+  id: 'file-1',
+  name: 'receipt.pdf',
+  size: 3,
+  mimeType: 'application/pdf',
+  kind: 'pdf',
+};
+
+describe('claimOf', () => {
+  it('freezes the message without its files, naming where each goes', () => {
+    const claim = claimOf(IDENTITY, 'key', { ...draftFields, attachments: [receipt] }, 7);
+    if (!claim.ok) throw new Error('refused');
+    const { message, state, claimedAt, target } = claim.value;
+    expect({ state, claimedAt, target }).toEqual({
+      state: 'submitting',
+      claimedAt: 7,
+      target: 'vault',
+    });
+    expect(message?.splices).toEqual([{ at: expect.any(Number), fileId: 'file-1' }]);
+    const head = new TextDecoder().decode(Uint8Array.fromBase64(message?.head ?? ''));
+    expect(head).toContain('filename="receipt.pdf"');
+    expect(head).not.toContain('AQID');
+  });
+
+  it('refuses text too long for the record, before anything is written', () => {
+    const claim = claimOf(IDENTITY, 'key', { ...draftFields, body: 'x '.repeat(200_000) }, 7);
+    expect(claim).toEqual({
+      ok: false,
+      error: {
+        kind: 'error',
+        detail: 'This message’s text is too long to send. Shorten it or trim the quoted thread.',
+      },
+    });
+  });
+
+  it('never refuses for the size of the files, which are not in the record', () => {
+    const big = { ...receipt, size: 24 * 1024 * 1024 };
+    expect(claimOf(IDENTITY, 'key', { ...draftFields, attachments: [big] }, 7).ok).toBe(true);
+  });
+
+  it('refuses attachments over 25 MiB in all', () => {
+    const big = { ...receipt, size: 25 * 1024 * 1024 + 1 };
+    expect(claimOf(IDENTITY, 'key', { ...draftFields, attachments: [big] }, 7).ok).toBe(false);
+  });
+});
+
+describe('assembleMessage', () => {
+  const frozen = (attachments: readonly FileReference[]) => {
+    const claim = claimOf(IDENTITY, 'key', { ...draftFields, attachments: [...attachments] }, 7);
+    if (!claim.ok || claim.value.message === undefined) throw new Error('refused');
+    return claim.value.message;
+  };
+  const second = { ...receipt, id: 'file-2', name: 'notes.txt' };
+
+  it('rebuilds the same bytes every time, whichever device reads the files', async () => {
+    const message = frozen([receipt, second]);
+    const read = async (fileId: string) =>
+      fileId === 'file-1' ? new Uint8Array([1, 2, 3]) : new Uint8Array([4, 5, 6]);
+    const first = await assembleMessage(message, read, () => '');
+    const again = await assembleMessage(message, read, () => '');
+    if (!first.ok || !again.ok) throw new Error('not assembled');
+    expect(first.value).toEqual(again.value);
+    const raw = new TextDecoder().decode(first.value);
+    expect(raw.indexOf('AQID')).toBeLessThan(raw.indexOf('BAUG'));
+    expect(raw).toContain(
+      'filename="receipt.pdf"\r\nContent-Transfer-Encoding: base64\r\n\r\nAQID\r\n',
+    );
+  });
+
+  it('says which file could not be read', async () => {
+    const assembled = await assembleMessage(
+      frozen([receipt]),
+      async () => null,
+      () => 'receipt.pdf',
+    );
+    expect(assembled).toEqual({
+      ok: false,
+      error: {
+        kind: 'error',
+        detail: 'Couldn’t download receipt.pdf',
+      },
+    });
+  });
+});
+
+describe('sentRecordFrom', () => {
+  it('finds the Date header in the head, however long the recipients made it', () => {
+    const to = Array.from({ length: 300 }, (_, index) => `person-${index}@example.com`).join(', ');
+    const claim = claimOf(IDENTITY, 'key', { ...draftFields, to }, 7);
+    if (!claim.ok || claim.value.message === undefined) throw new Error('refused');
+    const record = sentRecordFrom(
+      { ...draftFields, to, contentVersion: 1 },
+      claim.value.messageId,
+      claim.value.message,
+      9,
+    );
+    expect(record.date).toMatch(
+      /^[A-Z][a-z]{2}, \d+ [A-Z][a-z]{2} \d{4} \d\d:\d\d:\d\d [+-]\d{4}$/,
+    );
+  });
+
+  it('never reads a Date out of the body', () => {
+    const record = sentRecordFrom(
+      { ...draftFields, contentVersion: 1 },
+      '<m@x>',
+      {
+        head: new TextEncoder().encode('From: a@x\r\n\r\nDate: not a header\r\n').toBase64(),
+        splices: [],
+      },
+      9,
+    );
+    expect(record.date).toBe('');
+  });
+
+  it('keeps the message and the files it names', () => {
+    const message = { head: '', splices: [{ at: 0, fileId: 'file-1' }] };
+    const record = sentRecordFrom(
+      { ...draftFields, contentVersion: 1, attachments: [receipt] },
+      '<m@x>',
+      message,
+      9,
+    );
+    expect(record).toMatchObject({ message, attachments: [receipt] });
+  });
+});
+
 /** Every client builds the composer's message: the markdown as text, its rendering as a whole HTML document. */
 describe('buildOutgoing', () => {
   it('sends the markdown beside its rendered HTML', () => {
@@ -53,7 +202,8 @@ describe('buildOutgoing', () => {
       },
     );
     if (!built.ok) throw new Error('not built');
-    const message = new TextDecoder().decode(built.value);
+    expect(built.value.splices).toEqual([]);
+    const message = new TextDecoder().decode(built.value.head);
     expect(message).toContain('Thanks, **paid**.');
     expect(message).toContain('Content-Type: text/html');
     expect(message).toContain('<!DOCTYPE html><html>');

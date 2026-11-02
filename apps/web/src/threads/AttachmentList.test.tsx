@@ -89,6 +89,44 @@ describe('AttachmentList', () => {
     ]);
   });
 
+  describe('a file kept in R2', () => {
+    const STORED: Attachment = {
+      name: 'receipt.pdf',
+      size: 9,
+      kind: 'pdf',
+      mimeType: 'application/pdf',
+      fileId: 'file-1',
+    };
+    const renderStored = (
+      loadFile: (fileId: string) => Promise<Uint8Array<ArrayBuffer> | null>,
+    ) => {
+      root ??= createRoot(container);
+      act(() => root?.render(<AttachmentList attachments={[STORED]} loadFile={loadFile} />));
+    };
+
+    it('asks for nothing until it is clicked, then downloads what R2 holds', async () => {
+      const asked: string[] = [];
+      renderStored(async fileId => {
+        asked.push(fileId);
+        return new Uint8Array([1, 2, 3]);
+      });
+      expect(asked).toEqual([]);
+
+      await act(async () => button('Download receipt.pdf, 9 B').click());
+
+      expect(asked).toEqual(['file-1']);
+      expect(made).toEqual([{ url: 'blob:test/0', type: 'application/octet-stream' }]);
+    });
+
+    it('says so when R2 no longer holds it, and can be tried again', async () => {
+      renderStored(async () => null);
+      await act(async () => button('Download receipt.pdf, 9 B').click());
+      expect(container.textContent).toContain('Couldn’t download');
+      expect(made).toEqual([]);
+      expect(button('Download receipt.pdf, 9 B').disabled).toBe(false);
+    });
+  });
+
   it('tags a chip by what a click opens, and by its kind when it only downloads', () => {
     render([
       { ...PNG, name: 'scan.png', kind: 'other', mimeType: 'application/octet-stream' },

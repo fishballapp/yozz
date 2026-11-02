@@ -55,5 +55,7 @@ export const DISCARD_WARNING =
 
 /** Measured against the draft as it opened: a reply opens with a recipient, subject and quote already in it. */
 export const isUntouched = (draft: ComposeDraft, opened: ComposeDraft): boolean =>
-  draft.attachments.length === 0 &&
+  // By id: a forward opens holding its files, and a retry or a removal changes which.
+  draft.attachments.map(({ id }) => id).join(' ') ===
+    opened.attachments.map(({ id }) => id).join(' ') &&
   (['to', 'cc', 'bcc', 'subject', 'body'] as const).every(field => draft[field] === opened[field]);

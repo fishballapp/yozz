@@ -9,6 +9,7 @@ import {
 } from './draft-record.ts';
 import {
   claimSend,
+  completeSend,
   createDraft,
   deleteDraft,
   listDrafts,
@@ -55,6 +56,67 @@ describe('draft records', () => {
     expect(saved).toMatchObject({
       ok: true,
       handle: { record: { threadId: 'mid/<parent@x.co>' } },
+    });
+  });
+
+  describe("a draft's files", () => {
+    const receipt = { id: 'file-1', name: 'receipt.pdf', size: 3, kind: 'pdf' as const };
+
+    it('keeps them across a save that does not state them', async () => {
+      const { store } = fakeStore();
+      const created = await createDraft(store, content({ attachments: [receipt] }), 0);
+      if (!created.ok) throw new Error('the fixture could not create a draft');
+      const saved = await replaceDraft(store, created.handle.draftId, content({ body: 'new' }), 0);
+      expect(saved).toMatchObject({ ok: true, handle: { record: { attachments: [receipt] } } });
+    });
+
+    it('drops them when a save states an empty list', async () => {
+      const { store } = fakeStore();
+      const created = await createDraft(store, content({ attachments: [receipt] }), 0);
+      if (!created.ok) throw new Error('the fixture could not create a draft');
+      const saved = await replaceDraft(
+        store,
+        created.handle.draftId,
+        content({ attachments: [] }),
+        0,
+      );
+      expect(saved).toMatchObject({ ok: true, handle: { record: { attachments: [] } } });
+    });
+
+    it('holds on to them through a discard, for the 30 days it can be revived', async () => {
+      const { store } = fakeStore();
+      const created = await createDraft(store, content({ attachments: [receipt] }), 0);
+      if (!created.ok) throw new Error('the fixture could not create a draft');
+      const gone = await deleteDraft(store, created.handle.draftId, 1);
+      if (gone.outcome !== 'deleted') throw new Error('the fixture could not discard');
+      const revived = await reviveDraft(store, gone.draftId, 2);
+      expect(revived).toMatchObject({ ok: true, handle: { record: { attachments: [receipt] } } });
+    });
+
+    it('lets go of them when a send completes', async () => {
+      const { store } = fakeStore();
+      const created = await createDraft(store, content({ attachments: [receipt] }), 0);
+      if (!created.ok) throw new Error('the fixture could not create a draft');
+      await completeSend(store, created.handle.draftId, '<m@x.co>', 1);
+      const opened = await store.get(DRAFT_RECORD_TYPE, created.handle.draftKey);
+      expect(JSON.parse(opened?.plaintext ?? '{}').attachments).toBeUndefined();
+    });
+  });
+
+  it('keeps the conversation a reply belongs to across a claim that writes the newest text', async () => {
+    const { store } = fakeStore();
+    const created = await createDraft(store, content({ threadId: 'mid/<t@x.co>' }), 0);
+    if (!created.ok) throw new Error('the fixture could not create a draft');
+    const claimed = await claimSend(
+      store,
+      created.handle.draftId,
+      { messageId: '<m@x.co>', opId: 'op', state: 'submitting', claimedAt: 0 },
+      0,
+      content({ body: 'newest' }),
+    );
+    expect(claimed).toMatchObject({
+      ok: true,
+      handle: { record: { body: 'newest', threadId: 'mid/<t@x.co>' } },
     });
   });
 

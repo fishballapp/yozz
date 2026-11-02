@@ -1,4 +1,5 @@
 import { VaultApiError } from '@yozz.app/mail/vault/api';
+import { createFileStore, type FileStore } from '@yozz.app/mail/vault/file-store';
 import {
   createRecordStore,
   type RecordStore,
@@ -18,6 +19,7 @@ import {
   NetworkError,
   NotLoggedIn,
   reportFailure,
+  StorageFull,
   UsageError,
   VaultUnreadable,
 } from '../errors.ts';
@@ -32,6 +34,11 @@ export const toCliError = (cause: unknown) => {
   if (cause instanceof UsageError || cause instanceof VaultUnreadable) return cause;
   if (cause instanceof VaultApiError) {
     if (cause.code === 'NETWORK_ERROR') return new NetworkError({ message: cause.message });
+    if (cause.code === 'STORAGE_FULL') {
+      return new StorageFull({
+        message: 'Failed to upload: your file storage is full (1 GB).',
+      });
+    }
     if (cause.status === 401) {
       return new KeyRevoked({ message: `This CLI key was revoked: ${RELOGIN}` });
     }
@@ -60,10 +67,13 @@ export class Vault extends Context.Service<
     readonly account: Account;
     /** `HKDF(DEK, "yozz-cli-cache")`: what the mail cache on this machine is sealed with. */
     readonly cacheKey: CryptoKey;
-    /** Runs `f` over the record store, `@yozz.app/mail`'s port, with its failures as the CLI's errors. */
+    /** Runs `f` over the record and file stores, `@yozz.app/mail`'s ports, with their failures as the CLI's errors. */
     readonly use: <A>(
-      f: (records: RecordStore) => Promise<A>,
-    ) => Effect.Effect<A, KeyRevoked | NetworkError | ApiError | UsageError | VaultUnreadable>;
+      f: (records: RecordStore, files: FileStore) => Promise<A>,
+    ) => Effect.Effect<
+      A,
+      KeyRevoked | NetworkError | ApiError | StorageFull | UsageError | VaultUnreadable
+    >;
   }
 >()('@yozz.app/cli/Vault') {
   static readonly layer = Layer.effect(
@@ -111,9 +121,11 @@ export class Vault extends Context.Service<
           catch: () =>
             new KeyRevoked({ message: `This CLI key no longer opens the vault: ${RELOGIN}` }),
         });
+        const api = bearerVaultApi(client);
+        const files = createFileStore({ vault, api });
         const records = createRecordStore({
           vault,
-          api: bearerVaultApi(client),
+          api,
           marks: yield* fileRevisionMarks(settings.stateDir(userId)),
         });
 
@@ -121,7 +133,7 @@ export class Vault extends Context.Service<
           account: { userId, email, keyId, source },
           cacheKey: vault.localKey('yozz-cli-cache'),
           use: f =>
-            Effect.tryPromise(() => f(records)).pipe(
+            Effect.tryPromise(() => f(records, files)).pipe(
               Effect.catchTag('UnknownError', ({ cause }) => {
                 const error = toCliError(cause);
                 return error === undefined ? Effect.die(cause) : Effect.fail(error);

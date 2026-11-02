@@ -546,7 +546,9 @@ export const buildAgentTools = (port: () => AgentPort): readonly AgentTool[] => 
         if (identity === null) {
           return { error: `${from} is not one of the user's addresses; see get_addresses.` };
         }
-        const { record } = handle;
+        // Left out, not spread: the handle can be an older version than `draftId`, and a save that
+        // states no files keeps the record's current ones (`replaceDraft`).
+        const { attachments: _files, ...record } = handle.record;
         return saved(
           await port().writeDraft({
             draftId,

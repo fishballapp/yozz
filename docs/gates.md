@@ -16,7 +16,7 @@ pnpm -F @yozz.app/vault-contract test   # 34. The wire schemas, incl. the strict
 pnpm -F @yozz.app/worker-api test       # 276. Against an ISOLATED LOCAL D1 with every migration
                                     #   applied; migrations.test.ts pins the vault tables' exact
                                     #   column lists, so a new plaintext column is a red test
-pnpm -F @yozz.app/mail test             # 306. Threading, sync over a fake IMAP client, MIME and the
+pnpm -F @yozz.app/mail test             # 344. Threading, sync over a fake IMAP client, MIME and the
                                     #   HTML-to-text reduction (in Node), draft records under CAS,
                                     #   the send state machine (a lost SMTP answer is recorded unconfirmed),
                                     #   the draft mirror, reply seeding, the record store's marks,
@@ -88,6 +88,20 @@ pnpm -F @yozz.app/web draft:drive       # writes a draft record the way `save_dr
                                     #   To/Subject/Body back as both DOM property and attribute, since
                                     #   an agent reading a page snapshot only ever sees the attribute.
                                     #   Same dev servers as `vault:drive`.
+```
+
+## A draft's files in a real browser
+
+```bash
+pnpm -F @yozz.app/web attachments:drive  # the real Worker under `wrangler dev` with local D1 and R2,
+                                    #   real Chromium through the app, the real CLI bundle: the
+                                    #   cross-origin PUT, a reload, a second profile, Send (25 MiB too, under Gmail's `SIZE`), a refusal over `SIZE` and the draft back,
+                                    #   the received bytes intact, a send-only Sent chip that downloads,
+                                    #   failed and full uploads, collection, `draft --attach`, `send`,
+                                    #   `read --save-attachments`. Starts and stops its own servers;
+                                    #   needs 465 and 993 free. 43 checks, all ✓; about a minute.
+                                    #   The mail servers are local, under a test CA, through a WebSocket
+                                    #   route in place of the relay. `YOZZ_CAPTURES=<dir>` saves screenshots.
 ```
 
 ## Received HTML in real browsers

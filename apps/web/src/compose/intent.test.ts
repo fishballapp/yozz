@@ -64,10 +64,21 @@ describe('isUntouched', () => {
     expect(isUntouched({ ...opened, subject: 'Re: sync?' }, opened)).toBe(false);
   });
 
+  it('is true for a forward nobody touched, its files uploading or not', () => {
+    const file = { id: 'file-1', name: 'f.pdf', size: 3, kind: 'pdf' as const };
+    const forward = { ...opened, attachments: [{ ...file, upload: 'uploading' as const }] };
+    expect(
+      isUntouched({ ...forward, attachments: [{ ...file, upload: 'uploaded' }] }, forward),
+    ).toBe(true);
+    expect(isUntouched({ ...forward, attachments: [] }, forward)).toBe(false);
+  });
+
   it('is false for an attachment alone, which is writing with no text in it', () => {
     const attached = {
       ...opened,
-      attachments: [{ name: 'f.pdf', size: 3, kind: 'pdf' as const, content: new Uint8Array(3) }],
+      attachments: [
+        { id: 'file-1', name: 'f.pdf', size: 3, kind: 'pdf' as const, upload: 'uploaded' as const },
+      ],
     };
     expect(isUntouched(attached, opened)).toBe(false);
   });

@@ -98,8 +98,8 @@ yozz discard <draftId>
   recipients, the address it came to as From, the quote, the reply headers, a forward's attachments.
   `--text` is what you write above the quote, in markdown; the message carries it rendered as HTML
   beside it, as yozz.app's composer does. `--edit` changes only the fields you give.
-- Files you `--attach` (25 MiB in all) stay on this machine, encrypted, until the draft is sent or
-  discarded: yozz.app and other machines show and send the draft without them.
+- Files you `--attach` (25 MiB in all) are encrypted here and uploaded, so yozz.app and your other
+  machines show and send the draft with them, and they count against your 1 GB of file storage.
 - `send` never sends a draft twice. Repeating it answers `"replayed": true`, or finishes a send that
   went out but kept no copy in Sent yet. When nobody saw your mail server's answer to the message,
   it fails with `SendUnconfirmed` and leaves the draft alone: check Sent and settle it in yozz.app.
@@ -122,9 +122,8 @@ it means the CLI couldn't verify it. It says who sent the message, not that it i
 
 - It doesn't copy drafts into your mail server's Drafts folder (yozz.app does, while a tab is
   open), so another mail client doesn't see them. After a send it removes the copy yozz.app made.
-- A draft's attached files stay on the machine that made it.
-- A message much over about 550 KB (attachments included) can't be sent: a send keeps it in your
-  vault, whose records hold 1 MB. `draft` says so before saving anything.
+- A message whose text is much over about 200 KB (a very long quoted thread, say) can't be sent: a
+  send keeps it in your vault, whose records hold 1 MB. `draft` says so before saving anything.
 
 ## The output contract
 

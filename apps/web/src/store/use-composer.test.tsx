@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import type { ImapMessageSummary } from '@yozz.app/imap';
 import type { InboundAddress } from '@yozz.app/mail/addresses/record';
-import type { DraftContent } from '@yozz.app/mail/compose/draft';
+import { contentOf, type DraftContent } from '@yozz.app/mail/compose/draft';
 import {
   claimSend,
   createDraft,
@@ -11,15 +11,18 @@ import {
 } from '@yozz.app/mail/compose/draft-vault';
 import type { SentCopyFailure } from '@yozz.app/mail/compose/send';
 import type { MailConnectionFailure, Result } from '@yozz.app/mail/connection';
+import { fakeFileStore } from '@yozz.app/mail/testing/fake-file-store';
 import { fakeRecordStore } from '@yozz.app/mail/testing/fake-record-store';
 import { threadsFromAccounts } from '@yozz.app/mail/threads/summaries';
 import { isOnServer } from '@yozz.app/mail/threads/thread';
+import { VaultApiError } from '@yozz.app/mail/vault/api';
+import type { FileStore } from '@yozz.app/mail/vault/file-store';
 import type { RecordStore } from '@yozz.app/mail/vault/record-store';
 import PostalMime from 'postal-mime';
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createActivityTracker } from '../relay/activity';
+import { createActivityTracker, isUnsavedWork } from '../relay/activity';
 import { useComposerStore } from './use-composer';
 
 /** A point work stops at: `reached` once something waits there, which waits until `open`. */
@@ -159,10 +162,13 @@ afterEach(async () => {
 });
 
 /** The composer of a session over `store`, before its unlock has loaded anything. */
-const render = async (store: RecordStore) => {
+const storesOf = (store: RecordStore) => ({ store, files: fakeFileStore().store });
+
+const render = async (store: RecordStore, files: FileStore = fakeFileStore().store) => {
+  const activity = createActivityTracker();
   const props: Props = {
-    // Only the user id and the store are read; the keys behind them belong to the unlock.
-    session: { userId: 'user-1', store } as unknown as Props['session'],
+    // Only the user id and the stores are read; the keys behind them belong to the unlock.
+    session: { userId: 'user-1', store, files } as unknown as Props['session'],
     identities: [ACCOUNT],
     accounts: [ACCOUNT],
     bindRunOn: () => () => async () => ({
@@ -173,7 +179,7 @@ const render = async (store: RecordStore) => {
     sync: async () => {},
     threadsRef: { current: [] },
     baseByAccount: {},
-    activity: createActivityTracker(),
+    activity,
     demo: false,
   };
   const latest: { current: ReturnType<typeof useComposerStore> | null } = { current: null };
@@ -190,15 +196,16 @@ const render = async (store: RecordStore) => {
   };
   return {
     hook,
+    activity,
     rerender: (changes: Partial<Props>) =>
       act(async () => root.render(<Probe {...props} {...changes} />)),
   };
 };
 
 /** The composer of a session over `store`, unlocked. */
-const mount = async (store: RecordStore) => {
-  const rendered = await render(store);
-  await act(() => rendered.hook().load(store, [ACCOUNT], () => false));
+const mount = async (store: RecordStore, files: FileStore = fakeFileStore().store) => {
+  const rendered = await render(store, files);
+  await act(() => rendered.hook().load(storesOf(store), [ACCOUNT], () => false));
   return rendered;
 };
 
@@ -220,12 +227,16 @@ const SESSION_ENDINGS = {
     const theirs = await createDraft(store, content({ from: OTHER.address, body: 'Theirs' }), 0);
     if (!theirs.ok) throw new Error('no draft for the next account');
     await rerender({
-      session: { userId: 'user-2', store } as unknown as Props['session'],
+      session: {
+        userId: 'user-2',
+        store,
+        files: fakeFileStore().store,
+      } as unknown as Props['session'],
       identities: [OTHER],
       accounts: [OTHER],
     });
     await act(async () => hook().reset('user-1'));
-    await act(() => hook().load(store, [OTHER], () => false));
+    await act(() => hook().load(storesOf(store), [OTHER], () => false));
     return [theirs.handle];
   },
 } satisfies Record<string, (mounted: Mounted) => Promise<unknown[]>>;
@@ -363,6 +374,497 @@ const claimOne = async () => {
   });
   return { ...mounted, settled };
 };
+
+describe("a draft's files", () => {
+  const FILE_BYTES = new Uint8Array([1, 2, 3]);
+  const picked = {
+    name: 'receipt.pdf',
+    size: 3,
+    kind: 'pdf' as const,
+    mimeType: 'application/pdf',
+    content: FILE_BYTES,
+  };
+
+  /** A composer with a message written, over a file store whose uploads a test can hold or refuse. */
+  const composeWithFiles = async (over: Partial<FileStore> = {}) => {
+    const vault = vaultOver(fakeRecordStore().store);
+    const { store: real, files: stored } = fakeFileStore();
+    const reads: string[] = [];
+    const files: FileStore = {
+      ...real,
+      get: async fileId => {
+        reads.push(fileId);
+        return real.get(fileId);
+      },
+      ...over,
+    };
+    const mounted = await mount(vault.store, files);
+    await act(async () => {
+      mounted.hook().composer.seedDraft('new', {
+        identityId: ACCOUNT.address,
+        to: 'you@x.test',
+        subject: 'Receipt',
+        body: 'Attached.',
+      });
+    });
+    return { ...mounted, vault, files, stored, reads };
+  };
+
+  const sendNow = async ({ hook }: { hook: () => ReturnType<typeof useComposerStore> }) => {
+    const claimed = await act(() => hook().composer.send());
+    if (!claimed.ok) return claimed;
+    return { ...claimed, report: await act(() => claimed.value.settled) };
+  };
+
+  it('uploads a file the moment it is attached, and only then names it', async () => {
+    const held = gate();
+    const { hook } = await composeWithFiles({
+      put: async () => {
+        await held.pass();
+      },
+    });
+    await act(async () => hook().composer.attach([picked]));
+
+    const draft = hook().composer.draft;
+    expect(draft?.attachments[0]).toMatchObject({ name: 'receipt.pdf', upload: 'uploading' });
+    // What a save writes: a file still on its way is named nowhere.
+    if (draft === null || draft === undefined) throw new Error('no draft');
+    expect(contentOf(draft, undefined).attachments).toEqual([]);
+    await held.reached;
+    await act(async () => held.open());
+    await act(async () => {});
+    const uploaded = hook().composer.draft;
+    if (uploaded === null) throw new Error('no draft');
+    expect(contentOf(uploaded, undefined).attachments).toMatchObject([{ name: 'receipt.pdf' }]);
+  });
+
+  it('counts an upload as work a reload would lose, until it settles', async () => {
+    const held = gate();
+    const { hook, activity } = await composeWithFiles({
+      put: async () => {
+        await held.pass();
+      },
+    });
+
+    await act(async () => hook().composer.attach([picked]));
+
+    expect(activity.snapshot().filter(isUnsavedWork)).toHaveLength(1);
+    await held.reached;
+    await act(async () => held.open());
+    expect(activity.snapshot()).toEqual([]);
+  });
+
+  it('stops counting an upload that failed', async () => {
+    const { hook, activity } = await composeWithFiles({
+      put: async () => {
+        throw new VaultApiError('NETWORK_ERROR', 'offline');
+      },
+    });
+
+    await act(async () => hook().composer.attach([picked]));
+
+    expect(hook().composer.draft?.attachments[0]?.upload).toBe('failed');
+    expect(activity.snapshot()).toEqual([]);
+  });
+
+  it('sends from the bytes it holds, downloading nothing it just uploaded', async () => {
+    const world = await composeWithFiles();
+    await act(async () => world.hook().composer.attach([picked]));
+    await act(async () => {});
+
+    const sent = await sendNow(world);
+
+    expect(sent).toMatchObject({ report: { state: 'sent' } });
+    expect(world.reads).toEqual([]);
+    const raw = new TextDecoder().decode(network.submitted[0]);
+    expect(raw).toContain('filename="receipt.pdf"');
+    expect(raw).toContain('AQID');
+  });
+
+  it('waits for an upload under way, then sends with it', async () => {
+    const held = gate();
+    const { store: real } = fakeFileStore();
+    const world = await composeWithFiles({
+      put: async (fileId, bytes) => {
+        await held.pass();
+        await real.put(fileId, bytes);
+      },
+    });
+    await act(async () => world.hook().composer.attach([picked]));
+
+    const pending = world.hook().composer.send();
+    await held.reached;
+    expect(network.submitted).toEqual([]);
+    await act(async () => held.open());
+    const claimed = await act(() => pending);
+    if (!claimed.ok) throw new Error('refused');
+    await act(() => claimed.value.settled);
+
+    expect(new TextDecoder().decode(network.submitted[0])).toContain('AQID');
+  });
+
+  it('refuses to send over a failed upload, before anything is claimed', async () => {
+    const world = await composeWithFiles({
+      put: async () => {
+        throw new VaultApiError('NETWORK_ERROR', 'offline');
+      },
+    });
+    await act(async () => world.hook().composer.attach([picked]));
+    await act(async () => {});
+    expect(world.hook().composer.draft?.attachments[0]?.upload).toBe('failed');
+
+    expect(await sendNow(world)).toEqual({
+      ok: false,
+      error: {
+        kind: 'error',
+        detail: 'receipt.pdf failed to upload. Retry or remove it before sending.',
+      },
+    });
+    expect(network.submitted).toEqual([]);
+    expect(await listDrafts(world.vault.store)).toEqual([]);
+  });
+
+  it('says storage is full apart from any other failed upload', async () => {
+    const world = await composeWithFiles({
+      put: async () => {
+        throw new VaultApiError('STORAGE_FULL', 'File storage is full', 413);
+      },
+    });
+    await act(async () => world.hook().composer.attach([picked]));
+    await act(async () => {});
+    expect(world.hook().composer.draft?.attachments[0]?.upload).toBe('storage-full');
+  });
+
+  it('retries under a new id, leaving the old attempt to collection', async () => {
+    const ids: string[] = [];
+    let isDown = true;
+    const world = await composeWithFiles({
+      put: async fileId => {
+        ids.push(fileId);
+        if (isDown) throw new VaultApiError('NETWORK_ERROR', 'offline');
+      },
+    });
+    await act(async () => world.hook().composer.attach([picked]));
+    await act(async () => {});
+    isDown = false;
+    const failed = world.hook().composer.draft?.attachments[0];
+    if (failed === undefined) throw new Error('no file on the draft');
+
+    await act(async () => world.hook().composer.retryUpload(failed.id));
+    await act(async () => {});
+
+    const [retried] = world.hook().composer.draft?.attachments ?? [];
+    expect(retried?.upload).toBe('uploaded');
+    expect(retried?.id).not.toBe(failed.id);
+    expect(ids).toEqual([failed.id, retried?.id]);
+  });
+
+  it('keeps the file a device-stored draft named, so a reload still has it', async () => {
+    const world = await composeWithFiles();
+    await act(async () => world.hook().composer.attach([picked]));
+    await act(async () => {});
+    await act(async () => {
+      world.hook().composer.seedDraft(undefined, {});
+    });
+    const [saved] = await listDrafts(world.vault.store);
+    expect(saved?.record.attachments).toMatchObject([{ name: 'receipt.pdf', size: 3 }]);
+    // The bytes never reach the record.
+    expect(saved?.record.attachments?.[0]).not.toHaveProperty('content');
+  });
+
+  it('files a closed draft with the upload that was still running', async () => {
+    const held = gate();
+    const { store: real } = fakeFileStore();
+    const world = await composeWithFiles({
+      put: async (fileId, bytes) => {
+        await held.pass();
+        await real.put(fileId, bytes);
+      },
+    });
+    await act(async () => world.hook().composer.attach([picked]));
+    await act(async () => {
+      world.hook().composer.seedDraft(undefined, {});
+    });
+    expect(await listDrafts(world.vault.store)).toEqual([]);
+
+    await held.reached;
+    await act(async () => held.open());
+    await act(() => new Promise(resolve => setTimeout(resolve, 20)));
+
+    const [filed] = await listDrafts(world.vault.store);
+    expect(filed?.record.attachments).toMatchObject([{ name: 'receipt.pdf' }]);
+  });
+
+  it("uploads a forwarded message's files as it opens, and names again what R2 already holds", async () => {
+    const world = await composeWithFiles();
+    await act(async () => {
+      world.hook().composer.seedDraft('forward:mid/<m@x.test>', {
+        identityId: ACCOUNT.address,
+        subject: 'Fwd: Receipt',
+        attachments: [
+          picked,
+          { name: 'copy.pdf', size: 3, kind: 'pdf', fileId: 'held-1' },
+          { name: 'lost.pdf', size: 3, kind: 'pdf' },
+        ],
+      });
+    });
+    await act(async () => {});
+
+    expect(world.hook().composer.draft?.attachments).toMatchObject([
+      { name: 'receipt.pdf', upload: 'uploaded' },
+      { id: 'held-1', name: 'copy.pdf', upload: 'uploaded' },
+      // No bytes to send and none to fetch: the person is told, rather than sending without it.
+      { name: 'lost.pdf', upload: 'failed' },
+    ]);
+    expect(world.stored.size).toBe(1);
+  });
+
+  it('opens a draft another device attached to with its chips, and reads R2 only to send', async () => {
+    const { store: real, files: stored } = fakeFileStore();
+    const reads: string[] = [];
+    const vault = vaultOver(fakeRecordStore().store);
+    await real.put('file-1', FILE_BYTES);
+    const created = await createDraft(
+      vault.store,
+      content({ attachments: [{ id: 'file-1', name: 'receipt.pdf', size: 3, kind: 'pdf' }] }),
+      0,
+    );
+    if (!created.ok) throw new Error('no draft');
+    const mounted = await mount(vault.store, {
+      ...real,
+      get: async fileId => {
+        reads.push(fileId);
+        return real.get(fileId);
+      },
+    });
+    await act(async () => {
+      mounted.hook().composer.seedDraft(`draft:${created.handle.draftKey}`, {});
+    });
+
+    expect(mounted.hook().composer.draft?.attachments).toMatchObject([
+      { id: 'file-1', name: 'receipt.pdf', upload: 'uploaded' },
+    ]);
+    expect(reads).toEqual([]);
+    expect(stored.size).toBe(1);
+
+    const sent = await sendNow(mounted);
+
+    expect(sent).toMatchObject({ report: { state: 'sent' } });
+    expect(reads).toEqual(['file-1']);
+    expect(new TextDecoder().decode(network.submitted[0])).toContain('AQID');
+  });
+
+  it('gives the draft back when another device cannot read the file before SMTP', async () => {
+    const vault = vaultOver(fakeRecordStore().store);
+    const created = await createDraft(
+      vault.store,
+      content({ attachments: [{ id: 'gone', name: 'receipt.pdf', size: 3, kind: 'pdf' }] }),
+      0,
+    );
+    if (!created.ok) throw new Error('no draft');
+    const mounted = await mount(vault.store);
+    await act(async () => {
+      mounted.hook().composer.seedDraft(`draft:${created.handle.draftKey}`, {});
+    });
+
+    const sent = await sendNow(mounted);
+
+    expect(sent).toMatchObject({
+      report: {
+        state: 'refused',
+        detail: 'Couldn’t download receipt.pdf. Reopen the draft and try again.',
+      },
+    });
+    expect(network.submitted).toEqual([]);
+    const [back] = await listDrafts(vault.store);
+    expect(back?.record.send).toBeUndefined();
+    expect(back?.record.attachments).toHaveLength(1);
+  });
+
+  it('never tells anyone to reopen a message that went out, when only its copy failed', async () => {
+    network.sentCopy = {
+      ok: false,
+      error: { kind: 'error', detail: 'Couldn’t download receipt.pdf' },
+    };
+    const world = await composeWithFiles();
+    await act(async () => world.hook().composer.attach([picked]));
+    await act(async () => {});
+
+    expect(await sendNow(world)).toMatchObject({
+      report: {
+        state: 'sent-with-caveat',
+        detail: 'the copy was not stored · Couldn’t download receipt.pdf',
+      },
+    });
+  });
+
+  it('adds no instruction to a refusal that was not about a file', async () => {
+    network.submitAnswer = { ok: false, error: { kind: 'error', detail: 'refused by the host' } };
+    const world = await composeWithFiles();
+
+    expect(await sendNow(world)).toMatchObject({
+      report: { state: 'refused', detail: 'refused by the host' },
+    });
+  });
+
+  it('files nothing for a forward nobody touched, and waits on none of its uploads', async () => {
+    const held = gate();
+    const world = await composeWithFiles({
+      put: async () => {
+        await held.pass();
+      },
+    });
+    await act(async () => {
+      world.hook().composer.seedDraft('forward:mid/<m@x.test>', {
+        identityId: ACCOUNT.address,
+        subject: 'Fwd: Receipt',
+        body: 'quoted',
+        attachments: [picked],
+      });
+    });
+
+    await act(async () => {
+      world.hook().composer.seedDraft(undefined, {});
+    });
+    await held.reached;
+    await act(async () => held.open());
+    await act(() => new Promise(resolve => setTimeout(resolve, 20)));
+
+    expect(await listDrafts(world.vault.store)).toEqual([]);
+  });
+
+  describe('a Send and the writes around it', () => {
+    beforeEach(() => {
+      vi.useFakeTimers();
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    const second = { ...picked, name: 'second.pdf' };
+    const debounce = () => act(async () => vi.advanceTimersByTime(2_000));
+
+    it('writes nothing while it waits on uploads, then claims the version it read', async () => {
+      const gates = [gate(), gate()];
+      let uploads = 0;
+      const world = await composeWithFiles({
+        put: async () => {
+          const held = gates[uploads];
+          uploads += 1;
+          await held?.pass();
+        },
+      });
+      await debounce();
+      expect((await listDrafts(world.vault.store))[0]?.record.contentVersion).toBe(1);
+      await act(async () => world.hook().composer.attach([picked, second]));
+
+      const pending = world.hook().composer.send();
+      // One upload settling changes the draft, which is what used to re-arm the autosave.
+      await act(async () => gates[0]?.open());
+      await debounce();
+
+      expect((await listDrafts(world.vault.store))[0]?.record.contentVersion).toBe(1);
+      await act(async () => gates[1]?.open());
+      const claimed = await act(() => pending);
+      if (!claimed.ok) throw new Error(`refused: ${JSON.stringify(claimed.error)}`);
+      await act(() => claimed.value.settled);
+      const raw = new TextDecoder().decode(network.submitted[0]);
+      expect(raw).toContain('filename="receipt.pdf"');
+      expect(raw).toContain('filename="second.pdf"');
+    });
+
+    it('waits for a save already under way, and claims the version it wrote', async () => {
+      const world = await composeWithFiles();
+      await debounce();
+      await act(async () => world.hook().composer.updateDraft({ body: 'Newer.' }));
+      const saving = world.vault.holdNextPut();
+      await debounce();
+      await saving.reached;
+
+      const pending = world.hook().composer.send();
+      // Far enough that a Send not waiting would have claimed by now.
+      await act(async () => {
+        await vi.dynamicImportSettled();
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      expect(network.submitted).toEqual([]);
+      expect((await listDrafts(world.vault.store))[0]?.record.send).toBeUndefined();
+
+      // Inside one `act`, so no render has told the draft about the version the save wrote.
+      const claimed = await act(async () => {
+        saving.open();
+        return pending;
+      });
+
+      expect(claimed.ok).toBe(true);
+    });
+
+    it('saves again once a refused Send lets go, what was typed included', async () => {
+      const world = await composeWithFiles({
+        put: async () => {
+          throw new VaultApiError('NETWORK_ERROR', 'offline');
+        },
+      });
+      await act(async () => world.hook().composer.attach([picked]));
+      await act(async () => world.hook().composer.updateDraft({ body: 'Typed before Send.' }));
+
+      expect(await sendNow(world)).toMatchObject({ ok: false });
+      expect(await listDrafts(world.vault.store)).toEqual([]);
+      await debounce();
+
+      const [saved] = await listDrafts(world.vault.store);
+      expect(saved?.record.body).toBe('Typed before Send.');
+    });
+  });
+
+  it('refuses text too long to send, with a sentence of its own, before the claim', async () => {
+    const world = await composeWithFiles();
+    await act(async () => {
+      world.hook().composer.updateDraft({ body: 'x '.repeat(200_000) });
+    });
+
+    expect(await sendNow(world)).toEqual({
+      ok: false,
+      error: {
+        kind: 'error',
+        detail: 'This message’s text is too long to send. Shorten it or trim the quoted thread.',
+      },
+    });
+    expect(network.submitted).toEqual([]);
+    const [draft] = await listDrafts(world.vault.store);
+    expect(draft?.record.send).toBeUndefined();
+  });
+});
+
+describe('an unlock that finishes a send-only message', () => {
+  it('shows it in Sent at once, not after the next reload', async () => {
+    const vault = vaultOver(fakeRecordStore().store);
+    const created = await createDraft(vault.store, content(), 0);
+    if (!created.ok) throw new Error('no draft');
+    await claimSend(
+      vault.store,
+      created.handle.draftId,
+      {
+        messageId: '<plans@x.test>',
+        opId: 'op-1',
+        state: 'submitted',
+        claimedAt: 0,
+        message: {
+          head: new TextEncoder().encode('Date: x\r\nSubject: Plans\r\n\r\nHello').toBase64(),
+          splices: [],
+        },
+        target: 'vault',
+      },
+      0,
+    );
+
+    const { hook } = await mount(vault.store);
+
+    expect(hook().vaultSent.map(({ messageId }) => messageId)).toEqual(['<plans@x.test>']);
+    expect(hook().shared.drafts).toEqual([]);
+  });
+});
 
 describe('a message just sent from an address with a mailbox', () => {
   const sendOne = async () => {
@@ -581,7 +1083,7 @@ describe('a send and the close that overtakes it', () => {
 
     // The same person unlocks again and starts writing something else.
     await opened.rerender({});
-    await act(() => opened.hook().load(opened.vault.store, [ACCOUNT], () => false));
+    await act(() => opened.hook().load(storesOf(opened.vault.store), [ACCOUNT], () => false));
     await act(async () => {
       opened.hook().composer.seedDraft('new', { identityId: ACCOUNT.address, body: 'Next' });
     });
@@ -802,7 +1304,10 @@ describe('an answer that lands after its session ended', () => {
           opId: 'op-1',
           state: 'submitted',
           claimedAt: 0,
-          bytes: new TextEncoder().encode('Subject: Plans\r\n\r\nHello').toBase64(),
+          message: {
+            head: new TextEncoder().encode('Subject: Plans\r\n\r\nHello').toBase64(),
+            splices: [],
+          },
           target: { account: ACCOUNT.address, folder: 'sent' },
         },
         0,
@@ -812,7 +1317,7 @@ describe('an answer that lands after its session ended', () => {
       const mounted = await render(vault.store);
       let isCancelled = false;
       const { unlocked } = await act(async () => ({
-        unlocked: mounted.hook().load(vault.store, [ACCOUNT], () => isCancelled),
+        unlocked: mounted.hook().load(storesOf(vault.store), [ACCOUNT], () => isCancelled),
       }));
       await act(() => copying.reached);
       const finalRead = vault.holdNextRead();
@@ -883,7 +1388,7 @@ describe('an answer that lands after its session ended', () => {
             opId: subject,
             state: 'submitting',
             claimedAt: 0,
-            bytes: bytes.toBase64(),
+            message: { head: bytes.toBase64(), splices: [] },
             target: { account: ACCOUNT.address, folder: 'sent' },
           },
           0,

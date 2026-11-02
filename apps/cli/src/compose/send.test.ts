@@ -267,9 +267,9 @@ layer(NodeServices.layer)(it => {
       }),
     );
 
-    it.effect('sends the files attached on this machine, and forgets them once sent', () =>
+    it.effect('sends the files the draft names, read from R2, intact in the message', () =>
       Effect.gen(function* () {
-        const { homes, smtp, run } = yield* makeComposeWorld();
+        const { homes, server, smtp, run, drafts, world } = yield* makeComposeWorld();
         const fs = yield* FileSystem.FileSystem;
         const path = yield* Path.Path;
         yield* fs.makeDirectory(homes.XDG_STATE_HOME, { recursive: true });
@@ -287,16 +287,105 @@ layer(NodeServices.layer)(it => {
           ])).stdout,
         );
 
+        const key = draft.id.slice('draft/'.length);
         yield* run(['send', draft.draftId]);
 
         const data = smtp.delivered[0]?.data ?? '';
         expect(data).toContain('Content-Type: application/pdf');
         expect(data).toContain('filename="receipt.pdf"');
         expect(data).toContain(new TextEncoder().encode('%PDF-1.7 receipt').toBase64());
-        const kept = yield* fs.readDirectory(
-          path.join(homes.XDG_STATE_HOME, 'yozz', 'user_1', 'drafts'),
+        // The Sent copy is the same message, and the tombstone stops naming the file.
+        const sentBox = server.mailboxes.get('Sent')?.messages ?? [];
+        expect(new TextDecoder().decode(sentBox[0]?.raw)).toBe(`${data}\r\n`);
+        expect((yield* drafts)[key]?.attachments).toBeUndefined();
+        expect((yield* drafts)[key]?.deletedAt).toBeDefined();
+        // Left for collection, which does not run from a send.
+        expect(world.files.size).toBe(1);
+      }),
+    );
+
+    it.effect('gives the draft back, sending nothing, when a file cannot be read', () =>
+      Effect.gen(function* () {
+        const { homes, smtp, run, drafts, world } = yield* makeComposeWorld();
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        yield* fs.makeDirectory(homes.XDG_STATE_HOME, { recursive: true });
+        const receipt = path.join(homes.XDG_STATE_HOME, 'receipt.pdf');
+        yield* fs.writeFileString(receipt, 'x');
+        const { draft } = JSON.parse(
+          (yield* run([
+            'draft',
+            '--from',
+            ADDRESS,
+            '--to',
+            'kate@example.com',
+            '--attach',
+            receipt,
+          ])).stdout,
         );
-        expect(kept).toEqual([]);
+        const key = draft.id.slice('draft/'.length);
+        for (const id of world.files.keys()) world.loseFile(id);
+
+        const refused = yield* run(['send', draft.draftId]);
+
+        assert.isTrue(Exit.isFailure(refused.exit));
+        expect(failureOf(refused.stderr)).toMatchObject({
+          code: 'SendRefused',
+          currentDraftId: `${key}@3`,
+        });
+        // Nothing to reopen at a terminal: it names the version to send instead.
+        expect((failureOf(refused.stderr) as { message: string }).message).toBe(
+          `${ADDRESS}: Couldn’t download receipt.pdf. Nothing went out; the draft is back as ${key}@3`,
+        );
+        expect(smtp.commands).toEqual([]);
+        expect((yield* drafts)[key]?.send).toBeUndefined();
+        expect((yield* drafts)[key]?.attachments).toHaveLength(1);
+      }),
+    );
+
+    it.effect('keeps a send-only copy naming its files in R2, which read downloads', () =>
+      Effect.gen(function* () {
+        const { homes, sendOnlySmtp, run, world, addSendOnly } = yield* makeComposeWorld();
+        yield* addSendOnly();
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        yield* fs.makeDirectory(homes.XDG_STATE_HOME, { recursive: true });
+        const receipt = path.join(homes.XDG_STATE_HOME, 'receipt.pdf');
+        yield* fs.writeFileString(receipt, '%PDF-1.7 receipt');
+        const { draft } = JSON.parse(
+          (yield* run([
+            'draft',
+            '--from',
+            SEND_ONLY,
+            '--to',
+            'kate@example.com',
+            '--subject',
+            'Receipt',
+            '--attach',
+            receipt,
+          ])).stdout,
+        );
+
+        const sent = JSON.parse((yield* run(['send', draft.draftId])).stdout);
+
+        expect(sendOnlySmtp.delivered[0]?.data).toContain(
+          new TextEncoder().encode('%PDF-1.7 receipt').toBase64(),
+        );
+        const [record] = yield* world.readRecords('sent');
+        const parsed = JSON.parse(record?.plaintext ?? '{}');
+        expect(parsed.attachments).toMatchObject([{ name: 'receipt.pdf', size: 16 }]);
+        expect(parsed.message.splices).toHaveLength(1);
+        expect(parsed.date).toMatch(/\d{4} \d\d:\d\d:\d\d/u);
+        expect(parsed.bytes).toBeUndefined();
+
+        const saveTo = path.join(homes.XDG_STATE_HOME, 'saved');
+        const read = yield* run(['read', sent.messageId, '--save-attachments', saveTo]);
+        assert.isTrue(Exit.isSuccess(read.exit), read.stderr);
+        const message = JSON.parse(read.stdout).threads[0].messages[0];
+        expect(message.attachments).toMatchObject([
+          { type: 'application/pdf', size: 16, untrusted: { name: 'receipt.pdf' } },
+        ]);
+        expect(yield* fs.readFileString(message.attachments[0].path)).toBe('%PDF-1.7 receipt');
       }),
     );
   });

@@ -11,7 +11,7 @@ const draft: ComposeDraft = {
   subject: 'Re: hi',
   body: 'typed so far',
   inReplyTo: '<1@x>',
-  attachments: [{ name: 'f.pdf', size: 3, kind: 'pdf', content: new Uint8Array([1, 2, 3]) }],
+  attachments: [],
 };
 
 /** Enough of `Storage` for the store: what a browser gives it, over a Map. */
@@ -34,6 +34,32 @@ describe('draft store', () => {
     const storage = memoryStorage();
     saveDraft('u1', 'reply:me@x/inbox/1', draft, storage);
     expect(loadDraft('u1', 'reply:me@x/inbox/1', storage)).toEqual({ ...draft, attachments: [] });
+  });
+
+  it('keeps the files R2 holds by reference, a reload losing neither them nor any bytes', () => {
+    const storage = memoryStorage();
+    const stored = {
+      id: 'file-1',
+      name: 'f.pdf',
+      size: 3,
+      kind: 'pdf',
+      upload: 'uploaded',
+    } as const;
+    saveDraft(
+      'u1',
+      'new',
+      {
+        ...draft,
+        attachments: [
+          { ...stored, content: new Uint8Array([1, 2, 3]) },
+          // Nothing names an upload still running: R2 may never hold it.
+          { ...stored, id: 'file-2', name: 'g.pdf', upload: 'uploading' },
+        ],
+      },
+      storage,
+    );
+    expect(loadDraft('u1', 'new', storage)?.attachments).toEqual([stored]);
+    expect(JSON.stringify([...Object.values(storage)])).not.toContain('content');
   });
 
   it('restores which record the draft already is, so a reload cannot mint a second one', () => {

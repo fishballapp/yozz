@@ -9,6 +9,8 @@ export type Attachment = {
   mimeType?: string;
   /** Read from the picker for a draft, from the fetched message for a received one. */
   content?: Uint8Array<ArrayBuffer>;
+  /** Kept in R2 under this id (`FileStore`), so it is read when it is opened. */
+  fileId?: string;
 };
 
 /** Someone on a `To` or `Cc` line, as the sender wrote them. */

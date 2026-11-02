@@ -8,20 +8,19 @@ import { driveSend, type SendEffects } from '@yozz.app/mail/compose/send-machine
 import { sentRecordFrom, storeSentRecord } from '@yozz.app/mail/compose/sent-vault';
 import { describeMailFailure } from '@yozz.app/mail/describe-failure';
 import { messageIdOf } from '@yozz.app/mail/threads/thread';
+import type { FileStore } from '@yozz.app/mail/vault/file-store';
 import type { RecordStore } from '@yozz.app/mail/vault/record-store';
 import * as Clock from 'effect/Clock';
 import * as Argument from 'effect/cli/Argument';
 import * as Command from 'effect/cli/Command';
 import * as Effect from 'effect/Effect';
-import * as Layer from 'effect/Layer';
 import { Cache, MailboxLayer } from '../cache/cache.ts';
 import { reportFailure, SendRefused, SendUnconfirmed, UsageError } from '../errors.ts';
 import { Mail } from '../mail/mail.ts';
 import { printJson } from '../output.ts';
 import { Settings } from '../settings.ts';
 import { Vault } from '../vault/vault.ts';
-import { DraftFiles } from './draft-files.ts';
-import { claimOf, goneDraft, readDraft, refusedSave } from './drafts.ts';
+import { claimFor, goneDraft, readDraft, refusedSave } from './drafts.ts';
 
 const UNCONFIRMED =
   "nobody saw whether the mail server took it. Check Sent, and settle it in yozz.app: it won't be sent again from here";
@@ -37,7 +36,6 @@ export const sendCommand = Command.make(
     const vault = yield* Vault;
     const mail = yield* Mail;
     const cache = yield* Cache;
-    const files = yield* DraftFiles;
     const { webUrl } = yield* Settings;
     const clock = yield* Clock.Clock;
     const now = () => clock.currentTimeMillisUnsafe();
@@ -83,8 +81,9 @@ export const sendCommand = Command.make(
     }
 
     /** One implementation of each phase, for a fresh send and a resumed one, as the web app's. */
-    const effectsOf = (store: RecordStore): SendEffects => ({
+    const effectsOf = (store: RecordStore, files: FileStore): SendEffects => ({
       store,
+      readFile: files.get,
       submit: async (bytes, { record: claimed }) => {
         // Only a resumed send can lack it, and a resumed one never submits.
         if (identity === undefined) {
@@ -100,11 +99,11 @@ export const sendCommand = Command.make(
           }),
         );
       },
-      copyToSent: async (target, bytes, handle) => {
+      copyToSent: async (target, { message, assemble }, handle) => {
         const messageId = handle.record.send?.messageId ?? '';
         if (target === 'vault' || (identity !== undefined && !isInbound(identity))) {
           try {
-            await storeSentRecord(store, sentRecordFrom(handle.record, messageId, bytes, now()));
+            await storeSentRecord(store, sentRecordFrom(handle.record, messageId, message, now()));
           } catch (error) {
             // The copy's failure alone: the message went out.
             return { ok: false, error: { kind: 'error', detail: String(error) } };
@@ -114,7 +113,9 @@ export const sendCommand = Command.make(
         // The address's mailbox was removed since the claim: the send finishes without a copy in it.
         const account = mail.accounts.find(({ address }) => address === handle.record.from);
         if (account === undefined) return { ok: true, value: null };
-        const copied = await storeSentCopy(mail.runOn(account), bytes, messageId);
+        const assembled = await assemble();
+        if (!assembled.ok) return assembled;
+        const copied = await storeSentCopy(mail.runOn(account), assembled.value, messageId);
         if (!copied.ok) return copied;
         return { ok: true, value: copied.value === null ? null : { ...target, ...copied.value } };
       },
@@ -155,14 +156,8 @@ export const sendCommand = Command.make(
       if (recipients.length === 0) {
         return yield* new UsageError({ message: `The draft ${draftId} has no recipients` });
       }
-      const send = yield* claimOf({
-        identity,
-        key,
-        record,
-        attachments: yield* files.read(key),
-        now: now(),
-      });
-      // Phase (0): the bytes go into the record, under compare-and-swap on the version named, before
+      const send = yield* claimFor({ identity, key, record, now: now() });
+      // Phase (0): the message goes into the record, under compare-and-swap on the version named, before
       // SMTP sees them, so no other run or device can send it too.
       const claim = yield* vault.use(store => claimSend(store, draftId, send, now()));
       if (!claim.ok) return yield* refusedSave(draftId, claim);
@@ -173,7 +168,7 @@ export const sendCommand = Command.make(
     if (send === undefined) throw new Error('A claimed draft carries its send');
 
     const progress = yield* vault
-      .use(store => driveSend(effectsOf(store), claimed))
+      .use((store, files) => driveSend(effectsOf(store, files), claimed))
       .pipe(
         // Past the claim, so perhaps past SMTP: nothing can say it did not go out.
         Effect.mapError(
@@ -198,7 +193,6 @@ export const sendCommand = Command.make(
         message: `The draft ${draftId} was sent, but ${UNCONFIRMED}`,
       });
     }
-    yield* files.write(key, []);
     // The next list syncs the address first, and finds the Sent copy.
     const account = mail.accounts.find(({ address }) => address === record.from);
     if (account !== undefined) yield* cache.markStale(account);
@@ -216,7 +210,8 @@ naming its newest version (currentDraftId): read it, then send that.
 Repeating it never sends twice. A send that went through answers "replayed": true, and one that
 went out but did not finish (its Sent copy, say) is finished, never sent again. When nobody saw the
 mail server's answer, it fails with SendUnconfirmed: the person checks Sent and settles it in
-yozz.app. SendRefused means the server said no: nothing went out, and the draft can be sent again.
+yozz.app. SendRefused means the server said no, or an attached file could not be read: nothing went
+out, and the draft can be sent again.
 
 "sentCopy": "pending" means it went out but the copy in Sent is not stored yet; sending the same
 draftId again stores it.
@@ -236,5 +231,5 @@ Output:
       description: 'Send it',
     },
   ]),
-  Command.provide(DraftFiles.layer.pipe(Layer.provideMerge(MailboxLayer))),
+  Command.provide(MailboxLayer),
 );

@@ -243,42 +243,105 @@ layer(NodeServices.layer)(it => {
         }),
     );
 
-    it.effect(
-      'attaches files on this machine, and refuses a message too big for the send record',
-      () =>
-        Effect.gen(function* () {
-          const { homes, run } = yield* makeComposeWorld();
-          const fs = yield* FileSystem.FileSystem;
-          const path = yield* Path.Path;
-          yield* fs.makeDirectory(homes.XDG_STATE_HOME, { recursive: true });
-          const receipt = path.join(homes.XDG_STATE_HOME, 'receipt.pdf');
-          yield* fs.writeFileString(receipt, '%PDF-1.7 receipt');
-          const big = path.join(homes.XDG_STATE_HOME, 'big.bin');
-          yield* fs.writeFile(big, new Uint8Array(800 * 1024));
+    it.effect('uploads a file sealed under its id, and the record names it', () =>
+      Effect.gen(function* () {
+        const { homes, run, drafts, world } = yield* makeComposeWorld();
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        yield* fs.makeDirectory(homes.XDG_STATE_HOME, { recursive: true });
+        const receipt = path.join(homes.XDG_STATE_HOME, 'receipt.pdf');
+        yield* fs.writeFileString(receipt, '%PDF-1.7 receipt');
+        // Far past what a vault record holds: the record names it, R2 holds it.
+        const big = path.join(homes.XDG_STATE_HOME, 'big.bin');
+        yield* fs.writeFile(big, new Uint8Array(3 * 1024 * 1024).fill(7));
 
-          const created = yield* run(['draft', '--from', ADDRESS, '--attach', receipt]);
-          const { draft } = JSON.parse(created.stdout);
-          expect(draft.attachments, created.stderr).toEqual([
-            { type: 'application/pdf', size: 16, untrusted: { name: 'receipt.pdf' } },
-          ]);
+        const created = yield* run(['draft', '--from', ADDRESS, '--attach', receipt]);
+        const { draft } = JSON.parse(created.stdout);
+        expect(draft.attachments, created.stderr).toEqual([
+          { type: 'application/pdf', size: 16, untrusted: { name: 'receipt.pdf' } },
+        ]);
+        const key = draft.id.slice('draft/'.length);
+        const [named] = (yield* drafts)[key]?.attachments ?? [];
+        if (named === undefined) throw new Error('the record names no file');
+        expect(named).toMatchObject({ name: 'receipt.pdf', size: 16, kind: 'pdf' });
+        expect(new TextDecoder().decode((yield* world.readFiles)[named.id])).toBe(
+          '%PDF-1.7 receipt',
+        );
+        // Sealed: the Worker never sees the bytes.
+        expect(new TextDecoder().decode(world.files.get(named.id))).not.toContain('%PDF');
 
-          // Kept with the draft: an edit that attaches nothing still has it.
-          const edited = yield* run(['draft', '--edit', draft.draftId, '--subject', 'Receipt']);
-          expect(JSON.parse(edited.stdout).draft.attachments).toHaveLength(1);
+        // Kept with the draft: an edit that attaches nothing still has it.
+        const edited = yield* run(['draft', '--edit', draft.draftId, '--subject', 'Receipt']);
+        expect(JSON.parse(edited.stdout).draft.attachments).toHaveLength(1);
+        expect((yield* drafts)[key]?.attachments).toEqual([named]);
 
-          const tooBig = yield* run([
-            'draft',
-            '--edit',
-            JSON.parse(edited.stdout).draft.draftId,
-            '--attach',
-            big,
-          ]);
-          assert.isTrue(Exit.isFailure(tooBig.exit));
-          expect(failureOf(tooBig.stderr)).toMatchObject({ code: 'UsageError' });
-          expect((failureOf(tooBig.stderr) as { message: string }).message).toContain(
-            'too big to send',
-          );
-        }),
+        const bigger = yield* run([
+          'draft',
+          '--edit',
+          JSON.parse(edited.stdout).draft.draftId,
+          '--attach',
+          big,
+        ]);
+        assert.isTrue(Exit.isSuccess(bigger.exit), bigger.stderr);
+        expect(JSON.parse(bigger.stdout).draft.attachments).toHaveLength(2);
+      }),
+    );
+
+    it.effect('a retry takes a new id: an upload is never replaced', () =>
+      Effect.gen(function* () {
+        const { homes, run, world } = yield* makeComposeWorld();
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        yield* fs.makeDirectory(homes.XDG_STATE_HOME, { recursive: true });
+        const receipt = path.join(homes.XDG_STATE_HOME, 'receipt.pdf');
+        yield* fs.writeFileString(receipt, 'x');
+
+        yield* run(['draft', '--from', ADDRESS, '--attach', receipt]);
+        yield* run(['draft', '--from', ADDRESS, '--attach', receipt]);
+
+        expect(world.files.size).toBe(2);
+      }),
+    );
+
+    it.effect('says storage is full, and saves no draft that names a file R2 does not hold', () =>
+      Effect.gen(function* () {
+        const { homes, run, drafts, world } = yield* makeComposeWorld();
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        yield* fs.makeDirectory(homes.XDG_STATE_HOME, { recursive: true });
+        const receipt = path.join(homes.XDG_STATE_HOME, 'receipt.pdf');
+        yield* fs.writeFileString(receipt, 'x');
+        world.state.isStorageFull = true;
+
+        const refused = yield* run(['draft', '--from', ADDRESS, '--attach', receipt]);
+
+        assert.isTrue(Exit.isFailure(refused.exit));
+        expect(failureOf(refused.stderr)).toMatchObject({
+          code: 'StorageFull',
+          message: 'Failed to upload: your file storage is full (1 GB).',
+        });
+        expect(Object.keys(yield* drafts)).toEqual([]);
+      }),
+    );
+
+    it.effect('refuses text too long to send, before anything is saved', () =>
+      Effect.gen(function* () {
+        const { run, drafts } = yield* makeComposeWorld();
+        const refused = yield* run([
+          'draft',
+          '--from',
+          ADDRESS,
+          '--to',
+          'kate@example.com',
+          '--text',
+          'x '.repeat(200_000),
+        ]);
+        assert.isTrue(Exit.isFailure(refused.exit));
+        expect((failureOf(refused.stderr) as { message: string }).message).toContain(
+          'too long to send',
+        );
+        expect(Object.keys(yield* drafts)).toEqual([]);
+      }),
     );
 
     it.effect('refuses to edit a draft holding a send, however old: it may have gone out', () =>
@@ -292,7 +355,10 @@ layer(NodeServices.layer)(it => {
           messageId: '<lost@fishball.ltd>',
           opId: 'op',
           claimedAt: 0,
-          bytes: new TextEncoder().encode('Subject: x\r\n\r\nx').toBase64(),
+          message: {
+            head: new TextEncoder().encode('Subject: x\r\n\r\nx').toBase64(),
+            splices: [],
+          },
           target: { account: ADDRESS, folder: 'sent' },
         };
         // Long past the takeover age the web app allows a stale claim.

@@ -32,6 +32,11 @@ export class ApiError extends Schema.TaggedError<ApiError>()('ApiError', {
   status: Schema.Int,
 }) {}
 
+/** The account's file storage has no room for the file, so it was not uploaded. */
+export class StorageFull extends Schema.TaggedError<StorageFull>()('StorageFull', {
+  message: Schema.String,
+}) {}
+
 /** A record that did not open, or one older than this machine has already seen (a replay). */
 export class VaultUnreadable extends Schema.TaggedError<VaultUnreadable>()('VaultUnreadable', {
   message: Schema.String,
@@ -94,6 +99,7 @@ export type CliFailure =
   | KeyRevoked
   | NetworkError
   | ApiError
+  | StorageFull
   | VaultUnreadable
   | LoginFailed
   | NotFound

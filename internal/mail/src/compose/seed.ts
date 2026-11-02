@@ -1,7 +1,7 @@
 import type { AddressRecord } from '../addresses/record.ts';
 import { type Message, newestInbound, type Thread } from '../threads/thread.ts';
 import { fullTime } from '../time.ts';
-import type { ComposeDraft } from './draft.ts';
+import type { ComposeSeed } from './draft.ts';
 
 /**
  * Where a reply goes: the message's Reply-To (RFC 5322 §3.6.2) minus your own addresses, else its
@@ -48,7 +48,7 @@ export const seedFor = (
   threads: readonly Thread[],
   identities: readonly AddressRecord[],
   ownedAddresses: readonly string[],
-): Partial<ComposeDraft> => {
+): ComposeSeed => {
   const thread = threads.find(candidate =>
     candidate.messages.some(message => message.id === messageId),
   );

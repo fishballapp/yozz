@@ -27,6 +27,9 @@ declares no limit; `ehlo` reports the value as `maxMessageBytes`.
 
 `buildMessage` turns composer fields into 7-bit bytes: RFC 2047 headers, 7bit or quoted-printable bodies,
 `multipart/alternative` when an HTML rendering is given, `In-Reply-To` + the folded `References` chain for replies.
+`buildMessageParts` is the same message with each attachment's body left out and the offsets where they
+belong, for a caller that keeps the files elsewhere: `spliceMessage(parts, bodies.map(encodeAttachmentBody))`
+puts it together, byte for byte what `buildMessage` writes.
 
 ## Tests
 

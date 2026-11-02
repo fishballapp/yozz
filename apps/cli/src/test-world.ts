@@ -6,6 +6,7 @@ import {
 import { createVault, deriveApprovalKeys, generateCliKeyPair, rewrapDek } from '@yozz.app/vault';
 import {
   formatCliToken,
+  MAX_STORED_BYTES_PER_USER,
   PutRecordRequestSchema,
   type VaultRecordEnvelope,
 } from '@yozz.app/vault-contract';
@@ -56,7 +57,9 @@ export const makeWorld = Effect.fnUntraced(function* () {
   const records = new Map<string, StoredRecord>();
   const calls: Call[] = [];
   /** `refusePuts`: how many record writes from now are refused as conflicts (a write that raced). */
-  const state = { isRevoked: false, deleteStatus: 200, refusePuts: 0 };
+  const state = { isRevoked: false, deleteStatus: 200, refusePuts: 0, isStorageFull: false };
+  /** What R2 holds, sealed as the CLI sealed it. */
+  const files = new Map<string, Uint8Array<ArrayBuffer>>();
 
   const json = (status: number, body: unknown) =>
     new Response(JSON.stringify(body), {
@@ -89,6 +92,36 @@ export const makeWorld = Effect.fnUntraced(function* () {
     }
     if (call.method === 'DELETE' && url.pathname === `/api/v1/vault/cli-keys/${KEY_ID}`) {
       return json(state.deleteStatus, { ok: true });
+    }
+    const file = /^\/api\/v1\/vault\/files\/([A-Za-z0-9_-]+)$/u.exec(url.pathname)?.[1];
+    if (file !== undefined) {
+      if (call.method === 'PUT') {
+        if (files.has(file)) {
+          return json(409, { error: { code: 'CONFLICT', message: 'A file is never replaced' } });
+        }
+        if (state.isStorageFull) {
+          return json(413, { error: { code: 'STORAGE_FULL', message: 'File storage is full' } });
+        }
+        files.set(file, new Uint8Array(init?.body as Uint8Array<ArrayBuffer>));
+        return json(200, { ok: true });
+      }
+      if (call.method === 'DELETE') {
+        files.delete(file);
+        return json(200, { ok: true });
+      }
+      const stored = files.get(file);
+      return stored === undefined
+        ? json(404, { error: { code: 'NOT_FOUND', message: 'Not found' } })
+        : new Response(stored);
+    }
+    if (call.method === 'GET' && url.pathname === '/api/v1/vault/files') {
+      const sizes = [...files].map(([id, { length }]) => ({ id, size: length, createdAt: 0 }));
+      return json(200, {
+        files: sizes,
+        nextCursor: null,
+        usedBytes: sizes.reduce((sum, { size }) => sum + size, 0),
+        capBytes: MAX_STORED_BYTES_PER_USER,
+      });
     }
     // One record a page, so every listing follows the cursor.
     const listed = /^\/api\/v1\/vault\/records\/([a-z]+)$/u.exec(url.pathname)?.[1];
@@ -174,7 +207,30 @@ export const makeWorld = Effect.fnUntraced(function* () {
       ),
     );
 
-  return { fetch, calls, state, putRecord, putAddress, readRecords, credentials };
+  /** Removes a stored file, as if R2 had lost it. */
+  const loseFile = (fileId: string) => files.delete(fileId);
+
+  /** Opens every file the Worker holds, as a client would. */
+  const readFiles = Effect.promise(async () =>
+    Object.fromEntries(
+      await Promise.all(
+        [...files].map(async ([id, sealed]) => [id, await vault.decryptFile(id, sealed)] as const),
+      ),
+    ),
+  );
+
+  return {
+    fetch,
+    calls,
+    state,
+    files,
+    loseFile,
+    readFiles,
+    putRecord,
+    putAddress,
+    readRecords,
+    credentials,
+  };
 });
 
 /** Fresh XDG homes, gone with the scope. */

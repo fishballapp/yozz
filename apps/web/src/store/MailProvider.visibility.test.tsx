@@ -1,18 +1,23 @@
 // @vitest-environment jsdom
 
 import { ADDRESS_RECORD_TYPE, type AddressRecord } from '@yozz.app/mail/addresses/record';
+import { fakeFileStore } from '@yozz.app/mail/testing/fake-file-store';
 import { fakeRecordStore } from '@yozz.app/mail/testing/fake-record-store';
+import type { FileStore } from '@yozz.app/mail/vault/file-store';
 import type { RecordStore } from '@yozz.app/mail/vault/record-store';
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { MailProvider, useMail } from './MailProvider';
 
+/** The vault's file half, which these tests do not exercise. */
+const noFiles = fakeFileStore().store;
+
 // @ts-expect-error React reads it off the global
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
 const mocks = vi.hoisted(() => ({
-  session: null as { userId: string; store: RecordStore } | null,
+  session: null as { userId: string; files: FileStore; store: RecordStore } | null,
   /** The account of every task a manager was handed. A sync's first task is its LIST, so one per sync. */
   runs: [] as string[],
 }));
@@ -91,7 +96,7 @@ it('a tab return syncs an address whose last sync is stale, and skips one that s
     return null;
   };
   const root = createRoot(document.createElement('div'));
-  mocks.session = { userId: 'user-1', store: await vaultHolding([ALICE, BOB]) };
+  mocks.session = { userId: 'user-1', files: noFiles, store: await vaultHolding([ALICE, BOB]) };
   await act(async () =>
     root.render(
       <MailProvider>

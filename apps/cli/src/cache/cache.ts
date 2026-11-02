@@ -19,6 +19,7 @@ import type {
   KeyRevoked,
   MailServerError,
   NetworkError,
+  StorageFull,
   UsageError,
   VaultUnreadable,
 } from '../errors.ts';
@@ -27,7 +28,13 @@ import { Settings } from '../settings.ts';
 import { Vault } from '../vault/vault.ts';
 import { type AccountCache, accountCache, usingCache } from './disk.ts';
 
-type VaultFailure = KeyRevoked | NetworkError | ApiError | UsageError | VaultUnreadable;
+type VaultFailure =
+  | KeyRevoked
+  | NetworkError
+  | ApiError
+  | StorageFull
+  | UsageError
+  | VaultUnreadable;
 
 export class Cache extends Context.Service<
   Cache,

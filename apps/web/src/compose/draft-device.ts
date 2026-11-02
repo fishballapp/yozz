@@ -1,4 +1,5 @@
-import type { ComposeDraft } from '@yozz.app/mail/compose/draft';
+import { type ComposeDraft, draftFileOf, fileReferenceOf } from '@yozz.app/mail/compose/draft';
+import { fileReferenceSchema } from '@yozz.app/mail/compose/draft-record';
 import { z } from 'zod';
 import type { ComposeIntent } from './intent';
 
@@ -18,6 +19,8 @@ const storedDraftSchema = z.object({
     body: z.string(),
     inReplyTo: z.string().optional(),
     references: z.array(z.string()).optional(),
+    /** The files R2 holds, by reference, so a reload keeps them. Bytes never come here. */
+    attachments: z.array(fileReferenceSchema).optional(),
     /** Which vault record this text already is; without it a reload minted a second record (DECISIONS.md). The version is a hint the restore re-checks. */
     draftKey: z.string().optional(),
     draftId: z.string().optional(),
@@ -32,8 +35,10 @@ export const saveDraft = (
   draft: ComposeDraft,
   storage: Storage = localStorage,
 ): void => {
-  const { attachments: _files, ...rest } = draft;
-  storage.setItem(keyOf(userId), JSON.stringify({ intent, draft: rest }));
+  const attachments = draft.attachments
+    .filter(({ upload }) => upload === 'uploaded')
+    .map(fileReferenceOf);
+  storage.setItem(keyOf(userId), JSON.stringify({ intent, draft: { ...draft, attachments } }));
 };
 
 /** The stored draft for exactly this intent, or nothing. */
@@ -54,7 +59,10 @@ export const loadDraft = (
   }
   const parsed = storedDraftSchema.safeParse(json);
   if (!parsed.success || parsed.data.intent !== intent) return null;
-  return { ...parsed.data.draft, attachments: [] };
+  return {
+    ...parsed.data.draft,
+    attachments: (parsed.data.draft.attachments ?? []).map(draftFileOf),
+  };
 };
 
 export const clearDraft = (userId: string, storage: Storage = localStorage): void => {

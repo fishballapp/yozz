@@ -4,11 +4,9 @@ import * as Clock from 'effect/Clock';
 import * as Argument from 'effect/cli/Argument';
 import * as Command from 'effect/cli/Command';
 import * as Effect from 'effect/Effect';
-import * as Layer from 'effect/Layer';
 import { DraftSending, NetworkError, NotFound, reportFailure, UsageError } from '../errors.ts';
 import { printJson } from '../output.ts';
 import { Vault } from '../vault/vault.ts';
-import { DraftFiles } from './draft-files.ts';
 import { conflictOf } from './drafts.ts';
 
 /** What `discard` prints: the tombstone's id, and when it is erased. */
@@ -48,14 +46,12 @@ export const discardCommand = Command.make(
           message: 'The draft could not be discarded: YOZZ could not be reached',
         });
       case 'deleted':
-        yield* (yield* DraftFiles).write(parsed.key, []);
         return yield* printJson(discardedJson(outcome.draftId, now));
     }
   }, reportFailure),
 ).pipe(
   Command.withShortDescription('Throw a draft away'),
-  Command.withDescription(`Throw a draft away, as the composer's Discard does: it leaves every list at once, and is kept for 30 days (restorableUntil) before it is erased. Files it attached on this
-machine are deleted.
+  Command.withDescription(`Throw a draft away, as the composer's Discard does: it leaves every list at once, and is kept for 30 days (restorableUntil) before it is erased, its files with it.
 
 A draft changed since that draftId is a Conflict naming its newest version (currentDraftId); one
 whose send is in flight, or waits for you to settle it in yozz.app, is DraftSending.
@@ -72,5 +68,5 @@ Output:
       description: 'Discard it',
     },
   ]),
-  Command.provide(DraftFiles.layer.pipe(Layer.provideMerge(Vault.layer))),
+  Command.provide(Vault.layer),
 );

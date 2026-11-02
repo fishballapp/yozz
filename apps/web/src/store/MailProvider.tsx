@@ -702,6 +702,7 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
   // Keyed on the store, not the session object: a mode switch in Settings hands out a new session
   // over the same store and user, and that must not restart the mail session or clear its cache.
   const store = session?.store ?? null;
+  const files = session?.files ?? null;
   const userId = session?.userId ?? null;
   useEffect(() => {
     if (import.meta.env.DEV && isDemo()) {
@@ -722,7 +723,7 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
       setRecordsError(null);
       return;
     }
-    if (store === null || userId === null) return;
+    if (store === null || files === null || userId === null) return;
     let cancelled = false;
     setRecordsError(null);
     void (async () => {
@@ -773,7 +774,7 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
         // Read by the runner, which would otherwise refuse the resumed work this load starts.
         accountsRef.current = parsed.filter(isInbound);
         setRecords(parsed);
-        await load(store, parsed, () => cancelled);
+        await load({ store, files }, parsed, () => cancelled);
       } catch (err) {
         if (!cancelled) setRecordsError(vaultErrorMessage(err));
       }
@@ -816,7 +817,7 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
       // whoever unlocks next.
       toast.close();
     };
-  }, [store, userId, load, reset, activity]);
+  }, [store, files, userId, load, reset, activity]);
 
   /** One account's next window of a folder. A refused page reports like a refused flag write. */
   const loadOlderOn = useCallback(

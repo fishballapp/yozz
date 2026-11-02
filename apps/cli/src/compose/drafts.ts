@@ -1,4 +1,4 @@
-import { type AddressRecord, isInbound } from '@yozz.app/mail/addresses/record';
+import type { AddressRecord } from '@yozz.app/mail/addresses/record';
 import { BODY_CHARS, clip } from '@yozz.app/mail/agent-budgets';
 import { addressList } from '@yozz.app/mail/compose/draft';
 import {
@@ -9,10 +9,9 @@ import {
   parseDraftRecord,
 } from '@yozz.app/mail/compose/draft-record';
 import type { SaveOutcome } from '@yozz.app/mail/compose/draft-vault';
-import { buildOutgoing } from '@yozz.app/mail/compose/send';
+import { claimOf } from '@yozz.app/mail/compose/send';
 import { describeMailFailure } from '@yozz.app/mail/describe-failure';
-import { type Attachment, draftIdOf as draftHandleOf } from '@yozz.app/mail/threads/thread';
-import { MAX_CIPHERTEXT_BYTES } from '@yozz.app/vault-contract';
+import { draftIdOf as draftHandleOf } from '@yozz.app/mail/threads/thread';
 import * as Effect from 'effect/Effect';
 import {
   Conflict,
@@ -27,8 +26,6 @@ import { Vault } from '../vault/vault.ts';
 
 // What `draft`, `send` and `discard` share: reading a draft by its versioned id, printing it, and
 // building the message it sends.
-
-type Send = NonNullable<DraftRecord['send']>;
 
 /** The draft a versioned id names, at whatever version it is now; `NotFound` when there is none. */
 export const readDraft = Effect.fn('compose.readDraft')(function* (draftId: string) {
@@ -113,12 +110,10 @@ export const draftJson = ({
   webUrl,
   key,
   record,
-  attachments,
 }: {
   readonly webUrl: string;
   readonly key: string;
   readonly record: DraftRecord;
-  readonly attachments: readonly Attachment[];
 }) => {
   const { text, quote } = splitQuote(record.body);
   const addresses = (value: string) => addressList(value).map(untrusted);
@@ -133,7 +128,7 @@ export const draftJson = ({
       cc: addresses(record.cc),
       bcc: addresses(record.bcc),
       text: untrusted(text),
-      attachments: attachments.map(attachment => ({
+      attachments: (record.attachments ?? []).map(attachment => ({
         type: mimeTypeOf(attachment.mimeType),
         size: attachment.size,
         untrusted: { name: field(attachment.name, LINE_CHARS) },
@@ -148,64 +143,23 @@ export const draftJson = ({
   };
 };
 
-/** A fresh Message-ID on the sending address's own domain, as the composer mints it. */
-export const newMessageId = (from: string) =>
-  `<${crypto.randomUUID()}@${from.slice(from.indexOf('@') + 1)}>`;
-
 /**
- * The claim `send` writes: the message's exact bytes, built once by the composer's own
- * `buildOutgoing` (markdown with its rendered HTML), and where its Sent copy goes. The claim keeps
- * the bytes in the draft's vault record, so a message too big for one record can't be sent; that is
- * said here, before anything is written, rather than as a failed claim.
+ * The claim `send` writes: the composer's own (`claimOf`). Text too long for the record is said here,
+ * so `draft` can refuse before anything is saved.
  */
-export const claimOf = Effect.fn('compose.claimOf')(function* ({
+export const claimFor = ({
   identity,
   key,
   record,
-  attachments,
   now,
 }: {
   readonly identity: AddressRecord;
   readonly key: string;
-  readonly record: DraftRecord;
-  readonly attachments: readonly Attachment[];
+  readonly record: Parameters<typeof claimOf>[2];
   readonly now: number;
-}) {
-  const messageId = newMessageId(record.from);
-  const built = buildOutgoing(identity, {
-    to: addressList(record.to),
-    cc: addressList(record.cc),
-    bcc: addressList(record.bcc),
-    subject: record.subject,
-    text: record.body,
-    messageId,
-    ...(record.inReplyTo === undefined ? {} : { inReplyTo: record.inReplyTo }),
-    ...(record.references === undefined ? {} : { references: record.references }),
-    attachments,
-  });
-  if (!built.ok) {
-    return yield* new UsageError({ message: describeMailFailure(built.error, identity.address) });
-  }
-  const send: Send = {
-    messageId,
-    opId: crypto.randomUUID(),
-    state: 'submitting',
-    claimedAt: now,
-    bytes: built.value.toBase64(),
-    // The logical folder; the name is resolved against LIST at copy time.
-    target: isInbound(identity) ? { account: identity.address, folder: 'sent' } : 'vault',
-  };
-  const plaintext = JSON.stringify({ ...record, contentVersion: record.contentVersion + 1, send });
-  // `@yozz.app/vault`'s record: base64 of iv ‖ AES-GCM(tag) over the JSON of revision, key, plaintext.
-  const sealedBytes =
-    12 +
-    16 +
-    new TextEncoder().encode(JSON.stringify([String(Number.MAX_SAFE_INTEGER), key, plaintext]))
-      .length;
-  if (Math.ceil(sealedBytes / 3) * 4 > MAX_CIPHERTEXT_BYTES) {
-    return yield* new UsageError({
-      message: `This message is ${Math.round(built.value.length / 1024)} KB, too big to send: a send keeps the message in the draft's vault record, which holds at most 1 MB. Send smaller attachments`,
-    });
-  }
-  return send;
-});
+}) => {
+  const claim = claimOf(identity, key, record, now);
+  return claim.ok
+    ? Effect.succeed(claim.value)
+    : Effect.fail(new UsageError({ message: describeMailFailure(claim.error, identity.address) }));
+};

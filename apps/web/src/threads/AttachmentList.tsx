@@ -55,6 +55,47 @@ const Facts = ({ file, preview }: { file: Attachment; preview: Preview | null })
   </>
 );
 
+/** Reads a file kept in R2, for a chip whose bytes are not on this device. */
+export type LoadStoredFile = (fileId: string) => Promise<Uint8Array<ArrayBuffer> | null>;
+
+/** A chip whose bytes are in R2: fetched when it is clicked, and saying so if that fails. */
+const StoredFileChip = ({
+  file,
+  fileId,
+  loadFile,
+}: {
+  file: Attachment;
+  fileId: string;
+  loadFile: LoadStoredFile;
+}) => {
+  const [state, setState] = useState<'idle' | 'downloading' | 'failed'>('idle');
+  const name = displayName(file.name);
+  return (
+    <button
+      type="button"
+      disabled={state === 'downloading'}
+      onClick={async () => {
+        setState('downloading');
+        try {
+          const content = await loadFile(fileId);
+          if (content === null) throw new Error(`${fileId} is gone`);
+          download({ ...file, content });
+          setState('idle');
+        } catch {
+          setState('failed');
+        }
+      }}
+      className="flex h-11 max-w-full items-center gap-2.5 border border-rule bg-ink px-2.5 text-left font-mono text-2xs transition-colors hover:bg-ink-hover disabled:cursor-default disabled:hover:bg-ink lg:h-7"
+      aria-label={`Download ${name}, ${formatBytes(file.size)}`}
+    >
+      <Facts file={file} preview={null} />
+      {state === 'downloading' && <span className="shrink-0 text-paper-faint">Downloading…</span>}
+      {state === 'failed' && <span className="shrink-0 text-signal">Couldn’t download</span>}
+      <DownloadSimpleIcon size={12} className="shrink-0 text-paper-faint" />
+    </button>
+  );
+};
+
 /**
  * A chip that previews is two cells ruled as one box: the facts open it, the glyph downloads. One
  * that does not is a single download, as every attachment was before previews.
@@ -384,7 +425,13 @@ const AttachmentViewer = ({
  * through every attachment of the message; a PDF opens in the browser's viewer in a new tab; the
  * rest download. Download stays one click away on every one of them.
  */
-export const AttachmentList = ({ attachments }: { attachments: readonly Attachment[] }) => {
+export const AttachmentList = ({
+  attachments,
+  loadFile,
+}: {
+  attachments: readonly Attachment[];
+  loadFile?: LoadStoredFile | undefined;
+}) => {
   const previews = useMemo(() => attachments.map(previewOf), [attachments]);
   const openPdf = usePdfOpener();
   const [viewed, setViewed] = useState<number | null>(null);
@@ -398,18 +445,22 @@ export const AttachmentList = ({ attachments }: { attachments: readonly Attachme
           return (
             // Two parts of one message can share a name.
             <li key={`${index}-${file.name}`} className="max-w-full">
-              <AttachmentChip
-                file={file}
-                preview={preview}
-                onOpen={() => {
-                  if (preview?.kind === 'pdf' && file.content !== undefined) {
-                    openPdf(file.content, preview);
-                    return;
-                  }
-                  setViewed(index);
-                  setIsViewerOpen(true);
-                }}
-              />
+              {file.fileId !== undefined && loadFile !== undefined ? (
+                <StoredFileChip file={file} fileId={file.fileId} loadFile={loadFile} />
+              ) : (
+                <AttachmentChip
+                  file={file}
+                  preview={preview}
+                  onOpen={() => {
+                    if (preview?.kind === 'pdf' && file.content !== undefined) {
+                      openPdf(file.content, preview);
+                      return;
+                    }
+                    setViewed(index);
+                    setIsViewerOpen(true);
+                  }}
+                />
+              )}
             </li>
           );
         })}

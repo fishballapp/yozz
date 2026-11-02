@@ -22,6 +22,7 @@ const { session, moveMessages, prefetchBodies, setFlag, syncAccount, thread, sho
     return {
       session: {
         userId: 'user',
+        files: {},
         store: { list: async (type: string) => (type === 'address' ? records : []) },
       },
       moveMessages: vi.fn(),

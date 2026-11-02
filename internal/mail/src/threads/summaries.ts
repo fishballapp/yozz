@@ -1,6 +1,6 @@
 import type { ImapAddress, ImapMessageSummary } from '@yozz.app/imap';
 import { addressList } from '../compose/draft.ts';
-import type { DraftRecord } from '../compose/draft-record.ts';
+import type { DraftRecord, FileReference } from '../compose/draft-record.ts';
 import {
   draftIdOf,
   FOLDERS,
@@ -27,7 +27,7 @@ export type FolderSummaries = Partial<
 /** The folders whose messages are threaded as mail. Drafts are synced but are not mail. */
 const THREADED_FOLDERS = FOLDERS.filter(folder => folder !== 'drafts');
 
-/** Sent mail the vault holds because no mailbox does. Structurally a `SentRecord` without bytes. */
+/** Sent mail the vault holds because no mailbox does, or this tab's copy until a mailbox's syncs. */
 export type VaultSentMessage = {
   readonly messageId: string;
   readonly at: number;
@@ -39,7 +39,15 @@ export type VaultSentMessage = {
   readonly body: string;
   readonly inReplyTo?: string;
   readonly references?: readonly string[];
+  /** In R2. Only the vault's own copy names any: a mailbox's holds its files itself. */
+  readonly attachments?: readonly FileReference[];
 };
+
+/** A record's files on a message: opened from R2, since their bytes are not here. */
+const attachmentsInR2 = (files: readonly FileReference[] | undefined) =>
+  files === undefined || files.length === 0
+    ? {}
+    : { attachments: files.map(({ id, ...file }) => ({ ...file, fileId: id })) };
 
 /**
  * A Message-ID an id may carry: printable ASCII in angle brackets, of a sane length. An id is shown
@@ -333,7 +341,7 @@ export const threadsFromAccounts = (
     })),
   );
 
-  const vaultBodies = new Map(vaultSent.map(message => [message.messageId, message.body]));
+  const vaultHeld = new Map(vaultSent.map(message => [message.messageId, message]));
   const threads: ThreadState[] = [];
   for (const [rootId, ids] of groups) {
     const members = ids.flatMap(id => {
@@ -344,10 +352,16 @@ export const threadsFromAccounts = (
       .map(({ id, entry }) => {
         const message = messageFromCopies(id, entry.summary, entry.locations);
         // A vault-held message carries its own text; `pending` would spin for ever.
-        const held = vaultBodies.get(entry.summary.envelope?.messageId ?? '');
+        const held = vaultHeld.get(entry.summary.envelope?.messageId ?? '');
         return held === undefined
           ? message
-          : { ...message, body: toParagraphs(held), hasTextPart: true, bodyStatus: undefined };
+          : {
+              ...message,
+              body: toParagraphs(held.body),
+              hasTextPart: true,
+              bodyStatus: undefined,
+              ...attachmentsInR2(held.attachments),
+            };
       })
       .sort((a, b) => a.at - b.at);
     const flags = members.flatMap(({ entry }) => entry.flags);
@@ -405,6 +419,7 @@ export const withDrafts = (
       isDraft: true,
       draftKey,
       draftId,
+      ...attachmentsInR2(record.attachments),
     };
     // Named by the record, else found by the message its `In-Reply-To` points at.
     const parent =

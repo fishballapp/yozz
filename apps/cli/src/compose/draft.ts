@@ -1,5 +1,5 @@
 import { MAX_ATTACHMENT_BYTES, ownerAccountFor } from '@yozz.app/mail/compose/draft';
-import type { DraftRecord } from '@yozz.app/mail/compose/draft-record';
+import type { DraftRecord, FileReference } from '@yozz.app/mail/compose/draft-record';
 import { createDraft, replaceDraft } from '@yozz.app/mail/compose/draft-vault';
 import { type SeedRequest, seedFor } from '@yozz.app/mail/compose/seed';
 import { attachmentKindOf } from '@yozz.app/mail/threads/attachments';
@@ -11,7 +11,6 @@ import * as Command from 'effect/cli/Command';
 import * as Flag from 'effect/cli/Flag';
 import * as Effect from 'effect/Effect';
 import * as FileSystem from 'effect/FileSystem';
-import * as Layer from 'effect/Layer';
 import * as Option from 'effect/Option';
 import * as Path from 'effect/Path';
 import * as Stdio from 'effect/Stdio';
@@ -24,9 +23,8 @@ import { lookUp } from '../mail/search.ts';
 import { printJson } from '../output.ts';
 import { Settings } from '../settings.ts';
 import { Vault } from '../vault/vault.ts';
-import { DraftFiles } from './draft-files.ts';
 import {
-  claimOf,
+  claimFor,
   draftJson,
   goneDraft,
   identityOf,
@@ -95,17 +93,44 @@ const readAttachment = Effect.fnUntraced(function* (file: string) {
   } satisfies Attachment;
 });
 
+/** A file about to upload, under an id of its own: a retried `yozz draft` takes a new one. */
+type StagedFile = FileReference & { readonly content: Uint8Array<ArrayBuffer> };
+
+const staged = ({ name, size, kind, mimeType, content }: Attachment): readonly StagedFile[] =>
+  content === undefined
+    ? []
+    : [
+        {
+          id: crypto.randomUUID(),
+          name,
+          size,
+          kind,
+          ...(mimeType === undefined ? {} : { mimeType }),
+          content,
+        },
+      ];
+
 /** Files kept, then files added; a name added again replaces the one kept, as the composer's picker does. */
-const withAdded = (kept: readonly Attachment[], added: readonly Attachment[]) => {
+const withAdded = (kept: readonly FileReference[], added: readonly StagedFile[]) => {
   const attachments = [
     ...kept.filter(attachment => !added.some(({ name }) => name === attachment.name)),
-    ...added,
+    ...added.map(({ content: _content, ...reference }): FileReference => reference),
   ];
   const total = attachments.reduce((sum, { size }) => sum + size, 0);
   return total > MAX_ATTACHMENT_BYTES
     ? Effect.fail(new UsageError({ message: 'Attachments must total under 25 MiB' }))
     : Effect.succeed(attachments);
 };
+
+/** Before the record that names them, so no record names a file R2 does not hold. */
+const upload = Effect.fnUntraced(function* (files: readonly StagedFile[]) {
+  const vault = yield* Vault;
+  yield* Effect.forEach(
+    files,
+    ({ id, content }) => vault.use((_records, store) => store.put(id, content)),
+    { discard: true },
+  );
+});
 
 /**
  * The threads, with `messageId`'s body read in (from the cache, else the server), so the quote holds
@@ -264,11 +289,10 @@ export const draftCommand = Command.make(
       });
     }
     const vault = yield* Vault;
-    const files = yield* DraftFiles;
     const { webUrl } = yield* Settings;
     const { identities } = yield* Mail;
     const text = yield* Effect.transposeOption(Option.map(fields.text, readText));
-    const added = yield* Effect.forEach(attach, readAttachment);
+    const added = (yield* Effect.forEach(attach, readAttachment)).flatMap(staged);
     const now = yield* Clock.currentTimeMillis;
 
     if (Option.isSome(edit)) {
@@ -289,7 +313,7 @@ export const draftCommand = Command.make(
         identities,
         Option.getOrElse(fields.from, () => record.from),
       );
-      const attachments = yield* withAdded(yield* files.read(key), added);
+      const attachments = yield* withAdded(record.attachments ?? [], added);
       const {
         contentVersion: _version,
         send: _send,
@@ -310,19 +334,14 @@ export const draftCommand = Command.make(
           onNone: () => record.body,
           onSome: written => `${written}${splitQuote(record.body).quote}`,
         }),
+        attachments,
       };
       // Refused here rather than at send: what draft prints is what send can send.
-      yield* claimOf({
-        identity,
-        key,
-        record: { ...content, contentVersion: record.contentVersion + 1 },
-        attachments,
-        now,
-      });
+      yield* claimFor({ identity, key, record: content, now });
+      yield* upload(added);
       const saved = yield* vault.use(store => replaceDraft(store, draftId, content, now));
       if (!saved.ok) return yield* refusedSave(draftId, saved);
-      if (added.length > 0) yield* files.write(key, attachments);
-      return yield* printJson(draftJson({ webUrl, key, record: saved.handle.record, attachments }));
+      return yield* printJson(draftJson({ webUrl, key, record: saved.handle.record }));
     }
 
     const { identity, content, forwarded } = yield* startDraft({
@@ -330,25 +349,29 @@ export const draftCommand = Command.make(
       request: starts[0] ?? null,
       text,
     });
-    const missing = forwarded.find(({ content }) => content === undefined);
+    const missing = forwarded.find(
+      ({ content, fileId }) => content === undefined && fileId === undefined,
+    );
     if (missing !== undefined) {
       return yield* new UsageError({
         message: `The attachment ${missing.name} came without its bytes, so it can't be forwarded`,
       });
     }
-    const attachments = yield* withAdded(forwarded, added);
-    yield* claimOf({
-      identity,
-      key: crypto.randomUUID(),
-      record: { ...content, contentVersion: 1 },
-      attachments,
-      now,
-    });
-    const created = yield* vault.use(store => createDraft(store, content, now));
+    // A file already in R2 (a forward of a send-only Sent message) is named again, not copied.
+    const alreadyStored = forwarded.flatMap(({ fileId, name, size, kind, mimeType }) =>
+      fileId === undefined
+        ? []
+        : [{ id: fileId, name, size, kind, ...(mimeType === undefined ? {} : { mimeType }) }],
+    );
+    const toUpload = [...forwarded.flatMap(staged), ...added];
+    const attachments = yield* withAdded(alreadyStored, toUpload);
+    const withFiles = { ...content, attachments };
+    yield* claimFor({ identity, key: crypto.randomUUID(), record: withFiles, now });
+    yield* upload(toUpload);
+    const created = yield* vault.use(store => createDraft(store, withFiles, now));
     if (!created.ok) return yield* refusedSave('the new draft', created);
     const { draftKey, record } = created.handle;
-    yield* files.write(draftKey, attachments);
-    yield* printJson(draftJson({ webUrl, key: draftKey, record, attachments }));
+    yield* printJson(draftJson({ webUrl, key: draftKey, record }));
   }, reportFailure),
 ).pipe(
   Command.withShortDescription('Write or change a draft; prints exactly what send will send'),
@@ -364,13 +387,12 @@ forward's attachments. --text is what you write above the quote. --from, --to, -
 its newest version (currentDraftId). A draft whose send is in flight, or waits for you to settle
 it in yozz.app, is DraftSending.
 
-The draft is saved in your vault, so yozz.app shows it on every device. Attached files stay on this
-machine (a vault record is too small for them) until the draft is sent or discarded; yozz.app shows
-the draft without them. yozz does not copy drafts into your mail server's Drafts folder; yozz.app
-does, while a tab is open.
+The draft is saved in your vault, so yozz.app shows it on every device. Attached files are encrypted
+here and uploaded, so they are on every device too, and stay until the message is sent or discarded;
+draft fails with StorageFull when your storage (1 GB) has no room. yozz does not copy drafts into
+your mail server's Drafts folder; yozz.app does, while a tab is open.
 
-A message much over half a megabyte can't be sent yet, since a send keeps it in one vault record
-(1 MB); draft says so before saving anything.
+Text too long to send (a very long quoted thread, say) is refused before anything is saved.
 
 Output:
   {
@@ -410,5 +432,5 @@ Output:
       description: 'Add a file',
     },
   ]),
-  Command.provide(DraftFiles.layer.pipe(Layer.provideMerge(MailboxLayer))),
+  Command.provide(MailboxLayer),
 );

@@ -27,6 +27,10 @@ const mail = vi.hoisted(() => ({
   generation: 0,
   send: vi.fn(),
   attach: vi.fn(),
+  retryUpload: vi.fn(),
+  detach: vi.fn(),
+  draft: null as ComposeDraft | null,
+  draftConflict: null as unknown,
 }));
 const navigate = vi.hoisted(() => vi.fn());
 const reading = vi.hoisted(() => ({ files: null as PromiseWithResolvers<Attachment[]> | null }));
@@ -42,13 +46,14 @@ vi.mock('./draft', async importOriginal => ({
 }));
 vi.mock('../store/MailProvider', () => ({
   useComposer: () => ({
-    draft: DRAFT,
-    seedDraft: () => DRAFT,
+    draft: mail.draft ?? DRAFT,
+    seedDraft: () => mail.draft ?? DRAFT,
     updateDraft: vi.fn(),
     send: mail.send,
     attach: mail.attach,
-    detach: vi.fn(),
-    draftConflict: null,
+    detach: mail.detach,
+    retryUpload: mail.retryUpload,
+    draftConflict: mail.draftConflict,
     draftError: null,
     resolveDraftConflict: vi.fn(),
     openSendState: null,
@@ -62,6 +67,7 @@ vi.mock('../store/MailProvider', () => ({
     identities: [],
     ownedAddresses: [],
     drafts: [],
+    readStoredFile: async () => null,
     watchSession: () => {
       const taken = mail.generation;
       return () => mail.generation === taken;
@@ -128,6 +134,62 @@ describe('a send whose session ended during its claim', () => {
   });
 });
 
+describe('an edit from another device while a Send waits on uploads', () => {
+  const resolver = (name: string) =>
+    [...document.querySelectorAll('button')].find(button => button.textContent === name);
+
+  afterEach(() => {
+    mail.draftConflict = null;
+  });
+
+  it('cannot be resolved until the wait ends: their text would go with your files', async () => {
+    mail.draftConflict = { draftKey: 'k-1', draftId: 'k-1@2', record: {} };
+    const claim = Promise.withResolvers<SendAnswer>();
+    mail.send.mockReturnValue(claim.promise);
+    await act(async () => root.render(<Compose />));
+    expect(resolver('Load theirs')?.disabled).toBe(false);
+    expect(resolver('Keep mine')?.disabled).toBe(false);
+
+    const sendButton = resolver('Send');
+    await act(async () => sendButton?.click());
+    expect(resolver('Load theirs')?.disabled).toBe(true);
+    expect(resolver('Keep mine')?.disabled).toBe(true);
+
+    await act(async () =>
+      claim.resolve({ ok: false, error: { kind: 'error', detail: 'refused' } }),
+    );
+    expect(resolver('Load theirs')?.disabled).toBe(false);
+  });
+});
+
+describe('a send the server refused', () => {
+  it('reopens the draft from its toast, and takes the toast off the Send button', async () => {
+    const updated = vi.spyOn(toast, 'update');
+    const closed = vi.spyOn(toast, 'close');
+    mail.send.mockResolvedValue({
+      ok: true,
+      value: {
+        settled: Promise.resolve({ state: 'refused', detail: 'too large', draftKey: 'k-1' }),
+      },
+    });
+    const sendButton = [...document.querySelectorAll('button')].find(
+      button => button.textContent === 'Send',
+    );
+    await act(async () => sendButton?.click());
+    await act(async () => {});
+    const refused = updated.mock.calls.at(-1);
+    if (refused === undefined) throw new Error('the refusal was never reported');
+    const [id, update] = refused;
+    if (typeof update === 'function') throw new Error('the refusal was reported as an updater');
+    closed.mockClear();
+
+    await act(async () => update.actionProps?.onClick?.({} as never));
+
+    expect(closed).toHaveBeenCalledWith(id);
+    expect(navigate).toHaveBeenCalled();
+  });
+});
+
 describe('files whose read finishes after the session ended', () => {
   const pick = async () => {
     reading.files = Promise.withResolvers<Attachment[]>();
@@ -152,5 +214,56 @@ describe('files whose read finishes after the session ended', () => {
     const read = await pick();
     await act(async () => read.reject(new Error('payslip.pdf could not be read')));
     expect(alerts()).toEqual([]);
+  });
+});
+
+describe("a draft's file chips", () => {
+  const stored = { id: 'file-1', name: 'plan.pdf', size: 2048, kind: 'pdf' } as const;
+  const showing = async (attachments: ComposeDraft['attachments']) => {
+    mail.draft = { ...DRAFT, attachments };
+    await act(async () => root.render(<Compose />));
+  };
+  const chip = () => document.querySelector('li')?.textContent;
+
+  afterEach(() => {
+    mail.draft = null;
+    mail.retryUpload.mockReset();
+    mail.detach.mockReset();
+  });
+
+  it('says a file is uploading, and offers to remove it', async () => {
+    await showing([{ ...stored, upload: 'uploading' }]);
+    expect(chip()).toContain('Uploading…');
+    expect(alerts()).toEqual([]);
+    const remove = document.querySelector<HTMLButtonElement>('[aria-label="Remove plan.pdf"]');
+    await act(async () => remove?.click());
+    expect(mail.detach).toHaveBeenCalledWith('file-1');
+  });
+
+  it('says a stored file is nothing more than itself', async () => {
+    await showing([{ ...stored, upload: 'uploaded' }]);
+    expect(chip()).toContain('plan.pdf');
+    expect(chip()).not.toContain('Upload');
+    expect(document.querySelector('[aria-label="Retry plan.pdf"]')).toBeNull();
+  });
+
+  it('says an upload failed, in words that are not a connection error, and retries it', async () => {
+    await showing([{ ...stored, upload: 'failed', content: new Uint8Array(1) }]);
+    expect(chip()).toContain('Upload failed');
+    expect(alerts()).toEqual(['Failed to upload. Retry or remove the file.']);
+    const retry = document.querySelector<HTMLButtonElement>('[aria-label="Retry plan.pdf"]');
+    await act(async () => retry?.click());
+    expect(mail.retryUpload).toHaveBeenCalledWith('file-1');
+  });
+
+  it('says storage is full apart from any other failure', async () => {
+    await showing([{ ...stored, upload: 'storage-full', content: new Uint8Array(1) }]);
+    expect(chip()).toContain('Storage full');
+    expect(alerts()).toEqual(['Failed to upload. Your file storage is full (1 GB).']);
+  });
+
+  it('offers no retry for a file whose bytes this device does not hold', async () => {
+    await showing([{ ...stored, upload: 'failed' }]);
+    expect(document.querySelector('[aria-label="Retry plan.pdf"]')).toBeNull();
   });
 });

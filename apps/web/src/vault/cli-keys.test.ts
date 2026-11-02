@@ -102,6 +102,7 @@ describe('approveCliLogin', () => {
       wrappedDek,
       vault,
       store: {} as UnlockedVaultSession['store'],
+      files: {} as UnlockedVaultSession['files'],
     };
   };
 

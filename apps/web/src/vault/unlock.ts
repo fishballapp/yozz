@@ -1,4 +1,5 @@
 import { VaultApiError } from '@yozz.app/mail/vault/api';
+import { createFileStore, type FileStore } from '@yozz.app/mail/vault/file-store';
 import {
   createVault,
   deriveAccountKeys,
@@ -74,6 +75,7 @@ export type UnlockedVaultSession = VaultAccount & {
   readonly wrappedDek: string;
   readonly vault: Vault;
   readonly store: DeviceRecordStore;
+  readonly files: FileStore;
 };
 
 /** A vault answer that arrived after its session ended; it belongs to that user, so nobody hears it. */
@@ -111,13 +113,15 @@ const openSession = async ({
   readonly api: VaultApiClient;
   readonly idbFactory?: IDBFactory;
 }): Promise<UnlockedVaultSession> => {
+  const accountApi = api.forAccount(account.userId);
   const store = await openDeviceRecordStore({
     userId: account.userId,
     vault,
-    api: api.forAccount(account.userId),
+    api: accountApi,
     idbFactory,
   });
-  return { ...account, mode, encKey, wrappedDek, vault, store };
+  const files = createFileStore({ vault, api: accountApi });
+  return { ...account, mode, encKey, wrappedDek, vault, store, files };
 };
 
 /** `account` is the one the screen showed; the vault is created for it or not at all. */
@@ -751,13 +755,15 @@ export const resumeSession = async ({
   }
 
   const vault = await openVault({ encKey: keys.encKey }, keys.wrappedDek);
+  const accountApi = api.forAccount(user.id);
   const store = await openDeviceRecordStore({
     userId: user.id,
     vault,
-    api: api.forAccount(user.id),
+    api: accountApi,
     idbFactory,
   });
-  return { ...keys, email: user.email, vault, store };
+  const files = createFileStore({ vault, api: accountApi });
+  return { ...keys, email: user.email, vault, store, files };
 };
 
 export const resetVaultAccount = async (

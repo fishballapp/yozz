@@ -1,10 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildMessage,
+  buildMessageParts,
+  encodeAttachmentBody,
   encodeHeaderText,
   formatDate,
   formatMailbox,
   quotedPrintable,
+  spliceMessage,
 } from './message.ts';
 
 const decoder = new TextDecoder();
@@ -159,6 +162,65 @@ describe('message builder', () => {
       btoa(String.fromCharCode(...new Uint8Array(100))),
     );
     expect(raw.endsWith(`--${mixed}--\r\n`)).toBe(true);
+  });
+
+  it('pins the base64 line format, which a frozen message rebuilds from for ever', () => {
+    const body = (length: number) =>
+      decoder.decode(encodeAttachmentBody(new Uint8Array(length).fill(0xab)));
+    expect(body(0)).toBe('');
+    expect(body(3)).toBe('q6ur');
+    // 57 bytes is exactly one line of 76, and the break after it stays.
+    expect(body(57)).toBe(`${'q6ur'.repeat(19)}\r\n`);
+    expect(body(58)).toBe(`${'q6ur'.repeat(19)}\r\nqw==`);
+  });
+
+  describe('a message with its attachment bodies left out', () => {
+    const input = {
+      from: { address: 'me@x.test' },
+      to: ['you@y.test'],
+      subject: 'files',
+      date: new Date(2026, 10, 2, 9, 0, 0),
+      messageId: '<c@x.test>',
+      text: 'see attached',
+      html: '<p>see attached</p>',
+    };
+    const files = [
+      { filename: 'a.bin', mimeType: 'application/octet-stream', content: new Uint8Array(100) },
+      { filename: '報告.pdf', mimeType: 'application/pdf', content: new Uint8Array([1, 2, 3]) },
+    ];
+    /** Boundaries are random per build, so two builds compare once those are the same. */
+    const withoutBoundaries = (raw: string) => raw.replace(/=_yozz_[0-9a-f-]{36}/g, 'BOUNDARY');
+
+    it('puts back together as the message buildMessage writes', () => {
+      const parts = buildMessageParts({ ...input, attachments: files });
+      const whole = spliceMessage(
+        parts,
+        files.map(({ content }) => encodeAttachmentBody(content)),
+      );
+      expect(withoutBoundaries(decoder.decode(whole))).toBe(
+        withoutBoundaries(decoder.decode(buildMessage({ ...input, attachments: files }))),
+      );
+    });
+
+    it('names each body by a byte offset, not a character one', () => {
+      const parts = buildMessageParts({ ...input, to: ['ünï@y.test'], attachments: files });
+      expect(parts.splices).toHaveLength(2);
+      for (const at of parts.splices) {
+        // Each offset falls straight after the blank line that ends a part's headers.
+        expect(decoder.decode(parts.head.subarray(at - 4, at))).toBe('\r\n\r\n');
+        expect(decoder.decode(parts.head.subarray(0, at))).toMatch(
+          /Content-Transfer-Encoding: base64\r\n\r\n$/,
+        );
+      }
+    });
+
+    it('holds the whole message, with no splices, when there are no attachments', () => {
+      const parts = buildMessageParts(input);
+      expect(parts.splices).toEqual([]);
+      expect(withoutBoundaries(decoder.decode(parts.head))).toBe(
+        withoutBoundaries(decoder.decode(buildMessage(input))),
+      );
+    });
   });
 
   it('names carbon copies in a Cc header and blind ones nowhere at all', () => {

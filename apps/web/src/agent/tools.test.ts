@@ -1,7 +1,8 @@
 import { BODY_CHARS, OUTPUT_CHARS, RECIPIENTS_LISTED } from '@yozz.app/mail/agent-budgets';
 import { addressList } from '@yozz.app/mail/compose/draft';
-import type { DraftRecord } from '@yozz.app/mail/compose/draft-record';
-import type { DraftHandle } from '@yozz.app/mail/compose/draft-vault';
+import { DRAFT_RECORD_TYPE, type DraftRecord } from '@yozz.app/mail/compose/draft-record';
+import { createDraft, type DraftHandle, replaceDraft } from '@yozz.app/mail/compose/draft-vault';
+import { fakeRecordStore } from '@yozz.app/mail/testing/fake-record-store';
 import type { BodyOutcome } from '@yozz.app/mail/threads/body-state';
 import {
   type Folder,
@@ -621,6 +622,67 @@ describe('save_draft and delete_draft', () => {
         content: expect.objectContaining({ subject: 'Half written', body: 'A better start' }),
       },
     ]);
+  });
+
+  describe("a draft's files", () => {
+    const first = { id: 'file-1', name: 'r.pdf', size: 3, kind: 'pdf' as const };
+    const second = { id: 'file-2', name: 's.pdf', size: 3, kind: 'pdf' as const };
+
+    it('are never stated by a save, which says only the text', async () => {
+      const { tools, state } = fakePort([]);
+      const held = handle('k1');
+      state.drafts.push({ ...held, record: { ...held.record, attachments: [first] } });
+      await call(tools, 'save_draft', { draftId: 'k1@2', body: 'A better start' });
+      const [written] = state.written as { content: object }[];
+      expect(written?.content).not.toHaveProperty('attachments');
+    });
+
+    it('survive a save through a handle older than the version named', async () => {
+      const { store } = fakeRecordStore();
+      const created = await createDraft(
+        store,
+        {
+          from: 'me@yozz.app',
+          to: '',
+          cc: '',
+          bcc: '',
+          subject: 'Plans',
+          body: 'v1',
+          attachments: [first],
+        },
+        0,
+      );
+      if (!created.ok) throw new Error('the fixture could not create a draft');
+      const newer = await replaceDraft(
+        store,
+        created.handle.draftId,
+        {
+          from: 'me@yozz.app',
+          to: '',
+          cc: '',
+          bcc: '',
+          subject: 'Plans',
+          body: 'v2',
+          attachments: [first, second],
+        },
+        0,
+      );
+      if (!newer.ok) throw new Error('the fixture could not replace the draft');
+      // The list the agent reads is one render behind: its handle holds version 1's files.
+      const { tools, state } = fakePort([], {
+        writeDraft: async ({ draftId, content }) => replaceDraft(store, draftId ?? '', content, 0),
+      });
+      state.drafts.push(created.handle);
+
+      const result = await call(tools, 'save_draft', {
+        draftId: newer.handle.draftId,
+        body: 'From the agent',
+      });
+
+      expect(result).toMatchObject({ draftId: `${created.handle.draftKey}@3` });
+      const [row] = await store.list(DRAFT_RECORD_TYPE);
+      expect(JSON.parse(row?.plaintext ?? '{}').attachments).toEqual([first, second]);
+    });
   });
 
   it('says which version won when another device moved the draft on', async () => {

@@ -411,6 +411,7 @@ export const ThreadReader = ({
     restoreThread,
     markUnread,
     loadBody,
+    readStoredFile,
   } = useMail();
   // One choice for every HTML body, kept across reloads like the pane widths.
   const [mode, setMode] = useChromePref<ReadingMode>('yozz:reading-mode', 'html', raw =>
@@ -620,7 +621,7 @@ export const ThreadReader = ({
             </div>
 
             {message.attachments !== undefined && message.attachments.length > 0 && (
-              <AttachmentList attachments={message.attachments} />
+              <AttachmentList attachments={message.attachments} loadFile={readStoredFile} />
             )}
 
             <MessageActions message={message} canReplyAll={canReplyAll} />

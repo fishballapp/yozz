@@ -13,6 +13,7 @@
     "html:security": "node harness/html-security.ts",
     "vault:drive": "node harness/vault-drive.ts",
     "draft:drive": "node harness/draft-open.ts",
+    "attachments:drive": "pnpm -F @yozz.app/cli build && node harness/attachment-drive.ts",
     "og": "node scripts/build-og.ts"
   },
   "dependencies": {

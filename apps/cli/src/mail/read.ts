@@ -4,6 +4,7 @@ import { type DraftRecord, parseDraftId } from '@yozz.app/mail/compose/draft-rec
 import { listDrafts } from '@yozz.app/mail/compose/draft-vault';
 import { fetchBodyAt } from '@yozz.app/mail/threads/bodies';
 import {
+  type Attachment,
   draftIdOf,
   isServerCopy,
   type Message,
@@ -18,12 +19,10 @@ import * as Command from 'effect/cli/Command';
 import * as Flag from 'effect/cli/Flag';
 import * as Effect from 'effect/Effect';
 import * as FileSystem from 'effect/FileSystem';
-import * as Layer from 'effect/Layer';
 import * as Option from 'effect/Option';
 import * as Path from 'effect/Path';
 import { Cache, MailboxLayer } from '../cache/cache.ts';
 import { usingCache } from '../cache/disk.ts';
-import { DraftFiles } from '../compose/draft-files.ts';
 import { NotFound, reportFailure, UsageError } from '../errors.ts';
 import { printJson } from '../output.ts';
 import { Settings } from '../settings.ts';
@@ -115,7 +114,7 @@ export const readCommand = Command.make(
       return draft === null || id.startsWith('draft/') ? id : draftIdOf(draft.key);
     });
     const mail = yield* Mail;
-    const files = yield* DraftFiles;
+    const vault = yield* Vault;
     const cache = yield* Cache;
     const fs = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
@@ -153,12 +152,30 @@ export const readCommand = Command.make(
       });
     }
     const bodyChars = found.length > 1 ? SKIM_CHARS : BODY_CHARS;
-    // What a draft sends beyond what the thread shows: its copies and the files kept on this machine.
+    // What a draft sends beyond what the thread shows: its copies and its files.
     const draftRecords = found.some(({ messages }) => messages.some(({ isDraft }) => isDraft))
       ? new Map(
           (yield* (yield* Vault).use(listDrafts)).map(({ draftKey, record }) => [draftKey, record]),
         )
       : new Map<string, DraftRecord>();
+
+    const attachmentRow = Effect.fnUntraced(function* (
+      attachment: Attachment,
+      index: number,
+      content: Uint8Array | null,
+    ) {
+      const saved =
+        Option.isSome(dir) && content !== null
+          ? { path: yield* saveAttachment(dir.value, attachment.name, content) }
+          : {};
+      return {
+        index,
+        type: mimeTypeOf(attachment.mimeType),
+        size: attachment.size,
+        ...saved,
+        untrusted: { name: field(attachment.name, NAME_CHARS) },
+      };
+    });
 
     const readMessage = Effect.fnUntraced(function* (message: Message) {
       const common = messageHeadOf(message);
@@ -176,10 +193,9 @@ export const readCommand = Command.make(
       const account = mail.accounts.find(({ address }) => address === copy?.account);
       const draft = message.draftKey === undefined ? undefined : draftRecords.get(message.draftKey);
       if (message.draftKey !== undefined && draft !== undefined) {
-        const kept = yield* files.read(message.draftKey);
         return {
           ...common,
-          attachments: kept.map((attachment, index) => ({
+          attachments: (draft.attachments ?? []).map((attachment, index) => ({
             index,
             type: mimeTypeOf(attachment.mimeType),
             size: attachment.size,
@@ -193,9 +209,24 @@ export const readCommand = Command.make(
           },
         };
       }
-      // Sent mail the vault holds: its text is already here.
+      // Sent mail the vault holds: its text is already here, and its files are in R2.
       if (copy === undefined || account === undefined) {
-        return { ...common, untrusted: { ...addressed, text: text(message.body) } };
+        const stored = message.attachments ?? [];
+        const attachments = yield* Effect.forEach(stored, (attachment, index) =>
+          Effect.gen(function* () {
+            const { fileId } = attachment;
+            const content =
+              Option.isSome(dir) && fileId !== undefined
+                ? yield* vault.use((_records, files) => files.get(fileId))
+                : null;
+            return yield* attachmentRow(attachment, index, content);
+          }),
+        );
+        return {
+          ...common,
+          ...(stored.length === 0 ? {} : { attachments }),
+          untrusted: { ...addressed, text: text(message.body) },
+        };
       }
       const folderCache = cache.of(account).folder(copy.folder);
       const cached = yield* usingCache(() => folderCache.getBody(copy.uid));
@@ -218,19 +249,7 @@ export const readCommand = Command.make(
       }
       const body = res.value;
       const attachments = yield* Effect.forEach(body.attachments, (attachment, index) =>
-        Effect.gen(function* () {
-          const saved =
-            Option.isSome(dir) && attachment.content !== undefined
-              ? { path: yield* saveAttachment(dir.value, attachment.name, attachment.content) }
-              : {};
-          return {
-            index,
-            type: mimeTypeOf(attachment.mimeType),
-            size: attachment.size,
-            ...saved,
-            untrusted: { name: field(attachment.name, NAME_CHARS) },
-          };
-        }),
+        attachmentRow(attachment, index, attachment.content ?? null),
       );
       return {
         ...common,
@@ -271,8 +290,7 @@ export const readCommand = Command.make(
 ).pipe(
   Command.withShortDescription('Whole conversations as plain text; marks nothing read'),
   Command.withDescription(`Whole conversations, oldest message first, as plain text, with the domain that signed each message (signedBy) and each message's attachments. Marks nothing read. A draft
-in it shows its draftId, its cc and bcc, and the files attached to it on this machine: everything
-yozz send would send.
+in it shows its draftId, its cc and bcc, and the files attached to it: everything yozz send would send.
 
 Bodies are cut at ${BODY_CHARS} characters (${SKIM_CHARS} each when reading several conversations),
 and the whole answer at ${OUTPUT_CHARS}: the oldest messages go first, and a conversation that lost
@@ -313,5 +331,5 @@ Output:
       description: 'Read a conversation and keep its attachments',
     },
   ]),
-  Command.provide(DraftFiles.layer.pipe(Layer.provideMerge(MailboxLayer))),
+  Command.provide(MailboxLayer),
 );

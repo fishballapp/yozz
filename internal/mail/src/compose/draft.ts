@@ -1,5 +1,14 @@
 import type { Attachment, ThreadState } from '../threads/thread.ts';
-import type { DraftRecord } from './draft-record.ts';
+import type { DraftRecord, FileReference } from './draft-record.ts';
+
+/**
+ * A file on the open draft. Only an `uploaded` one is written to the record, so nothing names a file
+ * R2 does not hold; `content` is there on the device that picked it, and fetched elsewhere.
+ */
+export type DraftFile = Attachment & {
+  readonly id: string;
+  readonly upload: 'uploading' | 'uploaded' | 'failed' | 'storage-full';
+};
 
 /** The draft as the composer holds it, and the record fields it becomes. */
 /** What became of an open composer: the human pressed Send, or closed it. */
@@ -28,8 +37,13 @@ export type ComposeDraft = {
    * stored. Carried on the draft because the sending address may have no mailbox of its own.
    */
   ownerAccount?: string;
-  /** Picker files with their bytes read, or a forwarded message's; sent as `multipart/mixed`. */
-  attachments: Attachment[];
+  /** Sent as `multipart/mixed`. */
+  attachments: DraftFile[];
+};
+
+/** What an intent starts a draft from. A forwarded message's files have no id until they upload. */
+export type ComposeSeed = Omit<Partial<ComposeDraft>, 'attachments'> & {
+  attachments?: readonly Attachment[];
 };
 
 /** A draft's content without the record store's bookkeeping fields. */
@@ -37,6 +51,24 @@ export type DraftContent = Omit<
   DraftRecord,
   'contentVersion' | 'updatedAt' | 'send' | 'unconfirmedSend' | 'sentMessageId' | 'deletedAt'
 >;
+
+export const fileReferenceOf = ({ id, name, size, mimeType, kind }: DraftFile): FileReference => ({
+  id,
+  name,
+  size,
+  kind,
+  ...(mimeType === undefined ? {} : { mimeType }),
+});
+
+/** A record's file as the composer holds it: uploaded by whoever attached it, its bytes elsewhere. */
+export const draftFileOf = ({ id, name, size, mimeType, kind }: FileReference): DraftFile => ({
+  id,
+  name,
+  size,
+  kind,
+  upload: 'uploaded',
+  ...(mimeType === undefined ? {} : { mimeType }),
+});
 
 /** The record fields a composed draft becomes; shared by the autosave and the closing flush. */
 export const contentOf = (draft: ComposeDraft, ownerAccount: string | undefined): DraftContent => ({
@@ -49,6 +81,8 @@ export const contentOf = (draft: ComposeDraft, ownerAccount: string | undefined)
   ...(draft.inReplyTo === undefined ? {} : { inReplyTo: draft.inReplyTo }),
   ...(draft.references === undefined ? {} : { references: [...draft.references] }),
   ...(ownerAccount === undefined ? {} : { ownerAccount }),
+  // Stated even when empty: an absent list keeps what the record has, and this may be the removal.
+  attachments: draft.attachments.filter(({ upload }) => upload === 'uploaded').map(fileReferenceOf),
 });
 
 /**
@@ -67,7 +101,9 @@ export const sameDraftContent = (
   record.subject === content.subject &&
   record.body === content.body &&
   record.inReplyTo === content.inReplyTo &&
-  (record.references ?? []).join(' ') === (content.references ?? []).join(' ');
+  (record.references ?? []).join(' ') === (content.references ?? []).join(' ') &&
+  (record.attachments ?? []).map(({ id }) => id).join(' ') ===
+    (content.attachments ?? []).map(({ id }) => id).join(' ');
 
 /** A recipient field is free text: commas, semicolons and whitespace all separate. */
 export const addressList = (value: string): readonly string[] =>

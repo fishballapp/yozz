@@ -13,10 +13,15 @@ import '@yozz.app/mail/compose/send-machine';
 import '@yozz.app/mail/threads/sync';
 import '../compose/submit';
 import { SENT_RECORD_TYPE } from '@yozz.app/mail/compose/sent-record';
+import { fakeFileStore } from '@yozz.app/mail/testing/fake-file-store';
 import { fakeRecordStore } from '@yozz.app/mail/testing/fake-record-store';
 import type { ThreadState } from '@yozz.app/mail/threads/thread';
+import type { FileStore } from '@yozz.app/mail/vault/file-store';
 import type { RecordStore } from '@yozz.app/mail/vault/record-store';
 import { MailProvider, useComposer, useMail } from './MailProvider';
+
+/** The vault's file half, which these tests do not exercise. */
+const noFiles = fakeFileStore().store;
 
 // @ts-expect-error React reads it off the global
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
@@ -43,7 +48,11 @@ const gate = (): Gate => {
 
 const mocks = vi.hoisted(() => ({
   // What the mail store reads of the session.
-  session: null as { readonly userId: string; readonly store: RecordStore } | null,
+  session: null as {
+    readonly userId: string;
+    readonly store: RecordStore;
+    readonly files: FileStore;
+  } | null,
   /** Counts live managers, one per session. */
   managers: 0,
   /** Every IMAP task that reached a manager: which session's, and for which address. */
@@ -233,7 +242,10 @@ const leaveSubmitted = async (
       opId: 'op-1',
       state: 'submitted',
       claimedAt: 0,
-      bytes: new TextEncoder().encode('Subject: Plans\r\n\r\nHi').toBase64(),
+      message: {
+        head: new TextEncoder().encode('Subject: Plans\r\n\r\nHi').toBase64(),
+        splices: [],
+      },
       target: target === 'vault' ? 'vault' : { account: ALICE.address, folder: 'sent' },
     },
     0,
@@ -246,7 +258,7 @@ const settle = () => act(() => new Promise(resolve => setTimeout(resolve, 20)));
 const unmounts: (() => Promise<void>)[] = [];
 
 const mount = async (store: RecordStore) => {
-  mocks.session = { userId: 'user-1', store };
+  mocks.session = { userId: 'user-1', files: noFiles, store };
   let mail: ReturnType<typeof useMail> | null = null;
   let composer: ReturnType<typeof useComposer> | null = null;
   const Probe = () => {
@@ -287,7 +299,11 @@ const mount = async (store: RecordStore) => {
 };
 
 /** Another account signing in to the same tab, holding the same address on the same servers. */
-const nextAccount = async () => ({ userId: 'user-2', store: (await vault()).store });
+const nextAccount = async () => ({
+  userId: 'user-2',
+  files: noFiles,
+  store: (await vault()).store,
+});
 
 /** Unread in ALICE's inbox, so a session holding that address holds it too. */
 /** The message the server hands over for LUNCH's body. */
@@ -384,7 +400,7 @@ describe("an ended session's IMAP work", () => {
 
     // Out through SMTP and recorded as such, so the next unlock of that vault stores its copy.
     expect(await sendPhases(theirs.store)).toEqual(['submitted']);
-    await replaceSession({ userId: 'user-1', store: theirs.store });
+    await replaceSession({ userId: 'user-1', files: noFiles, store: theirs.store });
     await vi.waitFor(() => expect(mocks.runs).toEqual([{ manager: 3, account: ALICE.address }]));
   });
 
@@ -401,7 +417,7 @@ describe("an ended session's IMAP work", () => {
     expect(mocks.runs).toEqual([]);
 
     expect(await sendPhases(theirs.store)).toEqual(['submitted']);
-    await replaceSession({ userId: 'user-1', store: theirs.store });
+    await replaceSession({ userId: 'user-1', files: noFiles, store: theirs.store });
     await vi.waitFor(() => expect(mocks.runs).toEqual([{ manager: 3, account: ALICE.address }]));
   });
 
@@ -417,7 +433,7 @@ describe("an ended session's IMAP work", () => {
     await settle();
     expect(await sendPhases(theirs.store)).toEqual(['submitted']);
 
-    await replaceSession({ userId: 'user-1', store: theirs.store });
+    await replaceSession({ userId: 'user-1', files: noFiles, store: theirs.store });
     await vi.waitFor(async () => expect(await sendPhases(theirs.store)).toEqual([]));
   });
 
