@@ -13,4 +13,15 @@ describe('describeMailFailure', () => {
       'Secure connection to imap.example.test failed: the connection dropped',
     );
   });
+
+  it('names the limit of a host that refused a message for its size, in whole megabytes', () => {
+    expect(
+      describeMailFailure(
+        { kind: 'smtp', reason: { kind: 'too-large', limitBytes: 35_882_577 } },
+        'smtp.gmail.com',
+      ),
+    ).toBe(
+      'smtp.gmail.com accepts messages up to 35 MB, and this one is larger. Remove an attachment and send it again.',
+    );
+  });
 });

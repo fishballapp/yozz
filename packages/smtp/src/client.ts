@@ -12,6 +12,8 @@ export type SmtpCapabilities = {
   readonly keywords: readonly string[];
   /** SASL mechanisms from the AUTH line, upper-cased. */
   readonly auth: readonly string[];
+  /** RFC 1870's `SIZE <n>`: the largest message the server takes, or null for none declared (`SIZE`, `SIZE 0`, no `SIZE`). */
+  readonly maxMessageBytes: number | null;
 };
 
 export type SmtpClient = {
@@ -48,6 +50,13 @@ const refused = (reply: SmtpReply): SmtpResult<never> => ({
 
 const isCommandSafe = (address: string) => /^[^\s<>\r\n]+$/.test(address);
 
+/** RFC 1870 §4: `SIZE` alone, or with 0, declares no fixed limit. */
+const maxMessageBytesOf = (keywordLines: readonly string[]): number | null => {
+  const line = keywordLines.find(candidate => candidate.startsWith('SIZE '));
+  const limit = Number(line?.slice('SIZE '.length));
+  return Number.isSafeInteger(limit) && limit > 0 ? limit : null;
+};
+
 /** `.` CR LF, the end of the message after `dotStuff`'s final CRLF. */
 const DATA_TERMINATOR_BYTES = 3;
 
@@ -55,21 +64,45 @@ const DATA_TERMINATOR_BYTES = 3;
 const unconfirmedDetail = (reason: SmtpFailure): string => {
   if (reason.kind === 'closed') return 'the connection closed before the server answered';
   if (reason.kind === 'reply') return `neither yes nor no: ${reason.code} ${reason.text}`;
+  // `send` refuses on size before writing, so this never ends in an abandoned DATA; the union still has it.
+  if (reason.kind === 'too-large') return `over the ${reason.limitBytes} bytes the server takes`;
   return reason.detail;
 };
 
-/** RFC 5321 §4.5.2: a line beginning with `.` gets a second `.`; the message ends at `CRLF.CRLF`. */
+const DOT = 0x2e;
+const CR = 0x0d;
+const LF = 0x0a;
+
+/**
+ * RFC 5321 §4.5.2: a line beginning with `.` gets a second `.`; the message ends at `CRLF.CRLF`.
+ * Sized first and written once, since a message is tens of megabytes.
+ */
 export const dotStuff = (data: Uint8Array): Uint8Array => {
-  const out: number[] = [];
-  let atLineStart = true;
-  for (const byte of data) {
-    if (atLineStart && byte === 0x2e) out.push(0x2e);
-    out.push(byte);
-    atLineStart = byte === 0x0a;
+  let stuffedDots = 0;
+  for (let i = 0; i < data.length; i += 1) {
+    if (data[i] === DOT && (i === 0 || data[i - 1] === LF)) stuffedDots += 1;
   }
-  if (!atLineStart) out.push(0x0d, 0x0a);
-  out.push(0x2e, 0x0d, 0x0a);
-  return Uint8Array.from(out);
+  const endsLine = data.length === 0 || data[data.length - 1] === LF;
+  const out = new Uint8Array(
+    data.length + stuffedDots + (endsLine ? 0 : 2) + DATA_TERMINATOR_BYTES,
+  );
+  let at = 0;
+  for (let i = 0; i < data.length; i += 1) {
+    const byte = data[i] ?? 0;
+    if (byte === DOT && (i === 0 || data[i - 1] === LF)) {
+      out[at] = DOT;
+      at += 1;
+    }
+    out[at] = byte;
+    at += 1;
+  }
+  if (!endsLine) {
+    out[at] = CR;
+    out[at + 1] = LF;
+    at += 2;
+  }
+  out.set([DOT, CR, LF], at);
+  return out;
 };
 
 export const createSmtpClient = (transport: ByteDuplex): SmtpClient => {
@@ -79,7 +112,7 @@ export const createSmtpClient = (transport: ByteDuplex): SmtpClient => {
    * written now, QUIT included, could be read as body text. Nothing more is written.
    */
   let isAbandoned = false;
-  let capabilities: SmtpCapabilities = { keywords: [], auth: [] };
+  let capabilities: SmtpCapabilities = { keywords: [], auth: [], maxMessageBytes: null };
 
   const command = async (line: string): Promise<SmtpResult<SmtpReply>> => {
     if (isAbandoned) {
@@ -125,6 +158,7 @@ export const createSmtpClient = (transport: ByteDuplex): SmtpClient => {
     capabilities = {
       keywords: keywordLines.map(line => line.split(' ')[0] ?? line),
       auth: authLine === undefined ? [] : authLine.split(' ').slice(1),
+      maxMessageBytes: maxMessageBytesOf(keywordLines),
     };
     return { ok: true, value: capabilities };
   };
@@ -171,8 +205,19 @@ export const createSmtpClient = (transport: ByteDuplex): SmtpClient => {
     if (envelope.to.length === 0) {
       return { ok: false, reason: { kind: 'protocol', detail: 'no recipients' } };
     }
-    const bodyParam = capabilities.keywords.includes('8BITMIME') ? ' BODY=8BITMIME' : '';
-    const mailFrom = await expect(`MAIL FROM:<${envelope.from}>${bodyParam}`, 250);
+    const { maxMessageBytes } = capabilities;
+    // Before anything is written: a message the server would refuse at the end of DATA is not uploaded.
+    if (maxMessageBytes !== null && envelope.data.length > maxMessageBytes) {
+      return { ok: false, reason: { kind: 'too-large', limitBytes: maxMessageBytes } };
+    }
+    const params = [
+      ...(capabilities.keywords.includes('SIZE') ? [`SIZE=${envelope.data.length}`] : []),
+      ...(capabilities.keywords.includes('8BITMIME') ? ['BODY=8BITMIME'] : []),
+    ];
+    const mailFrom = await expect(
+      `MAIL FROM:<${envelope.from}>${params.map(param => ` ${param}`).join('')}`,
+      250,
+    );
     if (!mailFrom.ok) return mailFrom;
     for (const recipient of envelope.to) {
       // 252: the server cannot verify the address but accepts the message (RFC 5321 §3.5.3).

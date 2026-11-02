@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildOutgoing, envelopeRecipients } from './send.ts';
+import { buildOutgoing, envelopeRecipients, isUnconfirmedSubmission } from './send.ts';
 
 /**
  * The envelope is where Bcc exists. Nothing in the message bytes names a blind recipient, so if
@@ -58,5 +58,16 @@ describe('buildOutgoing', () => {
     expect(message).toContain('Content-Type: text/html');
     expect(message).toContain('<!DOCTYPE html><html>');
     expect(message).toContain('<strong>paid</strong>');
+  });
+});
+
+describe('isUnconfirmedSubmission', () => {
+  it('is true only for a lost answer to the end of the message', () => {
+    expect(
+      isUnconfirmedSubmission({ kind: 'smtp', reason: { kind: 'unconfirmed', detail: 'closed' } }),
+    ).toBe(true);
+    expect(
+      isUnconfirmedSubmission({ kind: 'smtp', reason: { kind: 'too-large', limitBytes: 20 } }),
+    ).toBe(false);
   });
 });

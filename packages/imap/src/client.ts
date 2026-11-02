@@ -75,7 +75,7 @@ export type ImapSelected = {
 
 export type ImapClientOptions = {
   readonly onUntagged?: (response: ImapUntagged) => void;
-  /** Default 32 MiB; a larger literal is a protocol failure. */
+  /** Default 64 MiB; a larger literal is a protocol failure. */
   readonly maxLiteralBytes?: number;
 };
 

@@ -19,7 +19,7 @@ export type Preview =
 
 /**
  * Text above this does not preview: one `<pre>` of a 30 MB log takes seconds to lay out, and a
- * file that size is a download anyway. Images and PDFs have no cap of their own; the 32 MiB message
+ * file that size is a download anyway. Images and PDFs have no cap of their own; the 64 MiB message
  * ceiling already bounds them.
  */
 export const MAX_TEXT_PREVIEW_BYTES = 2 * 1024 * 1024;

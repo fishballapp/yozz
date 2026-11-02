@@ -85,7 +85,7 @@ for (const host of targets) {
       continue;
     }
     console.log(
-      `ok    ${host.padEnd(22)} ${banner.value.lines[0]?.slice(0, 40)} | AUTH ${caps.value.auth.join(',') || '-'} | ${caps.value.keywords.filter(k => k !== 'AUTH').join(' ')}`,
+      `ok    ${host.padEnd(22)} ${banner.value.lines[0]?.slice(0, 40)} | AUTH ${caps.value.auth.join(',') || '-'} | ${caps.value.keywords.filter(k => k !== 'AUTH').join(' ')} | limit ${caps.value.maxMessageBytes ?? 'none'}`,
     );
 
     if (host === authHost && authUser !== undefined && authPass !== undefined) {

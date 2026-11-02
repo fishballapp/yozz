@@ -16,7 +16,7 @@ import {
   TAB,
 } from './bytes.ts';
 
-export const DEFAULT_MAX_LITERAL_BYTES = 32 * 1024 * 1024;
+export const DEFAULT_MAX_LITERAL_BYTES = 64 * 1024 * 1024;
 const MAX_UINT32 = 4294967295;
 
 export type ImapToken =

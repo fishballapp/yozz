@@ -18,6 +18,13 @@ optional `flush`, which settles once everything written has gone. `send` awaits 
 message's terminator, so a drop before then is a refusal rather than `unconfirmed`. A plain socket
 leaves it out.
 
+A server that declares a limit (RFC 1870, `SIZE 35882577`) is asked nothing it would refuse: `send`
+answers a message over it as `{ kind: 'too-large', limitBytes }` before `MAIL FROM`, so nothing is
+written and the connection stays usable. The message is counted as given, before dot-stuffing and
+without the terminator. A server that advertises `SIZE` is also told the size on `MAIL FROM`
+(`SIZE=<n>`), so one that declares no limit can still refuse there. `SIZE` alone, or `SIZE 0`,
+declares no limit; `ehlo` reports the value as `maxMessageBytes`.
+
 `buildMessage` turns composer fields into 7-bit bytes: RFC 2047 headers, 7bit or quoted-printable bodies,
 `multipart/alternative` when an HTML rendering is given, `In-Reply-To` + the folded `References` chain for replies.
 

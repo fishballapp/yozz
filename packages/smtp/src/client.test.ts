@@ -84,6 +84,35 @@ describe('dot stuffing', () => {
     );
     expect(decoder.decode(dotStuff(encoder.encode('x\r\n')))).toBe('x\r\n.\r\n');
   });
+
+  it('terminates an empty message and one that is only a dot', () => {
+    expect(decoder.decode(dotStuff(new Uint8Array()))).toBe('.\r\n');
+    expect(decoder.decode(dotStuff(encoder.encode('.')))).toBe('..\r\n.\r\n');
+    expect(decoder.decode(dotStuff(encoder.encode('.\r\n.\r\n')))).toBe('..\r\n..\r\n.\r\n');
+  });
+
+  it('leaves a dot inside a line, and a bare CR or LF line start, alone', () => {
+    expect(decoder.decode(dotStuff(encoder.encode('a.b\r\nc\r.d\n.e')))).toBe(
+      'a.b\r\nc\r.d\n..e\r\n.\r\n',
+    );
+  });
+
+  it('stuffs a 36 MB message byte for byte', () => {
+    // Lines of 75 characters, a third of them starting with a dot.
+    const line = (dotted: boolean) => `${dotted ? '.' : 'x'}${'y'.repeat(73)}\r\n`;
+    const lines = Array.from({ length: 480_000 }, (_, index) => line(index % 3 === 0));
+    const data = encoder.encode(lines.join(''));
+    expect(data.length).toBeGreaterThan(36_000_000);
+    const stuffed = dotStuff(data);
+    expect(stuffed.length).toBe(data.length + 160_000 + 3);
+    expect(decoder.decode(stuffed.subarray(0, 80))).toBe(
+      `..${'y'.repeat(73)}\r\nx${'y'.repeat(2)}`,
+    );
+    expect(decoder.decode(stuffed.subarray(-(76 + 3)))).toBe(`${line(false)}.\r\n`);
+    // Unstuffing gives the message back.
+    const unstuffed = decoder.decode(stuffed.subarray(0, -3)).replaceAll('\r\n..', '\r\n.');
+    expect(unstuffed.replace(/^\.\./, '.')).toBe(lines.join(''));
+  });
 });
 
 describe('client session', () => {
@@ -95,7 +124,7 @@ describe('client session', () => {
         reply: '250-mx.example\r\n250-SIZE 1000\r\n250-8BITMIME\r\n250 AUTH PLAIN LOGIN\r\n',
       },
       { expect: `AUTH PLAIN ${btoa('\0me@x.test\0pw')}\r\n`, reply: '235 ok\r\n' },
-      { expect: 'MAIL FROM:<me@x.test> BODY=8BITMIME\r\n', reply: '250 ok\r\n' },
+      { expect: 'MAIL FROM:<me@x.test> SIZE=20 BODY=8BITMIME\r\n', reply: '250 ok\r\n' },
       { expect: 'RCPT TO:<you@y.test>\r\n', reply: '252 cannot VRFY, will try\r\n' },
       { expect: 'DATA\r\n', reply: '354 go\r\n' },
       { expect: 'Subject: hi\r\n\r\n..body\r\n', reply: '' },
@@ -107,7 +136,11 @@ describe('client session', () => {
     const caps = await client.ehlo('yozz.app');
     expect(caps).toEqual({
       ok: true,
-      value: { keywords: ['SIZE', '8BITMIME', 'AUTH'], auth: ['PLAIN', 'LOGIN'] },
+      value: {
+        keywords: ['SIZE', '8BITMIME', 'AUTH'],
+        auth: ['PLAIN', 'LOGIN'],
+        maxMessageBytes: 1000,
+      },
     });
     expect(await client.authenticate('me@x.test', 'pw')).toEqual({ ok: true, value: undefined });
     const sent = await client.send({
@@ -370,6 +403,94 @@ describe('client session', () => {
       expect(await send(createSmtpClient(duplex))).toEqual({
         ok: false,
         reason: { kind: 'closed' },
+      });
+    });
+  });
+
+  describe('SIZE', () => {
+    const ehlo = async (keywordLines: string) => {
+      const { duplex } = scriptedDuplex([
+        { expect: null, reply: '220 mx.example ESMTP\r\n' },
+        { expect: 'EHLO h\r\n', reply: `250-mx.example\r\n${keywordLines}` },
+      ]);
+      const client = createSmtpClient(duplex);
+      await client.greeting();
+      return client.ehlo('h');
+    };
+
+    it('keeps the value SIZE declares', async () => {
+      expect(await ehlo('250 SIZE 35882577\r\n')).toMatchObject({
+        ok: true,
+        value: { keywords: ['SIZE'], maxMessageBytes: 35_882_577 },
+      });
+    });
+
+    it('reads SIZE alone, SIZE 0, an unreadable value and no SIZE as no limit', async () => {
+      for (const lines of [
+        '250 SIZE\r\n',
+        '250 SIZE 0\r\n',
+        '250 SIZE lots\r\n',
+        '250 SIZE -5\r\n',
+        '250 8BITMIME\r\n',
+      ]) {
+        expect(await ehlo(lines)).toMatchObject({ ok: true, value: { maxMessageBytes: null } });
+      }
+    });
+
+    const limited = (data: Uint8Array, rest: readonly Step[]) => {
+      const { duplex } = scriptedDuplex([
+        { expect: null, reply: '220 mx.example ESMTP\r\n' },
+        { expect: 'EHLO h\r\n', reply: '250-mx.example\r\n250 SIZE 20\r\n' },
+        ...rest,
+      ]);
+      const client = createSmtpClient(duplex);
+      return {
+        client,
+        send: async () => {
+          await client.greeting();
+          await client.ehlo('h');
+          return client.send({ from: 'me@x.test', to: ['you@y.test'], data });
+        },
+      };
+    };
+
+    it('refuses a message over the limit before writing anything, and leaves the connection usable', async () => {
+      // The script ends at QUIT: a MAIL FROM, or any byte of the message, would throw.
+      const { client, send } = limited(new Uint8Array(21), [
+        { expect: 'QUIT\r\n', reply: '221 bye\r\n' },
+      ]);
+      expect(await send()).toEqual({ ok: false, reason: { kind: 'too-large', limitBytes: 20 } });
+      expect((await client.quit()).ok).toBe(true);
+    });
+
+    it('counts the message before dot-stuffing, and takes one exactly at the limit', async () => {
+      // 20 bytes that stuff to 21, and no terminator counted.
+      const data = encoder.encode('.aaaaaaaaaaaaaaaaaaa');
+      expect(data.length).toBe(20);
+      const { send } = limited(data, [
+        { expect: 'MAIL FROM:<me@x.test> SIZE=20\r\n', reply: '250 ok\r\n' },
+        { expect: 'RCPT TO:<you@y.test>\r\n', reply: '250 ok\r\n' },
+        { expect: 'DATA\r\n', reply: '354 go\r\n' },
+        { expect: '..aaaaaaaaaaaaaaaaaaa\r\n', reply: '' },
+        { expect: '.\r\n', reply: '250 queued\r\n' },
+      ]);
+      expect((await send()).ok).toBe(true);
+    });
+
+    it('states SIZE on MAIL FROM when the server advertises it with no limit, and shows its refusal', async () => {
+      const { duplex } = scriptedDuplex([
+        { expect: null, reply: '220 mx.example ESMTP\r\n' },
+        { expect: 'EHLO h\r\n', reply: '250-mx.example\r\n250 SIZE\r\n' },
+        { expect: 'MAIL FROM:<me@x.test> SIZE=5000\r\n', reply: '552 5.3.4 message too big\r\n' },
+      ]);
+      const client = createSmtpClient(duplex);
+      await client.greeting();
+      await client.ehlo('h');
+      expect(
+        await client.send({ from: 'me@x.test', to: ['you@y.test'], data: new Uint8Array(5000) }),
+      ).toEqual({
+        ok: false,
+        reason: { kind: 'reply', code: 552, text: '5.3.4 message too big' },
       });
     });
   });

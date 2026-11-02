@@ -15,6 +15,10 @@ export const describeMailFailure = (failure: MailConnectionFailure, host: string
       return `${host} has not answered for a minute`;
     case 'smtp': {
       const { reason } = failure;
+      // Rounded down, so the limit named is never one the server would still refuse.
+      if (reason.kind === 'too-large') {
+        return `${host} accepts messages up to ${Math.floor(reason.limitBytes / 1_000_000)} MB, and this one is larger. Remove an attachment and send it again.`;
+      }
       const text = (() => {
         if (reason.kind === 'reply') return `${reason.code} ${reason.text}`;
         if (reason.kind === 'unconfirmed') return `no answer to the message · ${reason.detail}`;

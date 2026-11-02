@@ -12,6 +12,8 @@ export type SmtpFailure =
   | { readonly kind: 'closed' }
   | { readonly kind: 'protocol'; readonly detail: string }
   | { readonly kind: 'unsupported'; readonly detail: string }
+  /** `send` only: the message is over the `SIZE` the server declared, so nothing was written. */
+  | { readonly kind: 'too-large'; readonly limitBytes: number }
   /**
    * `send` only: the message's terminating `.` was written and no reply that says yes or no came
    * back (none, an unreadable one, or a code outside 2xx, 4xx and 5xx), so the server may have

@@ -36,3 +36,9 @@ Or for a specific host with authentication:
 ```bash
 YOZZ_IMAP_HOST=imap.example.com YOZZ_IMAP_USER=me@example.com YOZZ_IMAP_PASSWORD=secret pnpm -F @yozz.app/imap live imap.example.com
 ```
+
+A literal over 64 MiB (`DEFAULT_MAX_LITERAL_BYTES`, or `maxLiteralBytes` in the options) is a protocol failure.
+
+`harness/relay-load.ts` pushes large messages through the hosted yozz.app relay, up over SMTP and
+back down over IMAP, using a throwaway Forward Email alias and YOZZ account that it deletes. It is
+for the maintainers; it needs `FORWARD_EMAIL_API_KEY` for the yozz.app domain.

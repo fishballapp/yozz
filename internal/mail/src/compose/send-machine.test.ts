@@ -106,6 +106,22 @@ describe('the send state machine', () => {
     expect((await readRecord(store, handle.draftKey))?.send).toBeUndefined();
   });
 
+  it('gives the draft back when the host refuses the message for its size, as nothing went out', async () => {
+    const { store } = fakeRecordStore();
+    const handle = await claim(store);
+    const { effects } = spyEffects(store, {
+      submit: async () => ({
+        ok: false,
+        error: { kind: 'smtp', reason: { kind: 'too-large', limitBytes: 35_882_577 } },
+      }),
+    });
+
+    expect(await driveSend(effects, handle)).toMatchObject({ done: false, reason: 'refused' });
+    const record = await readRecord(store, handle.draftKey);
+    expect(record?.send).toBeUndefined();
+    expect(record?.deletedAt).toBeUndefined();
+  });
+
   it('keeps the claim when the answer to the end of the message never came', async () => {
     // The server may be delivering it, so handing the draft back would invite a second copy.
     const { store } = fakeRecordStore();
