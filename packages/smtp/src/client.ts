@@ -69,6 +69,11 @@ const unconfirmedDetail = (reason: SmtpFailure): string => {
   return reason.detail;
 };
 
+/** RFC 5321 §4.5.3.2's five minutes, the longest it gives any reply but the one below. */
+const REPLY_TIMEOUT_MS = 5 * 60 * 1000;
+/** §4.5.3.2.6: the wait after the terminator is the long one, as the server may be delivering. */
+export const DATA_END_TIMEOUT_MS = 10 * 60 * 1000;
+
 const DOT = 0x2e;
 const CR = 0x0d;
 const LF = 0x0a;
@@ -108,17 +113,35 @@ export const dotStuff = (data: Uint8Array): Uint8Array => {
 export const createSmtpClient = (transport: ByteDuplex): SmtpClient => {
   const reader = createLineReader(transport);
   /**
-   * DATA ended in a state nobody knows: the server may still be reading the message, so anything
-   * written now, QUIT included, could be read as body text. Nothing more is written.
+   * DATA ended in a state nobody knows, or a reply never came: the server may still be reading the
+   * message, or answer late, so anything written now, QUIT included, could be read as body text or
+   * paired with the wrong reply. Nothing more is written.
    */
   let isAbandoned = false;
   let capabilities: SmtpCapabilities = { keywords: [], auth: [], maxMessageBytes: null };
+
+  /** A silent server fails after `ms`. The read left behind ends when the caller closes the transport. */
+  const readReplyWithin = async (ms: number): Promise<SmtpResult<SmtpReply>> => {
+    const expired = Promise.withResolvers<SmtpResult<SmtpReply>>();
+    const timer = setTimeout(() => {
+      isAbandoned = true;
+      expired.resolve({
+        ok: false,
+        reason: { kind: 'protocol', detail: `no reply in ${ms / 60_000} minutes` },
+      });
+    }, ms);
+    try {
+      return await Promise.race([readReply(reader), expired.promise]);
+    } finally {
+      clearTimeout(timer);
+    }
+  };
 
   const command = async (line: string): Promise<SmtpResult<SmtpReply>> => {
     if (isAbandoned) {
       return {
         ok: false,
-        reason: { kind: 'protocol', detail: 'connection abandoned inside DATA' },
+        reason: { kind: 'protocol', detail: 'connection abandoned' },
       };
     }
     try {
@@ -129,7 +152,7 @@ export const createSmtpClient = (transport: ByteDuplex): SmtpClient => {
         reason: { kind: 'protocol', detail: `write failed: ${String(error)}` },
       };
     }
-    return readReply(reader);
+    return readReplyWithin(REPLY_TIMEOUT_MS);
   };
 
   const expect = async (
@@ -144,7 +167,7 @@ export const createSmtpClient = (transport: ByteDuplex): SmtpClient => {
   };
 
   const greeting = async (): Promise<SmtpResult<SmtpReply>> => {
-    const reply = await readReply(reader);
+    const reply = await readReplyWithin(REPLY_TIMEOUT_MS);
     if (!reply.ok) return reply;
     return reply.value.code === 220 ? reply : refused(reply.value);
   };
@@ -251,7 +274,7 @@ export const createSmtpClient = (transport: ByteDuplex): SmtpClient => {
         };
       }
       try {
-        return await readReply(reader);
+        return await readReplyWithin(DATA_END_TIMEOUT_MS);
       } catch (error) {
         return { ok: false, reason: { kind: 'protocol', detail: `read failed: ${String(error)}` } };
       }

@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
-import { createSmtpClient, dotStuff } from './client.ts';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { createSmtpClient, DATA_END_TIMEOUT_MS, dotStuff } from './client.ts';
 import { createLineReader, readReply } from './reply.ts';
 import type { ByteDuplex } from './transport.ts';
 
@@ -244,6 +244,79 @@ describe('client session', () => {
       });
     });
 
+    describe('from a server that goes silent', () => {
+      beforeEach(() => {
+        vi.useFakeTimers();
+      });
+      afterEach(() => {
+        vi.useRealTimers();
+      });
+
+      /** The script's replies, then a read that never ends: the server says nothing more. */
+      const silentAfter = (steps: readonly Step[]): ByteDuplex & { readonly written: string[] } => {
+        const { duplex } = scriptedDuplex(steps);
+        const written: string[] = [];
+        return {
+          written,
+          read: async () => {
+            const chunk = await duplex.read();
+            return chunk ?? new Promise<null>(() => {});
+          },
+          write: async bytes => {
+            written.push(decoder.decode(bytes));
+            await duplex.write(bytes);
+          },
+        };
+      };
+
+      it('is unconfirmed once the answer to the dot has not come in 10 minutes', async () => {
+        const transport = silentAfter([...throughData, { expect: '.\r\n', reply: '' }]);
+        const client = createSmtpClient(transport);
+        let answer: unknown = 'waiting';
+        void send(client).then(result => {
+          answer = result;
+        });
+
+        await vi.advanceTimersByTimeAsync(DATA_END_TIMEOUT_MS - 1);
+        expect(answer).toBe('waiting');
+        await vi.advanceTimersByTimeAsync(1);
+        expect(answer).toEqual({
+          ok: false,
+          reason: { kind: 'unconfirmed', detail: 'no reply in 10 minutes' },
+        });
+        // QUIT is not written, so closing does not wait on the same silence.
+        const writes = transport.written.length;
+        expect(await client.quit()).toMatchObject({ ok: false, reason: { kind: 'protocol' } });
+        expect(transport.written).toHaveLength(writes);
+      });
+
+      it('leaves no timer behind once the server answers', async () => {
+        const { duplex } = scriptedDuplex([
+          ...throughData,
+          { expect: '.\r\n', reply: '250 ok\r\n' },
+        ]);
+        expect(await send(createSmtpClient(duplex))).toMatchObject({ ok: true });
+        expect(vi.getTimerCount()).toBe(0);
+      });
+
+      it('is a refusal when a command before the message is never answered', async () => {
+        const transport = silentAfter([
+          { expect: null, reply: '220 mx.example ESMTP\r\n' },
+          { expect: 'MAIL FROM:<me@x.test>\r\n', reply: '' },
+        ]);
+        const client = createSmtpClient(transport);
+        const answer = send(client);
+
+        await vi.advanceTimersByTimeAsync(5 * 60 * 1000);
+        // Before the message's end nothing can have gone out, so the draft may come back.
+        expect(await answer).toEqual({
+          ok: false,
+          reason: { kind: 'protocol', detail: 'no reply in 5 minutes' },
+        });
+        expect(await client.quit()).toMatchObject({ ok: false, reason: { kind: 'protocol' } });
+      });
+    });
+
     it('is unconfirmed when the answer to the dot is neither yes nor no', async () => {
       // A syntactically valid code RFC 5321 does not allow here says nothing about the message.
       const { duplex } = scriptedDuplex([
@@ -289,7 +362,7 @@ describe('client session', () => {
         expect((await send(client)).ok, label).toBe(false);
         const abandoned = {
           ok: false,
-          reason: { kind: 'protocol', detail: 'connection abandoned inside DATA' },
+          reason: { kind: 'protocol', detail: 'connection abandoned' },
         };
         expect(await client.ehlo('yozz.app'), label).toEqual(abandoned);
         expect(await client.send(envelope), label).toEqual(abandoned);
@@ -347,7 +420,7 @@ describe('client session', () => {
         expect(writes).not.toContain('.\r\n');
         expect(await client.quit()).toEqual({
           ok: false,
-          reason: { kind: 'protocol', detail: 'connection abandoned inside DATA' },
+          reason: { kind: 'protocol', detail: 'connection abandoned' },
         });
       });
 

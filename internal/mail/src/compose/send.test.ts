@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { AddressRecord } from '../addresses/record.ts';
+import type { RunTask } from '../connection.ts';
+import { stubImapClient } from '../testing/fake-imap-client.ts';
 import type { FileReference } from './draft-record.ts';
 import {
   assembleMessage,
@@ -7,6 +9,7 @@ import {
   claimOf,
   envelopeRecipients,
   isUnconfirmedSubmission,
+  storeSentCopy,
 } from './send.ts';
 import { sentRecordFrom } from './sent-vault.ts';
 
@@ -219,5 +222,88 @@ describe('isUnconfirmedSubmission', () => {
     expect(
       isUnconfirmedSubmission({ kind: 'smtp', reason: { kind: 'too-large', limitBytes: 20 } }),
     ).toBe(false);
+  });
+});
+
+describe('storeSentCopy', () => {
+  const closed = { ok: false, reason: { kind: 'closed' } } as const;
+  const BYTES = new TextEncoder().encode('message');
+
+  /** Both clients' rule: a task that may be re-run gets one more go after a lost connection. */
+  const world = (over: Parameters<typeof stubImapClient>[0]) => {
+    const calls = { append: 0 };
+    const client = {
+      ...stubImapClient({
+        list: async () => ({
+          ok: true,
+          value: [{ name: 'Sent', delimiter: '/', attributes: ['\\Sent'] }],
+        }),
+        append: async () => {
+          calls.append += 1;
+          return { ok: true, value: { uidValidity: 1, uid: 7 } };
+        },
+        ...over,
+      }),
+      ensureSelected: async () => closed,
+    };
+    const run: RunTask = async task => {
+      const first = await task.run(client);
+      return !first.ok && first.error.kind === 'imap' && task.retry ? task.run(client) : first;
+    };
+    return { run, calls };
+  };
+
+  it('appends when the mailbox has no copy, and reports where it landed', async () => {
+    const { run, calls } = world({});
+    expect(await storeSentCopy(run, BYTES, '<m@x>')).toEqual({
+      ok: true,
+      value: { uidValidity: 1, uid: 7 },
+    });
+    expect(calls.append).toBe(1);
+  });
+
+  it('finds its own earlier copy instead of appending', async () => {
+    const { run, calls } = world({ uidSearchHeader: async () => ({ ok: true, value: [3, 9] }) });
+    expect(await storeSentCopy(run, BYTES, '<m@x>')).toEqual({
+      ok: true,
+      value: { uidValidity: 1, uid: 9 },
+    });
+    expect(calls.append).toBe(0);
+  });
+
+  it('uploads once when its connection is lost mid-APPEND: the server may still store it', async () => {
+    const calls = { append: 0 };
+    const { run } = world({
+      append: async () => {
+        calls.append += 1;
+        return closed;
+      },
+    });
+    expect(await storeSentCopy(run, BYTES, '<m@x>')).toEqual({
+      ok: false,
+      error: { kind: 'imap', reason: { kind: 'closed' } },
+    });
+    expect(calls.append).toBe(1);
+  });
+
+  it('searches again when the search lost its connection, rather than appending blind', async () => {
+    let searches = 0;
+    const { run, calls } = world({
+      uidSearchHeader: async () => {
+        searches += 1;
+        return searches === 1 ? closed : { ok: true, value: [4] };
+      },
+    });
+    expect(await storeSentCopy(run, BYTES, '<m@x>')).toMatchObject({ ok: true });
+    expect(searches).toBe(2);
+    expect(calls.append).toBe(0);
+  });
+
+  it('still stores the copy on a server that refuses the search', async () => {
+    const { run, calls } = world({
+      uidSearchHeader: async () => ({ ok: false, reason: { kind: 'no', text: 'not indexed' } }),
+    });
+    expect(await storeSentCopy(run, BYTES, '<m@x>')).toMatchObject({ ok: true });
+    expect(calls.append).toBe(1);
   });
 });

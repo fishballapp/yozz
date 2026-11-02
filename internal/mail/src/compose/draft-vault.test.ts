@@ -5,7 +5,8 @@ import {
   DRAFT_RECORD_TYPE,
   type DraftRecord,
   openSendStateOf,
-  SEND_CLAIM_STALE_MS,
+  SEND_CLAIM_BASE_MS,
+  sendClaimLifetimeMs,
 } from './draft-record.ts';
 import {
   claimSend,
@@ -185,7 +186,7 @@ describe('draft records', () => {
       revision: 2,
     });
 
-    const stale = SEND_CLAIM_STALE_MS + 1;
+    const stale = SEND_CLAIM_BASE_MS + 1;
     expect(
       await replaceDraft(store, created.handle.draftId, content({ body: 'edit' }), stale),
     ).toMatchObject({ ok: true });
@@ -200,11 +201,73 @@ describe('draft records', () => {
     };
     // A tab killed at `submitting` leaves exactly this and never writes `unconfirmedSend`, so the
     // composer must reach 'unconfirmed' from `send` alone or its two buttons never render.
-    expect(openSendStateOf(claimed, SEND_CLAIM_STALE_MS - 1)).toBe('sending');
-    expect(openSendStateOf(claimed, SEND_CLAIM_STALE_MS + 1)).toBe('unconfirmed');
+    expect(openSendStateOf(claimed, SEND_CLAIM_BASE_MS - 1)).toBe('sending');
+    expect(openSendStateOf(claimed, SEND_CLAIM_BASE_MS + 1)).toBe('unconfirmed');
     const { send: _claim, ...rest } = claimed;
     expect(openSendStateOf({ ...rest, unconfirmedSend: _claim }, 0)).toBe('unconfirmed');
     expect(openSendStateOf({ ...base, contentVersion: 1 }, 0)).toBeNull();
+  });
+
+  describe('how long a claim holds', () => {
+    const MIB = 2 ** 20;
+    const claimedWith = async (size: number) => {
+      const { store, rows, key } = fakeStore();
+      const created = await createDraft(
+        store,
+        content({ attachments: [{ id: 'f', name: 'a.zip', size, kind: 'archive' }] }),
+        0,
+      );
+      if (!created.ok) throw new Error('the fixture could not create a draft');
+      const record: DraftRecord = {
+        ...created.handle.record,
+        send: { messageId: '<out@x>', opId: 'op-1', state: 'submitting', claimedAt: 0 },
+      };
+      rows.set(key(DRAFT_RECORD_TYPE, created.handle.draftKey), {
+        plaintext: JSON.stringify(record),
+        revision: 2,
+      });
+      return { store, record, draftId: created.handle.draftId };
+    };
+
+    it('outlasts 24 MiB at 2 Mbps and the longest wait for its answer: no device takes it over', async () => {
+      const { store, record, draftId } = await claimedWith(24 * MIB);
+      // 165 s measured, and `@yozz.app/smtp` waits 10 minutes more for the answer.
+      const running = 165_000 + 10 * 60_000;
+      expect(sendClaimLifetimeMs(record)).toBeGreaterThan(running);
+      const send = {
+        messageId: '<two@x>',
+        opId: 'op-2',
+        state: 'submitting',
+        claimedAt: running,
+      } as const;
+      expect(await claimSend(store, draftId, send, running)).toEqual({
+        ok: false,
+        reason: 'sending',
+      });
+      expect(await replaceDraft(store, draftId, content({ body: 'edit' }), running)).toEqual({
+        ok: false,
+        reason: 'sending',
+      });
+      expect(openSendStateOf(record, running)).toBe('sending');
+    });
+
+    it('outlasts the longest wait for the answer to a message with no files', async () => {
+      const { record } = await claimedWith(0);
+      expect(openSendStateOf(record, 10 * 60_000 + 30_000)).toBe('sending');
+      expect(openSendStateOf(record, 20 * 60_000)).toBe('unconfirmed');
+    });
+
+    it('frees the draft of a killed tab once its lifetime is over, under half an hour at the largest', async () => {
+      const { store, record, draftId } = await claimedWith(25 * MIB);
+      const lifetime = sendClaimLifetimeMs(record);
+      expect(lifetime).toBeLessThan(30 * 60_000);
+      expect(openSendStateOf(record, lifetime)).toBe('unconfirmed');
+      expect(await replaceDraft(store, draftId, content({ body: 'edit' }), lifetime)).toMatchObject(
+        {
+          ok: true,
+        },
+      );
+    });
   });
 
   describe('a send whose answer was lost', () => {
@@ -234,7 +297,7 @@ describe('draft records', () => {
 
     it('refuses edits, a new send and discard, however old, until the person settles it', async () => {
       const { store, handle } = await seeded();
-      const late = SEND_CLAIM_STALE_MS + 1;
+      const late = SEND_CLAIM_BASE_MS + 1;
       expect(await replaceDraft(store, handle.draftId, content({ body: 'edit' }), late)).toEqual({
         ok: false,
         reason: 'sending',

@@ -1,5 +1,6 @@
 export {
   createSmtpClient,
+  DATA_END_TIMEOUT_MS,
   dotStuff,
   type SmtpCapabilities,
   type SmtpClient,

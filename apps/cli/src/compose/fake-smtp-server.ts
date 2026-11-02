@@ -22,6 +22,8 @@ export type FakeSmtpServer = {
   readonly commands: string[];
   /** What the server answers to the end of the next DATA. */
   answer: DataAnswer;
+  /** Every quiet limit a connection was given, in order. */
+  readonly quietLimits: number[];
   readonly open: () => MailSocket;
 };
 
@@ -38,10 +40,17 @@ export const makeFakeSmtpServer = ({
     delivered: [],
     commands: [],
     answer: 'accept',
+    quietLimits: [],
     open: () => {
       const { client, server: end, close } = pipe();
       void session(end, close);
-      return { duplex: client, setQuietLimit: () => {}, destroy: close };
+      return {
+        duplex: client,
+        setQuietLimit: ms => {
+          server.quietLimits.push(ms);
+        },
+        destroy: close,
+      };
     },
   };
 

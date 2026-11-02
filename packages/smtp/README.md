@@ -18,6 +18,11 @@ optional `flush`, which settles once everything written has gone. `send` awaits 
 message's terminator, so a drop before then is a refusal rather than `unconfirmed`. A plain socket
 leaves it out.
 
+A silent server does not hold a caller for ever. Every reply is waited on for 5 minutes, and the answer
+to the message's terminator for RFC 5321's 10 (`DATA_END_TIMEOUT_MS`). Running out of the first is a
+refusal, of the second `unconfirmed`, as the server may hold the message. Either way nothing more is
+written, so the caller closes the transport at once.
+
 A server that declares a limit (RFC 1870, `SIZE 35882577`) is asked nothing it would refuse: `send`
 answers a message over it as `{ kind: 'too-large', limitBytes }` before `MAIL FROM`, so nothing is
 written and the connection stays usable. The message is counted as given, before dot-stuffing and

@@ -120,20 +120,23 @@ export const driveSend = async (
     const advanced = await advanceSend(effects.store, handle.draftId, {
       ...send,
       state: 'submitted',
+      // The Sent copy uploads the whole message again, under a lifetime of its own.
+      claimedAt: effects.now(),
     });
     // Out, but the record still says `submitting`, so the next unlock asks rather than guesses.
     if (advanced === null) return { done: false, reason: 'unconfirmed' };
     handle = advanced;
   }
 
-  if (handle.record.send?.state === 'submitted') {
+  const held = handle.record.send;
+  if (held?.state === 'submitted') {
     const copied = await effects.copyToSent(target, { message, assemble }, handle);
     if (!copied.ok) {
       // Only the copy is missing; phase (2) re-runs and finds its own copy if one landed.
       return { done: false, reason: 'copy-pending', error: copied.error };
     }
     const advanced = await advanceSend(effects.store, handle.draftId, {
-      ...send,
+      ...held,
       state: 'copied',
       ...(copied.value === null ? {} : { locator: copied.value }),
     });

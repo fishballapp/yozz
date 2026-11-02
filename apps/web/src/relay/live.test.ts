@@ -335,6 +335,91 @@ describe('createLiveManager', () => {
     expect(await running).toEqual({ ok: true, value: 1 });
   });
 
+  describe('an APPEND waiting for its reply', () => {
+    const MIB = 2 ** 20;
+
+    /** A connection whose APPEND is written whole and answered only when the test says, or the socket ends. */
+    const appending = (activity = createActivityTracker()) => {
+      const answer = Promise.withResolvers<ImapResult<null>>();
+      const manager = managerOver(async (_imap, options) => {
+        options?.signal?.addEventListener('abort', () =>
+          answer.resolve({ ok: false, reason: { kind: 'closed' } }),
+        );
+        return {
+          ok: true,
+          value: {
+            client: { ...createFakeClient(), append: () => answer.promise },
+            close: async () => {},
+            resumed: false,
+          },
+        };
+      }, activity);
+      const append = (bytes: number): Promise<unknown> =>
+        manager.run(ACCOUNT, {
+          priority: 'user',
+          effect: 'write',
+          retry: false,
+          run: async client => {
+            const appended = await client.append('Sent', new Uint8Array(bytes), []);
+            return appended.ok
+              ? { ok: true, value: appended.value }
+              : { ok: false, error: { kind: 'imap', reason: appended.reason } };
+          },
+        });
+      return { manager, append, answer };
+    };
+
+    it('survives the minutes a server takes over a large message', async () => {
+      const { append, answer } = appending();
+      const written = append(33 * MIB);
+      await flush();
+
+      await advance(6 * 60_000);
+      expect(states.some(state => state.status === 'failed')).toBe(false);
+
+      answer.resolve({ ok: true, value: null });
+      expect(await written).toEqual({ ok: true, value: null });
+    });
+
+    it('fails as stalled when the server never answers a large one', async () => {
+      const { append } = appending();
+      const written = append(33 * MIB);
+      await flush();
+
+      await advance(10 * 60_000);
+      expect(await written).toEqual({ ok: false, error: { kind: 'stalled' } });
+      expect(states.at(-1)).toMatchObject({ status: 'failed', failure: { kind: 'stalled' } });
+    });
+
+    it('gives a small one about the minute everything else gets, so the queue moves on', async () => {
+      const { manager, append } = appending();
+      const written = append(1024);
+      let behind: unknown = 'waiting';
+      void manager.run(ACCOUNT, quick).then(result => {
+        behind = result;
+      });
+      await flush();
+
+      await advance(50_000);
+      expect(behind).toBe('waiting');
+      await advance(30_000);
+      expect(behind).toEqual({ ok: false, error: { kind: 'stalled' } });
+      expect(await written).toEqual({ ok: false, error: { kind: 'stalled' } });
+    });
+
+    it('takes its long limit with it when it is answered', async () => {
+      const { manager, append, answer } = appending();
+      answer.resolve({ ok: true, value: null });
+      await append(33 * MIB);
+
+      const read = manager.run(ACCOUNT, hanging().task);
+      await flush();
+      await advance(70_000);
+      expect(states.at(-1)).toMatchObject({ status: 'failed', failure: { kind: 'stalled' } });
+      void read;
+    });
+  });
+
   it('runs a task queued at any moment after the one before it finishes', async () => {
     const task: MailTask<number> = {
       priority: 'user',

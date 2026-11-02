@@ -1,11 +1,12 @@
 import type { ImapClient, ImapIdle, ImapSelected, ImapUntagged } from '@yozz.app/imap';
 import type { InboundAddress } from '@yozz.app/mail/addresses/record';
-import type {
-  MailClient,
-  MailConnectionFailure,
-  MailTask,
-  Result,
-  RunTask,
+import {
+  appendQuietLimitMs,
+  type MailClient,
+  type MailConnectionFailure,
+  type MailTask,
+  type Result,
+  type RunTask,
 } from '@yozz.app/mail/connection';
 import type { ActivityTracker } from './activity';
 import type { MailConnection } from './connection';
@@ -84,6 +85,8 @@ type Connection = {
   idleDroppedAt: number | null;
   /** When work here last moved: bytes either way, a task starting or ending, or work arriving. */
   progressAt: number;
+  /** How long that may last before the work has stalled: `STALL_MS`, or what the running APPEND allows. */
+  stallAfterMs: number;
   /** Ends the socket being opened or open at once, without the LOGOUT a stalled command would hold up. */
   abort: AbortController | null;
 };
@@ -112,7 +115,8 @@ const MAILBOX_CHANGE_THROTTLE_MS = 1000;
 const IDLE_RECONNECT_MIN_GAP_MS = 60 * 1000;
 /**
  * Work waiting this long with nothing moving has stalled. Measured as no progress, not as a task's
- * age: an APPEND of a large message may take minutes and is moving the whole time.
+ * age: an APPEND of a large message takes minutes to upload, and has `appendQuietLimitMs` for the
+ * silence after it.
  */
 const STALL_MS = 60 * 1000;
 const STALL_CHECK_MS = 10 * 1000;
@@ -168,7 +172,7 @@ export const createLiveManager = (deps: {
     deps.onMailboxChanged(conn.address);
   };
 
-  const wrapClient = (socket: () => Socket, client: ImapClient): MailClient => {
+  const wrapClient = (conn: Connection, socket: () => Socket, client: ImapClient): MailClient => {
     const select: ImapClient['select'] = async mailbox => {
       // Always read-write: flag writes and APPEND need it, and EXAMINE would block them.
       const res = await client.select(mailbox, { readOnly: false });
@@ -179,6 +183,14 @@ export const createLiveManager = (deps: {
     return {
       ...client,
       select,
+      append: async (mailbox, message, flags, internalDate) => {
+        conn.stallAfterMs = appendQuietLimitMs(message.length);
+        try {
+          return await client.append(mailbox, message, flags, internalDate);
+        } finally {
+          conn.stallAfterMs = STALL_MS;
+        }
+      },
       ensureSelected: async name => {
         const known = socket().selectedInfo;
         if (socket().selected === name && known !== null) return { ok: true, value: known };
@@ -226,7 +238,7 @@ export const createLiveManager = (deps: {
     }
     // `wrapClient` needs the socket it belongs to, which does not exist until the client does.
     const socket: Socket = {
-      client: wrapClient(() => socket, opened.value.client),
+      client: wrapClient(conn, () => socket, opened.value.client),
       close: opened.value.close,
       resumed: opened.value.resumed,
       idle: null,
@@ -426,7 +438,7 @@ export const createLiveManager = (deps: {
     conn.pumping !== null || conn.userQueue.length > 0 || conn.backgroundQueue.length > 0;
 
   /**
-   * Work waiting and nothing moving for a minute: a server that stopped answering, or a queue that
+   * Work waiting and nothing moving past its limit: a server that stopped answering, or a queue that
    * stopped running. Either way it is reported rather than waited on for ever: what is queued fails
    * as `stalled`, and the socket being opened or open is ended at once, so a handshake, a login or a
    * task blocked on it fails as `stalled` too (a task is retried once on a new socket if it may be).
@@ -441,7 +453,7 @@ export const createLiveManager = (deps: {
         queued: conn.userQueue.length + conn.backgroundQueue.length,
       }),
     );
-    // Reported once a minute, not on every check.
+    // Reported once per limit, not on every check.
     conn.progressAt = now();
     rejectQueued(conn, STALLED);
     // Not `closeSocket`: its LOGOUT would queue behind the very command that is not answered.
@@ -457,7 +469,7 @@ export const createLiveManager = (deps: {
       watchdog = null;
       const busy = [...connections.values()].filter(hasWork);
       for (const conn of busy) {
-        if (now() - conn.progressAt >= STALL_MS) stall(conn);
+        if (now() - conn.progressAt >= conn.stallAfterMs) stall(conn);
       }
       if (busy.length > 0) watch();
     }, STALL_CHECK_MS);
@@ -489,6 +501,7 @@ export const createLiveManager = (deps: {
       changedAt: null,
       idleDroppedAt: null,
       progressAt: now(),
+      stallAfterMs: STALL_MS,
       abort: null,
     };
     connections.set(account.address, conn);

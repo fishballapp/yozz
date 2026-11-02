@@ -698,6 +698,22 @@ describe("a draft's files", () => {
     });
   });
 
+  it.each([
+    ['the server went quiet', { kind: 'stalled' }],
+    ['the connection dropped', { kind: 'imap', reason: { kind: 'closed' } }],
+  ] as const)('does not claim the copy is missing when %s', async (_label, error) => {
+    network.sentCopy = { ok: false, error };
+    const world = await composeWithFiles();
+    await act(async () => world.hook().composer.attach([picked]));
+    await act(async () => {});
+
+    const sent = await sendNow(world);
+    expect(sent).toMatchObject({ report: { state: 'sent-with-caveat' } });
+    expect(sent).toMatchObject({
+      report: { detail: expect.stringContaining('may still appear') },
+    });
+  });
+
   it('adds no instruction to a refusal that was not about a file', async () => {
     network.submitAnswer = { ok: false, error: { kind: 'error', detail: 'refused by the host' } };
     const world = await composeWithFiles();

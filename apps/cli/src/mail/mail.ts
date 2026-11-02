@@ -6,12 +6,13 @@ import {
   isInbound,
   parseAddressRecord,
 } from '@yozz.app/mail/addresses/record';
-import type {
-  MailClient,
-  MailConnectionFailure,
-  MailTask,
-  Result,
-  RunTask,
+import {
+  appendQuietLimitMs,
+  type MailClient,
+  type MailConnectionFailure,
+  type MailTask,
+  type Result,
+  type RunTask,
 } from '@yozz.app/mail/connection';
 import { describeMailFailure } from '@yozz.app/mail/describe-failure';
 import type { TxtLookup } from '@yozz.app/mail/threads/dkim';
@@ -136,6 +137,14 @@ export class Mail extends Context.Service<
             client: {
               ...client,
               select,
+              append: async (mailbox, message, flags, internalDate) => {
+                setQuietLimit(appendQuietLimitMs(message.length));
+                try {
+                  return await client.append(mailbox, message, flags, internalDate);
+                } finally {
+                  setQuietLimit(QUIET_LIMIT_MS);
+                }
+              },
               ensureSelected: async name =>
                 selected.name === name && selected.info !== null
                   ? { ok: true, value: selected.info }

@@ -18,7 +18,7 @@ export type MailConnectionFailure =
   | { readonly kind: 'imap'; readonly reason: ImapFailure }
   | { readonly kind: 'smtp'; readonly reason: SmtpFailure }
   | { readonly kind: 'auth'; readonly text: string }
-  /** Work waited a minute with nothing crossing the connection. */
+  /** Work waited out its limit with nothing crossing the connection. */
   | { readonly kind: 'stalled' };
 
 export type MailClient = ImapClient & {
@@ -38,6 +38,13 @@ export type MailTask<T> = {
   /** Whether the task may be re-run on a fresh connection after a transport failure. APPEND must not. */
   readonly retry: boolean;
 };
+
+/**
+ * How long an APPEND may go with nothing crossing the connection. A server can go quiet for minutes
+ * once a large message is written (seen on Forward Email at 33 MiB), and a dead server still fails a
+ * small APPEND in about a minute.
+ */
+export const appendQuietLimitMs = (bytes: number): number => 60_000 + (bytes / 2 ** 20) * 15_000;
 
 /** Runs a task on one account's session. */
 export type RunTask = <T>(task: MailTask<T>) => Promise<Result<T, MailConnectionFailure>>;

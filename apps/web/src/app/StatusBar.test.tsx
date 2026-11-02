@@ -43,7 +43,7 @@ describe('StatusBar', () => {
       [ACCOUNT.address]: { status: 'failed', failure: { kind: 'stalled' }, at: 1000 },
     };
     await show();
-    expect(notice()?.textContent).toBe('imap.example.com has not answered for a minute·Retry');
+    expect(notice()?.textContent).toBe('imap.example.com stopped responding·Retry');
 
     await act(async () => host.querySelector('button')?.click());
     expect(mail.sync).toHaveBeenCalledWith(ACCOUNT.address);

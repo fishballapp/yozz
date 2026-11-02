@@ -655,7 +655,8 @@ describe('a send already claimed when its address is edited or removed', () => {
   };
 
   it('files its Sent copy through the record the address has now, and completes', async () => {
-    mocks.answer = { ok: true, value: null };
+    // The Sent copy's search finds it, so one task reaches the manager.
+    mocks.answer = { ok: true, value: { kind: 'stored', locator: null } };
     const { mail, store, settled } = await sendHeldInSmtp();
 
     await act(() =>

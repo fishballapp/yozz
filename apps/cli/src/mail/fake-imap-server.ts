@@ -209,6 +209,8 @@ export type FakeImapServer = {
   readonly open: () => MailSocket;
   /** How many connections were opened. */
   readonly connections: () => number;
+  /** Every quiet limit a connection was given, in order. */
+  readonly quietLimits: number[];
 };
 
 export const makeFakeImapServer = ({
@@ -546,6 +548,7 @@ export const makeFakeImapServer = ({
     })();
   };
 
+  const quietLimits: number[] = [];
   return {
     commands,
     mailboxes: boxes,
@@ -554,8 +557,15 @@ export const makeFakeImapServer = ({
       opened += 1;
       const { client, server, close } = pipe();
       session(server, close);
-      return { duplex: client, setQuietLimit: () => {}, destroy: close };
+      return {
+        duplex: client,
+        setQuietLimit: ms => {
+          quietLimits.push(ms);
+        },
+        destroy: close,
+      };
     },
     connections: () => opened,
+    quietLimits,
   };
 };

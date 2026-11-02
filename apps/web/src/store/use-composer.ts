@@ -506,10 +506,20 @@ export const useComposerStore = ({
         // `copy-pending` is the only outcome that knows the message went out.
         if (progress.reason === 'copy-pending') {
           // The status line has no title above it; the toast is already headed "Sent".
-          const detail =
-            progress.error.kind === 'no-sent-mailbox'
-              ? `${imapHost} has no Sent folder to keep a copy in`
-              : `the copy was not stored · ${describeMailFailure(progress.error, imapHost)}`;
+          const { error } = progress;
+          const detail = (() => {
+            if (error.kind === 'no-sent-mailbox') {
+              return `${imapHost} has no Sent folder to keep a copy in`;
+            }
+            // The server went quiet or the connection dropped: it may well go on to store what it has.
+            if (
+              error.kind === 'stalled' ||
+              (error.kind === 'imap' && error.reason.kind === 'closed')
+            ) {
+              return `${imapHost} did not confirm the copy was stored · it may still appear in Sent`;
+            }
+            return `the copy was not stored · ${describeMailFailure(error, imapHost)}`;
+          })();
           setSentCopyError(`sent, but ${detail}`);
           // It went out, and until the next unlock retries the copy, this tab's is the only one.
           if (isInbound(identity)) showSent();

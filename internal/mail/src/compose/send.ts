@@ -197,45 +197,64 @@ export const assembleMessage = async (
 export const isUnconfirmedSubmission = (failure: MailConnectionFailure): boolean =>
   failure.kind === 'smtp' && failure.reason.kind === 'unconfirmed';
 
+type SentCopyLookup =
+  | { readonly kind: 'no-sent-mailbox' }
+  | { readonly kind: 'absent'; readonly sent: string }
+  | { readonly kind: 'stored'; readonly locator: { uidValidity: number; uid: number } | null };
+
 /**
- * Searches the mailbox for its own Message-ID before appending, so a retry cannot duplicate.
- * Message-ID, not `X-Yozz-Draft`: Forward Email indexes only the headers IMAP names.
+ * Searches the mailbox for its own Message-ID before appending, so a later run finds a copy that
+ * landed. Message-ID, not `X-Yozz-Draft`: Forward Email indexes only the headers IMAP names.
  */
 export const storeSentCopy = async (
   run: RunTask,
   bytes: Uint8Array,
   messageId: string,
 ): Promise<Result<{ uidValidity: number; uid: number } | null, SentCopyFailure>> => {
-  let missingSent = false;
-  const result = await run({
+  const lookup = await run<SentCopyLookup>({
     priority: 'user',
-    effect: 'write',
-    // The search makes a second run safe.
+    effect: 'read',
     retry: true,
     run: async client => {
       const folders = await resolveFolders(client);
       if (!folders.ok) return folders;
       const sent = folders.value.sent;
-      if (sent === undefined) {
-        missingSent = true;
-        return { ok: true, value: null };
-      }
+      if (sent === undefined) return { ok: true, value: { kind: 'no-sent-mailbox' } };
       const selected = await client.select(sent);
       if (!selected.ok) return { ok: false, error: { kind: 'imap', reason: selected.reason } };
       const found = await client.uidSearchHeader('Message-ID', messageId);
-      const already = found.ok ? found.value.at(-1) : undefined;
-      if (already !== undefined) {
-        const uidValidity = selected.value.uidValidity;
-        return {
-          ok: true,
-          value: uidValidity === null ? null : { uidValidity, uid: already },
-        };
+      // A server that refuses the search gets the copy anyway; a lost connection gets a new search.
+      if (!found.ok && found.reason.kind !== 'no' && found.reason.kind !== 'bad') {
+        return { ok: false, error: { kind: 'imap', reason: found.reason } };
       }
+      const already = found.ok ? found.value.at(-1) : undefined;
+      if (already === undefined) return { ok: true, value: { kind: 'absent', sent } };
+      const uidValidity = selected.value.uidValidity;
+      return {
+        ok: true,
+        value: {
+          kind: 'stored',
+          locator: uidValidity === null ? null : { uidValidity, uid: already },
+        },
+      };
+    },
+  });
+  if (!lookup.ok) return lookup;
+  if (lookup.value.kind === 'no-sent-mailbox') {
+    return { ok: false, error: { kind: 'no-sent-mailbox' } };
+  }
+  if (lookup.value.kind === 'stored') return { ok: true, value: lookup.value.locator };
+  const { sent } = lookup.value;
+  return run({
+    priority: 'user',
+    effect: 'write',
+    // A server can go on storing an upload after its connection is lost, so a search on a new one
+    // would miss the copy and upload a second.
+    retry: false,
+    run: async client => {
       const appended = await client.append(sent, bytes, ['\\Seen']);
       if (!appended.ok) return { ok: false, error: { kind: 'imap', reason: appended.reason } };
       return { ok: true, value: appended.value };
     },
   });
-  if (missingSent) return { ok: false, error: { kind: 'no-sent-mailbox' } };
-  return result;
 };

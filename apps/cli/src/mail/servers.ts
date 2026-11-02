@@ -4,7 +4,12 @@ import { createImapClient, type ImapClient, type ImapUntagged } from '@yozz.app/
 import type { AddressRecord } from '@yozz.app/mail/addresses/record';
 import type { MailConnectionFailure, Result } from '@yozz.app/mail/connection';
 import type { TxtLookup } from '@yozz.app/mail/threads/dkim';
-import { createSmtpClient, type SmtpClient, type SmtpFailure } from '@yozz.app/smtp';
+import {
+  createSmtpClient,
+  DATA_END_TIMEOUT_MS,
+  type SmtpClient,
+  type SmtpFailure,
+} from '@yozz.app/smtp';
 import * as Context from 'effect/Context';
 import * as Layer from 'effect/Layer';
 
@@ -204,7 +209,10 @@ export const connectSmtp = async (
   if (refused !== null) return refused;
   const opened = await open(smtp);
   if (!opened.ok) return opened;
-  const { duplex, destroy } = opened.value;
+  const { duplex, setQuietLimit, destroy } = opened.value;
+  // The client times its own replies, the longest being the answer to the message; this is for a
+  // write that stops moving.
+  setQuietLimit(DATA_END_TIMEOUT_MS);
   const client = createSmtpClient(duplex);
   const fail = (reason: SmtpFailure): Result<never, MailConnectionFailure> => {
     destroy();

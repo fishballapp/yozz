@@ -44,7 +44,10 @@ const sendSchema = z.object({
   messageId: z.string().min(1),
   opId: z.string().min(1),
   state: z.enum(['submitting', 'unconfirmed', 'submitted', 'copied']),
-  /** A send not finished within `SEND_CLAIM_STALE_MS` did not finish; this is what says so. */
+  /**
+   * When this phase of the send began, renewed once SMTP has accepted the message. Past
+   * `sendClaimLifetimeMs` the send is taken not to be running.
+   */
   claimedAt: z.number().int().nonnegative(),
   /** So a resend is the same message. */
   message: frozenMessageSchema.optional(),
@@ -136,17 +139,27 @@ export const fileIdsOfDraft = (record: DraftRecord): readonly string[] => [
 
 export const parseDraftMirrorRecord = parser(draftMirrorRecordSchema);
 
-/** Longer than any SMTP attempt this client makes. */
-export const SEND_CLAIM_STALE_MS = 5 * 60 * 1000;
+/** Longer than a text-only attempt can run: `@yozz.app/smtp` waits 10 minutes for the answer alone. */
+export const SEND_CLAIM_BASE_MS = 15 * 60 * 1000;
+
+/** 512 kbit/s, the slowest upload a claim allows for. */
+const SLOWEST_UPLOAD_BYTES_PER_MS = 64;
+const BASE64_GROWTH = 4 / 3;
+
+/** The record alone decides it, so every device agrees and a send writes nothing to stay held. */
+export const sendClaimLifetimeMs = ({ attachments = [] }: DraftRecord): number =>
+  SEND_CLAIM_BASE_MS +
+  (attachments.reduce((total, { size }) => total + size, 0) * BASE64_GROWTH) /
+    SLOWEST_UPLOAD_BYTES_PER_MS;
 
 /**
- * A send still running. Past `SEND_CLAIM_STALE_MS` any device may take a claim over: a duplicate is
- * the accepted worst case, an unusable draft is not. An `unconfirmed` one is not running.
+ * A send still running. Past its lifetime any device may take a claim over: a duplicate is the
+ * accepted worst case, an unusable draft is not. An `unconfirmed` one is not running.
  */
 export const heldSend = (record: DraftRecord, now: number) =>
   record.send !== undefined &&
   record.send.state !== 'unconfirmed' &&
-  now - record.send.claimedAt < SEND_CLAIM_STALE_MS
+  now - record.send.claimedAt < sendClaimLifetimeMs(record)
     ? record.send
     : undefined;
 

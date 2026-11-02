@@ -103,6 +103,21 @@ describe('the send state machine', () => {
     expect(await listDrafts(store)).toEqual([]);
   });
 
+  it('renews the claim once SMTP has accepted, so the Sent copy has a lifetime of its own', async () => {
+    const { store } = fakeRecordStore();
+    const handle = await claim(store);
+    let during: DraftRecord | null = null;
+    const { effects } = spyEffects(store, {
+      copyToSent: async () => {
+        during = await readRecord(store, handle.draftKey);
+        return { ok: true, value: null };
+      },
+    });
+
+    await driveSend(effects, handle);
+    expect(during).toMatchObject({ send: { state: 'submitted', claimedAt: 1_000 } });
+  });
+
   it('gives the draft back when SMTP refuses it, because nothing went out', async () => {
     const { store } = fakeRecordStore();
     const handle = await claim(store);

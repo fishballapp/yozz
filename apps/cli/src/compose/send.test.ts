@@ -1,10 +1,13 @@
 import * as NodeServices from '@effect/platform-node/NodeServices';
 import { assert, describe, expect, layer } from '@effect/vitest';
+import { appendQuietLimitMs } from '@yozz.app/mail/connection';
+import { DATA_END_TIMEOUT_MS } from '@yozz.app/smtp';
 import * as Effect from 'effect/Effect';
 import * as Exit from 'effect/Exit';
 import * as FileSystem from 'effect/FileSystem';
 import * as Path from 'effect/Path';
 import { ADDRESS, mail } from '../mail/mail-world.ts';
+import { QUIET_LIMIT_MS } from '../mail/servers.ts';
 import { failureOf } from '../test-world.ts';
 import { makeComposeWorld, SEND_ONLY } from './compose-world.ts';
 
@@ -67,6 +70,20 @@ layer(NodeServices.layer)(it => {
           });
           expect(idsOf((yield* run(['list', '--mailbox', 'drafts'])).stdout)).toEqual([]);
         }),
+    );
+
+    it.effect('lets each connection wait out a slow answer, then limits it as before', () =>
+      Effect.gen(function* () {
+        const { server, smtp, run } = yield* makeComposeWorld();
+        const { draft } = JSON.parse(
+          (yield* run(['draft', '--from', ADDRESS, '--to', 'kate@example.com'])).stdout,
+        );
+        yield* run(['send', draft.draftId]);
+
+        expect(smtp.quietLimits).toEqual([DATA_END_TIMEOUT_MS]);
+        const copy = server.mailboxes.get('Sent')?.messages[0]?.raw;
+        expect(server.quietLimits).toEqual([appendQuietLimitMs(copy?.length ?? 0), QUIET_LIMIT_MS]);
+      }),
     );
 
     it.effect('never sends twice: a repeat is replayed, not resubmitted', () =>
