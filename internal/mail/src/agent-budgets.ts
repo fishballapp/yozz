@@ -16,6 +16,8 @@ export const DEPTH: Record<'none' | 'latest' | 'full', number> = { none: 50, lat
 export const SKIM_CHARS = 400;
 /** Per `to` / `cc` line: a list mail to hundreds must not spend the whole output on its header. */
 export const RECIPIENTS_LISTED = 10;
+/** An attachment's name as an agent is shown it. */
+export const ATTACHMENT_NAME_CHARS = 200;
 
 /** `text` cut to `max`, saying how much went, never between the two halves of a surrogate pair. */
 export const clip = (text: string, max: number) => {

@@ -96,13 +96,3 @@ export const rowOf = (
     },
   };
 };
-
-/**
- * The type a sender declared, when it is one: a strict `type/subtype`, never parameters or prose,
- * since it is printed outside the untrusted framing.
- */
-export const mimeTypeOf = (declared: string | undefined) =>
-  declared !== undefined &&
-  /^[a-z0-9][a-z0-9!#$&^_.+-]{0,62}\/[a-z0-9][a-z0-9!#$&^_.+-]{0,126}$/iu.test(declared)
-    ? declared.toLowerCase()
-    : 'application/octet-stream';

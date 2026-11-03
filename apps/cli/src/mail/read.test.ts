@@ -1,5 +1,6 @@
 import * as NodeServices from '@effect/platform-node/NodeServices';
 import { assert, describe, expect, layer } from '@effect/vitest';
+import { mimeTypeOf } from '@yozz.app/mail/threads/attachments';
 import * as Effect from 'effect/Effect';
 import * as Exit from 'effect/Exit';
 import * as FileSystem from 'effect/FileSystem';
@@ -7,7 +8,6 @@ import * as Path from 'effect/Path';
 import { failureOf, runCli } from '../test-world.ts';
 import { safeFileName } from './attachments.ts';
 import { mail, makeMailWorld, SECOND, signedByStripe } from './mail-world.ts';
-import { mimeTypeOf } from './rows.ts';
 
 const reply = (n: number, to: number, text: string) =>
   mail(n, {

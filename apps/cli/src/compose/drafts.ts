@@ -11,6 +11,7 @@ import {
 import type { SaveOutcome } from '@yozz.app/mail/compose/draft-vault';
 import { claimOf } from '@yozz.app/mail/compose/send';
 import { describeMailFailure } from '@yozz.app/mail/describe-failure';
+import { mimeTypeOf } from '@yozz.app/mail/threads/attachments';
 import { draftIdOf as draftHandleOf } from '@yozz.app/mail/threads/thread';
 import * as Effect from 'effect/Effect';
 import {
@@ -21,7 +22,7 @@ import {
   UsageError,
   VaultUnreadable,
 } from '../errors.ts';
-import { field, LINE_CHARS, mimeTypeOf, NOTICE, untrusted } from '../mail/rows.ts';
+import { field, LINE_CHARS, NOTICE, untrusted } from '../mail/rows.ts';
 import { Vault } from '../vault/vault.ts';
 
 // What `draft`, `send` and `discard` share: reading a draft by its versioned id, printing it, and

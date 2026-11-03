@@ -1,7 +1,15 @@
-import { BODY_CHARS, clip, fitting, OUTPUT_CHARS, SKIM_CHARS } from '@yozz.app/mail/agent-budgets';
+import {
+  ATTACHMENT_NAME_CHARS,
+  BODY_CHARS,
+  clip,
+  fitting,
+  OUTPUT_CHARS,
+  SKIM_CHARS,
+} from '@yozz.app/mail/agent-budgets';
 import { addressList } from '@yozz.app/mail/compose/draft';
 import { type DraftRecord, parseDraftId } from '@yozz.app/mail/compose/draft-record';
 import { listDrafts } from '@yozz.app/mail/compose/draft-vault';
+import { mimeTypeOf } from '@yozz.app/mail/threads/attachments';
 import { fetchBodyAt } from '@yozz.app/mail/threads/bodies';
 import {
   type Attachment,
@@ -37,15 +45,11 @@ import {
   LINE_CHARS,
   LIST_CHARS,
   messageHeadOf,
-  mimeTypeOf,
   NOTICE,
   untrusted,
   urlOf,
 } from './rows.ts';
 import { lookUp } from './search.ts';
-
-/** An attachment name as shown; the saved file's name is `safeFileName`'s. */
-const NAME_CHARS = 200;
 
 /** A message as `read` prints it, with its time kept beside it for the cut. */
 type ReadMessage = { readonly at: number; readonly json: Record<string, unknown> };
@@ -173,7 +177,7 @@ export const readCommand = Command.make(
         type: mimeTypeOf(attachment.mimeType),
         size: attachment.size,
         ...saved,
-        untrusted: { name: field(attachment.name, NAME_CHARS) },
+        untrusted: { name: field(attachment.name, ATTACHMENT_NAME_CHARS) },
       };
     });
 
@@ -199,7 +203,7 @@ export const readCommand = Command.make(
             index,
             type: mimeTypeOf(attachment.mimeType),
             size: attachment.size,
-            untrusted: { name: field(attachment.name, NAME_CHARS) },
+            untrusted: { name: field(attachment.name, ATTACHMENT_NAME_CHARS) },
           })),
           untrusted: {
             ...addressed,

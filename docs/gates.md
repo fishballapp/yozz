@@ -21,7 +21,7 @@ pnpm -F @yozz.app/mail test             # 416. Threading, sync over a fake IMAP 
                                     #   the send state machine (a lost SMTP answer is recorded unconfirmed),
                                     #   the draft mirror, reply seeding, the record store's marks,
                                     #   DKIM verification (RFC 8463's vectors, a mailauth-signed message)
-pnpm -F @yozz.app/web test              # 691. Vault client + unlock (WebAuthn mocked), the IndexedDB
+pnpm -F @yozz.app/web test              # 693. Vault client + unlock (WebAuthn mocked), the IndexedDB
                                     #   cache, the live connection, the WebMCP tools over a fake
                                     #   port + their mount, ceilings, sanitizer policy, image
                                     #   consent, the screens, and architecture.test.ts
