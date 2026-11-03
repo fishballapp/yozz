@@ -5,7 +5,12 @@ import type { RecordStore } from '@yozz.app/mail/vault/record-store';
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { expect, it } from 'vitest';
-import { forgetConsent, readConsents, rememberConsent } from './remote-images';
+import {
+  forgetConsent,
+  MAX_REMEMBERED_ID_LENGTH,
+  readConsents,
+  rememberConsent,
+} from './remote-images';
 import { RemoteImagesStoreProvider, useRemoteImages } from './remote-images-context';
 
 it('writes one consent change at a time, forgetting included, so a device never reads past its own write in flight', async () => {
@@ -121,6 +126,62 @@ it('keeps a message stopped while its earlier consent is still on its way, and i
   expect(await stopped).toBe('TypeError: Failed to fetch');
   await settle();
   expect(tab.remoteImages().isConsented(consentTo(1))).toBe(false);
+  await tab.unmount();
+});
+
+it('stays stopped once the vault confirms the Stop, though the consent before it failed', async () => {
+  const { store } = fakeRecordStore();
+  let isOffline = true;
+  const flaky: RecordStore = {
+    ...store,
+    put: async input => {
+      if (isOffline) throw new TypeError('Failed to fetch');
+      return store.put(input);
+    },
+  };
+  const tab = await mount(flaky);
+  await settle();
+  await act(async () => tab.remoteImages().consent(consentTo(1)));
+  await settle();
+  expect(tab.remoteImages().isConsented(consentTo(1))).toBe(true);
+
+  isOffline = false;
+  await act(() => tab.remoteImages().unconsent(consentTo(1)));
+  await settle();
+  expect(tab.remoteImages().isConsented(consentTo(1))).toBe(false);
+  await tab.unmount();
+});
+
+it('keeps a consent made after a Stop that is still on its way', async () => {
+  const { store } = fakeRecordStore();
+  await rememberConsent(store, consentTo(1));
+  const tab = await mount(store);
+  await settle();
+  await act(async () => {
+    const stopped = tab.remoteImages().unconsent(consentTo(1));
+    tab.remoteImages().consent(consentTo(1));
+    await stopped;
+  });
+  await settle();
+  expect(tab.remoteImages().isConsented(consentTo(1))).toBe(true);
+  expect((await readConsents(store)).consents).toEqual([consentTo(1)]);
+  await tab.unmount();
+});
+
+it('stops a message whose id is too long to remember', async () => {
+  const { store } = fakeRecordStore();
+  const tab = await mount(store);
+  await settle();
+  const long = {
+    messageId: `mid/<${'x'.repeat(MAX_REMEMBERED_ID_LENGTH)}@x>`,
+    sender: 'a@x.example',
+  };
+  await act(async () => tab.remoteImages().consent(long));
+  expect(tab.remoteImages().isConsented(long)).toBe(true);
+
+  await act(() => tab.remoteImages().unconsent(long));
+  await settle();
+  expect(tab.remoteImages().isConsented(long)).toBe(false);
   await tab.unmount();
 });
 

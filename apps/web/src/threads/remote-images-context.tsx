@@ -12,6 +12,7 @@ import {
 } from 'react';
 import { useVault } from '../vault/session';
 import {
+  consentKeyOf,
   forgetConsent,
   forgetSender,
   hasConsent,
@@ -65,6 +66,19 @@ const consentsOf = ({ stored, pending }: State): readonly ImageConsent[] =>
       kind === 'add' ? withConsent(consents, consent) : withoutConsent(consents, consent),
     stored,
   );
+
+/**
+ * What stays pending once the vault confirms `change`: the rest, less anything before it for the same
+ * consent, or a consent that failed would replay over the Stop that followed it.
+ */
+const pendingAfter = (pending: readonly ConsentChange[], change: ConsentChange) => {
+  const confirmedAt = pending.indexOf(change);
+  return pending.filter(
+    (candidate, index) =>
+      index > confirmedAt ||
+      (index < confirmedAt && consentKeyOf(candidate.consent) !== consentKeyOf(change.consent)),
+  );
+};
 
 const RemoteImagesContext = createContext<RemoteImagesValue | null>(null);
 
@@ -156,7 +170,7 @@ export const RemoteImagesStoreProvider = ({
       updateFor(store, current => ({
         ...current,
         stored: answer,
-        pending: current.pending.filter(candidate => candidate !== change),
+        pending: pendingAfter(current.pending, change),
       }));
     },
     [store, updateFor, queued],

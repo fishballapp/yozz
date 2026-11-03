@@ -16,7 +16,8 @@ import { z } from 'zod';
  */
 export type ImageConsent = { readonly messageId: string; readonly sender: string };
 
-const consentKeyOf = ({ messageId, sender }: ImageConsent) => `${senderKeyOf(sender)} ${messageId}`;
+export const consentKeyOf = ({ messageId, sender }: ImageConsent) =>
+  `${senderKeyOf(sender)} ${messageId}`;
 
 export const IMAGE_CONSENTS_RECORD_TYPE = 'image-consents';
 const IMAGE_CONSENTS_KEY = 'consents';
