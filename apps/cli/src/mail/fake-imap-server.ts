@@ -2,7 +2,7 @@ import type { ByteDuplex, MailSocket } from './servers.ts';
 
 // An IMAP server in memory, for tests: the commands `@yozz.app/imap` sends on the CLI's paths
 // (AUTHENTICATE, LIST, SELECT, FETCH and UID FETCH, UID STORE, UID MOVE with COPYUID, CREATE,
-// APPEND with APPENDUID, UID SEARCH on SUBJECT, FROM, HEADER and TEXT, which matches the body alone as
+// APPEND with APPENDUID, UID SEARCH on SUBJECT, FROM, TO, HEADER and TEXT, which matches the body alone as
 // Forward Email's does, IDLE, NOOP, LOGOUT), over a byte pipe, so the real client parses real
 // responses.
 
@@ -480,7 +480,7 @@ export const makeFakeImapServer = ({
             // as Forward Email's server matches it, so a subject is found only by a SUBJECT key.
             const keys = [
               ...rest.matchAll(
-                /HEADER "((?:[^"\\]|\\.)*)" "((?:[^"\\]|\\.)*)"|(SUBJECT|FROM|TEXT) "((?:[^"\\]|\\.)*)"/gu,
+                /HEADER "((?:[^"\\]|\\.)*)" "((?:[^"\\]|\\.)*)"|(SUBJECT|FROM|TO|TEXT) "((?:[^"\\]|\\.)*)"/gu,
               ),
             ].map(([, headerName, headerValue, key, value]) => ({
               name: headerName ?? key ?? '',

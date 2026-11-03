@@ -243,7 +243,7 @@ export const buildUidSearchHeaderCommand = (
 });
 
 /** What `buildUidSearchTextCommand` looks in. `TEXT` is the body alone on some servers. */
-export type UidSearchTextKey = 'SUBJECT' | 'FROM' | 'TEXT';
+export type UidSearchTextKey = 'SUBJECT' | 'FROM' | 'TO' | 'TEXT';
 
 /**
  * One `UID SEARCH <key> <text>`. A printable-ASCII query is a quoted string in the default charset;

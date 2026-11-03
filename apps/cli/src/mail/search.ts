@@ -21,7 +21,7 @@ const hitKey = ({ account, folder, uid }: Omit<Location, 'uidValidity'>) =>
   `${account}/${folder}/${uid}`;
 
 /**
- * `UID SEARCH TEXT` in one mailbox: the newest matches, and the summaries of those the cache does
+ * `uidSearchText` in one mailbox: the newest matches, and the summaries of those the cache does
  * not hold, which are read here and never written to it: the cache stays one contiguous window,
  * which the incremental sync and the older-mail paging rely on.
  */
