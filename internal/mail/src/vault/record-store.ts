@@ -1,6 +1,10 @@
 import { freshVault, type OpenedRecord, type RevisionMarks, type Vault } from '@yozz.app/vault';
 import type { PutPrecondition, VaultRecordEnvelope } from '@yozz.app/vault-contract';
+import { SEND_LEASE_RECORD_TYPE } from '../compose/draft-record.ts';
 import type { VaultRecordApi } from './api.ts';
+
+/** Every lease row seals this: nothing compares a lease's revisions. */
+const LEASE_REVISION = 1;
 
 /** The clear-text revision is not the one sealed inside the ciphertext; the client writes both from one number. */
 export class VaultStoreDisagreementError extends Error {
@@ -36,6 +40,13 @@ export const createRecordStore = ({
   readonly marks: RevisionMarks;
 }): RecordStore => {
   const vault = freshVault(rawVault, marks);
+  /**
+   * A lease keeps no mark and consults none, though it is still sealed and bound to its row. The mark
+   * rises at seal time, so a failed renewal followed by a dead tab would leave a row this device
+   * refuses for ever, and no one writes that row again. It needs no rollback defence: a replayed lease
+   * can only make a send look older, which leads to a banner and never to a send.
+   */
+  const vaultFor = (type: string) => (type === SEND_LEASE_RECORD_TYPE ? rawVault : vault);
 
   /**
    * The column is a claim, the sealed number is the fact. A NULL column predates the column and is
@@ -49,14 +60,14 @@ export const createRecordStore = ({
   };
 
   const get = async (type: string, naturalKey: string): Promise<OpenedRecord | null> => {
-    const id = await vault.recordId(type, naturalKey);
+    const id = await rawVault.recordId(type, naturalKey);
     const envelope = await api.get(type, id);
     if (!envelope) {
       return null;
     }
     return agreeing(
       envelope,
-      await vault.decryptRecord({
+      await vaultFor(type).decryptRecord({
         type,
         naturalKey,
         ciphertext: envelope.ciphertext,
@@ -68,7 +79,7 @@ export const createRecordStore = ({
     type: string,
   ): Promise<readonly (OpenedRecord & { readonly naturalKey: string })[]> => {
     return Array.fromAsync(api.list(type), async envelope =>
-      agreeing(envelope, await vault.decryptListedRecord(type, envelope)),
+      agreeing(envelope, await vaultFor(type).decryptListedRecord(type, envelope)),
     );
   };
 
@@ -82,27 +93,30 @@ export const createRecordStore = ({
     readonly plaintext: string;
     readonly precondition?: PutPrecondition;
   }): Promise<void> => {
-    const id = await vault.recordId(input.type, input.naturalKey);
-    const mark = await marks.highWaterMark(id);
-    /**
-     * A CAS update allocates from the row it replaces. Marks are per device, so allocating from the
-     * mark lets a losing device's mark exceed the winning revision and refuse every later read of
-     * it. Anything below `n + 1` is still refused.
-     */
-    const base =
-      input.precondition !== undefined &&
-      input.precondition.expect === 'revision' &&
-      input.precondition.revision !== null
-        ? input.precondition.revision
-        : (mark ?? 0);
+    const id = await rawVault.recordId(input.type, input.naturalKey);
+    const revision = await (async () => {
+      if (input.type === SEND_LEASE_RECORD_TYPE) return LEASE_REVISION;
+      const mark = await marks.highWaterMark(id);
+      /**
+       * A CAS update allocates from the row it replaces. Marks are per device, so allocating from the
+       * mark lets a losing device's mark exceed the winning revision and refuse every later read of
+       * it. Anything below `n + 1` is still refused.
+       */
+      const base =
+        input.precondition !== undefined &&
+        input.precondition.expect === 'revision' &&
+        input.precondition.revision !== null
+          ? input.precondition.revision
+          : (mark ?? 0);
+      return base + 1;
+    })();
     // Encrypting through freshVault raises the high-water mark before the network PUT.
-    const revision = base + 1;
-    const encrypted = await vault.encryptRecord({ ...input, revision });
+    const encrypted = await vaultFor(input.type).encryptRecord({ ...input, revision });
     await api.put(encrypted, revision, input.precondition);
   };
 
   const remove = async (type: string, naturalKey: string, ifRevision?: number): Promise<void> => {
-    const id = await vault.recordId(type, naturalKey);
+    const id = await rawVault.recordId(type, naturalKey);
     await api.remove(type, id, ifRevision);
     /** The mark survives a delete: clearing it would let a store that withholds a row replay an old ciphertext. */
   };

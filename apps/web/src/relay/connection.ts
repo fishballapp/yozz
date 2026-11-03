@@ -226,12 +226,18 @@ export const connectImap = async (
   return { ok: true, value: { client, close, resumed } };
 };
 
+/** A TLS 1.3 handshake is a few KB. Past it, `@yozz.app/smtp` bounds every reply itself. */
+const SMTP_HANDSHAKE_MS = 60 * 1000;
+
 /** Open, banner, EHLO, authenticate. `close` QUITs first; a 5xx on AUTH is an `auth` failure. */
 export const connectSmtp = async (
   smtp: AddressRecord['smtp'],
 ): Promise<Result<SmtpConnection, MailConnectionFailure>> => {
-  const tls = await openTlsDuplex(smtp, 465, 'SMTPS');
-  if (!tls.ok) return tls;
+  const handshake = new AbortController();
+  const limit = setTimeout(() => handshake.abort(), SMTP_HANDSHAKE_MS);
+  const tls = await openTlsDuplex(smtp, 465, 'SMTPS', undefined, handshake.signal);
+  clearTimeout(limit);
+  if (!tls.ok) return handshake.signal.aborted ? { ok: false, error: { kind: 'stalled' } } : tls;
   const { duplex, close: closeTls } = tls.value;
 
   const client = createSmtpClient(duplex);

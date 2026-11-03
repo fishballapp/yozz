@@ -1,14 +1,25 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fakeRecordStore } from '../testing/fake-record-store.ts';
 import type { RecordStore } from '../vault/record-store.ts';
-import { DRAFT_RECORD_TYPE, type DraftRecord, parseDraftRecord } from './draft-record.ts';
+import {
+  DRAFT_RECORD_TYPE,
+  type DraftRecord,
+  openSendStateOf,
+  parseDraftRecord,
+  SEND_LEASE_CEILING_MS,
+  SEND_LEASE_CLEANUP_MS,
+  SEND_LEASE_MS,
+  SEND_LEASE_RECORD_TYPE,
+} from './draft-record.ts';
 import {
   advanceSend,
   claimSend,
   createDraft,
   type DraftHandle,
+  deleteDraft,
   listDrafts,
   reclaimSend,
+  unconfirmSend,
 } from './draft-vault.ts';
 import { driveSend, resumeSends, type SendEffects } from './send-machine.ts';
 
@@ -41,19 +52,14 @@ const claim = async (
 ): Promise<DraftHandle> => {
   const created = await createDraft(store, { ...content, ...extra }, 0);
   if (!created.ok) throw new Error('the fixture could not create a draft');
-  const claimed = await claimSend(
-    store,
-    created.handle.draftId,
-    {
-      messageId: '<out@x.co>',
-      opId: 'op-1',
-      state: 'submitting',
-      claimedAt: 0,
-      message: frozen,
-      target: { account: 'me@x.co', folder: 'sent' },
-    },
-    0,
-  );
+  const claimed = await claimSend(store, created.handle.draftId, {
+    messageId: '<out@x.co>',
+    opId: 'op-1',
+    state: 'submitting',
+    claimedAt: 0,
+    message: frozen,
+    target: { account: 'me@x.co', folder: 'sent' },
+  });
   if (!claimed.ok) throw new Error('the fixture could not claim the draft');
   return claimed.handle;
 };
@@ -101,21 +107,6 @@ describe('the send state machine', () => {
     expect(record?.deletedAt).toBe(1_000);
     // Sent, so it is nobody's draft any more — including the next unlock's.
     expect(await listDrafts(store)).toEqual([]);
-  });
-
-  it('renews the claim once SMTP has accepted, so the Sent copy has a lifetime of its own', async () => {
-    const { store } = fakeRecordStore();
-    const handle = await claim(store);
-    let during: DraftRecord | null = null;
-    const { effects } = spyEffects(store, {
-      copyToSent: async () => {
-        during = await readRecord(store, handle.draftKey);
-        return { ok: true, value: null };
-      },
-    });
-
-    await driveSend(effects, handle);
-    expect(during).toMatchObject({ send: { state: 'submitted', claimedAt: 1_000 } });
   });
 
   it('gives the draft back when SMTP refuses it, because nothing went out', async () => {
@@ -203,7 +194,7 @@ describe('the send state machine', () => {
     const { store } = fakeRecordStore();
     const handle = await claim(store);
     const failing = spyEffects(store, {
-      copyToSent: async () => ({ ok: false, error: { kind: 'no-sent-mailbox' } }),
+      copyToSent: async () => ({ ok: false, error: { kind: 'stalled' } }),
     });
 
     expect(await driveSend(failing.effects, handle)).toMatchObject({
@@ -428,23 +419,483 @@ describe('the send state machine', () => {
     expect((await readRecord(store, handle.draftKey))?.deletedAt).toBeUndefined();
   });
 
+  describe('a Sent copy that fails', () => {
+    const noFolder = {
+      copyToSent: async () => ({ ok: false, error: { kind: 'no-sent-mailbox' } }),
+    } satisfies Partial<SendEffects>;
+
+    it('finishes the send when there is no Sent folder, as no retry could help', async () => {
+      const { store } = fakeRecordStore();
+      const handle = await claim(store);
+      const { effects, calls } = spyEffects(store, noFolder);
+
+      expect(await driveSend(effects, handle)).toEqual({
+        done: true,
+        sentCopy: { ok: false, error: { kind: 'no-sent-mailbox' } },
+      });
+      expect(calls.expunge).toBe(1);
+      const record = await readRecord(store, handle.draftKey);
+      expect(record).toMatchObject({
+        sentMessageId: '<out@x.co>',
+        deletedAt: 1_000,
+        isSentWithoutCopy: true,
+      });
+      expect(record?.send).toBeUndefined();
+      expect(await listDrafts(store)).toEqual([]);
+    });
+
+    it('finishes one an unlock resumes the same way, without SMTP', async () => {
+      const { store } = fakeRecordStore();
+      const handle = await claim(store);
+      await advanceSend(store, handle.draftId, {
+        ...(handle.record.send as NonNullable<DraftRecord['send']>),
+        state: 'submitted',
+      });
+      const { effects, calls } = spyEffects(store, { ...noFolder, now: () => SEND_LEASE_MS });
+
+      await resumeSends(await listDrafts(store), () => effects);
+      expect(calls.submit).toBe(0);
+      expect(await listDrafts(store)).toEqual([]);
+    });
+
+    it.each([
+      ['a stall', { kind: 'stalled' }],
+      ['a closed connection', { kind: 'imap', reason: { kind: 'closed' } }],
+      ['a refusal', { kind: 'imap', reason: { kind: 'no', text: 'Not allowed' } }],
+      [
+        'a full mailbox',
+        { kind: 'imap', reason: { kind: 'no', text: '[OVERQUOTA] Mailbox full' } },
+      ],
+    ] as const)('keeps the send to settle on %s', async (_name, error) => {
+      const { store } = fakeRecordStore();
+      const handle = await claim(store);
+      const { effects, calls } = spyEffects(store, {
+        copyToSent: async () => ({ ok: false, error }),
+      });
+
+      expect(await driveSend(effects, handle)).toMatchObject({
+        done: false,
+        reason: 'copy-pending',
+      });
+      expect(calls.expunge).toBe(0);
+      const [kept] = await listDrafts(store);
+      expect(kept?.record.send?.state).toBe('submitted');
+      expect(kept && openSendStateOf(kept.record, kept.renewedAt, SEND_LEASE_MS)).toBe('accepted');
+    });
+  });
+
+  describe('the lease a running send keeps', () => {
+    const MINUTE = 60_000;
+
+    beforeEach(() => {
+      vi.useFakeTimers({ now: 0 });
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    const stateOf = async (store: RecordStore) => {
+      const [listed] = await listDrafts(store);
+      if (listed === undefined) throw new Error('the draft should be listed');
+      return openSendStateOf(listed.record, listed.renewedAt, Date.now());
+    };
+
+    /** A send whose SMTP attempt answers only when told. */
+    const slowSend = async (store: RecordStore, over: Partial<SendEffects> = {}) => {
+      const handle = await claim(store);
+      const answer = Promise.withResolvers<Awaited<ReturnType<SendEffects['submit']>>>();
+      const { effects, calls } = spyEffects(store, {
+        submit: () => {
+          calls.submit += 1;
+          return answer.promise;
+        },
+        now: Date.now,
+        ...over,
+      });
+      return { handle, answer, calls, driving: driveSend(effects, handle) };
+    };
+
+    it('cannot be taken over past 15 minutes of slow SMTP replies, so no device delivers twice', async () => {
+      const { store } = fakeRecordStore();
+      const { handle, answer, calls, driving } = await slowSend(store);
+
+      for (const minute of [1, 4, 8, 15, 20]) {
+        await vi.advanceTimersByTimeAsync(minute * MINUTE - Date.now());
+        expect(await stateOf(store)).toBe('sending');
+        expect(await reclaimSend(store, handle.draftId, Date.now())).toBeNull();
+        expect(await unconfirmSend(store, handle.draftId, Date.now())).toBeNull();
+        expect(await deleteDraft(store, handle.draftId, Date.now())).toEqual({
+          outcome: 'sending',
+        });
+      }
+
+      answer.resolve({ ok: true, value: undefined });
+      expect(await driving).toMatchObject({ done: true });
+      expect(calls.submit).toBe(1);
+    });
+
+    it('frees the draft about 3 minutes after the tab dies, and sends nothing on its own', async () => {
+      const { store } = fakeRecordStore();
+      let isDead = false;
+      const dying: RecordStore = {
+        ...store,
+        // A dead tab's timers stop: nothing it would have written lands.
+        put: async input => {
+          if (isDead) throw new Error('the tab is gone');
+          return store.put(input);
+        },
+      };
+      const { calls } = await slowSend(dying);
+      await vi.advanceTimersByTimeAsync(10 * MINUTE);
+      isDead = true;
+      const diedAt = Date.now();
+
+      await vi.advanceTimersByTimeAsync(2 * MINUTE);
+      expect(await stateOf(store)).toBe('sending');
+      await vi.advanceTimersByTimeAsync(2 * MINUTE);
+      expect(await stateOf(store)).toBe('unconfirmed');
+      expect(Date.now() - diedAt).toBeLessThanOrEqual(SEND_LEASE_MS + MINUTE);
+
+      // Another device unlocking while it lapsed resumes nothing that might deliver twice.
+      const unlock = spyEffects(store, { now: Date.now });
+      await resumeSends(await listDrafts(store), () => unlock.effects);
+      expect(unlock.calls).toEqual({ submit: 0, copy: 0, expunge: 0 });
+      expect(calls.submit).toBe(1);
+    });
+
+    it('survives every other renewal being lost', async () => {
+      const { store } = fakeRecordStore();
+      let beat = 0;
+      const flaky: RecordStore = {
+        ...store,
+        put: async input => {
+          if (input.type === SEND_LEASE_RECORD_TYPE) {
+            beat += 1;
+            if (beat % 2 === 1) throw new Error('lost');
+          }
+          return store.put(input);
+        },
+      };
+      await slowSend(flaky);
+      for (const _minute of Array.from({ length: 20 })) {
+        await vi.advanceTimersByTimeAsync(MINUTE);
+        expect(await stateOf(store)).toBe('sending');
+      }
+    });
+
+    it('keeps sending when every lease write fails', async () => {
+      const { store } = fakeRecordStore();
+      const down: RecordStore = {
+        ...store,
+        put: async input => {
+          if (input.type === SEND_LEASE_RECORD_TYPE) throw new Error('down');
+          return store.put(input);
+        },
+      };
+      const { answer, driving } = await slowSend(down);
+      await vi.advanceTimersByTimeAsync(5 * MINUTE);
+      answer.resolve({ ok: true, value: undefined });
+      expect(await driving).toMatchObject({ done: true });
+    });
+
+    /** A store whose lease writes never answer, and how many were started. */
+    const hanging = (store: RecordStore) => {
+      const count = { renewals: 0 };
+      const hung: RecordStore = {
+        ...store,
+        put: input =>
+          input.type === SEND_LEASE_RECORD_TYPE
+            ? (() => {
+                count.renewals += 1;
+                return new Promise<void>(() => {});
+              })()
+            : store.put(input),
+      };
+      return { hung, count };
+    };
+
+    it('never writes the draft to stay held, and renews one write at a time', async () => {
+      const { store, rows, key } = fakeRecordStore();
+      const { hung, count } = hanging(store);
+      const { handle } = await slowSend(hung);
+      const row = rows.get(key(DRAFT_RECORD_TYPE, handle.draftKey));
+      await vi.advanceTimersByTimeAsync(10 * MINUTE);
+      expect(rows.get(key(DRAFT_RECORD_TYPE, handle.draftKey))).toEqual(row);
+      // One at a time, or an older write could land over a newer one.
+      expect(count.renewals).toBe(1);
+    });
+
+    it('does not hold a finished send on a lease write that hangs', async () => {
+      const { store } = fakeRecordStore();
+      const { hung } = hanging(store);
+      const { answer, driving } = await slowSend(hung);
+      await vi.advanceTimersByTimeAsync(MINUTE);
+      answer.resolve({ ok: true, value: undefined });
+      let isSettled = false;
+      void driving.then(() => {
+        isSettled = true;
+      });
+      await vi.advanceTimersByTimeAsync(SEND_LEASE_CLEANUP_MS);
+      expect(isSettled).toBe(true);
+      expect(await driving).toMatchObject({ done: true });
+      expect(vi.getTimerCount()).toBe(0);
+    });
+
+    it('does not hold a finished send on a remove that hangs', async () => {
+      const { store } = fakeRecordStore();
+      const hung: RecordStore = { ...store, remove: () => new Promise(() => {}) };
+      const { answer, driving } = await slowSend(hung);
+      await vi.advanceTimersByTimeAsync(MINUTE);
+      answer.resolve({ ok: true, value: undefined });
+      await vi.advanceTimersByTimeAsync(SEND_LEASE_CLEANUP_MS);
+      expect(await driving).toMatchObject({ done: true });
+    });
+
+    it('stops an unlock stalling on one send whose lease write hangs', async () => {
+      const { store } = fakeRecordStore();
+      const { hung } = hanging(store);
+      const first = await claim(store);
+      const second = await claim(store);
+      for (const { draftId, record } of [first, second]) {
+        await advanceSend(store, draftId, {
+          ...(record.send as NonNullable<DraftRecord['send']>),
+          state: 'submitted',
+        });
+      }
+      vi.setSystemTime(SEND_LEASE_MS);
+      const slowCopy = Promise.withResolvers<void>();
+      const { effects, calls } = spyEffects(hung, {
+        now: Date.now,
+        copyToSent: async () => {
+          calls.copy += 1;
+          if (calls.copy === 1) await slowCopy.promise;
+          return { ok: true, value: null };
+        },
+      });
+      const resuming = resumeSends(await listDrafts(store), () => effects);
+      await vi.advanceTimersByTimeAsync(MINUTE);
+      slowCopy.resolve();
+      await vi.advanceTimersByTimeAsync(SEND_LEASE_CLEANUP_MS);
+      await resuming;
+      expect(calls.copy).toBe(2);
+    });
+
+    it('still removes the row first when it can, so a list after a failed copy sees no fresh lease', async () => {
+      const { store, rows, key } = fakeRecordStore();
+      const slowly: RecordStore = {
+        ...store,
+        remove: async (...args) => {
+          await new Promise(resolve => setTimeout(resolve, 1_000));
+          return store.remove(...args);
+        },
+      };
+      const { handle, answer, driving } = await slowSend(slowly, {
+        copyToSent: async () => ({ ok: false, error: { kind: 'stalled' } }),
+      });
+      const opId = handle.record.send?.opId ?? '';
+      // Past the claim's own 3 minutes, so only the lease row could still say Sending.
+      await vi.advanceTimersByTimeAsync(4 * MINUTE);
+      expect(rows.has(key(SEND_LEASE_RECORD_TYPE, opId))).toBe(true);
+      const rowWhenItEnded = driving.then(() => rows.has(key(SEND_LEASE_RECORD_TYPE, opId)));
+      answer.resolve({ ok: true, value: undefined });
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(await rowWhenItEnded).toBe(false);
+      expect(await driving).toMatchObject({ reason: 'copy-pending' });
+      expect(await stateOf(store)).toBe('accepted');
+    });
+
+    it('stops renewing at its ceiling without touching the attempt', async () => {
+      const { store } = fakeRecordStore();
+      const { answer, driving } = await slowSend(store);
+      await vi.advanceTimersByTimeAsync(SEND_LEASE_CEILING_MS - MINUTE);
+      expect(await stateOf(store)).toBe('sending');
+      await vi.advanceTimersByTimeAsync(MINUTE + SEND_LEASE_MS);
+      expect(await stateOf(store)).toBe('unconfirmed');
+      expect(vi.getTimerCount()).toBe(0);
+      // The attempt was never cut off: a late yes still lands.
+      answer.resolve({ ok: true, value: undefined });
+      expect(await driving).toMatchObject({ done: true });
+    });
+
+    it('writes no lease for a send over before the first beat', async () => {
+      const { store } = fakeRecordStore();
+      const put = vi.fn(store.put);
+      const handle = await claim(store);
+      const { effects } = spyEffects({ ...store, put }, { now: Date.now });
+      await driveSend(effects, handle);
+      expect(put.mock.calls.map(([{ type }]) => type)).not.toContain(SEND_LEASE_RECORD_TYPE);
+    });
+
+    const ENDINGS: readonly {
+      readonly name: string;
+      readonly over: Partial<SendEffects>;
+      readonly outcome: 'resolves' | 'rejects';
+    }[] = [
+      {
+        name: 'it finishes',
+        over: { submit: async () => ({ ok: true, value: undefined }) },
+        outcome: 'resolves',
+      },
+      {
+        name: 'SMTP refuses it',
+        over: { submit: async () => ({ ok: false, error: { kind: 'error', detail: 'no' } }) },
+        outcome: 'resolves',
+      },
+      {
+        name: "SMTP's answer is lost",
+        over: {
+          submit: async () => ({
+            ok: false,
+            error: { kind: 'smtp', reason: { kind: 'unconfirmed', detail: 'x' } },
+          }),
+        },
+        outcome: 'resolves',
+      },
+      {
+        name: 'the copy fails',
+        over: {
+          copyToSent: async () => ({ ok: false, error: { kind: 'stalled' } }),
+        },
+        outcome: 'resolves',
+      },
+      {
+        name: 'there is no Sent folder',
+        over: {
+          copyToSent: async () => ({ ok: false, error: { kind: 'no-sent-mailbox' } }),
+        },
+        outcome: 'resolves',
+      },
+      {
+        name: 'SMTP throws',
+        over: {
+          submit: async () => {
+            throw new Error('boom');
+          },
+        },
+        outcome: 'rejects',
+      },
+      {
+        name: 'the copy throws',
+        over: {
+          copyToSent: async () => {
+            throw new Error('boom');
+          },
+        },
+        outcome: 'rejects',
+      },
+    ];
+
+    it.each(ENDINGS)(
+      'stops the heartbeat and removes its row when $name',
+      async ({ over, outcome }) => {
+        const { store, rows, key } = fakeRecordStore();
+        const handle = await claim(store);
+        const send = handle.record.send;
+        if (send === undefined) throw new Error('the fixture claims');
+        const started = Promise.withResolvers<void>();
+        const { effects } = spyEffects(store, {
+          now: Date.now,
+          ...over,
+          // Past a beat, so there is a row to remove.
+          submit: async (...args) => {
+            await started.promise;
+            return (over.submit ?? (async () => ({ ok: true, value: undefined })))(...args);
+          },
+        });
+        const driving = driveSend(effects, handle);
+        const ended = expect(driving)[outcome].toBeDefined();
+        await vi.advanceTimersByTimeAsync(MINUTE);
+        expect(rows.has(key(SEND_LEASE_RECORD_TYPE, send.opId))).toBe(true);
+
+        started.resolve();
+        await ended;
+        expect(vi.getTimerCount()).toBe(0);
+        expect(rows.has(key(SEND_LEASE_RECORD_TYPE, send.opId))).toBe(false);
+      },
+    );
+
+    it('stops the heartbeat when the record moved on without it', async () => {
+      const { store } = fakeRecordStore();
+      const { handle, answer, driving } = await slowSend(store);
+      await reclaimSend(store, handle.draftId, SEND_LEASE_MS * 100);
+      answer.resolve({ ok: true, value: undefined });
+      expect(await driving).toEqual({ done: false, reason: 'unconfirmed' });
+      expect(vi.getTimerCount()).toBe(0);
+    });
+  });
+
+  describe('an unlock finishing what another left', () => {
+    const accepted = async (store: RecordStore) => {
+      const handle = await claim(store);
+      const submitted = await advanceSend(store, handle.draftId, {
+        ...(handle.record.send as NonNullable<DraftRecord['send']>),
+        state: 'submitted',
+      });
+      if (submitted === null) throw new Error('the fixture could not advance');
+      return submitted;
+    };
+
+    it('leaves a copy another device is still storing, however it reads', async () => {
+      const { store } = fakeRecordStore();
+      await accepted(store);
+      const { effects, calls } = spyEffects(store, { now: () => SEND_LEASE_MS - 1 });
+      await resumeSends(await listDrafts(store), () => effects);
+      expect(calls.copy).toBe(0);
+    });
+
+    it('takes it over under a fresh claim once nobody runs it', async () => {
+      const { store } = fakeRecordStore();
+      const { draftKey } = await accepted(store);
+      let during: DraftRecord | null = null;
+      const { effects, calls } = spyEffects(store, {
+        now: () => SEND_LEASE_MS,
+        copyToSent: async () => {
+          during = await readRecord(store, draftKey);
+          return { ok: true, value: null };
+        },
+      });
+      await resumeSends(await listDrafts(store), () => effects);
+      expect(during).toMatchObject({ send: { state: 'submitted', claimedAt: SEND_LEASE_MS } });
+      expect(calls.submit).toBe(0);
+      expect(await listDrafts(store)).toEqual([]);
+    });
+
+    it('lets one of two devices unlocking together do it', async () => {
+      const { store } = fakeRecordStore();
+      await accepted(store);
+      const listed = await listDrafts(store);
+      const first = spyEffects(store, { now: () => SEND_LEASE_MS });
+      const held = Promise.withResolvers<void>();
+      const running = resumeSends(listed, () => ({
+        ...first.effects,
+        copyToSent: async () => {
+          first.calls.copy += 1;
+          await held.promise;
+          return { ok: true, value: null };
+        },
+      }));
+      await vi.waitFor(() => expect(first.calls.copy).toBe(1));
+      const second = spyEffects(store, { now: () => SEND_LEASE_MS });
+      await resumeSends(listed, () => second.effects);
+      expect(second.calls.copy).toBe(0);
+      held.resolve();
+      await running;
+    });
+  });
+
   it('never sends a claim from a build that froze only `bytes`: its files would be missing', async () => {
     // What an older client's claim reads as here: the field it wrote is gone, the target is not.
     const { store } = fakeRecordStore();
     const created = await createDraft(store, content, 0);
     if (!created.ok) throw new Error('the fixture could not create a draft');
-    const claimed = await claimSend(
-      store,
-      created.handle.draftId,
-      {
-        messageId: '<out@x.co>',
-        opId: 'op-1',
-        state: 'submitting',
-        claimedAt: 0,
-        target: 'vault',
-      },
-      0,
-    );
+    const claimed = await claimSend(store, created.handle.draftId, {
+      messageId: '<out@x.co>',
+      opId: 'op-1',
+      state: 'submitting',
+      claimedAt: 0,
+      target: 'vault',
+    });
     if (!claimed.ok) throw new Error('the fixture could not claim the draft');
     const { effects, calls } = spyEffects(store);
 
@@ -459,12 +910,12 @@ describe('the send state machine', () => {
     const { store } = fakeRecordStore();
     const created = await createDraft(store, content, 0);
     if (!created.ok) return;
-    const claimed = await claimSend(
-      store,
-      created.handle.draftId,
-      { messageId: '<out@x.co>', opId: 'op-1', state: 'submitting', claimedAt: 0 },
-      0,
-    );
+    const claimed = await claimSend(store, created.handle.draftId, {
+      messageId: '<out@x.co>',
+      opId: 'op-1',
+      state: 'submitting',
+      claimedAt: 0,
+    });
     if (!claimed.ok) return;
     const { effects, calls } = spyEffects(store);
 

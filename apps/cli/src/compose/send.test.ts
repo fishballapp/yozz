@@ -1,14 +1,18 @@
 import * as NodeServices from '@effect/platform-node/NodeServices';
 import { assert, describe, expect, layer } from '@effect/vitest';
+import { SEND_LEASE_MS } from '@yozz.app/mail/compose/draft-record';
 import { appendQuietLimitMs } from '@yozz.app/mail/connection';
 import { DATA_END_TIMEOUT_MS } from '@yozz.app/smtp';
+import * as Clock from 'effect/Clock';
 import * as Effect from 'effect/Effect';
 import * as Exit from 'effect/Exit';
 import * as FileSystem from 'effect/FileSystem';
 import * as Path from 'effect/Path';
-import { ADDRESS, mail } from '../mail/mail-world.ts';
+import * as TestClock from 'effect/testing/TestClock';
+import { makeFakeImapServer } from '../mail/fake-imap-server.ts';
+import { ADDRESS, IMAP_HOST, mail } from '../mail/mail-world.ts';
 import { QUIET_LIMIT_MS } from '../mail/servers.ts';
-import { failureOf } from '../test-world.ts';
+import { failureOf, runCli } from '../test-world.ts';
 import { makeComposeWorld, SEND_ONLY } from './compose-world.ts';
 
 /** The ids of the conversations a list prints. */
@@ -157,7 +161,8 @@ layer(NodeServices.layer)(it => {
           if (unconfirmed === undefined) throw new Error('the lost send left no claim');
           const commands = smtp.commands.length;
 
-          // A tab closed between the claim and SMTP's answer: the record still says submitting.
+          // A tab closed between the claim and SMTP's answer, and its lease over: the record still says submitting.
+          yield* TestClock.adjust(SEND_LEASE_MS);
           const stuck = yield* rewriteDraft(key, record => ({
             ...record,
             send: { ...unconfirmed, state: 'submitting' },
@@ -226,23 +231,60 @@ layer(NodeServices.layer)(it => {
       }),
     );
 
-    it.effect('finishes a send that went out but kept no Sent copy, without SMTP', () =>
+    it.effect('finishes a send with no Sent folder, and says no copy was kept, every time', () =>
       Effect.gen(function* () {
         const { server, smtp, run, drafts } = yield* makeComposeWorld();
-        const sentFolder = server.mailboxes.get('Sent');
         server.mailboxes.delete('Sent');
         const { draft } = JSON.parse(
           (yield* run(['draft', '--from', ADDRESS, '--to', 'kate@example.com'])).stdout,
         );
         const key = draft.id.slice('draft/'.length);
 
-        const pending = yield* run(['send', draft.draftId]);
+        const first = yield* run(['send', draft.draftId]);
+        assert.isTrue(Exit.isSuccess(first.exit), first.stderr);
+        expect(JSON.parse(first.stdout)).toMatchObject({
+          sent: true,
+          replayed: false,
+          sentCopy: 'none',
+        });
+        expect((yield* drafts)[key]?.deletedAt).toBeDefined();
+
+        const again = yield* run(['send', draft.draftId]);
+        expect(JSON.parse(again.stdout)).toMatchObject({ replayed: true, sentCopy: 'none' });
+        expect(smtp.delivered).toHaveLength(1);
+      }),
+    );
+
+    it.effect('finishes a send that went out but kept no Sent copy, without SMTP', () =>
+      Effect.gen(function* () {
+        const { world, homes, servers, server, smtp, run, drafts } = yield* makeComposeWorld();
+        const dropsAppend = makeFakeImapServer({
+          username: ADDRESS,
+          password: 'secret',
+          quirks: { dropsOn: command => command.startsWith('APPEND') },
+        });
+        const runWhileDropping = (args: readonly string[]) =>
+          runCli(args, {
+            fetch: world.fetch,
+            homes,
+            servers: { ...servers, [IMAP_HOST]: dropsAppend },
+          });
+        const { draft } = JSON.parse(
+          (yield* run(['draft', '--from', ADDRESS, '--to', 'kate@example.com'])).stdout,
+        );
+        const key = draft.id.slice('draft/'.length);
+
+        const pending = yield* runWhileDropping(['send', draft.draftId]);
 
         assert.isTrue(Exit.isSuccess(pending.exit), pending.stderr);
         expect(JSON.parse(pending.stdout)).toMatchObject({ sent: true, sentCopy: 'pending' });
         expect((yield* drafts)[key]?.send?.state).toBe('submitted');
 
-        if (sentFolder !== undefined) server.mailboxes.set('Sent', sentFolder);
+        // Each run takes the send over under a claim of its own, so no other can run beside it.
+        const firstClaim = (yield* drafts)[key]?.send?.opId;
+        yield* runWhileDropping(['send', draft.draftId]);
+        expect((yield* drafts)[key]?.send?.opId).not.toBe(firstClaim);
+
         const commands = smtp.commands.length;
         const finished = yield* run(['send', draft.draftId]);
         assert.isTrue(Exit.isSuccess(finished.exit), finished.stderr);
@@ -255,6 +297,32 @@ layer(NodeServices.layer)(it => {
         expect(smtp.delivered).toHaveLength(1);
         expect(server.mailboxes.get('Sent')?.messages).toHaveLength(1);
         expect((yield* drafts)[key]?.deletedAt).toBeDefined();
+      }),
+    );
+
+    it.effect('refuses a draft a send holds now, and sends nothing', () =>
+      Effect.gen(function* () {
+        const { run, smtp, rewriteDraft } = yield* makeComposeWorld();
+        const { draft } = JSON.parse(
+          (yield* run(['draft', '--from', ADDRESS, '--to', 'kate@example.com'])).stdout,
+        );
+        const key = draft.id.slice('draft/'.length);
+        const claim = {
+          messageId: '<elsewhere@fishball.ltd>',
+          opId: 'op-elsewhere',
+          claimedAt: yield* Clock.currentTimeMillis,
+          message: { head: btoa('Subject: x\r\n\r\nx'), splices: [] },
+          target: { account: ADDRESS, folder: 'sent' },
+        };
+        for (const state of ['submitting', 'submitted'] as const) {
+          const claimed = yield* rewriteDraft(key, record => ({
+            ...record,
+            send: { ...claim, state },
+          }));
+          const sent = yield* run(['send', claimed]);
+          expect(failureOf(sent.stderr), state).toMatchObject({ code: 'DraftSending' });
+        }
+        expect(smtp.delivered).toHaveLength(0);
       }),
     );
 

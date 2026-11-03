@@ -7,11 +7,22 @@ import {
 } from '@yozz.app/vault';
 import type { VaultRecordEnvelope } from '@yozz.app/vault-contract';
 import { beforeEach, describe, expect, it } from 'vitest';
+import { SEND_LEASE_RECORD_TYPE } from '../compose/draft-record.ts';
+import {
+  claimSend,
+  createDraft,
+  keepSendLease,
+  listDrafts,
+  purgeSendLeases,
+  readSendLease,
+} from '../compose/draft-vault.ts';
 import type { VaultRecordApi } from './api.ts';
 import { createRecordStore } from './record-store.ts';
 
 class InMemoryVaultApi implements VaultRecordApi {
   private records = new Map<string, VaultRecordEnvelope>();
+  /** A PUT that never reached the server. */
+  isOffline = false;
 
   async get(type: string, id: string): Promise<VaultRecordEnvelope | null> {
     const key = `${type}:${id}`;
@@ -27,6 +38,7 @@ class InMemoryVaultApi implements VaultRecordApi {
   }
 
   async put(record: EncryptedRecord, revision: number): Promise<void> {
+    if (this.isOffline) throw new Error('network down');
     const key = `${record.type}:${record.id}`;
     this.records.set(key, {
       id: record.id,
@@ -221,5 +233,132 @@ describe('RecordStore with freshVault and revision marks', () => {
     await store.put({ type: 'account', naturalKey: 'a@b.c', plaintext: 'recreated' });
 
     expect(await store.get('account', 'a@b.c')).toMatchObject({ plaintext: 'recreated' });
+  });
+});
+
+describe('a send lease on the real store', () => {
+  const opened = async () => {
+    const keys = await deriveAccountKeys({ email: 'user@example.com', password: 'password123456' });
+    const { vault } = await createVault(keys);
+    const api = new InMemoryVaultApi();
+    const marks = inMemoryRevisionMarks();
+    // A reload: a new store over the same device's marks.
+    const reload = () => createRecordStore({ vault, api, marks });
+    return { api, marks, reload, vault };
+  };
+
+  const CONTENT = {
+    from: 'me@x.co',
+    to: 'you@x.co',
+    cc: '',
+    bcc: '',
+    subject: 'Hi',
+    body: 'Hello',
+  };
+
+  const claimed = async (store: ReturnType<typeof createRecordStore>) => {
+    const created = await createDraft(store, CONTENT, 0);
+    if (!created.ok) throw new Error('the fixture could not create a draft');
+    const claim = await claimSend(store, created.handle.draftId, {
+      messageId: '<m@x.co>',
+      opId: 'op-1',
+      state: 'submitting',
+      claimedAt: 0,
+    });
+    if (!claim.ok) throw new Error('the fixture could not claim');
+    return claim.handle;
+  };
+
+  const renew = (store: ReturnType<typeof createRecordStore>, renewedAt: number) =>
+    store.put({
+      type: SEND_LEASE_RECORD_TYPE,
+      naturalKey: 'op-1',
+      plaintext: JSON.stringify({ renewedAt }),
+    });
+
+  it('keeps a device loading its drafts after a failed renewal and a dead tab, and sweeps the row', async () => {
+    const { api, reload } = await opened();
+    const tab = reload();
+    const { record } = await claimed(tab);
+    await renew(tab, 1_000);
+
+    api.isOffline = true;
+    await expect(renew(tab, 46_000)).rejects.toThrow('network down');
+    api.isOffline = false;
+
+    // The tab dies, and nobody ever writes that row again.
+    const next = reload();
+    const [listed] = await listDrafts(next);
+    expect(listed?.renewedAt).toBe(1_000);
+    expect(await readSendLease(next, record)).toBe(1_000);
+    await purgeSendLeases(next, 1_000_000);
+    expect(await next.list(SEND_LEASE_RECORD_TYPE)).toEqual([]);
+    expect(await listDrafts(next)).toHaveLength(1);
+  });
+
+  it('keeps a live tab reading between a failed beat and the next good one', async () => {
+    const { api, reload } = await opened();
+    const tab = reload();
+    await claimed(tab);
+    await renew(tab, 1_000);
+    api.isOffline = true;
+    await renew(tab, 46_000).catch(() => undefined);
+    api.isOffline = false;
+
+    expect((await listDrafts(tab))[0]?.renewedAt).toBe(1_000);
+    await renew(tab, 91_000);
+    expect((await listDrafts(tab))[0]?.renewedAt).toBe(91_000);
+  });
+
+  it('keeps no marks for a lease, and still marks everything else', async () => {
+    const { marks, reload, vault } = await opened();
+    const tab = reload();
+    await claimed(tab);
+    await renew(tab, 1_000);
+    expect(await marks.highWaterMark(await vault.recordId(SEND_LEASE_RECORD_TYPE, 'op-1'))).toBe(
+      undefined,
+    );
+    await tab.list(SEND_LEASE_RECORD_TYPE);
+    expect(await marks.highWaterMark(await vault.recordId(SEND_LEASE_RECORD_TYPE, 'op-1'))).toBe(
+      undefined,
+    );
+    expect(await marks.highWaterMark(await vault.recordId('account', 'x'))).toBe(undefined);
+    await tab.put({ type: 'account', naturalKey: 'x', plaintext: '{}' });
+    expect(await marks.highWaterMark(await vault.recordId('account', 'x'))).toBe(1);
+  });
+
+  it('consults no mark: one already left for a lease row neither refuses it nor moves its revision', async () => {
+    const { marks, reload, vault } = await opened();
+    const id = await vault.recordId(SEND_LEASE_RECORD_TYPE, 'op-1');
+    await marks.raiseTo(id, 5);
+    const tab = reload();
+    await renew(tab, 1_000);
+    expect((await tab.get(SEND_LEASE_RECORD_TYPE, 'op-1'))?.revision).toBe(1);
+    expect((await tab.list(SEND_LEASE_RECORD_TYPE)).map(({ revision }) => revision)).toEqual([1]);
+    expect(await marks.highWaterMark(id)).toBe(5);
+  });
+
+  it("still seals a lease to its row: another row's ciphertext does not open", async () => {
+    const { api, reload, vault } = await opened();
+    const tab = reload();
+    await renew(tab, 1_000);
+    const id = await vault.recordId(SEND_LEASE_RECORD_TYPE, 'op-1');
+    const row = await api.get(SEND_LEASE_RECORD_TYPE, id);
+    if (row === null) throw new Error('the lease was not stored');
+    const other = await vault.recordId(SEND_LEASE_RECORD_TYPE, 'op-2');
+    api.setRaw(SEND_LEASE_RECORD_TYPE, other, row.ciphertext, row.revision);
+    await expect(tab.get(SEND_LEASE_RECORD_TYPE, 'op-2')).rejects.toThrow();
+  });
+
+  it('survives a real heartbeat whose write fails when the send ends', async () => {
+    const { api, reload } = await opened();
+    const tab = reload();
+    await claimed(tab);
+    await renew(tab, 1_000);
+    api.isOffline = true;
+    const stop = keepSendLease(tab, 'op-1', () => 2_000);
+    await stop();
+    api.isOffline = false;
+    expect(await listDrafts(reload())).toHaveLength(1);
   });
 });

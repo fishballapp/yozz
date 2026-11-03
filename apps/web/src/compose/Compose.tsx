@@ -102,6 +102,13 @@ const reportSend = (settled: Promise<SendReport>, reopen: (draftKey: string) => 
   });
 };
 
+/** What the banner says of a send on the open draft. */
+const SEND_STATE_NOTICE = {
+  sending: 'Sending — this draft is frozen until it finishes.',
+  unconfirmed: 'This may already have been sent.',
+  accepted: 'This was sent, but could not be saved to Sent.',
+} as const;
+
 /** Every refusal a discard can meet. The composer has closed, so each says where the draft is. */
 const DISCARD_REFUSALS: Record<Exclude<DeleteOutcome['outcome'], 'deleted' | 'absent'>, string> = {
   conflict: 'Another device changed it, so it is still in Drafts.',
@@ -242,7 +249,9 @@ export const Compose = () => {
     resolveDraftConflict,
     openSendState,
     isOpenDraftFrozen,
+    isOpenSendOver,
     sendAgain,
+    finishWithoutCopy,
     backToEditing,
     discardDraft,
   } = useComposer();
@@ -251,6 +260,11 @@ export const Compose = () => {
   const close = () => {
     void navigate({ to: '.', search: withoutCompose, replace: true });
   };
+
+  // Its send ended while it was on screen, so there is nothing left here to write or send.
+  useEffect(() => {
+    if (isOpenSendOver) void navigate({ to: '.', search: withoutCompose, replace: true });
+  }, [isOpenSendOver, navigate]);
 
   /** Puts a refused send back in front of the person, by key. */
   const reopenDraft = (draftKey: string) => {
@@ -305,6 +319,38 @@ export const Compose = () => {
     return () => cancelAnimationFrame(frame);
     // Both deps are fixed for the life of a draft.
   }, [isOpen, startedAsReply]);
+
+  /** Send, and a takeover, which goes on the same way once it is claimed. */
+  const pressSend = (press: () => Promise<Awaited<ReturnType<typeof send>> | null>) => {
+    // A lock or a sign-in during the claim hands this composer to the next
+    // session: its draft is not closed, and none of this send is said in it.
+    const isCurrent = watchSession();
+    const identityId = draft?.identityId ?? '';
+    void (async () => {
+      setIsSending(true);
+      setSendError(null);
+      try {
+        const claimed = await press();
+        // Refused for a send still running, which the banner now says.
+        if (claimed === null || !isCurrent()) return;
+        if (!claimed.ok) {
+          const host =
+            identities.find(identity => identity.address === identityId)?.smtp.host ?? identityId;
+          setSendError(describeMailFailure(claimed.error, host));
+          return;
+        }
+        // The bytes are frozen; the rest of the send outlives this dialog.
+        close();
+        reportSend(claimed.value.settled, reopenDraft);
+      } catch (err) {
+        if (isCurrent()) {
+          setSendError(err instanceof Error ? err.message : String(err));
+        }
+      } finally {
+        setIsSending(false);
+      }
+    })();
+  };
 
   const uploadProblem = uploadProblemOf(draft?.attachments ?? []);
   const sendLabel = (() => {
@@ -389,17 +435,35 @@ export const Compose = () => {
               // Nothing resends on its own: the message may be at its recipient already.
               <div className="flex shrink-0 flex-wrap items-center gap-3 border-b border-rule bg-ink-sunken px-4 py-3">
                 <p role="alert" className="text-base text-paper-dim">
-                  {openSendState === 'sending'
-                    ? 'Sending — this draft is frozen until it finishes.'
-                    : 'This may already have been sent.'}
+                  {SEND_STATE_NOTICE[openSendState]}
                 </p>
                 {openSendState === 'unconfirmed' && (
                   <>
-                    <Button variant="secondary" size="sm" onClick={() => void sendAgain()}>
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      disabled={isSending}
+                      onClick={() => pressSend(sendAgain)}
+                    >
                       Send again
                     </Button>
                     <Button variant="ghost" size="sm" onClick={() => void backToEditing()}>
                       Back to editing
+                    </Button>
+                  </>
+                )}
+                {openSendState === 'accepted' && (
+                  <>
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      disabled={isSending}
+                      onClick={() => pressSend(sendAgain)}
+                    >
+                      Save to Sent
+                    </Button>
+                    <Button variant="ghost" size="sm" onClick={() => void finishWithoutCopy()}>
+                      Finish without copy
                     </Button>
                   </>
                 )}
@@ -634,35 +698,7 @@ export const Compose = () => {
                     <Button
                       variant="primary"
                       className="h-11 lg:h-8"
-                      onClick={() => {
-                        // A lock or a sign-in during the claim hands this composer to the next
-                        // session: its draft is not closed, and none of this send is said in it.
-                        const isCurrent = watchSession();
-                        void (async () => {
-                          setIsSending(true);
-                          setSendError(null);
-                          try {
-                            const claimed = await send();
-                            if (!isCurrent()) return;
-                            if (!claimed.ok) {
-                              const host =
-                                identities.find(identity => identity.address === draft.identityId)
-                                  ?.smtp.host ?? draft.identityId;
-                              setSendError(describeMailFailure(claimed.error, host));
-                              return;
-                            }
-                            // The bytes are frozen; the rest of the send outlives this dialog.
-                            close();
-                            reportSend(claimed.value.settled, reopenDraft);
-                          } catch (err) {
-                            if (isCurrent()) {
-                              setSendError(err instanceof Error ? err.message : String(err));
-                            }
-                          } finally {
-                            setIsSending(false);
-                          }
-                        })();
-                      }}
+                      onClick={() => pressSend(send)}
                       // A Bcc-only send is a real message.
                       disabled={
                         isSending ||

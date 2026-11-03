@@ -1,8 +1,14 @@
 import { isInbound } from '@yozz.app/mail/addresses/record';
 import { addressList } from '@yozz.app/mail/compose/draft';
 import { expungeMirror } from '@yozz.app/mail/compose/draft-mirror';
-import { draftIdOf } from '@yozz.app/mail/compose/draft-record';
-import { claimSend, type DraftHandle, readMirror } from '@yozz.app/mail/compose/draft-vault';
+import { draftIdOf, heldSend } from '@yozz.app/mail/compose/draft-record';
+import {
+  claimSend,
+  type DraftHandle,
+  readMirror,
+  readSendLease,
+  reclaimSend,
+} from '@yozz.app/mail/compose/draft-vault';
 import { envelopeRecipients, storeSentCopy } from '@yozz.app/mail/compose/send';
 import { driveSend, type SendEffects } from '@yozz.app/mail/compose/send-machine';
 import { sentRecordFrom, storeSentRecord } from '@yozz.app/mail/compose/sent-vault';
@@ -46,11 +52,11 @@ export const sendCommand = Command.make(
     const sent = ({
       messageId,
       isReplayed,
-      isCopyPending,
+      sentCopy,
     }: {
       readonly messageId: string;
       readonly isReplayed: boolean;
-      readonly isCopyPending: boolean;
+      readonly sentCopy: 'stored' | 'pending' | 'none';
     }) => {
       // Any message id in a conversation names it: a reply's is the message it answers.
       const threadId = record.threadId ?? messageIdOf(record.inReplyTo ?? messageId);
@@ -59,7 +65,7 @@ export const sendCommand = Command.make(
         replayed: isReplayed,
         messageId: messageIdOf(messageId),
         threadId,
-        sentCopy: isCopyPending ? 'pending' : 'stored',
+        sentCopy,
         url: `${webUrl}/m/sent/t/${encodeURIComponent(threadId)}`,
       });
     };
@@ -70,8 +76,13 @@ export const sendCommand = Command.make(
       return yield* sent({
         messageId: record.sentMessageId,
         isReplayed: true,
-        isCopyPending: false,
+        sentCopy: record.isSentWithoutCopy === true ? 'none' : 'stored',
       });
+    }
+    // Another device or run is at it now, which is not the question below.
+    const renewedAt = yield* vault.use(store => readSendLease(store, record));
+    if (heldSend(record, renewedAt, now()) !== undefined) {
+      return yield* refusedSave(draftId, { ok: false, reason: 'sending' });
     }
     const unsettled = record.unconfirmedSend ?? record.send;
     if (unsettled?.state === 'submitting' || unsettled?.state === 'unconfirmed') {
@@ -134,7 +145,12 @@ export const sendCommand = Command.make(
     const claimed: DraftHandle = yield* Effect.gen(function* () {
       // Claimed by an earlier run that got as far as SMTP's yes: finish the copy and the tombstone.
       if (record.send !== undefined) {
-        return { draftKey: key, draftId: draftIdOf(key, record.contentVersion), record };
+        const currentDraftId = draftIdOf(key, record.contentVersion);
+        const reclaimed = yield* vault.use(store => reclaimSend(store, currentDraftId, now()));
+        if (reclaimed === null) {
+          return yield* refusedSave(draftId, { ok: false, reason: 'sending' });
+        }
+        return reclaimed;
       }
       if (version !== record.contentVersion) {
         return yield* refusedSave(draftId, {
@@ -159,7 +175,7 @@ export const sendCommand = Command.make(
       const send = yield* claimFor({ identity, key, record, now: now() });
       // Phase (0): the message goes into the record, under compare-and-swap on the version named, before
       // SMTP sees them, so no other run or device can send it too.
-      const claim = yield* vault.use(store => claimSend(store, draftId, send, now()));
+      const claim = yield* vault.use(store => claimSend(store, draftId, send));
       if (!claim.ok) return yield* refusedSave(draftId, claim);
       return claim.handle;
     });
@@ -199,7 +215,10 @@ export const sendCommand = Command.make(
     yield* sent({
       messageId: send.messageId,
       isReplayed,
-      isCopyPending: !progress.done,
+      sentCopy: (() => {
+        if (!progress.done) return 'pending';
+        return progress.sentCopy.ok ? 'stored' : 'none';
+      })(),
     });
   }, reportFailure),
 ).pipe(
@@ -214,7 +233,8 @@ yozz.app. SendRefused means the server said no, or an attached file could not be
 out, and the draft can be sent again.
 
 "sentCopy": "pending" means it went out but the copy in Sent is not stored yet; sending the same
-draftId again stores it.
+draftId again stores it. "none" means it went out and no copy was kept: the address's mailbox has no
+Sent folder, or the person finished it without one in yozz.app, and sending again changes nothing.
 
 Output:
   {

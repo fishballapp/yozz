@@ -1,20 +1,26 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { fakeRecordStore as fakeStore } from '../testing/fake-record-store.ts';
 import type { RecordStore } from '../vault/record-store.ts';
 import {
   DRAFT_RECORD_TYPE,
   type DraftRecord,
+  isFrozenBySend,
   openSendStateOf,
-  SEND_CLAIM_BASE_MS,
-  sendClaimLifetimeMs,
+  parseDraftId,
+  SEND_LEASE_MS,
+  SEND_LEASE_RECORD_TYPE,
 } from './draft-record.ts';
 import {
   claimSend,
   completeSend,
   createDraft,
   deleteDraft,
+  finishWithoutCopy,
   listDrafts,
   purgeExpiredDrafts,
+  purgeSendLeases,
+  readDraftHandle,
+  readSendLease,
   reclaimSend,
   replaceDraft,
   reviveDraft,
@@ -112,7 +118,6 @@ describe('draft records', () => {
       store,
       created.handle.draftId,
       { messageId: '<m@x.co>', opId: 'op', state: 'submitting', claimedAt: 0 },
-      0,
       content({ body: 'newest' }),
     );
     expect(claimed).toMatchObject({
@@ -172,101 +177,204 @@ describe('draft records', () => {
     expect(await deleteDraft(store, created.handle.draftId, 0)).toEqual({ outcome: 'sending' });
   });
 
-  it('lets any device take over a claim whose sending tab never came back', async () => {
-    // Otherwise a tab that died mid-send freezes the draft on every device for ever: it can
-    // neither be edited, discarded, nor sent again.
-    const { store, rows, key } = fakeStore();
-    const created = await createDraft(store, content(), 0);
-    if (!created.ok) return;
-    rows.set(key(DRAFT_RECORD_TYPE, created.handle.draftKey), {
-      plaintext: JSON.stringify({
-        ...created.handle.record,
-        send: { messageId: '<out@x>', opId: 'op-1', state: 'submitting', claimedAt: 0 },
-      } satisfies DraftRecord),
-      revision: 2,
-    });
-
-    const stale = SEND_CLAIM_BASE_MS + 1;
-    expect(
-      await replaceDraft(store, created.handle.draftId, content({ body: 'edit' }), stale),
-    ).toMatchObject({ ok: true });
-  });
-
-  it('reads a claim nobody is running any more as the question, not as sending', async () => {
-    const base = content();
-    const claimed: DraftRecord = {
-      ...base,
-      contentVersion: 1,
-      send: { messageId: '<out@x>', opId: 'op-1', state: 'submitting', claimedAt: 0 },
-    };
-    // A tab killed at `submitting` leaves exactly this and never writes `unconfirmedSend`, so the
-    // composer must reach 'unconfirmed' from `send` alone or its two buttons never render.
-    expect(openSendStateOf(claimed, SEND_CLAIM_BASE_MS - 1)).toBe('sending');
-    expect(openSendStateOf(claimed, SEND_CLAIM_BASE_MS + 1)).toBe('unconfirmed');
-    const { send: _claim, ...rest } = claimed;
-    expect(openSendStateOf({ ...rest, unconfirmedSend: _claim }, 0)).toBe('unconfirmed');
-    expect(openSendStateOf({ ...base, contentVersion: 1 }, 0)).toBeNull();
-  });
-
   describe('how long a claim holds', () => {
-    const MIB = 2 ** 20;
-    const claimedWith = async (size: number) => {
+    const MINUTE = 60_000;
+    const claimOf = (state: NonNullable<DraftRecord['send']>['state']) =>
+      ({
+        messageId: '<out@x>',
+        opId: 'op-1',
+        state,
+        claimedAt: 0,
+      }) as const;
+    const claimedAs = async (
+      state: NonNullable<DraftRecord['send']>['state'],
+      extra: Partial<DraftRecord> = {},
+    ) => {
       const { store, rows, key } = fakeStore();
-      const created = await createDraft(
-        store,
-        content({ attachments: [{ id: 'f', name: 'a.zip', size, kind: 'archive' }] }),
-        0,
-      );
+      const created = await createDraft(store, content(), 0);
       if (!created.ok) throw new Error('the fixture could not create a draft');
-      const record: DraftRecord = {
-        ...created.handle.record,
-        send: { messageId: '<out@x>', opId: 'op-1', state: 'submitting', claimedAt: 0 },
-      };
+      const record: DraftRecord = { ...created.handle.record, ...extra, send: claimOf(state) };
       rows.set(key(DRAFT_RECORD_TYPE, created.handle.draftKey), {
         plaintext: JSON.stringify(record),
         revision: 2,
       });
-      return { store, record, draftId: created.handle.draftId };
+      const renewAt = (renewedAt: number) =>
+        store.put({
+          type: SEND_LEASE_RECORD_TYPE,
+          naturalKey: 'op-1',
+          plaintext: JSON.stringify({ renewedAt }),
+        });
+      return { store, rows, key, record, renewAt, draftId: created.handle.draftId };
     };
 
-    it('outlasts 24 MiB at 2 Mbps and the longest wait for its answer: no device takes it over', async () => {
-      const { store, record, draftId } = await claimedWith(24 * MIB);
-      // 165 s measured, and `@yozz.app/smtp` waits 10 minutes more for the answer.
-      const running = 165_000 + 10 * 60_000;
-      expect(sendClaimLifetimeMs(record)).toBeGreaterThan(running);
-      const send = {
-        messageId: '<two@x>',
-        opId: 'op-2',
-        state: 'submitting',
-        claimedAt: running,
-      } as const;
-      expect(await claimSend(store, draftId, send, running)).toEqual({
-        ok: false,
-        reason: 'sending',
-      });
-      expect(await replaceDraft(store, draftId, content({ body: 'edit' }), running)).toEqual({
-        ok: false,
-        reason: 'sending',
-      });
-      expect(openSendStateOf(record, running)).toBe('sending');
+    it('holds a claim with no lease for 3 minutes from when it was taken', async () => {
+      const { record } = await claimedAs('submitting');
+      expect(openSendStateOf(record, undefined, SEND_LEASE_MS - 1)).toBe('sending');
+      expect(openSendStateOf(record, undefined, SEND_LEASE_MS)).toBe('unconfirmed');
     });
 
-    it('outlasts the longest wait for the answer to a message with no files', async () => {
-      const { record } = await claimedWith(0);
-      expect(openSendStateOf(record, 10 * 60_000 + 30_000)).toBe('sending');
-      expect(openSendStateOf(record, 20 * 60_000)).toBe('unconfirmed');
+    it('lets nobody take over a send past 15 minutes while its lease is renewed', async () => {
+      const { store, draftId, renewAt } = await claimedAs('submitting');
+      await renewAt(20 * MINUTE);
+      const at = 22 * MINUTE;
+      expect(await reclaimSend(store, draftId, at)).toBeNull();
+      expect(await unconfirmSend(store, draftId, at)).toBeNull();
+      expect(await deleteDraft(store, draftId, at)).toEqual({ outcome: 'sending' });
+      const [listed] = await listDrafts(store);
+      if (listed === undefined) throw new Error('the draft should be listed');
+      expect(openSendStateOf(listed.record, listed.renewedAt, at)).toBe('sending');
     });
 
-    it('frees the draft of a killed tab once its lifetime is over, under half an hour at the largest', async () => {
-      const { store, record, draftId } = await claimedWith(25 * MIB);
-      const lifetime = sendClaimLifetimeMs(record);
-      expect(lifetime).toBeLessThan(30 * 60_000);
-      expect(openSendStateOf(record, lifetime)).toBe('unconfirmed');
-      expect(await replaceDraft(store, draftId, content({ body: 'edit' }), lifetime)).toMatchObject(
-        {
-          ok: true,
-        },
+    it('frees it 3 minutes after the last renewal', async () => {
+      const { store, draftId, renewAt } = await claimedAs('submitting');
+      await renewAt(20 * MINUTE);
+      const reclaimed = await reclaimSend(store, draftId, 20 * MINUTE + SEND_LEASE_MS);
+      expect(reclaimed?.record.send?.claimedAt).toBe(20 * MINUTE + SEND_LEASE_MS);
+    });
+
+    it('reads a claim nobody runs as the question, however it got there', async () => {
+      const { record } = await claimedAs('submitting');
+      const { send: _claim, ...rest } = record;
+      // A tab killed at `submitting` never writes `unconfirmedSend`, so the composer must reach
+      // the question from `send` alone or its two buttons never render.
+      expect(openSendStateOf({ ...rest, unconfirmedSend: _claim }, undefined, 0)).toBe(
+        'unconfirmed',
       );
+      expect(openSendStateOf(rest, undefined, 0)).toBeNull();
+    });
+
+    it('keeps an expired `submitting` frozen, so only the person settles it', async () => {
+      const { store, draftId, record } = await claimedAs('submitting');
+      const late = SEND_LEASE_MS + 1;
+      expect(await replaceDraft(store, draftId, content({ body: 'edit' }), late)).toEqual({
+        ok: false,
+        reason: 'sending',
+      });
+      expect(await claimSend(store, draftId, claimOf('submitting'))).toEqual({
+        ok: false,
+        reason: 'sending',
+      });
+      expect(isFrozenBySend(record)).toBe(true);
+    });
+
+    it('lets the person drop an expired `submitting`, which may never have reached SMTP', async () => {
+      const { store, draftId } = await claimedAs('submitting');
+      expect(await deleteDraft(store, draftId, SEND_LEASE_MS)).toMatchObject({
+        outcome: 'deleted',
+      });
+    });
+
+    it.each(['submitted', 'copied'] as const)(
+      'never unfreezes a `%s` send, which SMTP accepted: nothing can deliver it again',
+      async state => {
+        const { store, draftId, record } = await claimedAs(state);
+        const late = SEND_LEASE_MS * 100;
+        expect(openSendStateOf(record, undefined, late)).toBe('accepted');
+        expect(isFrozenBySend(record)).toBe(true);
+        expect(await replaceDraft(store, draftId, content({ body: 'edit' }), late)).toEqual({
+          ok: false,
+          reason: 'sending',
+        });
+        expect(await claimSend(store, draftId, claimOf('submitting'))).toEqual({
+          ok: false,
+          reason: 'sending',
+        });
+        expect(await deleteDraft(store, draftId, late)).toEqual({ outcome: 'sending' });
+        // Back to editing would make the next Send a second delivery.
+        expect(await unconfirmSend(store, draftId, late)).toBeNull();
+      },
+    );
+
+    it('takes over an accepted send at its phase, never back at `submitting`', async () => {
+      const { store, draftId } = await claimedAs('submitted');
+      const taken = await reclaimSend(store, draftId, SEND_LEASE_MS);
+      expect(taken?.record.send).toMatchObject({ state: 'submitted', claimedAt: SEND_LEASE_MS });
+    });
+
+    it('takes an expired `submitting` back under a fresh claim, and only once', async () => {
+      const { store, draftId } = await claimedAs('submitting');
+      const taken = await reclaimSend(store, draftId, SEND_LEASE_MS);
+      expect(taken?.record.send).toMatchObject({ state: 'submitting', claimedAt: SEND_LEASE_MS });
+      // The second click or device names the version the first moved on from.
+      expect(await reclaimSend(store, draftId, SEND_LEASE_MS)).toBeNull();
+      if (taken === null) throw new Error('the takeover wrote nothing');
+      expect(await reclaimSend(store, taken.draftId, SEND_LEASE_MS)).toBeNull();
+    });
+
+    it('does not let the lease of a claim taken over hold the new one', async () => {
+      const { store, draftId, renewAt } = await claimedAs('submitting');
+      const taken = await reclaimSend(store, draftId, SEND_LEASE_MS);
+      if (taken === null) throw new Error('the takeover wrote nothing');
+      // The tab it was taken from is alive after all, and still renewing its own.
+      await renewAt(100 * MINUTE);
+      expect(await readSendLease(store, taken.record)).toBeUndefined();
+      expect(await reclaimSend(store, taken.draftId, SEND_LEASE_MS * 2)).not.toBeNull();
+    });
+
+    describe('finishing a send whose copy can never land', () => {
+      const attachments = [{ id: 'f', name: 'a.zip', size: 1, kind: 'archive' }] as const;
+
+      it('tombstones what went out, saying what it became and freeing its files', async () => {
+        const { store, draftId } = await claimedAs('submitted', {
+          attachments: [...attachments],
+        });
+        const done = await finishWithoutCopy(store, draftId, SEND_LEASE_MS);
+        expect(done?.record).toMatchObject({
+          sentMessageId: '<out@x>',
+          deletedAt: SEND_LEASE_MS,
+          isSentWithoutCopy: true,
+        });
+        expect(done?.record.attachments).toBeUndefined();
+        expect(done?.record.send).toBeUndefined();
+        expect(await listDrafts(store)).toEqual([]);
+      });
+
+      it('refuses while the copy is still being tried', async () => {
+        const { store, draftId } = await claimedAs('submitted');
+        expect(await finishWithoutCopy(store, draftId, SEND_LEASE_MS - 1)).toBeNull();
+      });
+
+      it('refuses a send nobody saw the answer to, which may not have gone out', async () => {
+        const { store, draftId } = await claimedAs('submitting');
+        expect(await finishWithoutCopy(store, draftId, SEND_LEASE_MS)).toBeNull();
+      });
+    });
+
+    it('lists a held draft with its lease, and asks for leases only when one has a send', async () => {
+      const { store, renewAt } = await claimedAs('submitting');
+      await renewAt(MINUTE);
+      const [held] = await listDrafts(store);
+      expect(held?.renewedAt).toBe(MINUTE);
+
+      const plain = fakeStore().store;
+      await createDraft(plain, content(), 0);
+      const list = vi.fn(plain.list);
+      await listDrafts({ ...plain, list });
+      expect(list.mock.calls).toEqual([[DRAFT_RECORD_TYPE]]);
+    });
+
+    it('reads one draft as it stands, and `null` once it is gone', async () => {
+      const { store, draftId, renewAt } = await claimedAs('submitting');
+      await renewAt(MINUTE);
+      const draftKey = parseDraftId(draftId)?.key ?? '';
+      expect(await readDraftHandle(store, draftKey)).toMatchObject({ renewedAt: MINUTE });
+      await deleteDraft(store, draftId, SEND_LEASE_MS + MINUTE);
+      expect(await readDraftHandle(store, draftKey)).toBeNull();
+    });
+
+    it('sweeps the lease rows dead tabs left, and leaves a live one', async () => {
+      const { store } = fakeStore();
+      const row = (naturalKey: string, renewedAt: number) =>
+        store.put({
+          type: SEND_LEASE_RECORD_TYPE,
+          naturalKey,
+          plaintext: JSON.stringify({ renewedAt }),
+        });
+      await row('dead', 0);
+      await row('live', MINUTE);
+      await purgeSendLeases(store, SEND_LEASE_MS + 1);
+      const left = await store.list(SEND_LEASE_RECORD_TYPE);
+      expect(left.map(({ naturalKey }) => naturalKey)).toEqual(['live']);
     });
   });
 
@@ -292,31 +400,37 @@ describe('draft records', () => {
 
     it('is the question at once, not a send still running', async () => {
       const { handle } = await seeded();
-      expect(openSendStateOf(handle.record, 0)).toBe('unconfirmed');
+      expect(openSendStateOf(handle.record, undefined, 0)).toBe('unconfirmed');
     });
 
     it('refuses edits, a new send and discard, however old, until the person settles it', async () => {
       const { store, handle } = await seeded();
-      const late = SEND_CLAIM_BASE_MS + 1;
+      const late = SEND_LEASE_MS + 1;
       expect(await replaceDraft(store, handle.draftId, content({ body: 'edit' }), late)).toEqual({
         ok: false,
         reason: 'sending',
       });
-      expect(
-        await claimSend(store, handle.draftId, { ...lost, state: 'submitting' }, late),
-      ).toEqual({ ok: false, reason: 'sending' });
+      expect(await claimSend(store, handle.draftId, { ...lost, state: 'submitting' })).toEqual({
+        ok: false,
+        reason: 'sending',
+      });
       expect(await deleteDraft(store, handle.draftId, late)).toEqual({ outcome: 'sending' });
     });
 
     it('goes back under a fresh claim on Send again, the same message', async () => {
       const { store, handle } = await seeded();
       const reclaimed = await reclaimSend(store, handle.draftId, 7_000);
-      expect(reclaimed?.record.send).toEqual({ ...lost, state: 'submitting', claimedAt: 7_000 });
+      expect(reclaimed?.record.send).toEqual({
+        ...lost,
+        state: 'submitting',
+        claimedAt: 7_000,
+        opId: expect.not.stringMatching(/^op-1$/u),
+      });
     });
 
     it('is put aside on Back to editing, editable, and still not discardable', async () => {
       const { store, handle } = await seeded();
-      const aside = await unconfirmSend(store, handle.draftId);
+      const aside = await unconfirmSend(store, handle.draftId, 0);
       if (aside === null) throw new Error('Back to editing wrote nothing');
       expect(aside.record.send).toBeUndefined();
       expect(aside.record.unconfirmedSend).toEqual(lost);
@@ -325,7 +439,7 @@ describe('draft records', () => {
       if (!edited.ok) throw new Error('an edit after Back to editing was refused');
       // And Send again from there re-stamps it too.
       const reclaimed = await reclaimSend(store, edited.handle.draftId, 9_000);
-      expect(reclaimed?.record.send).toEqual({ ...lost, state: 'submitting', claimedAt: 9_000 });
+      expect(reclaimed?.record.send).toMatchObject({ state: 'submitting', claimedAt: 9_000 });
       expect(reclaimed?.record.unconfirmedSend).toBeUndefined();
     });
   });

@@ -1,6 +1,6 @@
 import * as NodeServices from '@effect/platform-node/NodeServices';
 import { assert, describe, expect, layer } from '@effect/vitest';
-import { SEND_CLAIM_BASE_MS } from '@yozz.app/mail/compose/draft-record';
+import { SEND_LEASE_MS } from '@yozz.app/mail/compose/draft-record';
 import * as Effect from 'effect/Effect';
 import * as Exit from 'effect/Exit';
 import * as FileSystem from 'effect/FileSystem';
@@ -362,7 +362,7 @@ layer(NodeServices.layer)(it => {
           target: { account: ADDRESS, folder: 'sent' },
         };
         // Long past the takeover age the web app allows a stale claim.
-        yield* TestClock.setTime(SEND_CLAIM_BASE_MS * 10);
+        yield* TestClock.setTime(SEND_LEASE_MS * 10);
 
         for (const state of ['submitting', 'submitted'] as const) {
           const claimed = yield* rewriteDraft(key, record => ({

@@ -2,7 +2,7 @@ import 'fake-indexeddb/auto';
 import type { StartTlsOptions, TlsFailure, TlsSession } from '@yozz.app/tls';
 import { YOZZ_VALIDATOR } from '@yozz.app/x509';
 import { IDBFactory } from 'fake-indexeddb';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 /** Chain validation and session resumption wiring, with the relay and handshake faked. */
 
@@ -23,7 +23,7 @@ vi.mock('./transport', () => ({
   openRelayTransport: (...args: unknown[]) => openRelayTransport(...args),
 }));
 
-const { openTlsDuplex } = await import('./connection');
+const { connectSmtp, openTlsDuplex } = await import('./connection');
 const { peerKey, saveSession, takeSession } = await import('./session-store');
 
 const HOST = { host: 'imap.example.net', port: 993 } as const;
@@ -72,6 +72,49 @@ const optionsOf = (call: number): StartTlsOptions => {
 beforeEach(() => {
   startTls.mockReset();
   vi.stubGlobal('indexedDB', new IDBFactory());
+});
+
+describe('connectSmtp', () => {
+  const SMTP = { host: 'smtp.example.net', port: 465, username: 'me', password: 'p' };
+  const relaySignal = () => {
+    const signal = openRelayTransport.mock.lastCall?.[2];
+    if (!(signal instanceof AbortSignal)) throw new Error('the relay was handed no signal');
+    return signal;
+  };
+
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('gives up on a handshake that never ends, so a send cannot wait on it for ever', async () => {
+    // What the relay does on abort: the socket closes, and the handshake fails on what it reads.
+    startTls.mockImplementationOnce(
+      () =>
+        new Promise(resolve =>
+          relaySignal().addEventListener('abort', () =>
+            resolve({
+              ok: false,
+              reason: { kind: 'truncated', alert: null } as unknown as TlsFailure,
+            }),
+          ),
+        ),
+    );
+    const connecting = connectSmtp(SMTP);
+    await vi.waitFor(() => expect(startTls).toHaveBeenCalled());
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(await connecting).toEqual({ ok: false, error: { kind: 'stalled' } });
+  });
+
+  it('leaves a connection past its handshake alone, however long the send then takes', async () => {
+    startTls.mockImplementationOnce(async (o: StartTlsOptions) => completed(o));
+    await connectSmtp(SMTP);
+    await vi.advanceTimersByTimeAsync(10 * 60_000);
+    expect(relaySignal().aborted).toBe(false);
+  });
 });
 
 describe('openTlsDuplex', () => {

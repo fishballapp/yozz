@@ -18,6 +18,7 @@ import {
   isFrozenBySend,
   openSendStateOf,
   parseDraftId,
+  SEND_LEASE_RENEW_MS,
   unconfirmedSendOf,
 } from '@yozz.app/mail/compose/draft-record';
 import type { DeleteOutcome, DraftHandle, SaveOutcome } from '@yozz.app/mail/compose/draft-vault';
@@ -170,12 +171,20 @@ export type Composer = {
   draftError: string | null;
   /** `'theirs'` replaces the editor's text with the winner; `'mine'` saves what is on screen over it. Never automatic. */
   resolveDraftConflict: (choice: 'theirs' | 'mine') => void;
-  /** `'sending'`: a send is running (here or elsewhere) and the draft is frozen. `'unconfirmed'`: nobody saw SMTP's answer. */
-  openSendState: 'sending' | 'unconfirmed' | null;
+  /** `'sending'`: a send is running, here or elsewhere. `'unconfirmed'`: nobody saw SMTP's answer. `'accepted'`: it went out, and only its copy in Sent is left. */
+  openSendState: 'sending' | 'unconfirmed' | 'accepted' | null;
   /** No write may change the open draft: a send is running, or its lost answer waits on the person. */
   isOpenDraftFrozen: boolean;
-  /** Re-runs the unconfirmed send with the same message. */
-  sendAgain: () => Promise<void>;
+  /** The send on the open draft has ended and its record is gone, so nothing may write or send it; it is closing. */
+  isOpenSendOver: boolean;
+  /**
+   * Takes over a send nobody is running: an unconfirmed one goes out again with the same message, an
+   * accepted one tries its copy. Answers as `send` does; `null` means it is running after all, which
+   * the banner now says.
+   */
+  sendAgain: () => Promise<SendClaim | null>;
+  /** Tombstones an accepted send whose copy can't land. */
+  finishWithoutCopy: () => Promise<void>;
   /** Puts the unconfirmed send aside so the draft can be written again. Discard stays refused. */
   backToEditing: () => Promise<void>;
   /**
@@ -473,6 +482,14 @@ export const useComposerStore = ({
           setJustSent(current => [...current, message]);
         };
 
+        if (progress.done && !progress.sentCopy.ok) {
+          const detail = `${imapHost} has no Sent folder to keep a copy in`;
+          setSentCopyError(`sent, but ${detail}`);
+          // No sync will ever find a copy, so this tab's stays until lock, and is the only one.
+          if (isInbound(identity)) showSent();
+          setDrafts(dropSent);
+          return { state: 'sent-with-caveat', detail };
+        }
         if (progress.done) {
           setSentCopyError(null);
           if (isInbound(identity)) {
@@ -508,9 +525,6 @@ export const useComposerStore = ({
           // The status line has no title above it; the toast is already headed "Sent".
           const { error } = progress;
           const detail = (() => {
-            if (error.kind === 'no-sent-mailbox') {
-              return `${imapHost} has no Sent folder to keep a copy in`;
-            }
             // The server went quiet or the connection dropped: it may well go on to store what it has.
             if (
               error.kind === 'stalled' ||
@@ -632,7 +646,7 @@ export const useComposerStore = ({
         if (!claim.ok) return claim;
 
         // Phase (0): the message goes into the record before SMTP sees it, so a resend is the same one.
-        const claimed = await claimSend(session.store, draftId, claim.value, Date.now(), content);
+        const claimed = await claimSend(session.store, draftId, claim.value, content);
         if (!claimed.ok) {
           return {
             ok: false,
@@ -651,6 +665,14 @@ export const useComposerStore = ({
           };
         }
 
+        // Frozen on this tab's list too, or reopening it mid-send would look editable.
+        if (isCurrent()) {
+          setDrafts(current =>
+            current.map(candidate =>
+              candidate.draftKey === claimed.handle.draftKey ? claimed.handle : candidate,
+            ),
+          );
+        }
         // The claim is the seam this function returns at; see DECISIONS.md, 2026-08-30.
         clearComposedDraft(compose);
         return {
@@ -720,6 +742,59 @@ export const useComposerStore = ({
     [drafts, draft],
   );
 
+  /** The open record as last listed, which says what its leaving the list means. */
+  const lastOpenRef = useRef<DraftHandle | null>(null);
+  if (openHandle !== null) lastOpenRef.current = openHandle;
+  const lastOpen = lastOpenRef.current;
+  /**
+   * Only a record that carried a send: the message has gone or its fate is settled, so a Send here
+   * would be a second one. An ordinary draft discarded elsewhere keeps what is being typed.
+   */
+  const isOpenSendOver =
+    draft !== null &&
+    openHandle === null &&
+    lastOpen !== null &&
+    lastOpen.draftKey === draft.draftKey &&
+    (lastOpen.record.send !== undefined || lastOpen.record.unconfirmedSend !== undefined);
+
+  useEffect(() => {
+    if (!isOpenSendOver) return;
+    // The close that follows must not file this over the tombstone.
+    if (composeRef.current !== null) composeRef.current.isDiscarded = true;
+    const userId = userIdRef.current;
+    if (userId !== null) clearDraft(userId);
+    setDraft(null);
+  }, [isOpenSendOver]);
+
+  /**
+   * A send ending moves the record on without changing its text, whichever device ended it, so this
+   * opening takes that version: otherwise its next write is a conflict with itself. Only if the text
+   * is what the version it names held: other text is another device's edit, and adopting it would
+   * let the next autosave overwrite that with no conflict, so the id stays and the conflict flow has it.
+   */
+  const openDraftId = draft?.draftId;
+  const thawRef = useRef<{
+    readonly compose: Compose;
+    readonly named: DraftHandle['record'] | null;
+    readonly hadSend: boolean;
+  } | null>(null);
+  useEffect(() => {
+    const compose = composeRef.current;
+    if (compose === null || openHandle === null) return;
+    const seen = thawRef.current?.compose === compose ? thawRef.current : null;
+    const named = openHandle.draftId === openDraftId ? openHandle.record : (seen?.named ?? null);
+    const hasSend = openHandle.record.send !== undefined;
+    thawRef.current = { compose, named, hadSend: hasSend };
+    if (seen?.hadSend !== true || hasSend || openHandle.draftId === openDraftId) return;
+    if (named === null || !sameDraftContent(openHandle.record, named)) return;
+    compose.writtenDraftId = openHandle.draftId;
+    setDraft(current =>
+      current?.draftKey === openHandle.draftKey
+        ? { ...current, draftId: openHandle.draftId }
+        : current,
+    );
+  }, [openHandle, openDraftId]);
+
   /** Read by the autosave, which must not depend on it: every save changes `drafts`. */
   const openHandleRef = useRef<DraftHandle | null>(null);
   openHandleRef.current = openHandle;
@@ -776,12 +851,44 @@ export const useComposerStore = ({
     return () => clearTimeout(timer);
   }, [openHandle, accounts, identities, bindRunOn]);
 
+  /**
+   * A frozen draft on screen follows the vault: its lease is what decides when another device's send
+   * has ended, and nothing else re-renders it.
+   */
+  const openSendKey = openHandle?.record.send === undefined ? null : openHandle.draftKey;
+  useEffect(() => {
+    const session = sessionRef.current;
+    if (openSendKey === null || session === null) return;
+    const isCurrent = watchSession(sessionGeneration);
+    const follow = async () => {
+      const { readDraftHandle } = await import('@yozz.app/mail/compose/draft-vault');
+      const fresh = await readDraftHandle(session.store, openSendKey).catch(() => undefined);
+      // Unreachable: the next beat asks again.
+      if (fresh === undefined || !isCurrent()) return;
+      setDrafts(current =>
+        current.flatMap(candidate => {
+          if (candidate.draftKey !== openSendKey) return [candidate];
+          if (fresh === null) return [];
+          // Read before a write of this tab's that landed first.
+          return [
+            candidate.record.contentVersion > fresh.record.contentVersion ? candidate : fresh,
+          ];
+        }),
+      );
+    };
+    void follow();
+    const timer = setInterval(() => void follow(), SEND_LEASE_RENEW_MS);
+    return () => clearInterval(timer);
+  }, [openSendKey]);
+
   /** An unconfirmed send is settled by the message turning up in a Sent folder, read off the summaries. */
   useEffect(() => {
     const session = sessionRef.current;
-    const unconfirmed = drafts.flatMap(handle =>
-      unconfirmedSendOf(handle.record) === undefined ? [] : [handle],
-    );
+    const now = Date.now();
+    const unconfirmed = drafts.flatMap(handle => {
+      const pending = unconfirmedSendOf(handle.record, handle.renewedAt, now);
+      return pending === undefined ? [] : [{ handle, messageId: pending.messageId }];
+    });
     if (session === null || unconfirmed.length === 0) return;
     // `<Message-ID>\0<from>` for every message in a Sent folder. Both halves: ids collide, and a
     // message arriving with a colliding id must not tombstone a draft nobody sent.
@@ -795,22 +902,16 @@ export const useComposerStore = ({
         }),
       ),
     );
-    const settled = unconfirmed.filter(handle => {
-      const pending = unconfirmedSendOf(handle.record);
-      return (
-        pending !== undefined &&
-        sent.has(`${pending.messageId}\0${handle.record.from}`.toLowerCase())
-      );
-    });
+    const settled = unconfirmed.filter(({ handle, messageId }) =>
+      sent.has(`${messageId}\0${handle.record.from}`.toLowerCase()),
+    );
     if (settled.length === 0) return;
     const isCurrent = watchSession(sessionGeneration);
     void (async () => {
       const { completeSend, listDrafts } = await import('@yozz.app/mail/compose/draft-vault');
-      for (const handle of settled) {
-        const messageId = unconfirmedSendOf(handle.record)?.messageId;
+      for (const { handle, messageId } of settled) {
         // Each one, since the last completion's round trip may have spanned a lock.
         if (!isCurrent()) return;
-        if (messageId === undefined) continue;
         await completeSend(session.store, handle.draftId, messageId, Date.now());
       }
       const live = await listDrafts(session.store);
@@ -930,46 +1031,84 @@ export const useComposerStore = ({
     });
   }, []);
 
-  const openSendState: 'sending' | 'unconfirmed' | null =
-    openHandle === null ? null : openSendStateOf(openHandle.record, Date.now());
-  const isOpenDraftFrozen = openHandle !== null && isFrozenBySend(openHandle.record, Date.now());
+  const openSendState =
+    openHandle === null
+      ? null
+      : openSendStateOf(openHandle.record, openHandle.renewedAt, Date.now());
+  const isOpenDraftFrozen =
+    isOpenSendOver || (openHandle !== null && isFrozenBySend(openHandle.record));
 
-  const sendAgain = useCallback(async () => {
+  const sendAgain = useCallback(async (): Promise<SendClaim | null> => {
     const session = sessionRef.current;
-    if (openHandle === null || session === null) return;
+    const compose = composeRef.current;
+    if (openHandle === null || session === null || compose === null) return null;
     const identity = identities.find(candidate => candidate.address === openHandle.record.from);
-    if (identity === undefined) return;
+    if (identity === undefined) {
+      return { ok: false, error: { kind: 'error', detail: 'That address was removed' } };
+    }
     const isCurrent = watchSession(sessionGeneration);
     const runOn = bindRunOn();
-    const [{ reclaimSend }, { driveSend }] = await Promise.all([
-      import('@yozz.app/mail/compose/draft-vault'),
-      import('@yozz.app/mail/compose/send-machine'),
-    ]);
+    const { listDrafts, reclaimSend } = await import('@yozz.app/mail/compose/draft-vault');
     // As `send`: an ended session claims nothing.
-    if (!isCurrent()) return;
-    // A lost answer goes back under a fresh claim; any other claim carries on from its phase.
-    const claimed =
-      unconfirmedSendOf(openHandle.record) !== undefined
-        ? await reclaimSend(session.store, openHandle.draftId, Date.now())
-        : openHandle;
-    if (claimed === null) return;
-    await driveSend(sendEffectsFor(session, runOn, identity), claimed);
-    if (!isCurrent()) return;
-    const { listDrafts } = await import('@yozz.app/mail/compose/draft-vault');
-    const live = await listDrafts(session.store);
-    if (isCurrent()) setDrafts(live);
-  }, [openHandle, identities, bindRunOn, sendEffectsFor]);
+    if (!isCurrent()) return null;
+    const claimed = await reclaimSend(session.store, openHandle.draftId, Date.now());
+    if (claimed === null) {
+      // Running after all, or another click or device got there: the list then says so.
+      const live = await listDrafts(session.store);
+      if (isCurrent()) setDrafts(live);
+      return null;
+    }
+    if (isCurrent()) {
+      setDrafts(current =>
+        current.map(candidate => (candidate.draftKey === claimed.draftKey ? claimed : candidate)),
+      );
+    }
+    // From here it is a send like any other: the composer lets go, and the toast reports the rest.
+    clearComposedDraft(compose);
+    return {
+      ok: true,
+      value: {
+        settled: settleSend(session, runOn, identity, claimed, isCurrent, new Map()),
+      },
+    };
+  }, [openHandle, identities, bindRunOn, settleSend, clearComposedDraft]);
 
-  const backToEditing = useCallback(async () => {
-    const session = sessionRef.current;
-    if (openHandle === null || session === null) return;
-    const isCurrent = watchSession(sessionGeneration);
-    const { listDrafts, unconfirmSend } = await import('@yozz.app/mail/compose/draft-vault');
-    if (!isCurrent()) return;
-    await unconfirmSend(session.store, openHandle.draftId);
-    const live = await listDrafts(session.store);
-    if (isCurrent()) setDrafts(live);
-  }, [openHandle]);
+  /** A settling write on the draft on screen, then the list as it now stands. */
+  const settleOpenDraft = useCallback(
+    async (
+      write: (
+        vault: typeof import('@yozz.app/mail/compose/draft-vault'),
+        store: RecordStore,
+        draftId: string,
+      ) => Promise<unknown>,
+    ) => {
+      const session = sessionRef.current;
+      if (openHandle === null || session === null) return;
+      const isCurrent = watchSession(sessionGeneration);
+      const vault = await import('@yozz.app/mail/compose/draft-vault');
+      if (!isCurrent()) return;
+      await write(vault, session.store, openHandle.draftId);
+      const live = await vault.listDrafts(session.store);
+      if (isCurrent()) setDrafts(live);
+    },
+    [openHandle],
+  );
+
+  const backToEditing = useCallback(
+    () =>
+      settleOpenDraft(({ unconfirmSend }, store, draftId) =>
+        unconfirmSend(store, draftId, Date.now()),
+      ),
+    [settleOpenDraft],
+  );
+
+  const finishWithoutCopy = useCallback(
+    () =>
+      settleOpenDraft(({ finishWithoutCopy: finish }, store, draftId) =>
+        finish(store, draftId, Date.now()),
+      ),
+    [settleOpenDraft],
+  );
 
   /** The vault's drafts and sent records, then the sends this vault left in flight. */
   const load = useCallback(
@@ -978,12 +1117,14 @@ export const useComposerStore = ({
       // Before the first await: a send resumed below copies into this session's mailboxes or nowhere.
       const runOn = bindRunOn();
       // Drafts come from the vault too.
-      const [{ listDrafts, purgeExpiredDrafts }, { collectFiles }] = await Promise.all([
-        import('@yozz.app/mail/compose/draft-vault'),
-        import('@yozz.app/mail/vault/collect-files'),
-      ]);
+      const [{ listDrafts, purgeExpiredDrafts, purgeSendLeases }, { collectFiles }] =
+        await Promise.all([
+          import('@yozz.app/mail/compose/draft-vault'),
+          import('@yozz.app/mail/vault/collect-files'),
+        ]);
       // Before listing, so an expired tombstone stops costing storage.
       await purgeExpiredDrafts(store, Date.now());
+      await purgeSendLeases(store, Date.now());
       const drafts = await listDrafts(store);
       if (isCancelled()) return;
       setDrafts(drafts);
@@ -1182,7 +1323,9 @@ export const useComposerStore = ({
       resolveDraftConflict,
       openSendState,
       isOpenDraftFrozen,
+      isOpenSendOver,
       sendAgain,
+      finishWithoutCopy,
       backToEditing,
       seedDraft: (intent, seed) => {
         const userId = userIdRef.current;
@@ -1432,7 +1575,9 @@ export const useComposerStore = ({
       resolveDraftConflict,
       openSendState,
       isOpenDraftFrozen,
+      isOpenSendOver,
       sendAgain,
+      finishWithoutCopy,
       backToEditing,
       send,
       demo,

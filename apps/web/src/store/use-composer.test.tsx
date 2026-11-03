@@ -2,10 +2,14 @@
 import type { ImapMessageSummary } from '@yozz.app/imap';
 import type { InboundAddress } from '@yozz.app/mail/addresses/record';
 import { contentOf, type DraftContent } from '@yozz.app/mail/compose/draft';
+import { SEND_LEASE_RECORD_TYPE } from '@yozz.app/mail/compose/draft-record';
 import {
   claimSend,
+  completeSend,
   createDraft,
+  deleteDraft,
   listDrafts,
+  reclaimSend,
   replaceDraft,
   unconfirmSend,
 } from '@yozz.app/mail/compose/draft-vault';
@@ -183,8 +187,10 @@ const render = async (store: RecordStore, files: FileStore = fakeFileStore().sto
     demo: false,
   };
   const latest: { current: ReturnType<typeof useComposerStore> | null } = { current: null };
+  const composers: ReturnType<typeof useComposerStore>['composer'][] = [];
   const Probe = (probed: Props) => {
     latest.current = useComposerStore(probed);
+    composers.push(latest.current.composer);
     return null;
   };
   const root = createRoot(document.createElement('div'));
@@ -197,6 +203,8 @@ const render = async (store: RecordStore, files: FileStore = fakeFileStore().sto
   return {
     hook,
     activity,
+    /** What every render handed out, in order. */
+    composers,
     rerender: (changes: Partial<Props>) =>
       act(async () => root.render(<Probe {...props} {...changes} />)),
   };
@@ -858,22 +866,17 @@ describe('an unlock that finishes a send-only message', () => {
     const vault = vaultOver(fakeRecordStore().store);
     const created = await createDraft(vault.store, content(), 0);
     if (!created.ok) throw new Error('no draft');
-    await claimSend(
-      vault.store,
-      created.handle.draftId,
-      {
-        messageId: '<plans@x.test>',
-        opId: 'op-1',
-        state: 'submitted',
-        claimedAt: 0,
-        message: {
-          head: new TextEncoder().encode('Date: x\r\nSubject: Plans\r\n\r\nHello').toBase64(),
-          splices: [],
-        },
-        target: 'vault',
+    await claimSend(vault.store, created.handle.draftId, {
+      messageId: '<plans@x.test>',
+      opId: 'op-1',
+      state: 'submitted',
+      claimedAt: 0,
+      message: {
+        head: new TextEncoder().encode('Date: x\r\nSubject: Plans\r\n\r\nHello').toBase64(),
+        splices: [],
       },
-      0,
-    );
+      target: 'vault',
+    });
 
     const { hook } = await mount(vault.store);
 
@@ -914,10 +917,18 @@ describe('a message just sent from an address with a mailbox', () => {
     expect(hook().vaultSent).toEqual([]);
   });
 
-  it('stays until the vault locks when its Sent copy could not be stored', async () => {
+  it("finishes with no Sent folder, keeping the toast and this tab's own copy until lock", async () => {
     network.sentCopy = { ok: false, error: { kind: 'no-sent-mailbox' } };
-    const { hook, rerender, report } = await sendOne();
-    expect(report).toMatchObject({ state: 'sent-with-caveat' });
+    const { hook, rerender, report, vault } = await sendOne();
+    expect(report).toEqual({
+      state: 'sent-with-caveat',
+      detail: 'imap.x has no Sent folder to keep a copy in',
+    });
+    expect(hook().shared.sentCopyError).toBe(
+      'sent, but imap.x has no Sent folder to keep a copy in',
+    );
+    expect(hook().shared.drafts).toEqual([]);
+    expect(await listDrafts(vault.store)).toEqual([]);
 
     await rerender({
       baseByAccount: { [ACCOUNT.address]: { sent: { uidValidity: 7, summaries: [] } } },
@@ -986,9 +997,525 @@ describe('a message whose SMTP answer was lost after its end', () => {
     const lost = await sendLost();
     await reopen(lost, lost.draft.draftKey);
     network.submitAnswer = { ok: true, value: undefined };
-    await act(() => lost.hook().composer.sendAgain());
+    const answer = await act(() => lost.hook().composer.sendAgain());
+    if (answer === null || !answer.ok) throw new Error('Send again was refused');
+    await act(() => answer.value.settled);
     expect(network.submitted).toEqual([lost.bytes, lost.bytes]);
     expect(await listDrafts(lost.vault.store)).toEqual([]);
+  });
+});
+
+/** A send another tab left in the vault, listed the way an unlock finds it. */
+const leftInVault = async (state: 'submitting' | 'submitted', claimedAt = 0) => {
+  const vault = vaultOver(fakeRecordStore().store);
+  const bytes = new TextEncoder().encode(
+    `From: Me <${ACCOUNT.address}>\r\nTo: you@x.test\r\nMessage-ID: <left@x.test>\r\nDate: Tue, 1 Jan 2030 00:00:00 +0000\r\nSubject: Plans\r\n\r\nHello`,
+  );
+  const created = await createDraft(vault.store, content(), 0);
+  if (!created.ok) throw new Error('no draft to claim');
+  const claimed = await claimSend(vault.store, created.handle.draftId, {
+    messageId: '<left@x.test>',
+    opId: 'op-left',
+    state,
+    claimedAt,
+    message: { head: bytes.toBase64(), splices: [] },
+    target: { account: ACCOUNT.address, folder: 'sent' },
+  });
+  if (!claimed.ok) throw new Error('no claim to leave');
+  return { vault, bytes, handle: claimed.handle };
+};
+
+const reopenedAs = async ({ hook }: Pick<Mounted, 'hook'>, draftKey: string) => {
+  await act(async () => {
+    hook().composer.seedDraft(`draft:${draftKey}`, {});
+  });
+  const { openSendState, isOpenDraftFrozen } = hook().composer;
+  return { openSendState, isOpenDraftFrozen };
+};
+
+describe('a send SMTP accepted, whose copy will not land', () => {
+  const stuck = async () => {
+    network.sentCopy = { ok: false, error: { kind: 'imap', reason: { kind: 'no', text: 'Full' } } };
+    const { vault, handle } = await leftInVault('submitted');
+    const mounted = await mount(vault.store);
+    await reopenedAs(mounted, handle.draftKey);
+    return { ...mounted, vault, handle };
+  };
+
+  it('stays frozen however old, saying it went out', async () => {
+    const { handle, ...mounted } = await stuck();
+    expect(await reopenedAs(mounted, handle.draftKey)).toEqual({
+      openSendState: 'accepted',
+      isOpenDraftFrozen: true,
+    });
+  });
+
+  it('is never delivered again by Save to Sent or Back to editing', async () => {
+    const { vault, handle, hook } = await stuck();
+    await act(() => hook().composer.backToEditing());
+    expect(hook().composer.openSendState).toBe('accepted');
+
+    const answer = await act(() => hook().composer.sendAgain());
+    if (answer === null || !answer.ok) throw new Error('Save to Sent was refused');
+    expect(await act(() => answer.value.settled)).toMatchObject({ state: 'sent-with-caveat' });
+    expect(network.submitted).toEqual([]);
+
+    // Still only the copy, from the vault alone after a reload.
+    const reloaded = await mount(vault.store);
+    await reopenedAs(reloaded, handle.draftKey);
+    expect(reloaded.hook().composer.openSendState).toBe('accepted');
+    expect(network.submitted).toEqual([]);
+  });
+
+  it('stores the copy on Save to Sent once it can land', async () => {
+    const { hook, vault } = await stuck();
+    network.sentCopy = { ok: true, value: null };
+    const answer = await act(() => hook().composer.sendAgain());
+    if (answer === null || !answer.ok) throw new Error('Save to Sent was refused');
+    expect(await act(() => answer.value.settled)).toEqual({ state: 'sent' });
+    expect(network.submitted).toEqual([]);
+    expect(await listDrafts(vault.store)).toEqual([]);
+  });
+
+  it('lets the person finish without it', async () => {
+    const { hook, vault } = await stuck();
+    await act(() => hook().composer.finishWithoutCopy());
+    expect(network.submitted).toEqual([]);
+    expect(await listDrafts(vault.store)).toEqual([]);
+    expect(hook().shared.drafts).toEqual([]);
+  });
+});
+
+describe('an unlock finding a send with no Sent folder', () => {
+  it('finishes it, with nothing left to press and nothing sent', async () => {
+    network.sentCopy = { ok: false, error: { kind: 'no-sent-mailbox' } };
+    const { vault } = await leftInVault('submitted');
+    const { hook } = await mount(vault.store);
+    expect(hook().shared.drafts).toEqual([]);
+    expect(await listDrafts(vault.store)).toEqual([]);
+    expect(network.submitted).toEqual([]);
+  });
+});
+
+describe('a claim a dead tab left at `submitting`', () => {
+  const left = async () => {
+    const { vault, bytes, handle } = await leftInVault('submitting');
+    const mounted = await mount(vault.store);
+    return { ...mounted, vault, bytes, handle };
+  };
+
+  it('is the same question as a lost answer, and frozen until settled', async () => {
+    const { handle, ...mounted } = await left();
+    expect(await reopenedAs(mounted, handle.draftKey)).toEqual({
+      openSendState: 'unconfirmed',
+      isOpenDraftFrozen: true,
+    });
+    expect(network.submitted).toEqual([]);
+  });
+
+  it('goes out once however often Send again is pressed', async () => {
+    const { vault, handle, ...mounted } = await left();
+    const { hook } = mounted;
+    await reopenedAs(mounted, handle.draftKey);
+    network.smtp = Promise.withResolvers();
+    const answers = await act(() =>
+      Promise.all([hook().composer.sendAgain(), hook().composer.sendAgain()]),
+    );
+    const claimed = answers.filter(answer => answer?.ok === true);
+    expect(claimed).toHaveLength(1);
+    expect(answers.filter(answer => answer === null)).toHaveLength(1);
+    await vi.waitFor(() => expect(network.submitted).toHaveLength(1));
+
+    network.smtp.resolve();
+    const [answer] = claimed;
+    if (answer === undefined || answer === null || !answer.ok) throw new Error('no claim');
+    await act(() => answer.value.settled);
+    expect(network.submitted).toHaveLength(1);
+    expect(await listDrafts(vault.store)).toEqual([]);
+  });
+
+  it('is not sent by a second device that had the same stale list', async () => {
+    const { vault, handle, ...here } = await left();
+    const there = await mount(vault.store);
+    await reopenedAs(here, handle.draftKey);
+    await reopenedAs(there, handle.draftKey);
+    network.smtp = Promise.withResolvers();
+    const answer = await act(() => here.hook().composer.sendAgain());
+    if (answer === null || !answer.ok) throw new Error('Send again was refused');
+    await vi.waitFor(() => expect(network.submitted).toHaveLength(1));
+
+    await act(() => there.hook().composer.sendAgain());
+    expect(network.submitted).toHaveLength(1);
+    // The refusal tells that device what is really going on.
+    expect(there.hook().composer.openSendState).toBe('sending');
+
+    network.smtp.resolve();
+    await act(() => answer.value.settled);
+  });
+
+  it('is settled by the message turning up in Sent', async () => {
+    const { rerender, vault, bytes } = await left();
+    await rerender({
+      baseByAccount: {
+        [ACCOUNT.address]: { sent: { uidValidity: 7, summaries: [await serverCopyOf(bytes)] } },
+      },
+    });
+    await act(() => new Promise(resolve => setTimeout(resolve, 20)));
+    expect(await listDrafts(vault.store)).toEqual([]);
+    expect(network.submitted).toEqual([]);
+  });
+});
+
+describe('the sending tab, while its send runs', () => {
+  it('shows the draft frozen when it is reopened', async () => {
+    network.smtp = Promise.withResolvers();
+    const { settled, ...mounted } = await claimOne();
+    const [listed] = mounted.hook().shared.drafts;
+    if (listed === undefined) throw new Error('the claimed draft should be listed');
+    expect(listed.record.send?.state).toBe('submitting');
+    expect(await reopenedAs(mounted, listed.draftKey)).toEqual({
+      openSendState: 'sending',
+      isOpenDraftFrozen: true,
+    });
+
+    network.smtp.resolve();
+    expect(await act(() => settled)).toEqual({ state: 'sent' });
+  });
+});
+
+describe("a draft on screen while another device's send holds it", () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ now: 1_000_000 });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  const onScreen = async () => {
+    const { vault, handle } = await leftInVault('submitting', Date.now());
+    const mounted = await mount(vault.store);
+    await reopenedAs(mounted, handle.draftKey);
+    return { ...mounted, vault, handle };
+  };
+
+  const wait = (ms: number) => act(async () => vi.advanceTimersByTimeAsync(ms));
+
+  it('frees itself about 3 minutes after that tab dies, with no click', async () => {
+    const { hook } = await onScreen();
+    expect(hook().composer.openSendState).toBe('sending');
+    await wait(2 * 60_000);
+    expect(hook().composer.openSendState).toBe('sending');
+    await wait(2 * 60_000);
+    expect(hook().composer.openSendState).toBe('unconfirmed');
+    expect(network.submitted).toEqual([]);
+  });
+
+  it('stays frozen past 15 minutes while its lease is renewed', async () => {
+    const { hook, vault } = await onScreen();
+    for (const _minute of Array.from({ length: 20 })) {
+      await vault.store.put({
+        type: SEND_LEASE_RECORD_TYPE,
+        naturalKey: 'op-left',
+        plaintext: JSON.stringify({ renewedAt: Date.now() }),
+      });
+      await wait(60_000);
+      expect(hook().composer.openSendState).toBe('sending');
+    }
+  });
+
+  it('stops looking once the composer closes', async () => {
+    const { hook } = await onScreen();
+    const before = vi.getTimerCount();
+    await act(async () => {
+      hook().composer.seedDraft(undefined, {});
+    });
+    expect(vi.getTimerCount()).toBeLessThan(before);
+  });
+});
+
+describe('the draft on screen when its send ends', () => {
+  const openOn = async (state: 'submitting' | 'submitted', claimedAt = 0) => {
+    const { vault, bytes, handle } = await leftInVault(state, claimedAt);
+    network.sentCopy = { ok: false, error: { kind: 'imap', reason: { kind: 'no', text: 'Full' } } };
+    const mounted = await mount(vault.store);
+    await reopenedAs(mounted, handle.draftKey);
+    network.sentCopy = { ok: true, value: null };
+    return { ...mounted, vault, bytes, handle };
+  };
+
+  const closedCleanly = ({ hook }: Pick<Mounted, 'hook'>) => {
+    expect(hook().composer.draft).toBeNull();
+    expect(hook().composer.draftConflict).toBeNull();
+    expect(hook().composer.draftError).toBeNull();
+  };
+
+  /** What the composer's close runs once the URL lets go, which must file nothing over a sent draft. */
+  const closeComposer = ({ hook }: Pick<Mounted, 'hook'>) =>
+    act(async () => {
+      hook().composer.seedDraft(undefined, {});
+    });
+
+  it('closes on Finish without copy, and the close files nothing', async () => {
+    const mounted = await openOn('submitted');
+    await act(() => mounted.hook().composer.finishWithoutCopy());
+    closedCleanly(mounted);
+    await closeComposer(mounted);
+    await act(() => new Promise(resolve => setTimeout(resolve, 20)));
+    closedCleanly(mounted);
+  });
+
+  it('closes at the claim on Save to Sent, and reports through the toast', async () => {
+    const mounted = await openOn('submitted');
+    const answer = await act(() => mounted.hook().composer.sendAgain());
+    if (answer === null || !answer.ok) throw new Error('Save to Sent was refused');
+    closedCleanly(mounted);
+    expect(await act(() => answer.value.settled)).toEqual({ state: 'sent' });
+    expect(network.submitted).toEqual([]);
+    expect(await listDrafts(mounted.vault.store)).toEqual([]);
+  });
+
+  it('closes at the claim on Send again, while the send is still on the network', async () => {
+    const mounted = await openOn('submitting');
+    network.smtp = Promise.withResolvers();
+    const answer = await act(() => mounted.hook().composer.sendAgain());
+    if (answer === null || !answer.ok) throw new Error('Send again was refused');
+    closedCleanly(mounted);
+    network.smtp.resolve();
+    await act(() => answer.value.settled);
+  });
+
+  it('closes when another device finishes it, without a press', async () => {
+    vi.useFakeTimers({ now: 1_000_000 });
+    try {
+      const { vault, handle } = await leftInVault('submitted', Date.now());
+      const mounted = await mount(vault.store);
+      await reopenedAs(mounted, handle.draftKey);
+      expect(mounted.hook().composer.openSendState).toBe('sending');
+      await completeSend(vault.store, handle.draftId, '<left@x.test>', Date.now());
+      await act(async () => vi.advanceTimersByTimeAsync(60_000));
+      closedCleanly(mounted);
+      await closeComposer(mounted);
+      closedCleanly(mounted);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('closes when the message turns up in Sent', async () => {
+    const mounted = await openOn('submitting');
+    await mounted.rerender({
+      baseByAccount: {
+        [ACCOUNT.address]: {
+          sent: { uidValidity: 7, summaries: [await serverCopyOf(mounted.bytes)] },
+        },
+      },
+    });
+    await act(() => new Promise(resolve => setTimeout(resolve, 20)));
+    closedCleanly(mounted);
+  });
+
+  it('closes on the sending tab when the send it reopened finishes', async () => {
+    network.smtp = Promise.withResolvers();
+    const { settled, ...mounted } = await claimOne();
+    const [listed] = mounted.hook().shared.drafts;
+    if (listed === undefined) throw new Error('the claimed draft should be listed');
+    await reopenedAs(mounted, listed.draftKey);
+    expect(mounted.hook().composer.draft).not.toBeNull();
+
+    network.smtp.resolve();
+    expect(await act(() => settled)).toEqual({ state: 'sent' });
+    closedCleanly(mounted);
+  });
+
+  it('never has a live Send in any render after the record goes', async () => {
+    const mounted = await openOn('submitted');
+    mounted.composers.length = 0;
+    await act(() => mounted.hook().composer.finishWithoutCopy());
+    const shown = mounted.composers.filter(({ draft }) => draft !== null);
+    expect(shown.length).toBeGreaterThan(0);
+    expect(shown.every(({ isOpenDraftFrozen }) => isOpenDraftFrozen)).toBe(true);
+    expect(mounted.hook().composer.draft).toBeNull();
+  });
+
+  it('leaves an ordinary draft another device discarded open, with what was typed', async () => {
+    const { hook, vault, created } = await openInComposer();
+    await act(async () => hook().composer.updateDraft({ body: 'Still typing' }));
+    await deleteDraft(vault.store, created.draftId, 0);
+    await act(() => hook().shared.writeDraft({ content: content({ body: 'Elsewhere' }) }));
+    expect(hook().composer.draft?.body).toBe('Still typing');
+  });
+});
+
+describe('Send again and Save to Sent report as Send does', () => {
+  const left = async (state: 'submitting' | 'submitted') => {
+    const { vault, bytes, handle } = await leftInVault(state);
+    network.sentCopy = { ok: false, error: { kind: 'imap', reason: { kind: 'no', text: 'Full' } } };
+    const mounted = await mount(vault.store);
+    await reopenedAs(mounted, handle.draftKey);
+    network.sentCopy = { ok: true, value: null };
+    return { ...mounted, vault, bytes, handle };
+  };
+
+  const press = async ({ hook }: Pick<Mounted, 'hook'>) => {
+    const answer = await act(() => hook().composer.sendAgain());
+    if (answer === null || !answer.ok) throw new Error('the press was refused');
+    return answer.value.settled;
+  };
+
+  it("says no Sent folder was there, and shows this tab's copy", async () => {
+    const mounted = await left('submitted');
+    network.sentCopy = { ok: false, error: { kind: 'no-sent-mailbox' } };
+    expect(await act(() => press(mounted))).toEqual({
+      state: 'sent-with-caveat',
+      detail: 'imap.x has no Sent folder to keep a copy in',
+    });
+    expect(mounted.hook().shared.sentCopyError).toBe(
+      'sent, but imap.x has no Sent folder to keep a copy in',
+    );
+    expect(mounted.hook().vaultSent.map(({ messageId }) => messageId)).toEqual(['<left@x.test>']);
+    expect(await listDrafts(mounted.vault.store)).toEqual([]);
+  });
+
+  it('says a copy that failed again failed', async () => {
+    const mounted = await left('submitted');
+    network.sentCopy = { ok: false, error: { kind: 'stalled' } };
+    expect(await act(() => press(mounted))).toMatchObject({ state: 'sent-with-caveat' });
+  });
+
+  it('counts as work on the network, so a reload asks first', async () => {
+    const mounted = await left('submitting');
+    network.smtp = Promise.withResolvers();
+    const answer = await act(() => mounted.hook().composer.sendAgain());
+    if (answer === null || !answer.ok) throw new Error('the press was refused');
+    const { settled } = answer.value;
+    expect(mounted.activity.snapshot().some(isUnsavedWork)).toBe(true);
+    network.smtp.resolve();
+    await act(() => settled);
+    expect(mounted.activity.snapshot().some(isUnsavedWork)).toBe(false);
+  });
+
+  it('gives the draft back on a refusal, at the version Reopen needs', async () => {
+    const mounted = await left('submitting');
+    network.submitAnswer = { ok: false, error: { kind: 'error', detail: 'refused by the host' } };
+    expect(await act(() => press(mounted))).toEqual({
+      state: 'refused',
+      detail: 'refused by the host',
+      draftKey: mounted.handle.draftKey,
+    });
+    await reopenedAs(mounted, mounted.handle.draftKey);
+    const { draft, openSendState, isOpenDraftFrozen } = mounted.hook().composer;
+    const [back] = await listDrafts(mounted.vault.store);
+    expect({ openSendState, isOpenDraftFrozen }).toEqual({
+      openSendState: null,
+      isOpenDraftFrozen: false,
+    });
+    expect(draft?.draftId).toBe(back?.draftId);
+  });
+
+  it('stays open and says nothing new when the send is running after all', async () => {
+    const mounted = await left('submitting');
+    await reclaimSend(mounted.vault.store, mounted.handle.draftId, Date.now());
+    expect(await act(() => mounted.hook().composer.sendAgain())).toBeNull();
+    expect(network.submitted).toEqual([]);
+    expect(mounted.hook().composer.openSendState).toBe('sending');
+  });
+
+  it('says so when the address has gone, and leaves the draft as it was', async () => {
+    const mounted = await left('submitted');
+    await mounted.rerender({ identities: [] });
+    expect(await act(() => mounted.hook().composer.sendAgain())).toEqual({
+      ok: false,
+      error: { kind: 'error', detail: 'That address was removed' },
+    });
+    expect(mounted.hook().composer.openSendState).toBe('accepted');
+  });
+});
+
+describe('Back to editing', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  const setAside = async () => {
+    const { vault, handle } = await leftInVault('submitting');
+    const mounted = await mount(vault.store);
+    await reopenedAs(mounted, handle.draftKey);
+    await act(() => mounted.hook().composer.backToEditing());
+    return { ...mounted, vault, handle };
+  };
+
+  it('names the version it wrote, so the next autosave is no conflict with itself', async () => {
+    const { hook, vault } = await setAside();
+    const [current] = await listDrafts(vault.store);
+    expect(hook().composer.draft?.draftId).toBe(current?.draftId);
+
+    await act(async () => hook().composer.updateDraft({ body: 'Edited after all' }));
+    await act(async () => vi.advanceTimersByTimeAsync(2_000));
+    expect(hook().composer.draftConflict).toBeNull();
+    expect((await listDrafts(vault.store))[0]?.record.body).toBe('Edited after all');
+  });
+
+  it('saves what was typed while it was frozen, as no conflict with itself', async () => {
+    const { vault, handle } = await leftInVault('submitting');
+    const mounted = await mount(vault.store);
+    await reopenedAs(mounted, handle.draftKey);
+    await act(async () => mounted.hook().composer.updateDraft({ body: 'Typed while frozen' }));
+    await act(() => mounted.hook().composer.backToEditing());
+    await act(async () => vi.advanceTimersByTimeAsync(2_000));
+    expect(mounted.hook().composer.draftConflict).toBeNull();
+    expect((await listDrafts(vault.store))[0]?.record.body).toBe('Typed while frozen');
+  });
+
+  describe('pressed on another device', () => {
+    /** This device has it open and frozen; that one sets it aside, and maybe edits it, before the next poll. */
+    const elsewhere = async (edit: (store: RecordStore, draftId: string) => Promise<unknown>) => {
+      const { vault, handle } = await leftInVault('submitting');
+      const mounted = await mount(vault.store);
+      await reopenedAs(mounted, handle.draftKey);
+      const aside = await unconfirmSend(vault.store, handle.draftId, Date.now());
+      if (aside === null) throw new Error('that device could not set it aside');
+      await edit(vault.store, aside.draftId);
+      await act(async () => vi.advanceTimersByTimeAsync(45_000));
+      expect(mounted.hook().composer.openSendState).toBe('unconfirmed');
+      return { ...mounted, vault, handle };
+    };
+
+    it('does not overwrite an edit made there, and leaves it to the conflict flow', async () => {
+      const { hook, vault, handle } = await elsewhere((store, draftId) =>
+        replaceDraft(store, draftId, content({ body: 'Theirs' }), Date.now()),
+      );
+      expect(hook().composer.draft?.draftId).toBe(handle.draftId);
+      await act(async () => vi.advanceTimersByTimeAsync(2_000));
+      expect((await listDrafts(vault.store))[0]?.record.body).toBe('Theirs');
+
+      await act(async () => hook().composer.updateDraft({ body: 'Mine' }));
+      await act(async () => vi.advanceTimersByTimeAsync(2_000));
+      expect(hook().composer.draftConflict?.record.body).toBe('Theirs');
+      expect((await listDrafts(vault.store))[0]?.record.body).toBe('Theirs');
+    });
+
+    it('takes the version when the text did not change there', async () => {
+      const { hook, vault } = await elsewhere(async () => {});
+      const [current] = await listDrafts(vault.store);
+      expect(hook().composer.draft?.draftId).toBe(current?.draftId);
+      await act(async () => hook().composer.updateDraft({ body: 'Mine' }));
+      await act(async () => vi.advanceTimersByTimeAsync(2_000));
+      expect(hook().composer.draftConflict).toBeNull();
+      expect((await listDrafts(vault.store))[0]?.record.body).toBe('Mine');
+    });
+  });
+
+  it('lets the next Send claim it, with no refusal as edited elsewhere', async () => {
+    const { hook } = await setAside();
+    const answer = await act(() => hook().composer.send());
+    expect(answer.ok).toBe(true);
+    if (answer.ok) await act(() => answer.value.settled);
+    expect(network.submitted).toHaveLength(1);
   });
 });
 
@@ -1312,22 +1839,17 @@ describe('an answer that lands after its session ended', () => {
       const sending = await createDraft(vault.store, content(), 0);
       if (!beside.ok || !sending.ok) throw new Error('no drafts to unlock');
       // Out through SMTP, but not yet in Sent: the unlock finishes it, then lists the drafts again.
-      await claimSend(
-        vault.store,
-        sending.handle.draftId,
-        {
-          messageId: '<plans@x.test>',
-          opId: 'op-1',
-          state: 'submitted',
-          claimedAt: 0,
-          message: {
-            head: new TextEncoder().encode('Subject: Plans\r\n\r\nHello').toBase64(),
-            splices: [],
-          },
-          target: { account: ACCOUNT.address, folder: 'sent' },
+      await claimSend(vault.store, sending.handle.draftId, {
+        messageId: '<plans@x.test>',
+        opId: 'op-1',
+        state: 'submitted',
+        claimedAt: 0,
+        message: {
+          head: new TextEncoder().encode('Subject: Plans\r\n\r\nHello').toBase64(),
+          splices: [],
         },
-        0,
-      );
+        target: { account: ACCOUNT.address, folder: 'sent' },
+      });
       const copying = gate();
       network.copying = copying;
       const mounted = await render(vault.store);
@@ -1396,21 +1918,16 @@ describe('an answer that lands after its session ended', () => {
         const bytes = new TextEncoder().encode(
           `From: ${ACCOUNT.address}\r\nMessage-ID: ${messageId}\r\nSubject: ${subject}\r\n\r\nHi`,
         );
-        const claimed = await claimSend(
-          vault.store,
-          created.handle.draftId,
-          {
-            messageId,
-            opId: subject,
-            state: 'submitting',
-            claimedAt: 0,
-            message: { head: bytes.toBase64(), splices: [] },
-            target: { account: ACCOUNT.address, folder: 'sent' },
-          },
-          0,
-        );
+        const claimed = await claimSend(vault.store, created.handle.draftId, {
+          messageId,
+          opId: subject,
+          state: 'submitting',
+          claimedAt: 0,
+          message: { head: bytes.toBase64(), splices: [] },
+          target: { account: ACCOUNT.address, folder: 'sent' },
+        });
         if (!claimed.ok) throw new Error('no claim to leave unconfirmed');
-        await unconfirmSend(vault.store, claimed.handle.draftId);
+        await unconfirmSend(vault.store, claimed.handle.draftId, Date.now());
         summaries.push(await serverCopyOf(bytes));
       }
       const mounted = await mount(vault.store);

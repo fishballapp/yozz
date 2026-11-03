@@ -339,7 +339,7 @@ describe('createLiveManager', () => {
     const MIB = 2 ** 20;
 
     /** A connection whose APPEND is written whole and answered only when the test says, or the socket ends. */
-    const appending = (activity = createActivityTracker()) => {
+    const appending = (activity = createActivityTracker(), close = async () => {}) => {
       const answer = Promise.withResolvers<ImapResult<null>>();
       const manager = managerOver(async (_imap, options) => {
         options?.signal?.addEventListener('abort', () =>
@@ -349,7 +349,7 @@ describe('createLiveManager', () => {
           ok: true,
           value: {
             client: { ...createFakeClient(), append: () => answer.promise },
-            close: async () => {},
+            close,
             resumed: false,
           },
         };
@@ -405,6 +405,31 @@ describe('createLiveManager', () => {
       await advance(30_000);
       expect(behind).toEqual({ ok: false, error: { kind: 'stalled' } });
       expect(await written).toEqual({ ok: false, error: { kind: 'stalled' } });
+    });
+
+    it('does not call a dropped connection a stall on what queued behind it', async () => {
+      const closing = Promise.withResolvers<void>();
+      const { manager, append, answer } = appending(undefined, () => closing.promise);
+      const written = append(33 * MIB);
+      let behind: unknown = 'waiting';
+      void manager.run(ACCOUNT, quick).then(result => {
+        behind = result;
+      });
+      await flush();
+      await advance(5 * 60_000);
+
+      // Lost past the minute the next task gets, and the socket takes a moment to close: that wait
+      // is not the next task's.
+      answer.resolve({ ok: false, reason: { kind: 'closed' } });
+      await flush();
+      await advance(20_000);
+      expect(behind).toBe('waiting');
+      expect(states.some(state => state.status === 'failed')).toBe(false);
+
+      closing.resolve();
+      await written;
+      await flush();
+      expect(behind).not.toEqual({ ok: false, error: { kind: 'stalled' } });
     });
 
     it('takes its long limit with it when it is answered', async () => {

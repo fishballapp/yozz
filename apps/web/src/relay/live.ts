@@ -189,6 +189,8 @@ export const createLiveManager = (deps: {
           return await client.append(mailbox, message, flags, internalDate);
         } finally {
           conn.stallAfterMs = STALL_MS;
+          // A long wait is over, so the shorter limit does not count it.
+          conn.progressAt = now();
         }
       },
       ensureSelected: async name => {

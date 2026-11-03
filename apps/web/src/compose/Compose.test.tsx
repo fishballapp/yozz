@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Composer } from '../store/use-composer';
 import { toast } from '../ui/Toast';
 import { Compose } from './Compose';
+import type { SendReport } from './draft';
 
 type SendAnswer = Awaited<ReturnType<Composer['send']>>;
 
@@ -31,6 +32,11 @@ const mail = vi.hoisted(() => ({
   detach: vi.fn(),
   draft: null as ComposeDraft | null,
   draftConflict: null as unknown,
+  openSendState: null as Composer['openSendState'],
+  isOpenSendOver: false,
+  sendAgain: vi.fn(),
+  backToEditing: vi.fn(),
+  finishWithoutCopy: vi.fn(),
 }));
 const navigate = vi.hoisted(() => vi.fn());
 const reading = vi.hoisted(() => ({ files: null as PromiseWithResolvers<Attachment[]> | null }));
@@ -56,10 +62,12 @@ vi.mock('../store/MailProvider', () => ({
     draftConflict: mail.draftConflict,
     draftError: null,
     resolveDraftConflict: vi.fn(),
-    openSendState: null,
-    isOpenDraftFrozen: false,
-    sendAgain: vi.fn(),
-    backToEditing: vi.fn(),
+    openSendState: mail.openSendState,
+    isOpenDraftFrozen: mail.openSendState !== null,
+    isOpenSendOver: mail.isOpenSendOver,
+    sendAgain: mail.sendAgain,
+    backToEditing: mail.backToEditing,
+    finishWithoutCopy: mail.finishWithoutCopy,
     discardDraft: vi.fn(),
   }),
   useMail: () => ({
@@ -87,8 +95,94 @@ afterEach(async () => {
   vi.restoreAllMocks();
   mail.send.mockReset();
   mail.attach.mockReset();
+  mail.openSendState = null;
+  mail.isOpenSendOver = false;
+  mail.sendAgain.mockReset();
   navigate.mockReset();
   reading.files = null;
+});
+
+describe('a send on the open draft', () => {
+  const offered = async (state: Composer['openSendState']) => {
+    mail.openSendState = state;
+    await act(async () => root.render(<Compose />));
+    const labels = ['Send again', 'Back to editing', 'Save to Sent', 'Finish without copy'];
+    return [...document.querySelectorAll('button')]
+      .map(({ textContent }) => textContent)
+      .filter(label => labels.includes(label ?? ''));
+  };
+
+  it('offers nothing while it runs', async () => {
+    expect(await offered('sending')).toEqual([]);
+    expect(alerts()).toEqual(['Sending — this draft is frozen until it finishes.']);
+  });
+
+  it('asks about a send nobody saw the answer to', async () => {
+    expect(await offered('unconfirmed')).toEqual(['Send again', 'Back to editing']);
+    expect(alerts()).toEqual(['This may already have been sent.']);
+  });
+
+  it('offers only the copy on one SMTP accepted, so nothing can send it twice', async () => {
+    expect(await offered('accepted')).toEqual(['Save to Sent', 'Finish without copy']);
+    expect(alerts()).toEqual(['This was sent, but could not be saved to Sent.']);
+    const finish = [...document.querySelectorAll('button')].find(
+      button => button.textContent === 'Finish without copy',
+    );
+    await act(async () => finish?.click());
+    expect(mail.finishWithoutCopy).toHaveBeenCalledTimes(1);
+    const send = [...document.querySelectorAll('button')].find(
+      button => button.textContent === 'Send',
+    );
+    expect(send?.disabled).toBe(true);
+  });
+});
+
+describe('a takeover from the banner', () => {
+  const press = async (label: string) => {
+    mail.openSendState = label === 'Save to Sent' ? 'accepted' : 'unconfirmed';
+    await act(async () => root.render(<Compose />));
+    const button = [...document.querySelectorAll('button')].find(
+      ({ textContent }) => textContent === label,
+    );
+    if (button === undefined) throw new Error(`no ${label}`);
+    await act(async () => button.click());
+  };
+
+  it.each(['Send again', 'Save to Sent'])('%s closes and reports as Send does', async label => {
+    const settled = Promise.withResolvers<SendReport>();
+    mail.sendAgain.mockResolvedValue({ ok: true, value: { settled: settled.promise } });
+    const added = vi.spyOn(toast, 'add');
+    await press(label);
+    expect(navigate).toHaveBeenCalledTimes(1);
+    expect(added).toHaveBeenCalledWith(expect.objectContaining({ title: 'Sending…' }));
+    settled.resolve({ state: 'sent' });
+  });
+
+  it('stays open and adds nothing when the send is running after all', async () => {
+    mail.sendAgain.mockResolvedValue(null);
+    const added = vi.spyOn(toast, 'add');
+    await press('Send again');
+    expect(navigate).not.toHaveBeenCalled();
+    expect(added).not.toHaveBeenCalled();
+  });
+
+  it('says why when it is refused at the claim', async () => {
+    mail.sendAgain.mockResolvedValue({
+      ok: false,
+      error: { kind: 'error', detail: 'That address was removed' },
+    });
+    await press('Save to Sent');
+    expect(navigate).not.toHaveBeenCalled();
+    expect(alerts()).toContain('That address was removed');
+  });
+});
+
+describe('a send that ends on screen', () => {
+  it('lets go of the intent, so the composer closes', async () => {
+    mail.isOpenSendOver = true;
+    await act(async () => root.render(<Compose />));
+    expect(navigate).toHaveBeenCalledTimes(1);
+  });
 });
 
 const alerts = () => [...document.querySelectorAll('[role="alert"]')].map(node => node.textContent);

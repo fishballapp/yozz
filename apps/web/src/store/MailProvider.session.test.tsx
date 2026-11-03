@@ -234,22 +234,17 @@ const leaveSubmitted = async (
     0,
   );
   if (!sending.ok) throw new Error('no draft to unlock');
-  await claimSend(
-    store,
-    sending.handle.draftId,
-    {
-      messageId: `<${subject.toLowerCase()}@example.com>`,
-      opId: 'op-1',
-      state: 'submitted',
-      claimedAt: 0,
-      message: {
-        head: new TextEncoder().encode('Subject: Plans\r\n\r\nHi').toBase64(),
-        splices: [],
-      },
-      target: target === 'vault' ? 'vault' : { account: ALICE.address, folder: 'sent' },
+  await claimSend(store, sending.handle.draftId, {
+    messageId: `<${subject.toLowerCase()}@example.com>`,
+    opId: 'op-1',
+    state: 'submitted',
+    claimedAt: 0,
+    message: {
+      head: new TextEncoder().encode('Subject: Plans\r\n\r\nHi').toBase64(),
+      splices: [],
     },
-    0,
-  );
+    target: target === 'vault' ? 'vault' : { account: ALICE.address, folder: 'sent' },
+  });
 };
 
 /** Lets held work that was let go run as far as it can. */

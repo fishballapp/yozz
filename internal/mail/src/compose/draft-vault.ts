@@ -10,9 +10,16 @@ import {
   heldSend,
   isFrozenBySend,
   newDraftKey,
+  openSendStateOf,
   parseDraftId,
   parseDraftMirrorRecord,
   parseDraftRecord,
+  parseSendLease,
+  SEND_LEASE_CEILING_MS,
+  SEND_LEASE_CLEANUP_MS,
+  SEND_LEASE_MS,
+  SEND_LEASE_RECORD_TYPE,
+  SEND_LEASE_RENEW_MS,
   unconfirmedSendOf,
 } from './draft-record.ts';
 
@@ -25,6 +32,8 @@ export type DraftHandle = {
   readonly draftKey: string;
   readonly draftId: string;
   readonly record: DraftRecord;
+  /** The send's lease as last read, for what renders. A write that decides something reads it again. */
+  readonly renewedAt?: number;
 };
 
 export type SaveOutcome =
@@ -37,10 +46,11 @@ export type SaveOutcome =
 
 const isConflict = (error: unknown) => error instanceof VaultApiError && error.code === 'CONFLICT';
 
-const handleOf = (draftKey: string, record: DraftRecord): DraftHandle => ({
+const handleOf = (draftKey: string, record: DraftRecord, renewedAt?: number): DraftHandle => ({
   draftKey,
   draftId: draftIdOf(draftKey, record.contentVersion),
   record,
+  ...(renewedAt === undefined ? {} : { renewedAt }),
 });
 
 const readDraft = async (
@@ -75,6 +85,16 @@ const winnerIdAfterRefusal = async (
 ): Promise<string | null> => {
   const now = await readDraft(store, draftKey);
   return now === null ? null : draftIdOf(draftKey, now.record.contentVersion);
+};
+
+/** When the record's send last renewed its lease, if it has. */
+export const readSendLease = async (
+  store: RecordStore,
+  { send }: DraftRecord,
+): Promise<number | undefined> => {
+  if (send === undefined) return undefined;
+  const opened = await store.get(SEND_LEASE_RECORD_TYPE, send.opId);
+  return opened === null ? undefined : parseSendLease(opened.plaintext)?.renewedAt;
 };
 
 /** The CAS write every version bump shares. Any failure other than a refused precondition is the network. */
@@ -140,7 +160,7 @@ export const replaceDraft = async (
   const current = await readVersion(store, draftId);
   if (current === null) return { ok: false, reason: 'conflict', currentDraftId: null };
   // A send in flight, or one waiting for the person to settle it, freezes the content on every device.
-  if (isFrozenBySend(current.record, now)) return { ok: false, reason: 'sending' };
+  if (isFrozenBySend(current.record)) return { ok: false, reason: 'sending' };
   if (!current.isCurrent) {
     return { ok: false, reason: 'conflict', currentDraftId: current.currentId };
   }
@@ -172,13 +192,12 @@ export const claimSend = async (
   store: RecordStore,
   draftId: string,
   send: NonNullable<DraftRecord['send']>,
-  now: number,
   // The editor's newest text, in the same CAS write as the claim: sending does not wait for the autosave.
   content?: Omit<DraftRecord, 'contentVersion' | 'send' | 'sentMessageId' | 'deletedAt'>,
 ): Promise<SaveOutcome> => {
   const current = await readVersion(store, draftId);
   if (current === null) return { ok: false, reason: 'conflict', currentDraftId: null };
-  if (isFrozenBySend(current.record, now)) return { ok: false, reason: 'sending' };
+  if (isFrozenBySend(current.record)) return { ok: false, reason: 'sending' };
   if (!current.isCurrent) {
     return { ok: false, reason: 'conflict', currentDraftId: current.currentId };
   }
@@ -202,11 +221,16 @@ export const claimSend = async (
 const bumpVersion = async (
   store: RecordStore,
   draftId: string,
-  next: (record: DraftRecord) => Omit<DraftRecord, 'contentVersion'> | null,
+  next: (
+    record: DraftRecord,
+  ) =>
+    | Omit<DraftRecord, 'contentVersion'>
+    | null
+    | Promise<Omit<DraftRecord, 'contentVersion'> | null>,
 ): Promise<DraftHandle | null> => {
   const current = await readVersion(store, draftId);
   if (current === null || !current.isCurrent) return null;
-  const fields = next(current.record);
+  const fields = await next(current.record);
   if (fields === null) return null;
   const record: DraftRecord = { ...fields, contentVersion: current.version + 1 };
   const written = await putVersion(store, current.key, record, current.revision);
@@ -230,46 +254,84 @@ export const releaseSend = async (store: RecordStore, draftId: string): Promise<
 
 /**
  * "Back to editing" for an unconfirmed send. Not a release, which would say the message never went
- * out: discarding stays refused until a sync finds it in Sent or the person sends again.
+ * out: discarding stays refused until a sync finds it in Sent or the person sends again. Asks the
+ * lease first: what was on screen may be minutes old, and it never applies to a send SMTP accepted.
  */
-export const unconfirmSend = (store: RecordStore, draftId: string): Promise<DraftHandle | null> =>
-  bumpVersion(store, draftId, ({ send, ...rest }) =>
-    send === undefined ? null : { ...rest, unconfirmedSend: send },
-  );
+export const unconfirmSend = (
+  store: RecordStore,
+  draftId: string,
+  now: number,
+): Promise<DraftHandle | null> =>
+  bumpVersion(store, draftId, async record => {
+    const { send, ...rest } = record;
+    const unconfirmed = unconfirmedSendOf(record, await readSendLease(store, record), now);
+    return send === undefined || unconfirmed === undefined
+      ? null
+      : { ...rest, unconfirmedSend: send };
+  });
 
-/** "Send again": the frozen bytes go back under a fresh claim, so phase (1) re-runs the same message. */
+/**
+ * Takes over a send nobody is running, under a fresh claim. The compare-and-swap lets one click or
+ * device through. Unconfirmed, the frozen bytes go out again: "Send again", the person's call. SMTP
+ * having accepted it, it stays at its phase, so nothing but the copy can follow. `null` is a send
+ * still running, one settled since, or nothing to take over.
+ */
 export const reclaimSend = (
   store: RecordStore,
   draftId: string,
   now: number,
 ): Promise<DraftHandle | null> =>
-  bumpVersion(store, draftId, record => {
-    const pending = unconfirmedSendOf(record);
+  bumpVersion(store, draftId, async record => {
+    const renewedAt = await readSendLease(store, record);
+    if (heldSend(record, renewedAt, now) !== undefined) return null;
+    const pending = unconfirmedSendOf(record, renewedAt, now) ?? record.send;
     if (pending === undefined) return null;
     const { unconfirmedSend: _reclaimed, ...rest } = record;
-    return { ...rest, send: { ...pending, state: 'submitting', claimedAt: now } };
+    return {
+      ...rest,
+      send: {
+        ...pending,
+        opId: crypto.randomUUID(),
+        state: pending.state === 'unconfirmed' ? 'submitting' : pending.state,
+        claimedAt: now,
+      },
+    };
   });
+
+/** The draft as a tombstone that remembers what it became. It stops naming its files, which frees them. */
+const tombstoneOfSent = (
+  { send: _done, unconfirmedSend: _settled, attachments: _freed, ...rest }: DraftRecord,
+  sentMessageId: string,
+  now: number,
+  options: { readonly isSentWithoutCopy?: true } = {},
+) => ({ ...rest, deletedAt: now, sentMessageId, ...options });
 
 /**
  * Phase (3): the draft becomes a tombstone. Unlike `deleteDraft`, allowed on a record carrying a
- * `send`. It stops naming its files, which is what frees them, now that the Sent copy is safe.
+ * `send`, now that the Sent copy is safe.
  */
 export const completeSend = async (
   store: RecordStore,
   draftId: string,
   sentMessageId: string,
   now: number,
+  options?: { readonly isSentWithoutCopy?: true },
 ): Promise<void> => {
-  await bumpVersion(
-    store,
-    draftId,
-    ({ send: _done, unconfirmedSend: _settled, attachments: _freed, ...rest }) => ({
-      ...rest,
-      deletedAt: now,
-      sentMessageId,
-    }),
-  );
+  await bumpVersion(store, draftId, record => tombstoneOfSent(record, sentMessageId, now, options));
 };
+
+/** The way out when a copy can never land: the message went out, so the person may let the copy go. */
+export const finishWithoutCopy = (
+  store: RecordStore,
+  draftId: string,
+  now: number,
+): Promise<DraftHandle | null> =>
+  bumpVersion(store, draftId, async record => {
+    const state = openSendStateOf(record, await readSendLease(store, record), now);
+    return state === 'accepted' && record.send !== undefined
+      ? tombstoneOfSent(record, record.send.messageId, now, { isSentWithoutCopy: true })
+      : null;
+  });
 
 export type DeleteOutcome =
   | { readonly outcome: 'deleted'; readonly draftId: string }
@@ -286,12 +348,14 @@ export const deleteDraft = async (
 ): Promise<DeleteOutcome> => {
   const current = await readVersion(store, draftId);
   if (current === null || current.record.deletedAt !== undefined) return { outcome: 'absent' };
-  if (
-    heldSend(current.record, now) !== undefined ||
-    unconfirmedSendOf(current.record) !== undefined
-  ) {
-    return { outcome: 'sending' };
-  }
+  const { send, unconfirmedSend } = current.record;
+  // A claim nobody ran past `submitting` may never have reached SMTP, and is the person's to drop.
+  const isDiscardable =
+    send === undefined
+      ? unconfirmedSend === undefined
+      : send.state === 'submitting' &&
+        heldSend(current.record, await readSendLease(store, current.record), now) === undefined;
+  if (!isDiscardable) return { outcome: 'sending' };
   if (!current.isCurrent) return { outcome: 'conflict', currentDraftId: current.currentId };
   const record: DraftRecord = {
     ...current.record,
@@ -339,14 +403,85 @@ export const purgeExpiredDrafts = async (store: RecordStore, now: number): Promi
   return purged;
 };
 
-/** Every live draft. */
+/** Rows a dead tab left behind: past its window a lease says nothing the claim doesn't. Best effort per row. */
+export const purgeSendLeases = async (store: RecordStore, now: number): Promise<void> => {
+  const rows = await store.list(SEND_LEASE_RECORD_TYPE);
+  for (const { naturalKey, plaintext } of rows) {
+    if (now - (parseSendLease(plaintext)?.renewedAt ?? 0) < SEND_LEASE_MS) continue;
+    await store.remove(SEND_LEASE_RECORD_TYPE, naturalKey).catch(() => undefined);
+  }
+};
+
+/**
+ * Renews the lease of the claim `opId` until the returned stop is called. One write at a time, as
+ * an older one must not land over a newer. A failed write is a missed beat and never touches the
+ * send it serves. Most sends end before the first beat, and write nothing.
+ */
+export const keepSendLease = (store: RecordStore, opId: string, now: () => number) => {
+  const startedAt = now();
+  let renewing: Promise<void> | null = null;
+  let hasRenewed = false;
+  const timer = setInterval(() => {
+    if (now() - startedAt >= SEND_LEASE_CEILING_MS) {
+      clearInterval(timer);
+      return;
+    }
+    if (renewing !== null) return;
+    hasRenewed = true;
+    renewing = (async () => {
+      try {
+        await store.put({
+          type: SEND_LEASE_RECORD_TYPE,
+          naturalKey: opId,
+          plaintext: JSON.stringify({ renewedAt: now() }),
+        });
+      } catch {
+        // The next beat tries again.
+      } finally {
+        renewing = null;
+      }
+    })();
+  }, SEND_LEASE_RENEW_MS);
+  return async (): Promise<void> => {
+    clearInterval(timer);
+    const removing = (async () => {
+      await renewing;
+      if (hasRenewed) await store.remove(SEND_LEASE_RECORD_TYPE, opId).catch(() => undefined);
+    })();
+    // The vault API has no timeout, and a write that hangs must not hold a send that has ended.
+    const limit = Promise.withResolvers<void>();
+    const limiting = setTimeout(limit.resolve, SEND_LEASE_CLEANUP_MS);
+    await Promise.race([removing, limit.promise]);
+    clearTimeout(limiting);
+  };
+};
+
+/** Every live draft, with the lease of each one a send holds. */
 export const listDrafts = async (store: RecordStore): Promise<readonly DraftHandle[]> => {
   const rows = await store.list(DRAFT_RECORD_TYPE);
-  return rows.flatMap(row => {
-    const record = parseDraftRecord(row.plaintext);
-    if (record === null || record.deletedAt !== undefined) return [];
-    return [handleOf(row.naturalKey, record)];
+  const drafts = rows.flatMap(({ naturalKey, plaintext }) => {
+    const record = parseDraftRecord(plaintext);
+    return record === null || record.deletedAt !== undefined ? [] : [{ naturalKey, record }];
   });
+  const leases = drafts.some(({ record }) => record.send !== undefined)
+    ? await store.list(SEND_LEASE_RECORD_TYPE)
+    : [];
+  const renewedAt = new Map(
+    leases.map(({ naturalKey, plaintext }) => [naturalKey, parseSendLease(plaintext)?.renewedAt]),
+  );
+  return drafts.map(({ naturalKey, record }) =>
+    handleOf(naturalKey, record, renewedAt.get(record.send?.opId ?? '')),
+  );
+};
+
+/** One draft as it stands now, or `null` once it is gone. */
+export const readDraftHandle = async (
+  store: RecordStore,
+  draftKey: string,
+): Promise<DraftHandle | null> => {
+  const current = await readDraft(store, draftKey);
+  if (current === null || current.record.deletedAt !== undefined) return null;
+  return handleOf(draftKey, current.record, await readSendLease(store, current.record));
 };
 
 export const readMirror = async (
