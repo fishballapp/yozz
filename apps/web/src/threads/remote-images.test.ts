@@ -18,11 +18,6 @@ import {
   withConsent,
 } from './remote-images';
 
-/** What a recovery would write; none of these tests makes the stored list unreadable. */
-const unread = (): never => {
-  throw new Error('the stored list was readable');
-};
-
 const consent = (n: number, sender = 'news@sender.example') => ({
   messageId: `mid/<${n}@sender.example>`,
   sender,
@@ -63,14 +58,14 @@ describe('withConsent', () => {
 describe('rememberConsent', () => {
   it('creates the record, then adds to it', async () => {
     const { store } = fakeRecordStore();
-    await rememberConsent(store, consent(1), unread);
-    await rememberConsent(store, consent(2), unread);
+    await rememberConsent(store, consent(1));
+    await rememberConsent(store, consent(2));
     expect((await readConsents(store)).consents).toEqual([consent(1), consent(2)]);
   });
 
   it("re-reads and keeps the other device's consent when its write landed first", async () => {
     const { store } = fakeRecordStore();
-    await rememberConsent(store, consent(1), unread);
+    await rememberConsent(store, consent(1));
     let isRacing = true;
     const racing: RecordStore = {
       ...store,
@@ -78,12 +73,12 @@ describe('rememberConsent', () => {
         if (isRacing) {
           isRacing = false;
           // The phone consents between this tab's read and its write.
-          await rememberConsent(store, consent(2), unread);
+          await rememberConsent(store, consent(2));
         }
         return store.put(input);
       },
     };
-    await rememberConsent(racing, consent(3), unread);
+    await rememberConsent(racing, consent(3));
     expect((await readConsents(store)).consents).toEqual([consent(1), consent(2), consent(3)]);
   });
 
@@ -95,21 +90,21 @@ describe('rememberConsent', () => {
         throw new VaultApiError('CONFLICT', 'stale', 409);
       },
     };
-    await expect(rememberConsent(refusing, consent(1), unread)).rejects.toThrow('stale');
+    await expect(rememberConsent(refusing, consent(1))).rejects.toThrow('stale');
     const offline: RecordStore = {
       ...store,
       put: async () => {
         throw new TypeError('Failed to fetch');
       },
     };
-    await expect(rememberConsent(offline, consent(1), unread)).rejects.toThrow('Failed to fetch');
+    await expect(rememberConsent(offline, consent(1))).rejects.toThrow('Failed to fetch');
   });
 
   it('reads an unreadable record as nothing remembered', async () => {
     const { store, rows, key } = fakeRecordStore();
     rows.set(key(IMAGE_CONSENTS_RECORD_TYPE, 'consents'), { plaintext: '{', revision: 1 });
     expect(await readConsents(store)).toEqual({ consents: [], revision: 1 });
-    await rememberConsent(store, consent(1), unread);
+    await rememberConsent(store, consent(1));
     expect((await readConsents(store)).consents).toEqual([consent(1)]);
   });
 });
@@ -117,20 +112,20 @@ describe('rememberConsent', () => {
 describe('forgetConsent', () => {
   it('forgets that message alone, and keeps what another device added meanwhile', async () => {
     const { store } = fakeRecordStore();
-    for (const n of [1, 2]) await rememberConsent(store, consent(n), unread);
+    for (const n of [1, 2]) await rememberConsent(store, consent(n));
     let isRacing = true;
     const racing: RecordStore = {
       ...store,
       put: async input => {
         if (isRacing) {
           isRacing = false;
-          await rememberConsent(store, consent(3), unread);
+          await rememberConsent(store, consent(3));
         }
         return store.put(input);
       },
     };
     // Matched as a consent is: the sender's case does not matter.
-    await forgetConsent(racing, consent(1, 'NEWS@sender.example'), unread);
+    await forgetConsent(racing, consent(1, 'NEWS@sender.example'));
     expect((await readConsents(store)).consents).toEqual([consent(2), consent(3)]);
   });
 });

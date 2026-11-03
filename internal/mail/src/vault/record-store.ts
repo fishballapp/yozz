@@ -41,10 +41,9 @@ export const createRecordStore = ({
 }): RecordStore => {
   const vault = freshVault(rawVault, marks);
   /**
-   * A lease keeps no mark and consults none, though it is still sealed and bound to its row. The mark
-   * rises at seal time, so a failed renewal followed by a dead tab would leave a row this device
-   * refuses for ever, and no one writes that row again. It needs no rollback defence: a replayed lease
-   * can only make a send look older, which leads to a banner and never to a send.
+   * A lease keeps no mark and consults none, though it is still sealed and bound to its row. It needs
+   * no rollback defence: a replayed lease can only make a send look older, which leads to a banner and
+   * never to a send. And marks are never cleared, so each send would leave one behind for good.
    */
   const vaultFor = (type: string) => (type === SEND_LEASE_RECORD_TYPE ? rawVault : vault);
 
@@ -93,26 +92,30 @@ export const createRecordStore = ({
     readonly plaintext: string;
     readonly precondition?: PutPrecondition;
   }): Promise<void> => {
+    if (input.type === SEND_LEASE_RECORD_TYPE) {
+      const lease = await rawVault.encryptRecord({ ...input, revision: LEASE_REVISION });
+      await api.put(lease, LEASE_REVISION, input.precondition);
+      return;
+    }
     const id = await rawVault.recordId(input.type, input.naturalKey);
-    const revision = await (async () => {
-      if (input.type === SEND_LEASE_RECORD_TYPE) return LEASE_REVISION;
-      const mark = await marks.highWaterMark(id);
-      /**
-       * A CAS update allocates from the row it replaces. Marks are per device, so allocating from the
-       * mark lets a losing device's mark exceed the winning revision and refuse every later read of
-       * it. Anything below `n + 1` is still refused.
-       */
-      const base =
-        input.precondition !== undefined &&
-        input.precondition.expect === 'revision' &&
-        input.precondition.revision !== null
-          ? input.precondition.revision
-          : (mark ?? 0);
-      return base + 1;
-    })();
-    // Encrypting through freshVault raises the high-water mark before the network PUT.
-    const encrypted = await vaultFor(input.type).encryptRecord({ ...input, revision });
+    /**
+     * A CAS update allocates from the row it replaces: marks are per device, and every device
+     * reading that row agrees on its sequence. Anything below `n + 1` is still refused.
+     */
+    const base =
+      input.precondition !== undefined &&
+      input.precondition.expect === 'revision' &&
+      input.precondition.revision !== null
+        ? input.precondition.revision
+        : ((await marks.highWaterMark(id)) ?? 0);
+    const revision = base + 1;
+    const encrypted = await vault.encryptRecord({ ...input, revision });
     await api.put(encrypted, revision, input.precondition);
+    /**
+     * Only on the store's yes, or a write that failed leaves this device refusing the row it still
+     * has. A store that says yes and keeps the old row is refused; one that says no has told us.
+     */
+    await marks.raiseTo(id, revision);
   };
 
   const remove = async (type: string, naturalKey: string, ifRevision?: number): Promise<void> => {

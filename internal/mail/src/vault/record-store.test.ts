@@ -5,24 +5,33 @@ import {
   inMemoryRevisionMarks,
   type RevisionMarks,
 } from '@yozz.app/vault';
-import type { VaultRecordEnvelope } from '@yozz.app/vault-contract';
-import { beforeEach, describe, expect, it } from 'vitest';
+import type { PutPrecondition, VaultRecordEnvelope } from '@yozz.app/vault-contract';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { SEND_LEASE_RECORD_TYPE } from '../compose/draft-record.ts';
 import {
+  advanceSend,
   claimSend,
   createDraft,
   keepSendLease,
   listDrafts,
   purgeSendLeases,
   readSendLease,
+  replaceDraft,
 } from '../compose/draft-vault.ts';
-import type { VaultRecordApi } from './api.ts';
+import { VaultApiError, type VaultRecordApi } from './api.ts';
 import { createRecordStore } from './record-store.ts';
 
 class InMemoryVaultApi implements VaultRecordApi {
   private records = new Map<string, VaultRecordEnvelope>();
   /** A PUT that never reached the server. */
   isOffline = false;
+  /** A PUT the server stored, whose answer never came back. */
+  isAnswerLost = false;
+  /** A hostile store: answers yes and keeps what it had. */
+  isDroppingWrites = false;
+  /** A PUT that never comes back, as for a tab that dies while it is on the wire. */
+  isHanging = false;
+  hungPuts = 0;
 
   async get(type: string, id: string): Promise<VaultRecordEnvelope | null> {
     const key = `${type}:${id}`;
@@ -37,9 +46,23 @@ class InMemoryVaultApi implements VaultRecordApi {
     }
   }
 
-  async put(record: EncryptedRecord, revision: number): Promise<void> {
+  async put(
+    record: EncryptedRecord,
+    revision: number,
+    precondition?: PutPrecondition,
+  ): Promise<void> {
     if (this.isOffline) throw new Error('network down');
+    if (this.isHanging) {
+      this.hungPuts += 1;
+      await new Promise(() => undefined);
+    }
+    if (this.isDroppingWrites) return;
     const key = `${record.type}:${record.id}`;
+    const existing = this.records.get(key);
+    const isRefused =
+      (precondition?.expect === 'absent' && existing !== undefined) ||
+      (precondition?.expect === 'revision' && existing?.revision !== precondition.revision);
+    if (isRefused) throw new VaultApiError('CONFLICT', 'Record revision is stale', 409);
     this.records.set(key, {
       id: record.id,
       type: record.type,
@@ -47,6 +70,7 @@ class InMemoryVaultApi implements VaultRecordApi {
       updatedAt: Date.now(),
       revision,
     });
+    if (this.isAnswerLost) throw new Error('connection lost');
   }
 
   async remove(type: string, id: string): Promise<void> {
@@ -150,32 +174,49 @@ describe('RecordStore with freshVault and revision marks', () => {
   });
 
   it('lets the loser of a CAS race still read the winner', async () => {
-    // Marks are per device; allocating from the mark would lock the loser out of its own draft.
     const keys = await deriveAccountKeys({
       email: 'user@example.com',
       password: 'password123456',
     });
     const { vault } = await createVault(keys);
     const api = new InMemoryVaultApi();
-    const store = createRecordStore({ vault, api, marks });
+    const loser = createRecordStore({ vault, api, marks });
+    const winner = createRecordStore({ vault, api, marks: inMemoryRevisionMarks() });
+    const atRevisionOne = { expect: 'revision', revision: 1 } as const;
+    await loser.put({ type: 'draft', naturalKey: 'k', plaintext: 'v0' });
 
-    // This device's mark runs well above the shared row.
-    for (let i = 0; i < 4; i += 1) {
-      await store.put({ type: 'draft', naturalKey: 'k', plaintext: `v${i}` });
-    }
-    const [row] = await Array.fromAsync(api.list('draft'));
-    if (row === undefined) throw new Error('the record was not stored');
-
-    // The other device read the row at 1 and wrote 2.
-    await store.put({
+    await winner.put({
       type: 'draft',
       naturalKey: 'k',
       plaintext: 'theirs',
-      precondition: { expect: 'revision', revision: row.revision },
+      precondition: atRevisionOne,
+    });
+    await expect(
+      loser.put({ type: 'draft', naturalKey: 'k', plaintext: 'mine', precondition: atRevisionOne }),
+    ).rejects.toMatchObject({ code: 'CONFLICT' });
+
+    expect(await loser.get('draft', 'k')).toMatchObject({ plaintext: 'theirs', revision: 2 });
+  });
+
+  it("allocates a compare-and-swap write from the row, not this device's mark", async () => {
+    const keys = await deriveAccountKeys({
+      email: 'user@example.com',
+      password: 'password123456',
+    });
+    const { vault } = await createVault(keys);
+    const api = new InMemoryVaultApi();
+    const seen = createRecordStore({ vault, api, marks });
+    const unseen = createRecordStore({ vault, api, marks: inMemoryRevisionMarks() });
+    await seen.put({ type: 'draft', naturalKey: 'k', plaintext: 'v0' });
+
+    await unseen.put({
+      type: 'draft',
+      naturalKey: 'k',
+      plaintext: 'next',
+      precondition: { expect: 'revision', revision: 1 },
     });
 
-    const opened = await store.get('draft', 'k');
-    expect(opened?.plaintext).toBe('theirs');
+    expect(await seen.get('draft', 'k')).toMatchObject({ plaintext: 'next', revision: 2 });
   });
 
   it('refuses a row whose clear revision disagrees with the sealed one', async () => {
@@ -360,5 +401,234 @@ describe('a send lease on the real store', () => {
     await stop();
     api.isOffline = false;
     expect(await listDrafts(reload())).toHaveLength(1);
+  });
+});
+
+describe('a write that fails, on the real store', () => {
+  const STALE = { name: 'VaultError', code: 'stale' };
+
+  const CONTENT = {
+    from: 'me@x.co',
+    to: 'you@x.co',
+    cc: '',
+    bcc: '',
+    subject: 'Hi',
+    body: 'Hello',
+  };
+
+  /** One device: every store it opens is a tab or a reload over the same marks. */
+  const device = async () => {
+    const keys = await deriveAccountKeys({ email: 'user@example.com', password: 'password123456' });
+    const { vault } = await createVault(keys);
+    const api = new InMemoryVaultApi();
+    const marks = inMemoryRevisionMarks();
+    const open = () => createRecordStore({ vault, api, marks });
+    return { api, marks, open, vault };
+  };
+
+  const savedDraft = async (store: ReturnType<typeof createRecordStore>) => {
+    const created = await createDraft(store, CONTENT, 0);
+    if (!created.ok) throw new Error('the fixture could not create a draft');
+    return created.handle;
+  };
+
+  it('keeps a draft loading after an autosave whose PUT failed, and lets the retry land', async () => {
+    const { api, open } = await device();
+    const tab = open();
+    const { draftId } = await savedDraft(tab);
+
+    api.isOffline = true;
+    expect(await replaceDraft(tab, draftId, { ...CONTENT, body: 'lost' }, 1)).toEqual({
+      ok: false,
+      reason: 'offline',
+    });
+    api.isOffline = false;
+
+    expect((await listDrafts(tab))[0]?.record.body).toBe('Hello');
+    expect((await listDrafts(open()))[0]?.record.body).toBe('Hello');
+    const retried = await replaceDraft(tab, draftId, { ...CONTENT, body: 'kept' }, 2);
+    expect(retried.ok).toBe(true);
+    expect((await listDrafts(open()))[0]?.record.body).toBe('kept');
+  });
+
+  it("keeps a draft loading after a send's phase write failed, and lets the phase be written again", async () => {
+    const { api, open } = await device();
+    const tab = open();
+    const { draftId } = await savedDraft(tab);
+    const send = {
+      messageId: '<m@x.co>',
+      opId: 'op-1',
+      state: 'submitting',
+      claimedAt: 0,
+    } as const;
+    const claim = await claimSend(tab, draftId, send);
+    if (!claim.ok) throw new Error('the fixture could not claim');
+
+    api.isOffline = true;
+    const submitted = { ...send, state: 'submitted' } as const;
+    expect(await advanceSend(tab, claim.handle.draftId, submitted)).toBeNull();
+    api.isOffline = false;
+
+    expect((await listDrafts(open()))[0]?.record.send?.state).toBe('submitting');
+    const advanced = await advanceSend(tab, claim.handle.draftId, submitted);
+    expect(advanced?.record.send?.state).toBe('submitted');
+  });
+
+  it.each(['address', 'draft', 'draft-mirror', 'image-consents', 'image-sender', 'sent'])(
+    'leaves a %s row readable, conditioned or not',
+    async type => {
+      const { api, open, vault } = await device();
+      const tab = open();
+      await tab.put({ type, naturalKey: 'k', plaintext: 'one' });
+      const id = await vault.recordId(type, 'k');
+
+      api.isOffline = true;
+      await expect(tab.put({ type, naturalKey: 'k', plaintext: 'lost' })).rejects.toThrow();
+      await expect(
+        tab.put({
+          type,
+          naturalKey: 'k',
+          plaintext: 'lost',
+          precondition: { expect: 'revision', revision: 1 },
+        }),
+      ).rejects.toThrow();
+      api.isOffline = false;
+
+      expect(await tab.list(type)).toMatchObject([{ plaintext: 'one', revision: 1 }]);
+      expect(await open().get(type, 'k')).toMatchObject({ plaintext: 'one', revision: 1 });
+      expect(await api.get(type, id)).toMatchObject({ revision: 1 });
+    },
+  );
+
+  it('reads a write that landed though its answer was lost, and then refuses what it replaced', async () => {
+    const { api, marks, open, vault } = await device();
+    const tab = open();
+    await tab.put({ type: 'address', naturalKey: 'k', plaintext: 'one' });
+    const id = await vault.recordId('address', 'k');
+    const before = await api.get('address', id);
+    if (before === null) throw new Error('the record was not stored');
+
+    api.isAnswerLost = true;
+    await expect(tab.put({ type: 'address', naturalKey: 'k', plaintext: 'two' })).rejects.toThrow();
+    api.isAnswerLost = false;
+
+    const opened = await open().get('address', 'k');
+    expect(opened).toMatchObject({ plaintext: 'two', revision: 2 });
+    expect(await marks.highWaterMark(id)).toBe(2);
+    api.setRaw('address', id, before.ciphertext, before.revision);
+    await expect(open().get('address', 'k')).rejects.toMatchObject(STALE);
+  });
+
+  it('answers a retry of its own lost write as a conflict naming that write, never a lockout', async () => {
+    const { api, open } = await device();
+    const tab = open();
+    const { draftId, draftKey } = await savedDraft(tab);
+
+    api.isAnswerLost = true;
+    await replaceDraft(tab, draftId, { ...CONTENT, body: 'landed' }, 1);
+    api.isAnswerLost = false;
+
+    expect(await replaceDraft(tab, draftId, { ...CONTENT, body: 'again' }, 2)).toEqual({
+      ok: false,
+      reason: 'conflict',
+      currentDraftId: `${draftKey}@2`,
+    });
+    expect((await listDrafts(tab))[0]?.record.body).toBe('landed');
+  });
+
+  it('leaves the mark alone for a tab that dies while its PUT is on the wire', async () => {
+    const { api, marks, open, vault } = await device();
+    const tab = open();
+    await tab.put({ type: 'address', naturalKey: 'k', plaintext: 'one' });
+
+    api.isHanging = true;
+    void tab.put({ type: 'address', naturalKey: 'k', plaintext: 'never answered' });
+    await vi.waitFor(() => expect(api.hungPuts).toBe(1));
+    expect(await marks.highWaterMark(await vault.recordId('address', 'k'))).toBe(1);
+    api.isHanging = false;
+
+    expect(await open().get('address', 'k')).toMatchObject({ plaintext: 'one', revision: 1 });
+  });
+
+  it("lets two tabs share marks: one tab's failure stops neither, and its success binds both", async () => {
+    const { api, open, vault } = await device();
+    const [one, other] = [open(), open()];
+    await one.put({ type: 'address', naturalKey: 'k', plaintext: 'first' });
+    const id = await vault.recordId('address', 'k');
+    const first = await api.get('address', id);
+    if (first === null) throw new Error('the record was not stored');
+
+    api.isOffline = true;
+    await expect(
+      one.put({ type: 'address', naturalKey: 'k', plaintext: 'lost' }),
+    ).rejects.toThrow();
+    api.isOffline = false;
+    expect(await other.get('address', 'k')).toMatchObject({ plaintext: 'first' });
+
+    await one.put({ type: 'address', naturalKey: 'k', plaintext: 'second' });
+    api.setRaw('address', id, first.ciphertext, first.revision);
+    await expect(other.get('address', 'k')).rejects.toMatchObject(STALE);
+  });
+
+  it('refuses a store that answered yes and kept the old row', async () => {
+    const { api, open } = await device();
+    const tab = open();
+    await tab.put({ type: 'address', naturalKey: 'k', plaintext: 'old host' });
+
+    api.isDroppingWrites = true;
+    await tab.put({ type: 'address', naturalKey: 'k', plaintext: 'rotated host' });
+    api.isDroppingWrites = false;
+
+    await expect(open().get('address', 'k')).rejects.toMatchObject(STALE);
+    await expect(open().list('address')).rejects.toMatchObject(STALE);
+  });
+
+  it('still refuses a replay of anything older than what it last saw, after a failed write', async () => {
+    const { api, open, vault } = await device();
+    const tab = open();
+    await tab.put({ type: 'draft', naturalKey: 'k', plaintext: 'one' });
+    const id = await vault.recordId('draft', 'k');
+    const one = await api.get('draft', id);
+    if (one === null) throw new Error('the record was not stored');
+    await tab.put({
+      type: 'draft',
+      naturalKey: 'k',
+      plaintext: 'two',
+      precondition: { expect: 'revision', revision: 1 },
+    });
+
+    api.isOffline = true;
+    await expect(
+      tab.put({
+        type: 'draft',
+        naturalKey: 'k',
+        plaintext: 'lost',
+        precondition: { expect: 'revision', revision: 2 },
+      }),
+    ).rejects.toThrow();
+    api.isOffline = false;
+
+    api.setRaw('draft', id, one.ciphertext, one.revision);
+    await expect(open().get('draft', 'k')).rejects.toMatchObject(STALE);
+  });
+
+  it('keeps refusing a row left behind a mark by an older build, until another device writes up to it', async () => {
+    const { api, marks, open, vault } = await device();
+    const tab = open();
+    await tab.put({ type: 'draft', naturalKey: 'k', plaintext: 'one' });
+    const id = await vault.recordId('draft', 'k');
+    await marks.raiseTo(id, 2);
+    await expect(open().list('draft')).rejects.toMatchObject(STALE);
+
+    const elsewhere = createRecordStore({ vault, api, marks: inMemoryRevisionMarks() });
+    await elsewhere.get('draft', 'k');
+    await elsewhere.put({
+      type: 'draft',
+      naturalKey: 'k',
+      plaintext: 'two',
+      precondition: { expect: 'revision', revision: 1 },
+    });
+
+    expect(await open().list('draft')).toMatchObject([{ plaintext: 'two', revision: 2 }]);
   });
 });

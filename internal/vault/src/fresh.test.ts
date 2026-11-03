@@ -30,6 +30,7 @@ describe('freshVault', () => {
   it('refuses the superseded ciphertext the vault alone would hand back', async () => {
     const before = await write('{"host":"old-host.example"}', 3);
     const after = await write('{"host":"new-host.example"}', 4);
+    await read(after.ciphertext);
 
     await expect(read(before.ciphertext)).rejects.toMatchObject({ code: 'stale' });
     expect(await read(after.ciphertext)).toEqual({
@@ -45,16 +46,16 @@ describe('freshVault', () => {
     ).toEqual({ revision: 3, plaintext: '{"host":"old-host.example"}' });
   });
 
-  it('advances the mark on a WRITE, or a rotation is undone by a store that ignores it', async () => {
+  it('raises no mark on a seal, which may never reach the store', async () => {
     const before = await write('{"host":"old-host.example"}', 3);
-    // The write alone must move the mark, or a store that drops the rotation is believed forever.
     await write('{"host":"new-host.example"}', 4);
 
-    await expect(read(before.ciphertext)).rejects.toMatchObject({ code: 'stale' });
+    expect(await read(before.ciphertext)).toMatchObject({ revision: 3 });
   });
 
-  it('lets a failed write be retried at the same revision', async () => {
-    await write('{"host":"new-host.example"}', 4);
+  it('lets a write at the mark through, so a tab behind its sibling hears the conflict from the store', async () => {
+    const first = await write('{"host":"new-host.example"}', 4);
+    await read(first.ciphertext);
 
     const retried = await write('{"host":"new-host.example"}', 4);
     expect(await read(retried.ciphertext)).toEqual({
@@ -64,7 +65,7 @@ describe('freshVault', () => {
   });
 
   it('refuses a write that goes backwards', async () => {
-    await write('{"host":"new-host.example"}', 4);
+    await read((await write('{"host":"new-host.example"}', 4)).ciphertext);
 
     await expect(write('{"host":"old-host.example"}', 3)).rejects.toMatchObject({ code: 'stale' });
   });
@@ -84,7 +85,7 @@ describe('freshVault', () => {
 
   it('checks the enumeration path too, under the id the listing supplied', async () => {
     const before = await write('{"host":"old-host.example"}', 3);
-    await write('{"host":"new-host.example"}', 4);
+    await read((await write('{"host":"new-host.example"}', 4)).ciphertext);
 
     await expect(vault.decryptListedRecord('account', before)).rejects.toMatchObject({
       code: 'stale',
@@ -92,12 +93,7 @@ describe('freshVault', () => {
   });
 
   it('marks records independently, so one rotation does not strand another', async () => {
-    await vault.encryptRecord({
-      type: 'account',
-      naturalKey: 'jason@gmail.com',
-      revision: 12,
-      plaintext: 'busy',
-    });
+    await marks.raiseTo(await vault.recordId('account', 'jason@gmail.com'), 12);
     const quiet = await write('{"host":"posteo.de"}', 1);
 
     expect(await read(quiet.ciphertext)).toEqual({
@@ -130,22 +126,16 @@ describe('freshVault', () => {
         await underlying.raiseTo(id, revision);
       },
     });
-    const seal = (revision: number) =>
-      recording.encryptRecord({
+    const open = async (revision: number) =>
+      recording.decryptRecord({
         type: 'account',
         naturalKey: NATURAL_KEY,
-        revision,
-        plaintext: 'x',
+        ciphertext: (await write('x', revision)).ciphertext,
       });
 
-    await seal(5);
-    await seal(5);
-    const current = await seal(6);
-    await recording.decryptRecord({
-      type: 'account',
-      naturalKey: NATURAL_KEY,
-      ciphertext: current.ciphertext,
-    });
+    await open(5);
+    await open(5);
+    await open(6);
 
     expect(advanced).toEqual([5, 6]);
   });

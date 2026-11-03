@@ -75,19 +75,16 @@ const mount = async (store: RecordStore) => {
 
 const settle = () => act(async () => new Promise(resolve => setTimeout(resolve, 20)));
 const consentTo = (n: number) => ({ messageId: `mid/<${n}@x>`, sender: 'a@x.example' });
-const unread = (): never => {
-  throw new Error('the stored list was readable');
-};
 
 it("takes another device's removal from the vault's answer, not this tab's memory", async () => {
   const { store } = fakeRecordStore();
-  await rememberConsent(store, consentTo(1), unread);
+  await rememberConsent(store, consentTo(1));
   const tab = await mount(store);
   await settle();
   expect(tab.remoteImages().isConsented(consentTo(1))).toBe(true);
 
   // The phone forgets message 1; this tab then loads message 2.
-  await forgetConsent(store, consentTo(1), unread);
+  await forgetConsent(store, consentTo(1));
   await act(async () => tab.remoteImages().consent(consentTo(2)));
   await settle();
   expect(tab.remoteImages().isConsented(consentTo(1))).toBe(false);

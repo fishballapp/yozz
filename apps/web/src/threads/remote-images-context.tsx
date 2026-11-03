@@ -100,14 +100,9 @@ export const RemoteImagesStoreProvider = ({
   const [held, setState] = useState<State>(() => emptyFor(store));
   // Never another session's answers, even for the render before the effect below resets them.
   const state = held.store === store ? held : emptyFor(store);
-  // What a write that finds the stored list unreadable falls back to (`remote-images.ts`).
-  const stateRef = useRef(state);
-  stateRef.current = state;
-
   /**
-   * Consent reads and writes run one at a time: two in flight on one device trip the vault's replay
-   * guard, since a write raises this device's revision mark before the server holds that revision.
-   * Their answers therefore arrive in order, each the base for the changes still behind it.
+   * Consent reads and writes run one at a time, so their answers arrive in order, each the base for
+   * the changes still behind it.
    */
   const consentQueue = useRef<Promise<unknown>>(Promise.resolve());
   const queued = useCallback(<T,>(task: () => Promise<T>): Promise<T> => {
@@ -177,18 +172,14 @@ export const RemoteImagesStoreProvider = ({
       }
       // ponytail: unwritten, this message asks again after a reload; the images it loaded already
       // have. Un-park if a toast is wanted for an offline consent.
-      void apply(change, store =>
-        rememberConsent(store, consent, () => consentsOf(stateRef.current)),
-      ).catch(() => {});
+      void apply(change, store => rememberConsent(store, consent)).catch(() => {});
     },
     [store, updateFor, apply],
   );
 
   const unconsent = useCallback(
     (consent: ImageConsent) =>
-      apply({ kind: 'remove', consent }, store =>
-        forgetConsent(store, consent, () => consentsOf(stateRef.current)),
-      ),
+      apply({ kind: 'remove', consent }, store => forgetConsent(store, consent)),
     [apply],
   );
 

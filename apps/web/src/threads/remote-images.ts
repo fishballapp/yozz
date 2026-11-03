@@ -2,7 +2,6 @@ import type { SenderCheck } from '@yozz.app/mail/threads/thread';
 import { senderKeyOf } from '@yozz.app/mail/threads/thread';
 import { VaultApiError } from '@yozz.app/mail/vault/api';
 import type { RecordStore } from '@yozz.app/mail/vault/record-store';
-import { VaultError } from '@yozz.app/vault';
 import { z } from 'zod';
 
 /**
@@ -73,46 +72,13 @@ const isConflict = (error: unknown) => error instanceof VaultApiError && error.c
 /** Two devices changing the list at once both land: a refused write re-reads and reapplies. */
 const CAS_ATTEMPTS = 3;
 
-/** What this device holds, the list a recovery writes. Called only then. */
-type Held = () => readonly ImageConsent[];
-
-const isStale = (error: unknown) => error instanceof VaultError && error.code === 'stale';
-
-/**
- * One compare-and-swap change to the list. Resolves with it as stored; rejects when the vault cannot
- * be reached.
- *
- * A write that never reached the server has still raised this device's revision mark (a write
- * advances it before the PUT), so every later read of the row refuses it as stale, in this session
- * and after a reload. Then the list this device can no longer read is replaced, last write wins,
- * by what it holds; an unconditioned put allocates past the mark, and the row reads again.
- */
+/** One compare-and-swap change to the list. Resolves with it as stored; rejects when the vault cannot be reached. */
 const changeConsents = async (
   store: RecordStore,
   change: (consents: readonly ImageConsent[]) => readonly ImageConsent[],
-  held: Held,
 ): Promise<readonly ImageConsent[]> => {
   for (let attempt = 1; ; attempt++) {
-    const current = await (async () => {
-      try {
-        return await readConsents(store);
-      } catch (error) {
-        if (isStale(error)) return null;
-        throw error;
-      }
-    })();
-    if (current === null) {
-      // Session-only ids stay unwritten here too.
-      const consents = change(
-        held().filter(({ messageId }) => messageId.length <= MAX_REMEMBERED_ID_LENGTH),
-      );
-      await store.put({
-        type: IMAGE_CONSENTS_RECORD_TYPE,
-        naturalKey: IMAGE_CONSENTS_KEY,
-        plaintext: JSON.stringify({ consents }),
-      });
-      return consents;
-    }
+    const current = await readConsents(store);
     const consents = change(current.consents);
     try {
       await store.put({
@@ -131,12 +97,12 @@ const changeConsents = async (
   }
 };
 
-export const rememberConsent = (store: RecordStore, consent: ImageConsent, held: Held) =>
-  changeConsents(store, consents => withConsent(consents, consent), held);
+export const rememberConsent = (store: RecordStore, consent: ImageConsent) =>
+  changeConsents(store, consents => withConsent(consents, consent));
 
 /** This message only: any other message from the same sender keeps its consent. */
-export const forgetConsent = (store: RecordStore, consent: ImageConsent, held: Held) =>
-  changeConsents(store, consents => withoutConsent(consents, consent), held);
+export const forgetConsent = (store: RecordStore, consent: ImageConsent) =>
+  changeConsents(store, consents => withoutConsent(consents, consent));
 
 export const IMAGE_SENDER_RECORD_TYPE = 'image-sender';
 

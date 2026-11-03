@@ -12,8 +12,8 @@ export type RevisionMarks = {
 };
 
 export const freshVault = (vault: Vault, marks: RevisionMarks): Vault => {
-  // Equal passes: re-sealing the same revision is how a failed write is retried.
-  const check = async (id: string, revision: number): Promise<void> => {
+  // Equal passes: a tab behind its sibling seals the revision the sibling just confirmed, and hears the conflict from the store.
+  const refuseBehindMark = async (id: string, revision: number): Promise<number | undefined> => {
     const mark = await marks.highWaterMark(id);
     if (mark !== undefined && revision < mark) {
       throw new VaultError(
@@ -21,11 +21,12 @@ export const freshVault = (vault: Vault, marks: RevisionMarks): Vault => {
         `record ${id} is revision ${revision}, behind the ${mark} this device has already seen`,
       );
     }
-    if (mark === undefined || revision > mark) await marks.raiseTo(id, revision);
+    return mark;
   };
 
   const checked = async <T extends OpenedRecord>(id: string, opened: T): Promise<T> => {
-    await check(id, opened.revision);
+    const mark = await refuseBehindMark(id, opened.revision);
+    if (mark === undefined || opened.revision > mark) await marks.raiseTo(id, opened.revision);
     return opened;
   };
 
@@ -34,8 +35,8 @@ export const freshVault = (vault: Vault, marks: RevisionMarks): Vault => {
 
     encryptRecord: async item => {
       const record = await vault.encryptRecord(item);
-      // A write advances the mark too, or a store that drops the write is believed forever.
-      await check(record.id, item.revision);
+      // Raises nothing: a seal may never reach the store. Whoever writes it raises the mark on the store's yes.
+      await refuseBehindMark(record.id, item.revision);
       return record;
     },
 
