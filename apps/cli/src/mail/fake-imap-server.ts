@@ -15,6 +15,8 @@ export type FakeMessage = {
   /** RFC 5322, e.g. `Thu, 29 Oct 2026 08:14:00 +0000`. */
   readonly date: string;
   readonly text: string;
+  /** Sent as `multipart/alternative` beside the text. */
+  readonly html?: string;
   readonly inReplyTo?: string;
   readonly references?: readonly string[];
   readonly cc?: readonly string[];
@@ -87,6 +89,12 @@ export const rawOf = (message: FakeMessage): Uint8Array => {
     'MIME-Version: 1.0',
   ];
   const text = message.text.replace(/\n/g, '\r\n');
+  if (message.html !== undefined) {
+    const boundary = 'fake-boundary-alternative';
+    return bytes(
+      `${[...headers, `Content-Type: multipart/alternative; boundary="${boundary}"`].join('\r\n')}\r\n\r\n--${boundary}\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Transfer-Encoding: 8bit\r\n\r\n${text}\r\n--${boundary}\r\nContent-Type: text/html; charset=utf-8\r\nContent-Transfer-Encoding: base64\r\n\r\n${bytes(message.html).toBase64()}\r\n--${boundary}--\r\n`,
+    );
+  }
   if (message.attachments === undefined || message.attachments.length === 0) {
     return bytes(
       `${[...headers, 'Content-Type: text/plain; charset=utf-8', 'Content-Transfer-Encoding: 8bit'].join('\r\n')}\r\n\r\n${text}\r\n`,

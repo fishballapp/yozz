@@ -1,4 +1,5 @@
 import { defineConfig } from 'tsdown';
+import { iifePlugin } from './iife-plugin.ts';
 
 // Everything is bundled (effect, @effect/platform-node and the private @yozz.app/* packages are
 // devDependencies): the published CLI installs with zero dependencies, since platform-node's
@@ -14,6 +15,8 @@ export default defineConfig({
   sourcemap: false,
   minify: true,
   clean: true,
+  // The served mail page's script, embedded as a string: it never runs in Node.
+  plugins: [iifePlugin()],
   outputOptions: {
     entryFileNames: '[name].js',
   },

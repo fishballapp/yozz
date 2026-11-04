@@ -16,15 +16,16 @@ pnpm -F @yozz.app/vault-contract test   # 34. The wire schemas, incl. the strict
 pnpm -F @yozz.app/worker-api test       # 276. Against an ISOLATED LOCAL D1 with every migration
                                     #   applied; migrations.test.ts pins the vault tables' exact
                                     #   column lists, so a new plaintext column is a red test
-pnpm -F @yozz.app/mail test             # 416. Threading, sync over a fake IMAP client, MIME and the
+pnpm -F @yozz.app/mail test             # 462. Threading, sync over a fake IMAP client, MIME and the
                                     #   HTML-to-text reduction (in Node), draft records under CAS,
                                     #   the send state machine (a lost SMTP answer is recorded unconfirmed),
                                     #   the draft mirror, reply seeding, the record store's marks,
-                                    #   DKIM verification (RFC 8463's vectors, a mailauth-signed message)
-pnpm -F @yozz.app/web test              # 693. Vault client + unlock (WebAuthn mocked), the IndexedDB
+                                    #   DKIM verification (RFC 8463's vectors, a mailauth-signed message),
+                                    #   the sanitizer policy and the served page (under jsdom)
+pnpm -F @yozz.app/web test              # 659. Vault client + unlock (WebAuthn mocked), the IndexedDB
                                     #   cache, the live connection, the WebMCP tools over a fake
-                                    #   port + their mount, ceilings, sanitizer policy, image
-                                    #   consent, the screens, and architecture.test.ts
+                                    #   port + their mount, ceilings, the frame script's pin in
+                                    #   public/_headers, image consent, the screens, and architecture.test.ts
 pnpm -F @yozz.app/x509 test             # 426, incl. end-to-end chains signed at test time and the
                                     #   two authentication bypasses as regressions
 pnpm -F @yozz.app/tls test              # 455. RFC 8448 byte-exact on all five traces; the interop
@@ -121,6 +122,17 @@ pnpm -F @yozz.app/web html:security     # Chromium + Firefox + WebKit: loads the
                                     #   Six ✓ lines. Build first: it also rejects inline scripts in dist.
                                     #   Linux WebKit alone has no PDF viewer: there PDFs must SAVE,
                                     #   leaving no document, and its line says "PDFs saved".
+pnpm -F @yozz.app/cli html:security     # `yozz read --serve-html` from the built dist/bin.js against a
+                                    #   local IMAP server and fake Worker, in Chromium + Firefox +
+                                    #   WebKit, judged by what local listeners heard and what the page
+                                    #   holds: remote images and pixels silent, withheld boxes inert,
+                                    #   a link opening its own tab with no Referer while the page stays put,
+                                    #   unsafe and YOZZ links refused, a hostile mail contained (each layer
+                                    #   probed alone too), --remote-images loading with no Referer or
+                                    #   secret, every wrong request a bare 404, loopback only, IMAP
+                                    #   logged out before any page, only BODY.PEEK, SIGTERM. Needs 993
+                                    #   free (on Linux, low ports opened: see ci.yml). Eight ✓ lines,
+                                    #   then "All N checks passed". `YOZZ_CAPTURES=<dir>` saves screenshots.
 ```
 
 This gate runs in `ci.yml` on every push. It needs

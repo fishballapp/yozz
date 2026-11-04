@@ -68,6 +68,9 @@ jobs:
         run: pnpm -F @yozz.app/web exec playwright install chromium firefox webkit
       - run: pnpm -F @yozz.app/web exec playwright install-deps chromium firefox webkit
       - run: pnpm -F @yozz.app/web html:security
+      # `yozz read --serve-html` from the built CLI, against a mail server on the real port 993.
+      - run: sudo sysctl -w net.ipv4.ip_unprivileged_port_start=993
+      - run: pnpm -F @yozz.app/cli html:security
 
   # x509-limbo's 9739 path-validation testcases: a 39MB corpus, too big for vitest. Two
   # authentication bypasses shipped while this was a command someone had to remember.

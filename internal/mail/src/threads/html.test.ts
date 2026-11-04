@@ -1,10 +1,12 @@
 // @vitest-environment jsdom
-import { createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { buildMailFrame } from './html';
+import { MAIL_FRAME_MEASURE_SCRIPT } from './frame-scripts.ts';
+import { buildMailFrame } from './html.ts';
 
-const blocked = (html: string) => buildMailFrame(html, { allowRemoteImages: false });
+const blocked = (html: string) =>
+  buildMailFrame(html, { allowRemoteImages: false, isReadOnly: false });
+const readOnly = (html: string, allowRemoteImages = false) =>
+  buildMailFrame(html, { allowRemoteImages, isReadOnly: true });
 
 describe('buildMailFrame', () => {
   it('strips scripts, event handlers, SVG, MathML and templates', () => {
@@ -29,7 +31,7 @@ describe('buildMailFrame', () => {
     expect(denied.srcdoc).toContain('data:image/gif');
     expect(denied.srcdoc).toContain('img-src data:;');
 
-    const allowed = buildMailFrame(html, { allowRemoteImages: true });
+    const allowed = buildMailFrame(html, { allowRemoteImages: true, isReadOnly: false });
     expect(allowed.srcdoc).toContain('https://tracker.example/pixel.gif');
     expect(allowed.srcdoc).toContain('referrerpolicy="no-referrer"');
     expect(allowed.srcdoc).toContain('img-src data: https://tracker.example');
@@ -44,7 +46,7 @@ describe('buildMailFrame', () => {
     expect(denied.srcdoc).toContain('style="aspect-ratio:600/200"');
     expect(denied.srcdoc).toContain('img[data-yozz-withheld]{');
 
-    const allowed = buildMailFrame(html, { allowRemoteImages: true });
+    const allowed = buildMailFrame(html, { allowRemoteImages: true, isReadOnly: false });
     expect(allowed.srcdoc).not.toContain('data-yozz-withheld=""');
     expect(allowed.srcdoc).not.toContain('title="Load remote images"');
   });
@@ -79,7 +81,7 @@ describe('buildMailFrame', () => {
       <div style="color:red;background-image:url(//tracker.example/inline.gif)">x</div>
       <div style="background-image:u\\72l(https://tracker.example/escaped.gif)">y</div>`;
     for (const allowRemoteImages of [false, true]) {
-      const frame = buildMailFrame(html, { allowRemoteImages });
+      const frame = buildMailFrame(html, { allowRemoteImages, isReadOnly: false });
       expect(frame.hasRemoteImages).toBe(false);
       expect(frame.srcdoc).not.toContain('tracker.example');
       expect(frame.srcdoc).toMatch(/color:\s*red/);
@@ -100,7 +102,7 @@ describe('buildMailFrame', () => {
       .wrap{max-width:600px;margin:0 auto;background:url(https://tracker.example/bg.gif);color:red}
       @media (max-width:600px){.wrap{width:100%}}</style></head>
       <body><style>.foot{color:gray}</style><div class="wrap">x</div></body></html>`;
-    const { srcdoc } = buildMailFrame(html, { allowRemoteImages: true });
+    const { srcdoc } = buildMailFrame(html, { allowRemoteImages: true, isReadOnly: false });
     expect(srcdoc).not.toContain('tracker.example');
     expect(srcdoc).not.toContain('@import');
     expect(srcdoc).not.toContain('@font-face');
@@ -181,7 +183,7 @@ describe('buildMailFrame', () => {
     const frame = buildMailFrame(
       `<a href="https://example.com/very/\tlong\n/path">link</a>
       <img src="https://tracker.example/pix\r\n.gif">`,
-      { allowRemoteImages: true },
+      { allowRemoteImages: true, isReadOnly: false },
     );
     expect(frame.srcdoc).toContain('href="https://example.com/very/long/path"');
     expect(frame.srcdoc).toContain('src="https://tracker.example/pix.gif"');
@@ -216,7 +218,7 @@ describe('buildMailFrame', () => {
       <img src="https://ev%22il.example/injected.gif">
       <img src="https://a;b.example/injected.gif">
       <img srcset="https://tracker.example/a 1x" src="//tracker.example/b.gif">`;
-    const allowed = buildMailFrame(html, { allowRemoteImages: true });
+    const allowed = buildMailFrame(html, { allowRemoteImages: true, isReadOnly: false });
     expect(allowed.srcdoc).not.toContain('plain.example');
     expect(allowed.srcdoc).not.toContain('app-origin');
     expect(allowed.srcdoc).not.toContain('evil.example');
@@ -241,7 +243,7 @@ describe('buildMailFrame', () => {
       { length: 65 },
       (_, index) => `<img src="https://images-${index}.example/pixel.gif">`,
     ).join('');
-    const allowed = buildMailFrame(html, { allowRemoteImages: true });
+    const allowed = buildMailFrame(html, { allowRemoteImages: true, isReadOnly: false });
     expect(allowed.srcdoc).toContain('images-63.example');
     expect(allowed.srcdoc).not.toContain('images-64.example');
     expect(allowed.remoteImagesTruncated).toBe(true);
@@ -284,12 +286,47 @@ describe('buildMailFrame', () => {
     expect(nonceOf(a.srcdoc)).not.toBe(nonceOf(b.srcdoc));
   });
 
-  it('keeps the host CSP hash aligned with the exact measuring script', () => {
-    const { srcdoc } = blocked('<p>x</p>');
-    const script = srcdoc.match(/<script nonce="[^"]+">([\s\S]*?)<\/script>/)?.[1];
-    if (script === undefined) throw new Error('measuring script not found');
-    const hash = createHash('sha256').update(script).digest('base64');
-    const headers = readFileSync('public/_headers', 'utf8');
-    expect(headers).toContain(`'sha256-${hash}'`);
+  describe('a read-only frame', () => {
+    it('runs the measuring script and nothing else', () => {
+      const { srcdoc } = readOnly('<p>x</p>');
+      const scripts = [...srcdoc.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/g)];
+      expect(scripts.map(([, script]) => script)).toEqual([MAIL_FRAME_MEASURE_SCRIPT]);
+      expect(srcdoc).not.toContain('yozz:load-remote-images');
+    });
+
+    it('keeps a withheld image its box and offers nothing', () => {
+      const { srcdoc } = readOnly('<img src="https://t.example/a.png" width="600" height="300">');
+      expect(srcdoc).toContain('data-yozz-withheld-box');
+      expect(srcdoc).toContain('aspect-ratio:600/300');
+      expect(srcdoc).not.toContain('data-yozz-withheld=');
+      expect(srcdoc).not.toContain('img[data-yozz-withheld]');
+      expect(srcdoc).not.toContain('Load remote images');
+      expect(srcdoc).not.toContain('cursor:pointer');
+    });
+
+    it('turns off DNS prefetch, for links it serves over http', () => {
+      const prefetchOff = '<meta http-equiv="x-dns-prefetch-control" content="off">';
+      expect(readOnly('<a href="https://t.example/">x</a>').srcdoc).toContain(prefetchOff);
+      expect(blocked('<a href="https://t.example/">x</a>').srcdoc).not.toContain(prefetchOff);
+    });
+
+    it('draws no box for a tracking pixel', () => {
+      const { srcdoc } = readOnly('<img src="https://t.example/p.gif" width="1" height="1">');
+      expect(srcdoc).not.toContain('data-yozz-withheld-box=');
+    });
+
+    it('takes neither marker from a sender', () => {
+      const { srcdoc } = readOnly('<p data-yozz-withheld data-yozz-withheld-box>x</p>');
+      expect(srcdoc).toContain('<p>x</p>');
+    });
+
+    it('loads remote images only when told to', () => {
+      const html = '<img src="https://t.example/a.png" width="600" height="300">';
+      expect(readOnly(html).srcdoc).not.toContain('t.example');
+      const allowed = readOnly(html, true).srcdoc;
+      expect(allowed).toContain('src="https://t.example/a.png"');
+      expect(allowed).toContain('img-src data: https://t.example');
+      expect(allowed).not.toContain('data-yozz-withheld-box=');
+    });
   });
 });

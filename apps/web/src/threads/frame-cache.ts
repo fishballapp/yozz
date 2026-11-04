@@ -1,4 +1,4 @@
-import type { MailFrame } from './html';
+import type { MailFrame } from '@yozz.app/mail/threads/html';
 
 // ponytail: bounded by count, not bytes; 32 messages near the 8M-code-unit render ceiling would
 // hold ~1 GB. Un-park if a tab is seen dying after a long session of image-heavy mail.

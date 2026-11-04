@@ -1,11 +1,17 @@
-import { SAFE_INLINE_IMAGE_MIME_TYPES } from '@yozz.app/mail/threads/image-types';
 import createDOMPurify from 'dompurify';
-import { isPermittedExternalHostname, normalizedUrlInputOf, outboundHrefOf } from './url-policy';
+import {
+  MAIL_FRAME_CLICKABLE_SCRIPT,
+  MAIL_FRAME_MEASURE_SCRIPT,
+  WITHHELD_IMAGE_ATTR,
+} from './frame-scripts.ts';
+import { SAFE_INLINE_IMAGE_MIME_TYPES } from './image-types.ts';
+import { isPermittedExternalHostname, normalizedUrlInputOf, outboundHrefOf } from './url-policy.ts';
 
 /**
  * Three layers, each assuming the one before failed: DOMPurify's HTML-only profile with hooks
  * narrowing URL shapes; a CSP `<meta>` in the srcdoc denying every fetch (remote images opt in per
- * message); and the iframe sandbox in `HtmlBody.tsx` (no `allow-same-origin`).
+ * message); and the iframe sandbox of the page that mounts it (no `allow-same-origin`). It needs a
+ * browser's own CSS parser, so it never runs in Node.
  */
 export type MailFrame = {
   readonly srcdoc: string;
@@ -13,6 +19,8 @@ export type MailFrame = {
   readonly hasRemoteImages: boolean;
   /** The distinct-origin ceiling removed images that consent cannot restore. */
   readonly remoteImagesTruncated: boolean;
+  /** The frame is on the dark ground; otherwise on the white one the mail was authored against. */
+  readonly isDark: boolean;
 };
 
 const PROTOCOL_RELATIVE_URL = /^\/\//;
@@ -37,8 +45,8 @@ const fetchFreeInlineStyleOf = (raw: string): string =>
 // A blocked image keeps a transparent pixel: an `<img>` with no source is a broken-image icon in WebKit.
 const BLOCKED_IMAGE_PLACEHOLDER =
   'data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==';
-/** Marks an image consent can restore. */
-const WITHHELD_IMAGE_ATTR = 'data-yozz-withheld';
+/** Draws a withheld image in a read-only frame, where nothing reads a click on it. */
+const WITHHELD_BOX_ATTR = 'data-yozz-withheld-box';
 // A warm mid grey reads on both the dark and the white ground.
 const WITHHELD_IMAGE_ICON =
   "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%238f8a80' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='3' y='4' width='18' height='16' rx='2'/%3E%3Ccircle cx='9' cy='9.5' r='1.5'/%3E%3Cpath d='M21 15l-4.5-4.5L8 19M3 17l3.5-3.5L9 16'/%3E%3C/svg%3E";
@@ -49,17 +57,44 @@ const pixelsOf = (raw: string | null): number | null => {
   return match === null || match === undefined ? null : Number(match[1]);
 };
 
+const WITHHELD_BOX_STYLE = `box-sizing:border-box;border:1px dashed color-mix(in oklch,currentColor 30%,transparent);background:color-mix(in oklch,currentColor 5%,transparent) url("${WITHHELD_IMAGE_ICON}") center/20px no-repeat`;
+
+/** What a frame does with a withheld image, and the one script it runs. */
+const FRAME_KINDS = {
+  /** yozz.app's: a click on a withheld image asks for it. */
+  clickable: {
+    withheldAttr: WITHHELD_IMAGE_ATTR,
+    withheldTitle: 'Load remote images',
+    withheldStyle: `img[${WITHHELD_IMAGE_ATTR}]{${WITHHELD_BOX_STYLE};cursor:pointer}`,
+    script: MAIL_FRAME_CLICKABLE_SCRIPT,
+    extraHead: '',
+  },
+  /** Just the mail, its links working: nothing is offered, so nothing says a click would load an image. */
+  readOnly: {
+    withheldAttr: WITHHELD_BOX_ATTR,
+    withheldTitle: null,
+    withheldStyle: `img[${WITHHELD_BOX_ATTR}]{${WITHHELD_BOX_STYLE}}`,
+    script: MAIL_FRAME_MEASURE_SCRIPT,
+    // Served over http, where a browser may resolve a link's host before anyone clicks it, which
+    // would tell the sender's DNS the mail was opened. The page's header may not reach a srcdoc.
+    extraHead: '<meta http-equiv="x-dns-prefetch-control" content="off">\n',
+  },
+} as const;
+
 /**
  * Only a picture the sender gave a box to is drawn as withheld; a tracking pixel stays invisible.
  * The transparent pixel is square, so the ratio is restated or `height:auto` draws a square.
  */
 // ponytail: an image sized only by CSS (`style="width:600px"`) still draws square; read the inline width if it matters.
-const markWithheld = (node: Element): void => {
+const markWithheld = (
+  node: Element,
+  { withheldAttr, withheldTitle }: (typeof FRAME_KINDS)[keyof typeof FRAME_KINDS],
+): void => {
   const widthAttr = node.getAttribute('width');
   const leading = Number(widthAttr?.match(/^\s*(\d+)/)?.[1]);
   if (!(leading > 1)) return;
-  node.setAttribute(WITHHELD_IMAGE_ATTR, '');
-  node.setAttribute('title', 'Load remote images');
+  node.setAttribute(withheldAttr, '');
+  if (withheldTitle !== null) node.setAttribute('title', withheldTitle);
   const width = pixelsOf(widthAttr);
   const height = pixelsOf(node.getAttribute('height'));
   if (width === null || height === null || !(height > 1)) return;
@@ -68,7 +103,6 @@ const markWithheld = (node: Element): void => {
     .join(';');
   node.setAttribute('style', style);
 };
-const WITHHELD_IMAGE_STYLE = `img[${WITHHELD_IMAGE_ATTR}]{box-sizing:border-box;border:1px dashed color-mix(in oklch,currentColor 30%,transparent);background:color-mix(in oklch,currentColor 5%,transparent) url("${WITHHELD_IMAGE_ICON}") center/20px no-repeat;cursor:pointer}`;
 
 const fetchFreeDeclarationsOf = (style: CSSStyleDeclaration): string => {
   for (const property of Array.from(style)) {
@@ -160,16 +194,6 @@ const cspOf = (allowRemoteImages: boolean, remoteImageOrigins: Set<string>, nonc
     "form-action 'none'",
   ].join('; ');
 
-// The first click on a withheld image loads it without following its link. This exact source
-// is also admitted by the host CSP's SHA-256: a srcdoc inherits the host policy, then applies
-// its own nonce policy, so a drift in either fails.
-const MAIL_FRAME_MEASURE_SCRIPT = `let pending=0,last=-1;
-const post=()=>{pending=0;const height=document.documentElement.scrollHeight;if(height===last)return;last=height;parent.postMessage({type:'yozz:mail-height',height},'*')};
-const schedule=()=>{if(pending===0)pending=setTimeout(post,100)};
-new ResizeObserver(schedule).observe(document.body);
-addEventListener('load',schedule);
-addEventListener('click',e=>{if(!(e.target instanceof HTMLImageElement&&e.target.hasAttribute('${WITHHELD_IMAGE_ATTR}')))return;e.preventDefault();parent.postMessage({type:'yozz:load-remote-images'},'*')});`;
-
 const randomNonce = (): string =>
   Array.from(crypto.getRandomValues(new Uint8Array(16)), byte =>
     byte.toString(16).padStart(2, '0'),
@@ -177,8 +201,16 @@ const randomNonce = (): string =>
 
 export const buildMailFrame = (
   html: string,
-  { allowRemoteImages }: { allowRemoteImages: boolean },
+  {
+    allowRemoteImages,
+    isReadOnly,
+  }: {
+    allowRemoteImages: boolean;
+    /** No script but the measuring one, and nothing that offers a withheld image. */
+    isReadOnly: boolean;
+  },
 ): MailFrame => {
+  const kind = isReadOnly ? FRAME_KINDS.readOnly : FRAME_KINDS.clickable;
   const purifier = createDOMPurify(window);
   // Where DOMPurify cannot run, sanitize() returns the input. (happy-dom passes this check and
   // still garbles output, so the tests run under jsdom.)
@@ -189,6 +221,7 @@ export const buildMailFrame = (
   purifier.addHook('afterSanitizeAttributes', node => {
     // A sender who ships the marker would turn their own picture into a consent trigger.
     node.removeAttribute(WITHHELD_IMAGE_ATTR);
+    node.removeAttribute(WITHHELD_BOX_ATTR);
     // CSS can fetch through more properties and escape spellings than a regex can enumerate, so
     // every declaration the browser parsed as URL-bearing goes.
     if (node instanceof HTMLElement) {
@@ -253,7 +286,7 @@ export const buildMailFrame = (
           node.setAttribute('referrerpolicy', 'no-referrer');
         } else {
           node.setAttribute(attr, BLOCKED_IMAGE_PLACEHOLDER);
-          markWithheld(node);
+          markWithheld(node, kind);
         }
         continue;
       }
@@ -295,16 +328,16 @@ export const buildMailFrame = (
     : ':root{color-scheme:light}body{background:#fff;color:#111}';
   const srcdoc = `<!doctype html><html><head><meta charset="utf-8">
 <meta name="referrer" content="no-referrer">
-<meta http-equiv="Content-Security-Policy" content="${cspOf(allowRemoteImages, remoteImageOrigins, nonce)}">
+${kind.extraHead}<meta http-equiv="Content-Security-Policy" content="${cspOf(allowRemoteImages, remoteImageOrigins, nonce)}">
 <style>
 ${ground}
 body{margin:12px;font:14px/1.5 system-ui,sans-serif;overflow-wrap:break-word}
 img{max-width:100%;height:auto}
-${WITHHELD_IMAGE_STYLE}
+${kind.withheldStyle}
 </style>
 <style>${stylesheet}</style>
 </head><body>${clean}
-<script nonce="${nonce}">${MAIL_FRAME_MEASURE_SCRIPT}</script>
+<script nonce="${nonce}">${kind.script}</script>
 </body></html>`;
-  return { srcdoc, hasRemoteImages, remoteImagesTruncated };
+  return { srcdoc, hasRemoteImages, remoteImagesTruncated, isDark: dark };
 };

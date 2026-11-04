@@ -1,6 +1,6 @@
 {
   "name": "@yozz.app/cli",
-  "version": "0.2.3",
+  "version": "0.3.0",
   "license": "AGPL-3.0-only",
   "type": "module",
   "description": "yozz: the mail in your YOZZ account, from a terminal, for coding agents and the person beside them.",
@@ -28,12 +28,14 @@
     "prepack": "pnpm build",
     "cli": "pnpm build && node dist/bin.js",
     "test": "vitest run",
+    "html:security": "pnpm build && node harness/html-security.ts",
     "check:effect": "effect-tsgo diagnostics --project tsconfig.json --format text"
   },
   "devDependencies": {
     "@effect/platform-node": "catalog:",
     "@effect/vitest": "catalog:",
     "@fishballapps/cli-login": "workspace:*",
+    "@playwright/test": "catalog:",
     "@types/node": "catalog:",
     "@yozz.app/imap": "workspace:*",
     "@yozz.app/mail": "workspace:*",
@@ -41,6 +43,7 @@
     "@yozz.app/vault": "workspace:*",
     "@yozz.app/vault-contract": "workspace:*",
     "effect": "catalog:",
+    "rolldown": "catalog:",
     "tsdown": "catalog:",
     "vitest": "catalog:"
   }

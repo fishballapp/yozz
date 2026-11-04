@@ -16,8 +16,8 @@ vi.mock('../ui/Toast', () => ({
   reportProblem: (title: string, description: string) => problems.push({ title, description }),
 }));
 
-vi.mock('./html', async importOriginal => {
-  const actual = await importOriginal<typeof import('./html')>();
+vi.mock('@yozz.app/mail/threads/html', async importOriginal => {
+  const actual = await importOriginal<typeof import('@yozz.app/mail/threads/html')>();
   return {
     ...actual,
     buildMailFrame: (...args: Parameters<typeof actual.buildMailFrame>) => {

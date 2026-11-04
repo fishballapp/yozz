@@ -1,5 +1,5 @@
+import { outboundHrefOf } from '@yozz.app/mail/threads/url-policy';
 import { Children, isValidElement, type ReactNode } from 'react';
-import { outboundHrefOf } from './url-policy';
 
 /**
  * Runs at render time on string leaves only, so it can never reach into a code span or fenced

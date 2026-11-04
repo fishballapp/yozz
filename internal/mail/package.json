@@ -15,6 +15,7 @@
     "@yozz.app/smtp": "workspace:*",
     "@yozz.app/vault": "workspace:*",
     "@yozz.app/vault-contract": "workspace:*",
+    "dompurify": "catalog:",
     "parse5": "catalog:",
     "postal-mime": "catalog:",
     "tldts": "catalog:",
@@ -22,6 +23,7 @@
   },
   "devDependencies": {
     "@types/node": "catalog:",
+    "jsdom": "catalog:",
     "vitest": "catalog:"
   },
   "scripts": {

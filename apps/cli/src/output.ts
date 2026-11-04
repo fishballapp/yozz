@@ -1,5 +1,6 @@
 import * as Cause from 'effect/Cause';
 import * as Console from 'effect/Console';
+import * as Context from 'effect/Context';
 import * as CliError from 'effect/cli/CliError';
 import * as Command from 'effect/cli/Command';
 import * as Effect from 'effect/Effect';
@@ -40,6 +41,15 @@ const pretty = (value: unknown) => JSON.stringify(value, null, 2);
 
 /** A command's result: one pretty-printed JSON document on stdout. Progress goes to stderr. */
 export const printJson = (value: unknown) => Console.log(pretty(value));
+
+/**
+ * Prints what the command has written so far, now: for a command that stays running after its
+ * answer. Anything it writes afterwards is held as usual.
+ */
+export class FlushOutput extends Context.Reference<Effect.Effect<void>>(
+  '@yozz.app/cli/FlushOutput',
+  { defaultValue: () => Effect.void },
+) {}
 
 /** What a run prints: what it held for stdout, its one error line, or nothing (a defect, which the runtime logs on stderr). */
 const outputOf = (
@@ -94,6 +104,12 @@ export const runCommand =
             held.push(parts);
           },
         }),
+        Effect.provideService(
+          FlushOutput,
+          Effect.sync(() => {
+            for (const parts of held.splice(0)) console.log(...parts);
+          }),
+        ),
         Effect.exit,
       );
       const output = outputOf(exit, held);

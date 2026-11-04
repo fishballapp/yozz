@@ -10,12 +10,19 @@ import { CliLayer } from './app.ts';
 const home = mkdtempSync(join(tmpdir(), 'yozz-bin-'));
 afterAll(() => rmSync(home, { recursive: true }));
 
+/** A `?iife` import is the bundler's (`iife-plugin.ts`), and nothing here serves a page. */
+const WITHOUT_BUNDLER = `data:text/javascript,import{registerHooks}from'node:module';registerHooks({resolve:(specifier,context,next)=>specifier.endsWith('?iife')?{url:'data:text/javascript,export default ""',shortCircuit:true}:next(specifier,context)})`;
+
 /** The real bin, as a shell runs it, with no credentials. */
 const yozz = (...args: string[]) =>
-  spawnSync(process.execPath, [join(import.meta.dirname, 'bin.ts'), ...args], {
-    encoding: 'utf8',
-    env: { PATH: process.env.PATH, XDG_CONFIG_HOME: home, XDG_STATE_HOME: home },
-  });
+  spawnSync(
+    process.execPath,
+    ['--import', WITHOUT_BUNDLER, join(import.meta.dirname, 'bin.ts'), ...args],
+    {
+      encoding: 'utf8',
+      env: { PATH: process.env.PATH, XDG_CONFIG_HOME: home, XDG_STATE_HOME: home },
+    },
+  );
 
 describe('the bin', () => {
   it.each([

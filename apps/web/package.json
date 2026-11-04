@@ -35,7 +35,6 @@
     "better-auth": "catalog:",
     "cn": "catalog:",
     "class-variance-authority": "catalog:",
-    "dompurify": "catalog:",
     "react": "catalog:web",
     "react-dom": "catalog:web",
     "zod": "catalog:"

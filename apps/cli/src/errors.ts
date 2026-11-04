@@ -1,6 +1,6 @@
 import { CliLoginError } from '@fishballapps/cli-login';
 import * as Config from 'effect/Config';
-import type * as CliError from 'effect/cli/CliError';
+import * as CliError from 'effect/cli/CliError';
 import * as Effect from 'effect/Effect';
 import * as PlatformError from 'effect/PlatformError';
 import * as Schema from 'effect/Schema';
@@ -93,6 +93,11 @@ export class PartialFailure extends Schema.TaggedError<PartialFailure>()('Partia
   output: Schema.Unknown,
 }) {}
 
+/** `read --serve-html` could not start its local server. */
+export class HtmlServerError extends Schema.TaggedError<HtmlServerError>()('HtmlServerError', {
+  message: Schema.String,
+}) {}
+
 export type CliFailure =
   | UsageError
   | NotLoggedIn
@@ -109,7 +114,8 @@ export type CliFailure =
   | SendRefused
   | SendUnconfirmed
   | WaitTimedOut
-  | PartialFailure;
+  | PartialFailure
+  | HtmlServerError;
 
 const LOGIN_FAILURE_CODES = {
   Denied: 'LoginDenied',
@@ -131,10 +137,16 @@ const toFailure = (error: ReportedError): Failure => {
   return { ...fields, code: _tag, message: error.message };
 };
 
-/** Turns a command's failure into its one error line, after a partial failure's output. */
+/**
+ * Turns a command's failure into its one error line, after a partial failure's output. One a layer
+ * it provided for itself has already reported goes through as it is.
+ */
 export const reportFailure = <A, R>(
-  effect: Effect.Effect<A, ReportedError, R>,
+  effect: Effect.Effect<A, ReportedError | CliError.UserError, R>,
 ): Effect.Effect<A, CliError.UserError, R> =>
-  Effect.catch(effect, error =>
-    fail(toFailure(error), error instanceof PartialFailure ? { output: error.output } : {}),
+  Effect.catchIf(
+    effect,
+    (error): error is ReportedError => !(error instanceof CliError.UserError),
+    error =>
+      fail(toFailure(error), error instanceof PartialFailure ? { output: error.output } : {}),
   );

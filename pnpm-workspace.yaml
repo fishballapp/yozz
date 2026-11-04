@@ -81,6 +81,7 @@ catalog:
   react-native-screens: ~4.26.0
   react-native-worklets: 0.10.1
   repojj: ^2026.7.29
+  rolldown: ^1.2.8
   tailwindcss: ^4.3.3
   tldts: ^7.4.16
   tsdown: ^0.23.0

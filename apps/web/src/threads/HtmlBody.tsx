@@ -1,4 +1,5 @@
 import { ImageIcon } from '@phosphor-icons/react';
+import { buildMailFrame } from '@yozz.app/mail/threads/html';
 import type { SenderCheck } from '@yozz.app/mail/threads/thread';
 import { cn } from 'cn';
 import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
@@ -9,7 +10,6 @@ import { useChromePref } from '../ui/chrome';
 import { reportProblem } from '../ui/Toast';
 import { vaultErrorMessage } from '../vault/screen-policy';
 import { cachedFrameOf } from './frame-cache';
-import { buildMailFrame } from './html';
 import { isLoadedByTrust } from './remote-images';
 import { useRemoteImages } from './remote-images-context';
 
@@ -141,8 +141,10 @@ export const HtmlBody = ({
     try {
       // The cache is keyed by bytes alone, so it holds only the withheld frame.
       return isRemoteAllowed
-        ? buildMailFrame(html, { allowRemoteImages: true })
-        : cachedFrameOf(html, () => buildMailFrame(html, { allowRemoteImages: false }));
+        ? buildMailFrame(html, { allowRemoteImages: true, isReadOnly: false })
+        : cachedFrameOf(html, () =>
+            buildMailFrame(html, { allowRemoteImages: false, isReadOnly: false }),
+          );
     } catch {
       return null;
     }

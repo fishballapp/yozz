@@ -17,7 +17,7 @@ import {
 import { createServer } from 'vite';
 import { runAttachmentChecks } from './attachment-security.ts';
 
-type HtmlModule = typeof import('../src/threads/html');
+type HtmlModule = typeof import('@yozz.app/mail/threads/html');
 type MountResult = {
   readonly hasRemoteImages: boolean;
   readonly measuredHeight: number;
@@ -56,7 +56,7 @@ const mount = async (page: Page, html: string, allowRemoteImages: boolean): Prom
     async ({ allow, body, heightTimeoutMs }) => {
       const module = (globalThis as typeof globalThis & { htmlSecurity?: HtmlModule }).htmlSecurity;
       if (module === undefined) throw new Error('HTML security module did not load');
-      const result = module.buildMailFrame(body, { allowRemoteImages: allow });
+      const result = module.buildMailFrame(body, { allowRemoteImages: allow, isReadOnly: false });
       document.body.replaceChildren();
       const frame = document.createElement('iframe');
       frame.title = 'security probe';
