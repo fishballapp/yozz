@@ -29,6 +29,7 @@ import {
   chromium,
   type Frame,
   firefox,
+  type Logger,
   type Page,
   webkit,
 } from '@playwright/test';
@@ -475,6 +476,65 @@ const OBSERVER = () => {
   });
 };
 
+/** The browser's own side of the last few moments, kept quiet unless a page load hangs. */
+const browserLog: string[] = [];
+const BROWSER_LOG_LINES = 400;
+const browserLogger: Logger = {
+  isEnabled: name => name === 'browser' || name === 'protocol',
+  log: (name, _severity, message) => {
+    browserLog.push(
+      `${new Date().toISOString().slice(11, 23)} ${name} ${String(message).slice(0, 400)}`,
+    );
+    if (browserLog.length > BROWSER_LOG_LINES) browserLog.shift();
+  },
+};
+
+const settled = <T>(work: Promise<T>, ms: number): Promise<T | string> =>
+  Promise.race([
+    work.catch(error => String(error).split('\n', 1)[0] ?? 'failed'),
+    new Promise<string>(done => setTimeout(() => done(`no answer in ${ms} ms`), ms)),
+  ]);
+
+/**
+ * What a hung first load looks like from every side. Read only after it has hung: page listeners
+ * attached beforehand appeared to keep it from happening.
+ */
+const reportHang = async (context: BrowserContext, page: Page, url: string) => {
+  const startedAt = Date.now();
+  const server = await settled(
+    fetch(url).then(res => `${res.status} in ${Date.now() - startedAt} ms`),
+    5_000,
+  );
+  const state = await settled(
+    page.evaluate(() => ({
+      readyState: document.readyState,
+      iframes: document.querySelectorAll('iframe').length,
+      unfinished: performance
+        .getEntriesByType('resource')
+        .filter(entry => (entry as PerformanceResourceTiming).responseEnd === 0)
+        .map(({ name }) => name.slice(0, 80)),
+    })),
+    5_000,
+  );
+  const otherTab = await context.newPage();
+  const otherAt = Date.now();
+  const otherLoad = await settled(
+    otherTab.goto(url, { waitUntil: 'load' }).then(() => `loaded in ${Date.now() - otherAt} ms`),
+    15_000,
+  );
+  console.log(
+    [
+      'HANG: the first page load did not finish',
+      `  page.url: ${page.url().slice(0, 40)}, frames: ${page.frames().length}`,
+      `  server, asked directly: ${server}`,
+      `  the page itself: ${JSON.stringify(state)}`,
+      `  the same URL in a second tab: ${otherLoad}`,
+      `  the browser's last ${browserLog.length} log lines:`,
+      ...browserLog.map(line => `    ${line}`),
+    ].join('\n'),
+  );
+};
+
 const openMail = async (context: BrowserContext, url: string) => {
   const page = await context.newPage();
   const dialogs: string[] = [];
@@ -487,7 +547,10 @@ const openMail = async (context: BrowserContext, url: string) => {
     if (/content.security.policy/i.test(line.text())) violations.push(line.text());
   });
   await page.addInitScript(OBSERVER);
-  await page.goto(url, { waitUntil: 'load' });
+  await page.goto(url, { waitUntil: 'load' }).catch(async error => {
+    await reportHang(context, page, url);
+    throw error;
+  });
   await page.waitForSelector('iframe', { state: 'attached', timeout: PAGE_TIMEOUT_MS });
   const frame = await childOf(page);
   await settle();
@@ -529,7 +592,7 @@ const runEngine = async ({
   /** An HTTPS host no mail names, up and answering, so a request to it would be heard. */
   unlisted: Listener;
 }) => {
-  const browser = await browserType.launch({ headless: true });
+  const browser = await browserType.launch({ headless: true, logger: browserLogger });
   const assertSilence = (what: string) => {
     assert(
       tls.hits.length === 0,
