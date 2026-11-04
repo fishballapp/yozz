@@ -28,10 +28,13 @@ export type FileReference = z.infer<typeof fileReferenceSchema>;
  * A message frozen by its claim: `head` (base64) is every byte but the attachments' bodies, and each
  * splice says where a file's body goes. A new field, not `bytes` and optional splices: a client that
  * knows neither stops, where one that knew `bytes` alone would send empty attachments.
+ * `bcc` is no part of those bytes, which SMTP carries without it: it is who the Sent copy names, frozen
+ * with the claim so a draft edited since cannot change it.
  */
 export const frozenMessageSchema = z.object({
   head: z.string(),
   splices: z.array(z.object({ at: z.number().int().nonnegative(), fileId: z.string().min(1) })),
+  bcc: z.array(z.string().min(1)).optional(),
 });
 export type FrozenMessage = z.infer<typeof frozenMessageSchema>;
 

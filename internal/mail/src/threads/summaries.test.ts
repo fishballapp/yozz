@@ -1,5 +1,7 @@
 import type { ImapMessageSummary } from '@yozz.app/imap';
 import { describe, expect, it } from 'vitest';
+import { threadMatches } from './match.ts';
+import { parseQuery } from './query.ts';
 import {
   type FolderSummaries,
   parseInternalDate,
@@ -86,6 +88,27 @@ describe('parseInternalDate', () => {
 });
 
 describe('threadFromSummary', () => {
+  it('carries who a vault-held message was blind-copied to, so a search can find it', () => {
+    const [thread] = threadsFromAccounts({}, [
+      {
+        messageId: '<sent-1@x.co>',
+        at: 1,
+        date: 'Sun, 23 Aug 2026 09:00:00 +0000',
+        from: 'send-only@x.co',
+        to: 'kate@example.com',
+        cc: '',
+        bcc: 'legal@example.com, sam@example.com',
+        subject: 'Hi',
+        body: 'Hello',
+      },
+    ]);
+    expect(thread?.messages[0]?.bcc).toEqual([
+      { address: 'legal@example.com' },
+      { address: 'sam@example.com' },
+    ]);
+    expect(thread && threadMatches(parseQuery('legal@example.com'))(thread)).toBe(true);
+  });
+
   it('keeps each message its own flags beside the conversation’s', () => {
     const inbox = (uid: number, flags: readonly string[], over = {}) =>
       summaryOf({ uid, flags, envelope: envelope({ messageId: `<m${uid}@x.co>`, ...over }) });

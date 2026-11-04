@@ -110,7 +110,7 @@ export const sendCommand = Command.make(
           }),
         );
       },
-      copyToSent: async (target, { message, assemble }, handle) => {
+      copyToSent: async (target, { message, assembleCopy }, handle) => {
         const messageId = handle.record.send?.messageId ?? '';
         if (target === 'vault' || (identity !== undefined && !isInbound(identity))) {
           try {
@@ -124,7 +124,7 @@ export const sendCommand = Command.make(
         // The address's mailbox was removed since the claim: the send finishes without a copy in it.
         const account = mail.accounts.find(({ address }) => address === handle.record.from);
         if (account === undefined) return { ok: true, value: null };
-        const assembled = await assemble();
+        const assembled = await assembleCopy();
         if (!assembled.ok) return assembled;
         const copied = await storeSentCopy(mail.runOn(account), assembled.value, messageId);
         if (!copied.ok) return copied;

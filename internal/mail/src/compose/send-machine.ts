@@ -14,6 +14,7 @@ import {
   isUnconfirmedSubmission,
   type ReadFile,
   type SentCopyFailure,
+  withBccLine,
 } from './send.ts';
 
 /**
@@ -41,13 +42,14 @@ export type SendEffects = {
   ) => Promise<Result<void, MailConnectionFailure>>;
   /**
    * Phase (2). Idempotent by contract: it looks for its own earlier copy first. `null` means no
-   * locator to report. `assemble` reads the files, which a copy in the vault needs no bytes of.
+   * locator to report. `assembleCopy` reads the files, which a copy in the vault needs no bytes of;
+   * its bytes are the submitted ones with the `Bcc` line the copy alone carries.
    */
   readonly copyToSent: (
     target: SendTarget,
     frozen: {
       readonly message: FrozenMessage;
-      readonly assemble: () => Promise<Result<Uint8Array, MailConnectionFailure>>;
+      readonly assembleCopy: () => Promise<Result<Uint8Array, MailConnectionFailure>>;
     },
     handle: DraftHandle,
   ) => Promise<Result<SentLocator | null, SentCopyFailure>>;
@@ -104,6 +106,12 @@ const runSend = async (effects: SendEffects, claimed: DraftHandle): Promise<Send
     );
     return assembling;
   };
+  const assembleCopy = async () => {
+    const assembled = await assemble();
+    return assembled.ok
+      ? ({ ok: true, value: withBccLine(assembled.value, message.bcc) } as const)
+      : assembled;
+  };
 
   if (send.state === 'submitting') {
     const assembled = await assemble();
@@ -134,7 +142,7 @@ const runSend = async (effects: SendEffects, claimed: DraftHandle): Promise<Send
 
   const held = handle.record.send;
   if (held?.state === 'submitted') {
-    const copied = await effects.copyToSent(target, { message, assemble }, handle);
+    const copied = await effects.copyToSent(target, { message, assembleCopy }, handle);
     if (!copied.ok) {
       if (copied.error.kind === 'no-sent-mailbox') {
         // Not `copied`: there is no copy, and a crash here only asks the same question again.

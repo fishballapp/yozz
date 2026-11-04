@@ -1,5 +1,10 @@
 import { renderHtml } from '@tanstack/markdown/html';
-import { buildMessageParts, encodeAttachmentBody, spliceMessage } from '@yozz.app/smtp';
+import {
+  buildMessageParts,
+  encodeAttachmentBody,
+  encodeHeaderText,
+  spliceMessage,
+} from '@yozz.app/smtp';
 import { MAX_CIPHERTEXT_BYTES } from '@yozz.app/vault-contract';
 import { resolveFolders } from '../addresses/mailboxes.ts';
 import { type AddressRecord, isInbound } from '../addresses/record.ts';
@@ -109,10 +114,11 @@ export const claimOf = (
   now: number,
 ): Result<NonNullable<DraftRecord['send']>, MailConnectionFailure> => {
   const messageId = `<${crypto.randomUUID()}@${record.from.slice(record.from.indexOf('@') + 1)}>`;
+  const bcc = addressList(record.bcc);
   const built = buildOutgoing(identity, {
     to: addressList(record.to),
     cc: addressList(record.cc),
-    bcc: addressList(record.bcc),
+    bcc,
     subject: record.subject,
     text: record.body,
     messageId,
@@ -126,7 +132,11 @@ export const claimOf = (
     opId: crypto.randomUUID(),
     state: 'submitting',
     claimedAt: now,
-    message: { head: built.value.head.toBase64(), splices: built.value.splices },
+    message: {
+      head: built.value.head.toBase64(),
+      splices: built.value.splices,
+      ...(bcc.length === 0 ? {} : { bcc: [...bcc] }),
+    },
     // The logical folder; the name is resolved against LIST at copy time.
     target: isInbound(identity) ? { account: identity.address, folder: 'sent' } : 'vault',
   } satisfies NonNullable<DraftRecord['send']>;
@@ -187,6 +197,25 @@ export const assembleMessage = async (
       bodies,
     ),
   };
+};
+
+/**
+ * The Sent copy of `bytes`: the same message with a `Bcc` line in front, so the copy records who was
+ * blind-copied. Never for SMTP, which would tell every recipient. In front of the assembled bytes, so
+ * no file's splice offset moves.
+ */
+export const withBccLine = (bytes: Uint8Array, bcc: readonly string[] | undefined): Uint8Array => {
+  if (bcc === undefined || bcc.length === 0) return bytes;
+  const list = bcc.join(', ');
+  // 7-bit either way: an address that is not ASCII (SMTPUTF8) goes as encoded words, not as raw bytes.
+  const line = /^[\x20-\x7e]*$/.test(list)
+    ? encodeHeaderText(`Bcc: ${list}`)
+    : `Bcc: ${encodeHeaderText(list)}`;
+  const head = new TextEncoder().encode(`${line}\r\n`);
+  const copy = new Uint8Array(head.length + bytes.length);
+  copy.set(head);
+  copy.set(bytes, head.length);
+  return copy;
 };
 
 /**

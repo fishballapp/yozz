@@ -17,6 +17,8 @@ export const sentRecordSchema = z.object({
   from: z.string().min(1),
   to: z.string(),
   cc: z.string(),
+  /** Absent when nobody was blind-copied. Free text like `to`; the message's own bytes never name it. */
+  bcc: z.string().optional(),
   subject: z.string(),
   /** The markdown source, also the wire format's `text/plain` part. */
   body: z.string(),

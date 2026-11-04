@@ -20,7 +20,7 @@ export type ComposeDraft = {
   to: string;
   /** Free text like `to`. */
   cc: string;
-  /** Free text like `to`; reaches the envelope only (`buildMessage` writes no `Bcc` header). */
+  /** Free text like `to`; SMTP gets it as an envelope recipient only, and the Sent copy names it in a `Bcc` header. */
   bcc: string;
   subject: string;
   /** Markdown source. */

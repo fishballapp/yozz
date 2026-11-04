@@ -35,6 +35,8 @@ export type VaultSentMessage = {
   readonly from: string;
   readonly to: string;
   readonly cc: string;
+  /** Who it was blind-copied to, when a record kept it. */
+  readonly bcc?: string;
   readonly subject: string;
   readonly body: string;
   readonly inReplyTo?: string;
@@ -227,7 +229,7 @@ const asSyntheticCopy = (message: VaultSentMessage) => ({
       replyTo: asImapAddresses(message.from),
       to: asImapAddresses(message.to),
       cc: asImapAddresses(message.cc),
-      bcc: [],
+      bcc: asImapAddresses(message.bcc ?? ''),
       inReplyTo: message.inReplyTo ?? null,
       messageId: message.messageId,
     },

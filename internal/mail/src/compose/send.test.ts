@@ -10,6 +10,7 @@ import {
   envelopeRecipients,
   isUnconfirmedSubmission,
   storeSentCopy,
+  withBccLine,
 } from './send.ts';
 import { sentRecordFrom } from './sent-vault.ts';
 
@@ -142,6 +143,119 @@ describe('assembleMessage', () => {
         detail: 'Couldn’t download receipt.pdf',
       },
     });
+  });
+});
+
+const BLIND = ['legal@example.com', 'sam@example.com'];
+const text = (bytes: Uint8Array) => new TextDecoder().decode(bytes);
+
+/** The security line: the bytes SMTP carries never name a blind recipient. */
+describe('a blind copy in the frozen message', () => {
+  const blind = { ...draftFields, bcc: BLIND.join(', '), attachments: [receipt] };
+
+  it('is frozen with the claim, and is no part of the head', () => {
+    const claim = claimOf(IDENTITY, 'key', blind, 7);
+    if (!claim.ok || claim.value.message === undefined) throw new Error('refused');
+    expect(claim.value.message.bcc).toEqual(BLIND);
+    const head = text(Uint8Array.fromBase64(claim.value.message.head)).toLowerCase();
+    expect(head).not.toContain('bcc');
+    for (const address of BLIND) expect(head).not.toContain(address);
+  });
+
+  it('is left out of a claim with nobody blind-copied', () => {
+    const claim = claimOf(IDENTITY, 'key', draftFields, 7);
+    if (!claim.ok || claim.value.message === undefined) throw new Error('refused');
+    expect(claim.value.message).not.toHaveProperty('bcc');
+  });
+
+  it('never reaches the bytes a resend submits', async () => {
+    const claim = claimOf(IDENTITY, 'key', blind, 7);
+    if (!claim.ok || claim.value.message === undefined) throw new Error('refused');
+    const assembled = await assembleMessage(
+      claim.value.message,
+      async () => new Uint8Array([1, 2, 3]),
+      () => 'receipt.pdf',
+    );
+    if (!assembled.ok) throw new Error('not assembled');
+    const submitted = text(assembled.value).toLowerCase();
+    expect(submitted).not.toContain('bcc');
+    for (const address of BLIND) expect(submitted).not.toContain(address);
+  });
+
+  it('is on the vault record of a message with no mailbox', () => {
+    const claim = claimOf(IDENTITY, 'key', blind, 7);
+    if (!claim.ok || claim.value.message === undefined) throw new Error('refused');
+    const record = sentRecordFrom(
+      { ...blind, contentVersion: 1 },
+      claim.value.messageId,
+      claim.value.message,
+      9,
+    );
+    expect(record.bcc).toBe('legal@example.com, sam@example.com');
+  });
+
+  it('is absent from the vault record of a message nobody was blind-copied on', () => {
+    const claim = claimOf(IDENTITY, 'key', draftFields, 7);
+    if (!claim.ok || claim.value.message === undefined) throw new Error('refused');
+    const record = sentRecordFrom(
+      { ...draftFields, contentVersion: 1 },
+      claim.value.messageId,
+      claim.value.message,
+      9,
+    );
+    expect(record).not.toHaveProperty('bcc');
+  });
+});
+
+describe('withBccLine', () => {
+  const BYTES = new TextEncoder().encode('From: a@x\r\n\r\nbody');
+
+  it('hands back the very same bytes when nobody was blind-copied', () => {
+    expect(withBccLine(BYTES, undefined)).toBe(BYTES);
+    expect(withBccLine(BYTES, [])).toBe(BYTES);
+  });
+
+  it('puts one Bcc header in front of the message, which is otherwise untouched', () => {
+    expect(text(withBccLine(BYTES, BLIND))).toBe(
+      'Bcc: legal@example.com, sam@example.com\r\nFrom: a@x\r\n\r\nbody',
+    );
+  });
+
+  it('folds a long list under 78 columns, and unfolds to the same list', () => {
+    const many = Array.from({ length: 300 }, (_, index) => `person-${index}@example.com`);
+    const copy = text(withBccLine(BYTES, many));
+    const header = copy.slice(0, copy.indexOf('\r\nFrom:'));
+    expect(header.startsWith('Bcc: ')).toBe(true);
+    for (const line of header.split('\r\n')) expect(line.length).toBeLessThanOrEqual(78);
+    expect(header.replace(/\r\n /g, ' ')).toBe(`Bcc: ${many.join(', ')}`);
+  });
+
+  it('stays 7-bit for an address that is not ASCII', () => {
+    const copy = withBccLine(BYTES, ['jörg@example.com']);
+    expect(copy.every(byte => byte < 0x80)).toBe(true);
+    expect(text(copy)).toMatch(/^Bcc: =\?utf-8\?B\?/);
+  });
+
+  it('leaves every file where its splice puts it: the header goes in front of the assembled bytes', async () => {
+    const claim = claimOf(
+      IDENTITY,
+      'key',
+      { ...draftFields, bcc: BLIND.join(','), attachments: [receipt] },
+      7,
+    );
+    if (!claim.ok || claim.value.message === undefined) throw new Error('refused');
+    const file = new Uint8Array([1, 2, 3]);
+    const assembled = await assembleMessage(
+      claim.value.message,
+      async () => file,
+      () => 'receipt.pdf',
+    );
+    if (!assembled.ok) throw new Error('not assembled');
+    const copy = withBccLine(assembled.value, claim.value.message.bcc);
+    const prefix = 'Bcc: legal@example.com, sam@example.com\r\n'.length;
+    expect(copy.subarray(prefix)).toEqual(assembled.value);
+    // The attachment's base64 body sits under its own headers, as in what SMTP carried.
+    expect(text(copy)).toContain('Content-Transfer-Encoding: base64\r\n\r\nAQID\r\n');
   });
 });
 

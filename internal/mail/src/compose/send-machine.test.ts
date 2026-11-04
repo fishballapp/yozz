@@ -34,9 +34,13 @@ const content = {
 
 const head = new TextEncoder().encode('HEAD|TAIL');
 const FILE_ID = 'file-1';
-const message = (splices: readonly { at: number; fileId: string }[] = []) => ({
+const message = (
+  splices: readonly { at: number; fileId: string }[] = [],
+  bcc?: readonly string[],
+) => ({
   head: head.toBase64(),
   splices: [...splices],
+  ...(bcc === undefined ? {} : { bcc: [...bcc] }),
 });
 const attachment = {
   id: FILE_ID,
@@ -74,9 +78,9 @@ const spyEffects = (store: RecordStore, over: Partial<SendEffects> = {}) => {
       calls.submit += 1;
       return { ok: true, value: undefined };
     },
-    copyToSent: async (_target, { assemble }) => {
+    copyToSent: async (_target, { assembleCopy }) => {
       calls.copy += 1;
-      const assembled = await assemble();
+      const assembled = await assembleCopy();
       if (!assembled.ok) return assembled;
       return { ok: true, value: { account: 'me@x.co', folder: 'sent', uidValidity: 1, uid: 9 } };
     },
@@ -222,6 +226,80 @@ describe('the send state machine', () => {
     expect(still?.record.send?.state).toBe('submitting');
   });
 
+  /** The submitted bytes and the Sent copy are the same message but for the copy's `Bcc` line. */
+  describe('a message with a blind copy', () => {
+    const BLIND = ['legal@x.co', 'sam@x.co'];
+    const BCC_LINE = 'Bcc: legal@x.co, sam@x.co\r\n';
+    const text = (bytes: Uint8Array | undefined) => new TextDecoder().decode(bytes);
+
+    const capture = (store: RecordStore) => {
+      const seen: { submitted?: Uint8Array; copied?: Uint8Array } = {};
+      const effects = spyEffects(store, {
+        readFile: async () => new Uint8Array([1, 2, 3]),
+        submit: async bytes => {
+          seen.submitted = bytes;
+          return { ok: true, value: undefined };
+        },
+        copyToSent: async (_target, { assembleCopy }) => {
+          const assembled = await assembleCopy();
+          if (assembled.ok) seen.copied = assembled.value;
+          return { ok: true, value: null };
+        },
+      });
+      return { seen, ...effects };
+    };
+
+    it('submits no Bcc line, and copies the same message with one', async () => {
+      const { store } = fakeRecordStore();
+      const handle = await claim(store, message([{ at: 'HEAD|'.length, fileId: FILE_ID }], BLIND));
+      const { effects, seen } = capture(store);
+
+      expect(await driveSend(effects, handle)).toMatchObject({ done: true });
+
+      expect(text(seen.submitted)).toBe('HEAD|AQIDTAIL');
+      expect(text(seen.submitted).toLowerCase()).not.toContain('bcc');
+      expect(text(seen.copied)).toBe(`${BCC_LINE}HEAD|AQIDTAIL`);
+    });
+
+    it('copies byte for byte what it submitted when nobody was blind-copied', async () => {
+      const { store } = fakeRecordStore();
+      const handle = await claim(store, message());
+      const { effects, seen } = capture(store);
+
+      await driveSend(effects, handle);
+
+      expect(seen.copied).toEqual(seen.submitted);
+    });
+
+    it('takes the list from the claim, not the draft, which may have been edited since', async () => {
+      const { store } = fakeRecordStore();
+      const handle = await claim(store, message([], BLIND));
+      const { effects, seen } = capture(store);
+
+      await driveSend(effects, {
+        ...handle,
+        record: { ...handle.record, bcc: 'someone-else@x.co' },
+      });
+
+      expect(text(seen.copied)).toBe(`${BCC_LINE}HEAD|TAIL`);
+    });
+
+    it('still names them when the copy is made by a later run that finds the message already sent', async () => {
+      const { store } = fakeRecordStore();
+      const handle = await claim(store, message([], BLIND));
+      const { send } = handle.record;
+      if (send === undefined) throw new Error('the fixture claimed nothing');
+      const submitted = await advanceSend(store, handle.draftId, { ...send, state: 'submitted' });
+      if (submitted === null) throw new Error('the fixture could not advance the draft');
+      const { effects, seen, calls } = capture(store);
+
+      expect(await driveSend(effects, submitted)).toMatchObject({ done: true });
+
+      expect(calls.submit).toBe(0);
+      expect(text(seen.copied)).toBe(`${BCC_LINE}HEAD|TAIL`);
+    });
+  });
+
   describe('a message whose files are in R2', () => {
     const splice = [{ at: 'HEAD|'.length, fileId: FILE_ID }];
     const file = new Uint8Array([1, 2, 3]);
@@ -241,8 +319,8 @@ describe('the send state machine', () => {
           seen.submitted = bytes;
           return { ok: true, value: undefined };
         },
-        copyToSent: async (_target, { assemble }) => {
-          const assembled = await assemble();
+        copyToSent: async (_target, { assembleCopy }) => {
+          const assembled = await assembleCopy();
           if (assembled.ok) seen.copied = assembled.value;
           return { ok: true, value: null };
         },
@@ -297,10 +375,9 @@ describe('the send state machine', () => {
       // claim stays and nothing is sent again.
       const { store } = fakeRecordStore();
       const handle = await claim(store, message(splice), { attachments: [attachment] });
-      const submitted = await advanceSend(store, handle.draftId, {
-        ...(handle.record.send as NonNullable<DraftRecord['send']>),
-        state: 'submitted',
-      });
+      const { send } = handle.record;
+      if (send === undefined) throw new Error('the fixture claimed nothing');
+      const submitted = await advanceSend(store, handle.draftId, { ...send, state: 'submitted' });
       if (submitted === null) throw new Error('the fixture could not advance');
       const { effects, calls } = spyEffects(store, { readFile: async () => null });
 
@@ -828,10 +905,9 @@ describe('the send state machine', () => {
   describe('an unlock finishing what another left', () => {
     const accepted = async (store: RecordStore) => {
       const handle = await claim(store);
-      const submitted = await advanceSend(store, handle.draftId, {
-        ...(handle.record.send as NonNullable<DraftRecord['send']>),
-        state: 'submitted',
-      });
+      const { send } = handle.record;
+      if (send === undefined) throw new Error('the fixture claimed nothing');
+      const submitted = await advanceSend(store, handle.draftId, { ...send, state: 'submitted' });
       if (submitted === null) throw new Error('the fixture could not advance');
       return submitted;
     };

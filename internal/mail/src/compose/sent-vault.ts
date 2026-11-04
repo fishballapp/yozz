@@ -45,6 +45,7 @@ export const sentRecordFrom = (
   from: record.from,
   to: record.to,
   cc: record.cc,
+  ...(message.bcc === undefined ? {} : { bcc: message.bcc.join(', ') }),
   subject: record.subject,
   body: record.body,
   ...(record.inReplyTo === undefined ? {} : { inReplyTo: record.inReplyTo }),

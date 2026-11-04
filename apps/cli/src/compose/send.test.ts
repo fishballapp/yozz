@@ -76,6 +76,37 @@ layer(NodeServices.layer)(it => {
         }),
     );
 
+    it.effect('hands SMTP no Bcc line, and keeps who was blind-copied on the Sent copy alone', () =>
+      Effect.gen(function* () {
+        const { server, smtp, run } = yield* makeComposeWorld();
+        const { draft } = JSON.parse(
+          (yield* run([
+            'draft',
+            '--from',
+            ADDRESS,
+            '--to',
+            'kate@example.com',
+            '--bcc',
+            'legal@example.com,sam@example.com',
+          ])).stdout,
+        );
+
+        const { exit, stderr } = yield* run(['send', draft.draftId]);
+
+        assert.isTrue(Exit.isSuccess(exit), stderr);
+        // The envelope reaches them; what follows `DATA` names no one.
+        const [delivered] = smtp.delivered;
+        expect(delivered?.to).toEqual(['kate@example.com', 'legal@example.com', 'sam@example.com']);
+        expect(delivered?.data.toLowerCase()).not.toContain('bcc');
+        expect(delivered?.data).not.toContain('legal@example.com');
+        // The copy is that message with the one header in front.
+        const copy = server.mailboxes.get('Sent')?.messages[0]?.raw;
+        expect(new TextDecoder().decode(copy)).toBe(
+          `Bcc: legal@example.com, sam@example.com\r\n${delivered?.data}\r\n`,
+        );
+      }),
+    );
+
     it.effect('lets each connection wait out a slow answer, then limits it as before', () =>
       Effect.gen(function* () {
         const { server, smtp, run } = yield* makeComposeWorld();

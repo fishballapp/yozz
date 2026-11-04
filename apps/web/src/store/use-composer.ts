@@ -407,7 +407,7 @@ export const useComposerStore = ({
           }),
         );
       },
-      copyToSent: async (target, { message, assemble }, handle) => {
+      copyToSent: async (target, { message, assembleCopy }, handle) => {
         const messageId = handle.record.send?.messageId ?? '';
         if (target === 'vault' || (identity !== undefined && !isInbound(identity))) {
           const { sentRecordFrom, storeSentRecord } = await import(
@@ -424,7 +424,7 @@ export const useComposerStore = ({
         const mailbox = currentAccount(handle.record.from);
         if (mailbox === undefined) return { ok: true, value: null };
         const { storeSentCopy } = await import('@yozz.app/mail/compose/send');
-        const assembled = await assemble();
+        const assembled = await assembleCopy();
         if (!assembled.ok) return assembled;
         const copied = await storeSentCopy(runOn(mailbox), assembled.value, messageId);
         if (!copied.ok) return copied;
