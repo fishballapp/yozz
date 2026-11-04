@@ -17,7 +17,7 @@ import type { SentCopyFailure } from '@yozz.app/mail/compose/send';
 import type { MailConnectionFailure, Result } from '@yozz.app/mail/connection';
 import { fakeFileStore } from '@yozz.app/mail/testing/fake-file-store';
 import { fakeRecordStore } from '@yozz.app/mail/testing/fake-record-store';
-import { threadsFromAccounts } from '@yozz.app/mail/threads/summaries';
+import { threadsFromMailboxes } from '@yozz.app/mail/threads/summaries';
 import { isOnServer } from '@yozz.app/mail/threads/thread';
 import { VaultApiError } from '@yozz.app/mail/vault/api';
 import type { FileStore } from '@yozz.app/mail/vault/file-store';
@@ -81,7 +81,7 @@ vi.stubGlobal('localStorage', {
   removeItem: (key: string) => storage.delete(key),
 });
 
-const ACCOUNT: InboundAddress = {
+const MAILBOX: InboundAddress = {
   address: 'me@x.test',
   senderName: 'Me',
   smtp: { host: 'smtp.x', port: 465, username: 'me', password: 'p' },
@@ -89,10 +89,10 @@ const ACCOUNT: InboundAddress = {
 };
 
 /** Whoever unlocks the same tab next. */
-const OTHER: InboundAddress = { ...ACCOUNT, address: 'other@y.test' };
+const OTHER: InboundAddress = { ...MAILBOX, address: 'other@y.test' };
 
 const content = (over: Partial<DraftContent> = {}): DraftContent => ({
-  from: ACCOUNT.address,
+  from: MAILBOX.address,
   to: 'you@x.test',
   cc: '',
   bcc: '',
@@ -173,16 +173,16 @@ const render = async (store: RecordStore, files: FileStore = fakeFileStore().sto
   const props: Props = {
     // Only the user id and the stores are read; the keys behind them belong to the unlock.
     session: { userId: 'user-1', store, files } as unknown as Props['session'],
-    identities: [ACCOUNT],
-    accounts: [ACCOUNT],
+    identities: [MAILBOX],
+    mailboxes: [MAILBOX],
     bindRunOn: () => () => async () => ({
       ok: false,
       error: { kind: 'error', detail: 'no IMAP here' },
     }),
-    currentAccount: address => (address === ACCOUNT.address ? ACCOUNT : undefined),
+    currentMailbox: address => (address === MAILBOX.address ? MAILBOX : undefined),
     sync: async () => {},
     threadsRef: { current: [] },
-    baseByAccount: {},
+    baseByMailbox: {},
     activity,
     demo: false,
   };
@@ -213,7 +213,7 @@ const render = async (store: RecordStore, files: FileStore = fakeFileStore().sto
 /** The composer of a session over `store`, unlocked. */
 const mount = async (store: RecordStore, files: FileStore = fakeFileStore().store) => {
   const rendered = await render(store, files);
-  await act(() => rendered.hook().load(storesOf(store), [ACCOUNT], () => false));
+  await act(() => rendered.hook().load(storesOf(store), [MAILBOX], () => false));
   return rendered;
 };
 
@@ -241,7 +241,7 @@ const SESSION_ENDINGS = {
         files: fakeFileStore().store,
       } as unknown as Props['session'],
       identities: [OTHER],
-      accounts: [OTHER],
+      mailboxes: [OTHER],
     });
     await act(async () => hook().reset('user-1'));
     await act(() => hook().load(storesOf(store), [OTHER], () => false));
@@ -363,7 +363,7 @@ const composeOne = async () => {
   const mounted = await mount(vault.store);
   await act(async () => {
     mounted.hook().composer.seedDraft('new', {
-      identityId: ACCOUNT.address,
+      identityId: MAILBOX.address,
       to: 'you@x.test',
       // Encoded on the wire, decoded by IMAP: the fingerprint must survive both.
       subject: 'Re: Café plans',
@@ -410,7 +410,7 @@ describe("a draft's files", () => {
     const mounted = await mount(vault.store, files);
     await act(async () => {
       mounted.hook().composer.seedDraft('new', {
-        identityId: ACCOUNT.address,
+        identityId: MAILBOX.address,
         to: 'you@x.test',
         subject: 'Receipt',
         body: 'Attached.',
@@ -608,7 +608,7 @@ describe("a draft's files", () => {
     const world = await composeWithFiles();
     await act(async () => {
       world.hook().composer.seedDraft('forward:mid/<m@x.test>', {
-        identityId: ACCOUNT.address,
+        identityId: MAILBOX.address,
         subject: 'Fwd: Receipt',
         attachments: [
           picked,
@@ -741,7 +741,7 @@ describe("a draft's files", () => {
     });
     await act(async () => {
       world.hook().composer.seedDraft('forward:mid/<m@x.test>', {
-        identityId: ACCOUNT.address,
+        identityId: MAILBOX.address,
         subject: 'Fwd: Receipt',
         body: 'quoted',
         attachments: [picked],
@@ -899,7 +899,7 @@ describe('a message just sent from an address with a mailbox', () => {
     const { hook, report } = await sendOne();
     expect(report).toEqual({ state: 'sent' });
     expect(hook().shared.drafts).toEqual([]);
-    const [thread] = threadsFromAccounts({}, hook().vaultSent);
+    const [thread] = threadsFromMailboxes({}, hook().vaultSent);
     expect(thread?.folders).toEqual(['sent']);
     expect(thread?.messages.map(message => message.body)).toEqual([['See you there.']]);
   });
@@ -907,19 +907,19 @@ describe('a message just sent from an address with a mailbox', () => {
   it("collapses into the server's copy of the same bytes, then gives way to it", async () => {
     const { hook, rerender, bytes } = await sendOne();
     const synced = {
-      [ACCOUNT.address]: { sent: { uidValidity: 7, summaries: [await serverCopyOf(bytes)] } },
+      [MAILBOX.address]: { sent: { uidValidity: 7, summaries: [await serverCopyOf(bytes)] } },
     };
 
     // Both at once is one message, never two.
-    const both = threadsFromAccounts(synced, hook().vaultSent);
+    const both = threadsFromMailboxes(synced, hook().vaultSent);
     expect(both.flatMap(thread => thread.messages)).toHaveLength(1);
 
-    await rerender({ baseByAccount: synced });
+    await rerender({ baseByMailbox: synced });
     expect(hook().vaultSent).toEqual([]);
   });
 
   it("finishes with no Sent folder, keeping the toast and this tab's own copy until lock", async () => {
-    network.sentCopy = { ok: false, error: { kind: 'no-sent-mailbox' } };
+    network.sentCopy = { ok: false, error: { kind: 'no-sent-folder' } };
     const { hook, rerender, report, vault } = await sendOne();
     expect(report).toEqual({
       state: 'sent-with-caveat',
@@ -932,11 +932,11 @@ describe('a message just sent from an address with a mailbox', () => {
     expect(await listDrafts(vault.store)).toEqual([]);
 
     await rerender({
-      baseByAccount: { [ACCOUNT.address]: { sent: { uidValidity: 7, summaries: [] } } },
+      baseByMailbox: { [MAILBOX.address]: { sent: { uidValidity: 7, summaries: [] } } },
     });
     expect(hook().vaultSent).toHaveLength(1);
     // Nothing of it is on a server, so nothing offers to star, mark or file it.
-    expect(threadsFromAccounts({}, hook().vaultSent).map(isOnServer)).toEqual([false]);
+    expect(threadsFromMailboxes({}, hook().vaultSent).map(isOnServer)).toEqual([false]);
 
     await act(async () => hook().reset('user-1'));
     expect(hook().vaultSent).toEqual([]);
@@ -986,8 +986,8 @@ describe('a message whose SMTP answer was lost after its end', () => {
   it('is settled by the message turning up in Sent, from a provider that files its own copy', async () => {
     const { rerender, vault, bytes } = await sendLost();
     await rerender({
-      baseByAccount: {
-        [ACCOUNT.address]: { sent: { uidValidity: 7, summaries: [await serverCopyOf(bytes)] } },
+      baseByMailbox: {
+        [MAILBOX.address]: { sent: { uidValidity: 7, summaries: [await serverCopyOf(bytes)] } },
       },
     });
     await act(() => new Promise(resolve => setTimeout(resolve, 20)));
@@ -1010,7 +1010,7 @@ describe('a message whose SMTP answer was lost after its end', () => {
 const leftInVault = async (state: 'submitting' | 'submitted', claimedAt = 0) => {
   const vault = vaultOver(fakeRecordStore().store);
   const bytes = new TextEncoder().encode(
-    `From: Me <${ACCOUNT.address}>\r\nTo: you@x.test\r\nMessage-ID: <left@x.test>\r\nDate: Tue, 1 Jan 2030 00:00:00 +0000\r\nSubject: Plans\r\n\r\nHello`,
+    `From: Me <${MAILBOX.address}>\r\nTo: you@x.test\r\nMessage-ID: <left@x.test>\r\nDate: Tue, 1 Jan 2030 00:00:00 +0000\r\nSubject: Plans\r\n\r\nHello`,
   );
   const created = await createDraft(vault.store, content(), 0);
   if (!created.ok) throw new Error('no draft to claim');
@@ -1020,7 +1020,7 @@ const leftInVault = async (state: 'submitting' | 'submitted', claimedAt = 0) => 
     state,
     claimedAt,
     message: { head: bytes.toBase64(), splices: [] },
-    target: { account: ACCOUNT.address, folder: 'sent' },
+    target: { account: MAILBOX.address, folder: 'sent' },
   });
   if (!claimed.ok) throw new Error('no claim to leave');
   return { vault, bytes, handle: claimed.handle };
@@ -1089,7 +1089,7 @@ describe('a send SMTP accepted, whose copy will not land', () => {
 
 describe('an unlock finding a send with no Sent folder', () => {
   it('finishes it, with nothing left to press and nothing sent', async () => {
-    network.sentCopy = { ok: false, error: { kind: 'no-sent-mailbox' } };
+    network.sentCopy = { ok: false, error: { kind: 'no-sent-folder' } };
     const { vault } = await leftInVault('submitted');
     const { hook } = await mount(vault.store);
     expect(hook().shared.drafts).toEqual([]);
@@ -1157,8 +1157,8 @@ describe('a claim a dead tab left at `submitting`', () => {
   it('is settled by the message turning up in Sent', async () => {
     const { rerender, vault, bytes } = await left();
     await rerender({
-      baseByAccount: {
-        [ACCOUNT.address]: { sent: { uidValidity: 7, summaries: [await serverCopyOf(bytes)] } },
+      baseByMailbox: {
+        [MAILBOX.address]: { sent: { uidValidity: 7, summaries: [await serverCopyOf(bytes)] } },
       },
     });
     await act(() => new Promise(resolve => setTimeout(resolve, 20)));
@@ -1306,8 +1306,8 @@ describe('the draft on screen when its send ends', () => {
   it('closes when the message turns up in Sent', async () => {
     const mounted = await openOn('submitting');
     await mounted.rerender({
-      baseByAccount: {
-        [ACCOUNT.address]: {
+      baseByMailbox: {
+        [MAILBOX.address]: {
           sent: { uidValidity: 7, summaries: [await serverCopyOf(mounted.bytes)] },
         },
       },
@@ -1366,7 +1366,7 @@ describe('Send again and Save to Sent report as Send does', () => {
 
   it("says no Sent folder was there, and shows this tab's copy", async () => {
     const mounted = await left('submitted');
-    network.sentCopy = { ok: false, error: { kind: 'no-sent-mailbox' } };
+    network.sentCopy = { ok: false, error: { kind: 'no-sent-folder' } };
     expect(await act(() => press(mounted))).toEqual({
       state: 'sent-with-caveat',
       detail: 'imap.x has no Sent folder to keep a copy in',
@@ -1627,9 +1627,9 @@ describe('a send and the close that overtakes it', () => {
 
     // The same person unlocks again and starts writing something else.
     await opened.rerender({});
-    await act(() => opened.hook().load(storesOf(opened.vault.store), [ACCOUNT], () => false));
+    await act(() => opened.hook().load(storesOf(opened.vault.store), [MAILBOX], () => false));
     await act(async () => {
-      opened.hook().composer.seedDraft('new', { identityId: ACCOUNT.address, body: 'Next' });
+      opened.hook().composer.seedDraft('new', { identityId: MAILBOX.address, body: 'Next' });
     });
     expect(storage.has('yozz:draft:user-1')).toBe(true);
 
@@ -1663,7 +1663,7 @@ describe('an autosave refused as a conflict', () => {
       opened.hook().composer.seedDraft(undefined, {});
     });
     await act(async () => {
-      opened.hook().composer.seedDraft('new', { identityId: ACCOUNT.address });
+      opened.hook().composer.seedDraft('new', { identityId: MAILBOX.address });
     });
     reread.open();
     vi.useRealTimers();
@@ -1713,7 +1713,7 @@ describe('a first autosave still minting when its composer closes', () => {
     });
     await act(async () => {
       composed.hook().composer.seedDraft('reply:<lunch@x.test>', {
-        identityId: ACCOUNT.address,
+        identityId: MAILBOX.address,
         to: 'them@x.test',
         subject: 'Re: Lunch',
       });
@@ -1849,14 +1849,14 @@ describe('an answer that lands after its session ended', () => {
           head: new TextEncoder().encode('Subject: Plans\r\n\r\nHello').toBase64(),
           splices: [],
         },
-        target: { account: ACCOUNT.address, folder: 'sent' },
+        target: { account: MAILBOX.address, folder: 'sent' },
       });
       const copying = gate();
       network.copying = copying;
       const mounted = await render(vault.store);
       let isCancelled = false;
       const { unlocked } = await act(async () => ({
-        unlocked: mounted.hook().load(storesOf(vault.store), [ACCOUNT], () => isCancelled),
+        unlocked: mounted.hook().load(storesOf(vault.store), [MAILBOX], () => isCancelled),
       }));
       await act(() => copying.reached);
       const finalRead = vault.holdNextRead();
@@ -1917,7 +1917,7 @@ describe('an answer that lands after its session ended', () => {
         if (!created.ok) throw new Error('no draft to send');
         const messageId = `<${subject.toLowerCase()}@x.test>`;
         const bytes = new TextEncoder().encode(
-          `From: ${ACCOUNT.address}\r\nMessage-ID: ${messageId}\r\nSubject: ${subject}\r\n\r\nHi`,
+          `From: ${MAILBOX.address}\r\nMessage-ID: ${messageId}\r\nSubject: ${subject}\r\n\r\nHi`,
         );
         const claimed = await claimSend(vault.store, created.handle.draftId, {
           messageId,
@@ -1925,7 +1925,7 @@ describe('an answer that lands after its session ended', () => {
           state: 'submitting',
           claimedAt: 0,
           message: { head: bytes.toBase64(), splices: [] },
-          target: { account: ACCOUNT.address, folder: 'sent' },
+          target: { account: MAILBOX.address, folder: 'sent' },
         });
         if (!claimed.ok) throw new Error('no claim to leave unconfirmed');
         await unconfirmSend(vault.store, claimed.handle.draftId, Date.now());
@@ -1936,7 +1936,7 @@ describe('an answer that lands after its session ended', () => {
       // Both turn up in Sent; the first completion's write is held.
       vault.hold();
       await mounted.rerender({
-        baseByAccount: { [ACCOUNT.address]: { sent: { uidValidity: 7, summaries } } },
+        baseByMailbox: { [MAILBOX.address]: { sent: { uidValidity: 7, summaries } } },
       });
       await end(mounted);
 

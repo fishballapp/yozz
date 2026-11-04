@@ -1,4 +1,4 @@
-import { resolveFolders } from '../addresses/mailboxes.ts';
+import { resolveFolders } from '../addresses/folder-names.ts';
 import type { MailClient, RunTask } from '../connection.ts';
 import type { RecordStore } from '../vault/record-store.ts';
 import type { DraftRecord } from './draft-record.ts';
@@ -14,11 +14,11 @@ import { type DraftHandle, readMirror, writeMirror } from './draft-vault.ts';
  * `X-Yozz-Draft` header because Forward Email indexes only the headers IMAP names: `SEARCH HEADER
  * X-Yozz-Draft` answered empty for a message that carried it.
  */
-export const draftMirrorMessageId = (draftKey: string, account: string): string =>
-  `<yozz-draft-${draftKey}@${account.slice(account.indexOf('@') + 1)}>`;
+export const draftMirrorMessageId = (draftKey: string, mailbox: string): string =>
+  `<yozz-draft-${draftKey}@${mailbox.slice(mailbox.indexOf('@') + 1)}>`;
 
-/** The sending address when it has a mailbox, else the account whose thread the draft replies to; `null` for a new message from a send-only address. */
-export const mirrorAccountOf = (
+/** The sending address when it has a mailbox, else the mailbox whose thread the draft replies to; `null` for a new message from a send-only address. */
+export const mirrorMailboxOf = (
   record: DraftRecord,
   isInbound: (address: string) => boolean,
 ): string | null => (isInbound(record.from) ? record.from : (record.ownerAccount ?? null));
@@ -44,14 +44,14 @@ const eraseOthers = async (
 
 /**
  * APPEND-then-erase: a crash between the two leaves a duplicate, where the other order leaves no
- * draft. `UID EXPUNGE` needs UIDPLUS; without it the account gets no mirror.
+ * draft. `UID EXPUNGE` needs UIDPLUS; without it the mailbox gets no mirror.
  */
 export const mirrorDraft = async (
   run: RunTask,
   store: RecordStore,
   handle: DraftHandle,
   bytes: Uint8Array,
-  account: string,
+  mailbox: string,
 ): Promise<void> => {
   const existing = await readMirror(store, handle.draftKey);
   if (existing !== null && existing.mirror.mirroredVersion >= handle.record.contentVersion) return;
@@ -74,8 +74,8 @@ export const mirrorDraft = async (
       const landed = appended.value;
       if (landed === null) return { ok: true, value: null };
       // Best effort: a copy left behind is found by the next mirror's search.
-      await eraseOthers(client, draftMirrorMessageId(handle.draftKey, account), landed.uid);
-      return { ok: true, value: { account, folder: drafts, ...landed } };
+      await eraseOthers(client, draftMirrorMessageId(handle.draftKey, mailbox), landed.uid);
+      return { ok: true, value: { account: mailbox, folder: drafts, ...landed } };
     },
   });
   if (!written.ok) return;
@@ -107,7 +107,7 @@ export const expungeMirror = async (
       if (!client.hasCapability('UIDPLUS')) return { ok: true, value: false };
       const selected = await client.select(locator.folder);
       if (!selected.ok) return { ok: false, error: { kind: 'imap', reason: selected.reason } };
-      // A renumbered mailbox hands the same uid to different mail, so the search says which are ours. `-1` keeps nothing.
+      // A renumbered folder hands the same uid to different mail, so the search says which are ours. `-1` keeps nothing.
       if (selected.value.uidValidity !== locator.uidValidity) return { ok: true, value: false };
       return {
         ok: true,

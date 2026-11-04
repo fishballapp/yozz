@@ -9,22 +9,22 @@ import { useMail } from '../store/MailProvider';
  * never moves on to one of them.
  */
 export const useAdvancePast = () => {
-  const { mailbox } = useParams({ from: '/_app/m/$mailbox' });
-  const { q } = useSearch({ from: '/_app/m/$mailbox' });
+  const { view } = useParams({ from: '/_app/m/$view' });
+  const { q } = useSearch({ from: '/_app/m/$view' });
   const navigate = useNavigate();
   const { threads } = useMail();
 
   return (threadId: string, alsoFiled: ReadonlySet<string> = new Set()) => {
-    const staying = visibleThreads(threads, mailbox, q).filter(
+    const staying = visibleThreads(threads, view, q).filter(
       thread => thread.id === threadId || !alsoFiled.has(thread.id),
     );
     const next = neighbourOf(staying, threadId);
     void navigate(
       next === undefined
-        ? { to: '/m/$mailbox', params: { mailbox }, search: previous => previous }
+        ? { to: '/m/$view', params: { view }, search: previous => previous }
         : {
-            to: '/m/$mailbox/t/$',
-            params: { mailbox, _splat: next.id },
+            to: '/m/$view/t/$',
+            params: { view, _splat: next.id },
             search: previous => previous,
             replace: true,
           },

@@ -4,11 +4,11 @@ import type { Folder } from './thread.ts';
 
 /**
  * The mail cache: derived from IMAP, rebuilt whenever lost (ARCHITECTURE.md, "State placement").
- * Per account and folder; each client stores it its own way.
+ * Per mailbox and folder; each client stores it its own way.
  */
 
 export type FolderSync = {
-  /** The mailbox `SELECT` names. */
+  /** The folder name `SELECT` takes. */
   readonly name: string;
   readonly uidValidity: number;
   readonly lastUid: number;

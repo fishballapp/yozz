@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { type Folder, type ThreadState, VAULT_UID_VALIDITY } from '@yozz.app/mail/threads/thread';
-import type { MailboxId } from '@yozz.app/mail/threads/views';
+import type { ViewId } from '@yozz.app/mail/threads/views';
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -24,10 +24,10 @@ vi.mock('../store/MailProvider', () => ({ useMail: () => mail }));
 /** A server's copy in each folder, unless `uidValidity` says no server issued them. */
 const threadIn = (folders: readonly Folder[], uidValidity = 1): ThreadState => ({
   id: 't1',
-  accounts: ['me@example.com'],
+  mailboxes: ['me@example.com'],
   subject: 'Lunch',
   folders,
-  foldersByAccount: { 'me@example.com': folders },
+  foldersByMailbox: { 'me@example.com': folders },
   isUnread: false,
   isReplied: false,
   isStarred: false,
@@ -40,7 +40,7 @@ const threadIn = (folders: readonly Folder[], uidValidity = 1): ThreadState => (
       at: 1,
       body: [],
       locations: folders.map((folder, index) => ({
-        account: 'me@example.com',
+        mailbox: 'me@example.com',
         folder,
         uidValidity,
         uid: index + 1,
@@ -51,12 +51,12 @@ const threadIn = (folders: readonly Folder[], uidValidity = 1): ThreadState => (
 
 const host = document.createElement('div');
 const root = createRoot(host);
-const showRow = async (mailbox: MailboxId, folders: readonly Folder[], uidValidity = 1) => {
+const showRow = async (view: ViewId, folders: readonly Folder[], uidValidity = 1) => {
   await act(async () =>
     root.render(
       <ThreadRow
         thread={threadIn(folders, uidValidity)}
-        mailbox={mailbox}
+        view={view}
         isSelected={false}
         isChecked={false}
         hasSelection={false}
@@ -81,8 +81,8 @@ describe('RowTriage', () => {
     // Your own message with no inbox copy: there is nothing to archive.
     ['sent', ['sent'], ['Delete Lunch']],
     ['trash', ['trash'], ['Restore Lunch']],
-  ] as const)('in %s, a thread in %j offers %j', async (mailbox, folders, offered) => {
-    const labels = await showRow(mailbox, folders);
+  ] as const)('in %s, a thread in %j offers %j', async (view, folders, offered) => {
+    const labels = await showRow(view, folders);
     expect(labels.filter(label => label !== 'Star Lunch')).toEqual(offered);
   });
 
@@ -128,7 +128,7 @@ describe('a Drafts row', () => {
       root.render(
         <ThreadRow
           thread={{ ...thread, messages: [draft('d-1'), draft('d-2')] }}
-          mailbox="drafts"
+          view="drafts"
           isSelected={false}
           isChecked={false}
           hasSelection={false}

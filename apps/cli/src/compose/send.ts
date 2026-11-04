@@ -122,22 +122,22 @@ export const sendCommand = Command.make(
           return { ok: true, value: null };
         }
         // The address's mailbox was removed since the claim: the send finishes without a copy in it.
-        const account = mail.accounts.find(({ address }) => address === handle.record.from);
-        if (account === undefined) return { ok: true, value: null };
+        const mailbox = mail.mailboxes.find(({ address }) => address === handle.record.from);
+        if (mailbox === undefined) return { ok: true, value: null };
         const assembled = await assembleCopy();
         if (!assembled.ok) return assembled;
-        const copied = await storeSentCopy(mail.runOn(account), assembled.value, messageId);
+        const copied = await storeSentCopy(mail.runOn(mailbox), assembled.value, messageId);
         if (!copied.ok) return copied;
         return { ok: true, value: copied.value === null ? null : { ...target, ...copied.value } };
       },
       // Phase (4), best effort: only a copy yozz.app mirrored has a locator to erase.
       expungeMirror: async ({ draftKey }) => {
         const mirror = await readMirror(store, draftKey).catch(() => null);
-        const account = mail.accounts.find(
+        const mailbox = mail.mailboxes.find(
           ({ address }) => address === mirror?.mirror.locator?.account,
         );
-        if (account === undefined) return;
-        await expungeMirror(mail.runOn(account), store, draftKey).catch(() => undefined);
+        if (mailbox === undefined) return;
+        await expungeMirror(mail.runOn(mailbox), store, draftKey).catch(() => undefined);
       },
       now,
     });
@@ -210,8 +210,8 @@ export const sendCommand = Command.make(
       });
     }
     // The next list syncs the address first, and finds the Sent copy.
-    const account = mail.accounts.find(({ address }) => address === record.from);
-    if (account !== undefined) yield* cache.markStale(account);
+    const mailbox = mail.mailboxes.find(({ address }) => address === record.from);
+    if (mailbox !== undefined) yield* cache.markStale(mailbox);
     yield* sent({
       messageId: send.messageId,
       isReplayed,

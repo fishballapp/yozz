@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { previewKey, withBodies, withoutAccountPreviews } from './body-state.ts';
+import { previewKey, withBodies, withoutMailboxPreviews } from './body-state.ts';
 import type { Message, ThreadState } from './thread.ts';
 
 const message = (over: Partial<Message>): Message => ({
@@ -10,25 +10,25 @@ const message = (over: Partial<Message>): Message => ({
   at: 1,
   body: [],
   bodyStatus: 'pending',
-  locations: [{ account: 'me@x', folder: 'inbox', uidValidity: 1, uid: 7 }],
+  locations: [{ mailbox: 'me@x', folder: 'inbox', uidValidity: 1, uid: 7 }],
   ...over,
 });
 
 const thread = (messages: Message[]): ThreadState => ({
   id: 't',
-  accounts: ['me@x'],
+  mailboxes: ['me@x'],
   subject: 's',
   messages,
   isUnread: false,
   isReplied: false,
   isStarred: false,
   folders: ['inbox'],
-  foldersByAccount: { 'me@x': ['inbox'] },
+  foldersByMailbox: { 'me@x': ['inbox'] },
 });
 
 describe('withBodies', () => {
   const previews = {
-    [previewKey({ account: 'me@x', folder: 'inbox', uidValidity: 1, uid: 7 })]: ['cached text'],
+    [previewKey({ mailbox: 'me@x', folder: 'inbox', uidValidity: 1, uid: 7 })]: ['cached text'],
   };
 
   it('fills an unopened message from the preview and keeps it pending', () => {
@@ -64,7 +64,7 @@ describe('withBodies', () => {
 
   it('a reused uid under a new uidValidity gets nothing', () => {
     const reset = message({
-      locations: [{ account: 'me@x', folder: 'inbox', uidValidity: 2, uid: 7 }],
+      locations: [{ mailbox: 'me@x', folder: 'inbox', uidValidity: 2, uid: 7 }],
     });
     const [out] = withBodies([thread([reset])], {}, previews);
     expect(out?.messages[0]?.body).toEqual([]);
@@ -76,8 +76,8 @@ describe('withBodies', () => {
     expect(out?.messages[0]?.body).toEqual(['mine']);
   });
 
-  it('drops one account without touching another', () => {
+  it('drops one mailbox without touching another', () => {
     const both = { ...previews, 'you@x/inbox/1/1': ['other'] };
-    expect(withoutAccountPreviews(both, 'me@x')).toEqual({ 'you@x/inbox/1/1': ['other'] });
+    expect(withoutMailboxPreviews(both, 'me@x')).toEqual({ 'you@x/inbox/1/1': ['other'] });
   });
 });

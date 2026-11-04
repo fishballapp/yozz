@@ -6,7 +6,7 @@ import {
   spliceMessage,
 } from '@yozz.app/smtp';
 import { MAX_CIPHERTEXT_BYTES } from '@yozz.app/vault-contract';
-import { resolveFolders } from '../addresses/mailboxes.ts';
+import { resolveFolders } from '../addresses/folder-names.ts';
 import { type AddressRecord, isInbound } from '../addresses/record.ts';
 import type { MailConnectionFailure, Result, RunTask } from '../connection.ts';
 import { addressList, MAX_ATTACHMENT_BYTES } from './draft.ts';
@@ -38,7 +38,7 @@ export const envelopeRecipients = (
   });
 };
 
-export type SentCopyFailure = MailConnectionFailure | { readonly kind: 'no-sent-mailbox' };
+export type SentCopyFailure = MailConnectionFailure | { readonly kind: 'no-sent-folder' };
 
 /** The message with its files left out; with none, `head` is the whole message. */
 export type OutgoingMessage = {
@@ -227,12 +227,12 @@ export const isUnconfirmedSubmission = (failure: MailConnectionFailure): boolean
   failure.kind === 'smtp' && failure.reason.kind === 'unconfirmed';
 
 type SentCopyLookup =
-  | { readonly kind: 'no-sent-mailbox' }
+  | { readonly kind: 'no-sent-folder' }
   | { readonly kind: 'absent'; readonly sent: string }
   | { readonly kind: 'stored'; readonly locator: { uidValidity: number; uid: number } | null };
 
 /**
- * Searches the mailbox for its own Message-ID before appending, so a later run finds a copy that
+ * Searches the folder for its own Message-ID before appending, so a later run finds a copy that
  * landed. Message-ID, not `X-Yozz-Draft`: Forward Email indexes only the headers IMAP names.
  */
 export const storeSentCopy = async (
@@ -248,7 +248,7 @@ export const storeSentCopy = async (
       const folders = await resolveFolders(client);
       if (!folders.ok) return folders;
       const sent = folders.value.sent;
-      if (sent === undefined) return { ok: true, value: { kind: 'no-sent-mailbox' } };
+      if (sent === undefined) return { ok: true, value: { kind: 'no-sent-folder' } };
       const selected = await client.select(sent);
       if (!selected.ok) return { ok: false, error: { kind: 'imap', reason: selected.reason } };
       const found = await client.uidSearch({
@@ -273,8 +273,8 @@ export const storeSentCopy = async (
     },
   });
   if (!lookup.ok) return lookup;
-  if (lookup.value.kind === 'no-sent-mailbox') {
-    return { ok: false, error: { kind: 'no-sent-mailbox' } };
+  if (lookup.value.kind === 'no-sent-folder') {
+    return { ok: false, error: { kind: 'no-sent-folder' } };
   }
   if (lookup.value.kind === 'stored') return { ok: true, value: lookup.value.locator };
   const { sent } = lookup.value;

@@ -1202,7 +1202,7 @@ try {
   );
   assert(!commands.some(command => /STORE/i.test(command)), 'nothing stored a flag');
   assert(
-    [...(imap.mailboxes.get('INBOX')?.messages ?? [])].every(({ flags }) => flags.size === 0),
+    [...(imap.folders.get('INBOX')?.messages ?? [])].every(({ flags }) => flags.size === 0),
     'the mail is still unread on the server',
   );
   console.log(

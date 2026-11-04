@@ -248,7 +248,7 @@ layer(NodeServices.layer)(it => {
             const { world, homes, server, servers } = yield* makeMailWorld();
             // Inbox zero: the only message so far was archived, so UIDNEXT is past every uid here.
             const uid = server.deliver('INBOX', mail(1));
-            const inbox = server.mailboxes.get('INBOX');
+            const inbox = server.folders.get('INBOX');
             if (inbox === undefined) throw new Error('no inbox');
             inbox.messages = inbox.messages.filter(message => message.uid !== uid);
 

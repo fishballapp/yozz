@@ -78,7 +78,7 @@ vi.mock('@yozz.app/mail/threads/hydrate', async importOriginal => ({
 }));
 vi.mock('@yozz.app/mail/threads/sync', () => ({
   prefetchBodies: () => {},
-  syncAccount: (_run: unknown, _cache: unknown, isStale: () => boolean) =>
+  syncMailbox: (_run: unknown, _cache: unknown, isStale: () => boolean) =>
     new Promise(resolve => {
       mocks.syncs.push({
         isStale,

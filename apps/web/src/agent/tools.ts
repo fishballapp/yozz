@@ -152,7 +152,7 @@ const NOT_ON_SERVER =
 
 const NOTHING_TO_ARCHIVE = 'nothing in the inbox to archive';
 
-const mailboxSchema = z
+const folderSchema = z
   .enum(['inbox', 'archive', 'trash', 'sent', 'drafts'])
   .describe("Which mailbox to look in. Default 'inbox'.");
 
@@ -168,28 +168,28 @@ const idsSchema = z
 const selected = (
   port: AgentPort,
   {
-    account,
-    mailbox = 'inbox',
+    mailbox,
+    folder = 'inbox',
     query,
     unread,
     starred,
   }: {
-    account?: string | undefined;
-    mailbox?: 'inbox' | 'archive' | 'trash' | 'sent' | 'drafts' | undefined;
+    mailbox?: string | undefined;
+    folder?: 'inbox' | 'archive' | 'trash' | 'sent' | 'drafts' | undefined;
     query?: string | undefined;
     unread?: boolean | undefined;
     starred?: boolean | undefined;
   },
 ) => {
-  // An address's own view is the inbox filtered to that account.
-  const view = mailbox === 'inbox' ? (account ?? 'unified') : mailbox;
+  // An address's own view is the inbox filtered to that mailbox.
+  const view = folder === 'inbox' ? (mailbox ?? 'unified') : folder;
   const inView = visibleThreads(port.threads, view, query);
   return inView.filter(thread => {
     if (unread !== undefined && thread.isUnread !== unread) return false;
     if (starred !== undefined && thread.isStarred !== starred) return false;
-    // With both an account and a mailbox, the thread must be in that mailbox in that account.
-    if (account === undefined || mailbox === 'inbox') return true;
-    return (thread.foldersByAccount[account] ?? []).includes(mailbox);
+    // With both a mailbox and a folder, the thread must be in that folder in that mailbox.
+    if (mailbox === undefined || folder === 'inbox') return true;
+    return (thread.foldersByMailbox[mailbox] ?? []).includes(folder);
   });
 };
 
@@ -291,7 +291,7 @@ const threadOf = async (
   return {
     id: thread.id,
     subject: thread.subject,
-    accounts: thread.accounts,
+    accounts: thread.mailboxes,
     mailboxes: thread.folders,
     isUnread: thread.isUnread,
     isStarred: thread.isStarred,
@@ -312,9 +312,9 @@ const identityFor = (port: AgentPort, from: string | undefined, fallback: string
   return port.addresses.some(({ address }) => address === from) ? from : null;
 };
 
-/** The sending address when it has a mailbox, else the account holding the conversation. Stored, not re-derived. */
-const ownerAccountOf = (thread: ThreadState, from: string): string | null =>
-  thread.accounts.includes(from) ? from : (thread.accounts[0] ?? null);
+/** The sending address when it has a mailbox, else the mailbox holding the conversation. Stored, not re-derived. */
+const ownerMailboxOf = (thread: ThreadState, from: string): string | null =>
+  thread.mailboxes.includes(from) ? from : (thread.mailboxes[0] ?? null);
 
 const handleFor = (port: AgentPort, draftId: string) =>
   port.drafts.find(candidate => candidate.draftId === draftId) ??
@@ -375,7 +375,7 @@ export const buildAgentTools = (port: () => AgentPort): readonly AgentTool[] => 
         .optional()
         .describe('Particular conversations. Every other filter is ignored when this is given.'),
       account: z.string().optional().describe("One of the user's addresses (get_addresses)."),
-      mailbox: mailboxSchema.optional(),
+      mailbox: folderSchema.optional(),
       query: z
         .string()
         .min(1)
@@ -405,8 +405,8 @@ export const buildAgentTools = (port: () => AgentPort): readonly AgentTool[] => 
     annotations: readOnly,
     run: async ({
       ids,
-      account,
-      mailbox,
+      account: mailbox,
+      mailbox: folder,
       query,
       unread,
       starred,
@@ -420,7 +420,7 @@ export const buildAgentTools = (port: () => AgentPort): readonly AgentTool[] => 
       const resolved = ids === undefined ? null : resolveHandles(port().threads, ids);
       const matching =
         resolved === null
-          ? selected(port(), { account, mailbox, query, unread, starred })
+          ? selected(port(), { mailbox, folder, query, unread, starred })
           : resolved.flatMap(({ thread }) => (thread === null ? [] : [thread]));
       const notFound = resolved?.flatMap(({ id, thread }) => (thread === null ? [id] : [])) ?? [];
       const page = matching.slice(offset, offset + Math.min(limit ?? DEPTH[depth], DEPTH[depth]));
@@ -470,18 +470,18 @@ export const buildAgentTools = (port: () => AgentPort): readonly AgentTool[] => 
         'Name at least one of read, starred or mailbox.',
       ),
     annotations: write,
-    run: ({ ids, read, starred, mailbox }) => {
+    run: ({ ids, read, starred, mailbox: folder }) => {
       const entries = resolveHandles(port().threads, ids);
       const found = entries.flatMap(({ thread }) => (thread === null ? [] : [thread]));
       /** Why a conversation needs no move, or null when it does. */
       const unmoved = (thread: ThreadState): string | null => {
-        if (mailbox === 'archive') {
+        if (folder === 'archive') {
           if (isArchived(thread)) return 'already archived';
           // No inbox copy: nothing to move, so don't report one.
           if (!thread.folders.includes('inbox')) return NOTHING_TO_ARCHIVE;
         }
-        if (mailbox === 'trash' && isTrashed(thread)) return 'already in the trash';
-        if (mailbox === 'inbox' && !isArchived(thread) && !isTrashed(thread)) {
+        if (folder === 'trash' && isTrashed(thread)) return 'already in the trash';
+        if (folder === 'inbox' && !isArchived(thread) && !isTrashed(thread)) {
           return 'already in the inbox';
         }
         return null;
@@ -510,10 +510,10 @@ export const buildAgentTools = (port: () => AgentPort): readonly AgentTool[] => 
           threadIds => port().setStar(threadIds, starred),
         );
       }
-      if (mailbox !== undefined) {
+      if (folder !== undefined) {
         write(
           thread => unmoved(thread) === null,
-          threadIds => port().move(threadIds, mailbox),
+          threadIds => port().move(threadIds, folder),
         );
       }
       return {
@@ -522,14 +522,14 @@ export const buildAgentTools = (port: () => AgentPort): readonly AgentTool[] => 
           if (refused.has(thread.id)) {
             return { id, status: 'pending' as const, note: NOT_ON_SERVER };
           }
-          const note = mailbox === undefined ? null : unmoved(thread);
+          const note = folder === undefined ? null : unmoved(thread);
           return {
             id,
             status: 'ok' as const,
             ...(read === undefined ? {} : { isRead: read }),
             ...(starred === undefined ? {} : { isStarred: starred }),
-            // A row that moved nothing claims no mailbox.
-            ...(mailbox === undefined || note === NOTHING_TO_ARCHIVE ? {} : { mailbox }),
+            // A row that moved nothing claims no folder.
+            ...(folder === undefined || note === NOTHING_TO_ARCHIVE ? {} : { mailbox: folder }),
             ...(note === null ? {} : { note }),
           };
         }),
@@ -648,9 +648,9 @@ export const buildAgentTools = (port: () => AgentPort): readonly AgentTool[] => 
             body: `${body}${quoteForReply(parent)}`,
             threadId: thread.id,
             // Fixed at creation: the sending address may have no mailbox of its own.
-            ...(ownerAccountOf(thread, identity) === null
+            ...(ownerMailboxOf(thread, identity) === null
               ? {}
-              : { ownerAccount: ownerAccountOf(thread, identity) ?? '' }),
+              : { ownerAccount: ownerMailboxOf(thread, identity) ?? '' }),
             ...(seed.inReplyTo === undefined ? {} : { inReplyTo: seed.inReplyTo }),
             ...(seed.references === undefined ? {} : { references: [...seed.references] }),
           },

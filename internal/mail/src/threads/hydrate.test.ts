@@ -25,15 +25,15 @@ const body = (paragraphs: string[]) => ({
 
 describe('hydration from the mail cache', () => {
   it('reads every folder, with UIDVALIDITY 0 standing in where nothing was synced', async () => {
-    const account = memoryMailCache();
-    const inbox = account.folder('inbox');
+    const mailbox = memoryMailCache();
+    const inbox = mailbox.folder('inbox');
     await inbox.putSync({ name: 'INBOX', uidValidity: 42, lastUid: 2, complete: true });
     await inbox.putSummaries([summary(1), summary(2)]);
-    const sent = account.folder('sent');
+    const sent = mailbox.folder('sent');
     await sent.putSync({ name: 'Sent', uidValidity: 99, lastUid: 10, complete: false });
     await sent.putSummaries([summary(10)]);
 
-    const byFolder = await cachedSummaries(account);
+    const byFolder = await cachedSummaries(mailbox);
     expect(byFolder.inbox?.uidValidity).toBe(42);
     expect(byFolder.inbox?.summaries.map(s => s.uid)).toEqual([1, 2]);
     expect(byFolder.sent?.uidValidity).toBe(99);
@@ -42,17 +42,17 @@ describe('hydration from the mail cache', () => {
   });
 
   it("keys each cached body's text by its location, and skips a folder with no sync mark", async () => {
-    const account = memoryMailCache();
-    const inbox = account.folder('inbox');
+    const mailbox = memoryMailCache();
+    const inbox = mailbox.folder('inbox');
     await inbox.putSync({ name: 'INBOX', uidValidity: 12, lastUid: 3, complete: true });
     await inbox.putBody(3, body(['Preview snippet one', 'Paragraph two']));
-    const sent = account.folder('sent');
+    const sent = mailbox.folder('sent');
     await sent.putSync({ name: 'Sent', uidValidity: 34, lastUid: 7, complete: false });
     await sent.putBody(7, body(['Sent message snippet']));
     // A body with no UIDVALIDITY to key it by cannot be placed.
-    await account.folder('archive').putBody(5, body(['unplaceable']));
+    await mailbox.folder('archive').putBody(5, body(['unplaceable']));
 
-    expect(await cachedPreviews(account, 'me@x')).toEqual({
+    expect(await cachedPreviews(mailbox, 'me@x')).toEqual({
       'me@x/inbox/12/3': ['Preview snippet one', 'Paragraph two'],
       'me@x/sent/34/7': ['Sent message snippet'],
     });

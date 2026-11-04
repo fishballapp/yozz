@@ -10,7 +10,7 @@ import { ThreadList } from './ThreadList';
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
 const mail = vi.hoisted(() => ({
-  accounts: [{ address: 'me@example.com', imap: { host: 'imap.example.com' } }],
+  mailboxes: [{ address: 'me@example.com', imap: { host: 'imap.example.com' } }],
   ownedAddresses: ['me@example.com'],
   recordsError: null,
   syncStates: {},
@@ -55,10 +55,10 @@ vi.mock('./use-advance', () => ({ useAdvancePast: () => vi.fn() }));
 
 const threadNumbered = (index: number): ThreadState => ({
   id: `thread-${index}`,
-  accounts: ['me@example.com'],
+  mailboxes: ['me@example.com'],
   subject: `Subject ${index}`,
   folders: ['inbox'],
-  foldersByAccount: { 'me@example.com': ['inbox'] },
+  foldersByMailbox: { 'me@example.com': ['inbox'] },
   isUnread: false,
   isReplied: false,
   isStarred: false,
@@ -70,7 +70,7 @@ const threadNumbered = (index: number): ThreadState => ({
       toAddress: 'me@example.com',
       at: 1_700_000_000_000 - index * 60_000,
       body: [],
-      locations: [{ account: 'me@example.com', folder: 'inbox', uidValidity: 1, uid: index + 1 }],
+      locations: [{ mailbox: 'me@example.com', folder: 'inbox', uidValidity: 1, uid: index + 1 }],
     },
   ],
 });
@@ -119,10 +119,10 @@ afterAll(() => {
 
 const host = document.body.appendChild(document.createElement('div'));
 const root = createRoot(host);
-const show = (threads: readonly ThreadState[], query = '', mailbox = 'unified') =>
+const show = (threads: readonly ThreadState[], query = '', view = 'unified') =>
   act(async () =>
     root.render(
-      <ThreadList threads={threads} mailbox={mailbox} query={query} onQueryChange={() => {}} />,
+      <ThreadList threads={threads} view={view} query={query} onQueryChange={() => {}} />,
     ),
   );
 const scroller = () => {
@@ -172,7 +172,7 @@ afterEach(async () => {
 });
 
 describe('ThreadList', () => {
-  it('puts a screenful of a long mailbox in the DOM, each row saying where it sits in the whole', async () => {
+  it('puts a screenful of a long view in the DOM, each row saying where it sits in the whole', async () => {
     await show(MAILBOX);
     const rows = [...host.querySelectorAll('li')];
     expect(rows.length).toBeLessThan(50);
@@ -267,7 +267,7 @@ describe('ThreadList', () => {
     await click(boxOf('Subject 1'));
     await click(button('Mark as unread'));
     expect(mail.flagThreads.mock.calls).toEqual([[['thread-0', 'thread-1'], 'isUnread', true]]);
-    expect(route.navigate).toHaveBeenCalledWith(expect.objectContaining({ to: '/m/$mailbox' }));
+    expect(route.navigate).toHaveBeenCalledWith(expect.objectContaining({ to: '/m/$view' }));
   });
 
   it('does not bring back the ticks from before a message was opened when it closes', async () => {

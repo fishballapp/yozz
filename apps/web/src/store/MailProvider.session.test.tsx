@@ -56,7 +56,7 @@ const mocks = vi.hoisted(() => ({
   /** Counts live managers, one per session. */
   managers: 0,
   /** Every IMAP task that reached a manager: which session's, and for which address. */
-  runs: [] as { manager: number; account: string }[],
+  runs: [] as { manager: number; mailbox: string }[],
   /** The IMAP password each of those tasks would have logged in with. */
   logins: [] as string[],
   threads: [] as ThreadState[],
@@ -98,9 +98,9 @@ vi.mock('../relay/live', () => ({
     mocks.managers += 1;
     const manager = mocks.managers;
     return {
-      run: async (account: AddressRecord) => {
-        mocks.runs.push({ manager, account: account.address });
-        mocks.logins.push(account.imap?.password ?? '');
+      run: async (mailbox: AddressRecord) => {
+        mocks.runs.push({ manager, mailbox: mailbox.address });
+        mocks.logins.push(mailbox.imap?.password ?? '');
         const held = mocks.task;
         mocks.task = null;
         await held?.pass();
@@ -142,7 +142,7 @@ vi.mock('@yozz.app/mail/threads/hydrate', async importOriginal => ({
 // A sync that never lands and asks for no task, so every task a test sees is the one under test.
 vi.mock('@yozz.app/mail/threads/sync', async importOriginal => ({
   ...(await importOriginal<typeof import('@yozz.app/mail/threads/sync')>()),
-  syncAccount: () =>
+  syncMailbox: () =>
     mocks.syncLands
       ? Promise.resolve({
           byFolder: {},
@@ -153,7 +153,7 @@ vi.mock('@yozz.app/mail/threads/sync', async importOriginal => ({
 }));
 vi.mock('@yozz.app/mail/threads/summaries', async importOriginal => ({
   ...(await importOriginal<typeof import('@yozz.app/mail/threads/summaries')>()),
-  threadsFromAccounts: () => mocks.threads,
+  threadsFromMailboxes: () => mocks.threads,
 }));
 vi.mock('../compose/submit', () => ({
   submitBytes: async () => {
@@ -306,13 +306,13 @@ const LUNCH_RAW = new TextEncoder().encode('Subject: Lunch\r\n\r\nThe code is 44
 
 const LUNCH: ThreadState = {
   id: 't1',
-  accounts: [ALICE.address],
+  mailboxes: [ALICE.address],
   subject: 'Lunch',
   isUnread: true,
   isReplied: false,
   isStarred: false,
   folders: ['inbox'],
-  foldersByAccount: { [ALICE.address]: ['inbox'] },
+  foldersByMailbox: { [ALICE.address]: ['inbox'] },
   messages: [
     {
       id: 'm1',
@@ -321,7 +321,7 @@ const LUNCH: ThreadState = {
       toAddress: ALICE.address,
       at: 1,
       body: [],
-      locations: [{ account: ALICE.address, folder: 'inbox', uidValidity: 1, uid: 7 }],
+      locations: [{ mailbox: ALICE.address, folder: 'inbox', uidValidity: 1, uid: 7 }],
     },
   ],
 };
@@ -396,7 +396,7 @@ describe("an ended session's IMAP work", () => {
     // Out through SMTP and recorded as such, so the next unlock of that vault stores its copy.
     expect(await sendPhases(theirs.store)).toEqual(['submitted']);
     await replaceSession({ userId: 'user-1', files: noFiles, store: theirs.store });
-    await vi.waitFor(() => expect(mocks.runs).toEqual([{ manager: 3, account: ALICE.address }]));
+    await vi.waitFor(() => expect(mocks.runs).toEqual([{ manager: 3, mailbox: ALICE.address }]));
   });
 
   it("an unlock whose Sent-record read lands after the session ended resumes nothing into the next session's", async () => {
@@ -413,7 +413,7 @@ describe("an ended session's IMAP work", () => {
 
     expect(await sendPhases(theirs.store)).toEqual(['submitted']);
     await replaceSession({ userId: 'user-1', files: noFiles, store: theirs.store });
-    await vi.waitFor(() => expect(mocks.runs).toEqual([{ manager: 3, account: ALICE.address }]));
+    await vi.waitFor(() => expect(mocks.runs).toEqual([{ manager: 3, mailbox: ALICE.address }]));
   });
 
   it('an unlock whose Sent-record read lands after the session ended finishes no send; the next unlock does', async () => {

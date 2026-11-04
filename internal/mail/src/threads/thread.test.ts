@@ -24,7 +24,7 @@ describe('isArchived', () => {
 });
 
 describe('isTrashed', () => {
-  it('is a thread whose every message sits in the bin', () => {
+  it('is a thread whose every message sits in Trash', () => {
     expect(isTrashed({ folders: ['trash'] })).toBe(true);
     // Half of it deleted is not deleted: the rest is still live mail.
     expect(isTrashed({ folders: ['inbox', 'trash'] })).toBe(false);
@@ -33,8 +33,8 @@ describe('isTrashed', () => {
   });
 });
 
-const at = (account: string, folder: 'inbox' | 'sent' | 'archive', uid = 1) => ({
-  account,
+const at = (mailbox: string, folder: 'inbox' | 'sent' | 'archive', uid = 1) => ({
+  mailbox,
   folder,
   uidValidity: 1,
   uid,
@@ -53,7 +53,7 @@ const message = (overrides: Partial<Message>): Message => ({
 describe('isOnServer', () => {
   // This tab's copy of a message it has just sent, or sent mail the vault holds.
   const local = {
-    account: 'jason@jyu.example',
+    mailbox: 'jason@jyu.example',
     folder: 'sent' as const,
     uidValidity: VAULT_UID_VALIDITY,
     uid: 0,
@@ -72,7 +72,7 @@ describe('isOnServer', () => {
 });
 
 describe('inboxesOf', () => {
-  it('names each account a message arrived at once, wherever it has been filed since', () => {
+  it('names each mailbox a message arrived at once, wherever it has been filed since', () => {
     const copies = message({
       locations: [
         at('jason@jyu.example', 'inbox', 1),
@@ -95,10 +95,10 @@ describe('inboxesOf', () => {
     expect(inboxesOf(message({}))).toEqual([]);
   });
 
-  it('never counts the sending account, so a deleted Sent copy in Trash is not an arrival', () => {
+  it('never counts the sending mailbox, so a deleted Sent copy in Trash is not an arrival', () => {
     const deleted = message({
       fromAddress: 'Jason@JYU.example',
-      locations: [{ account: 'jason@jyu.example', folder: 'trash', uidValidity: 1, uid: 1 }],
+      locations: [{ mailbox: 'jason@jyu.example', folder: 'trash', uidValidity: 1, uid: 1 }],
     });
     expect(inboxesOf(deleted)).toEqual([]);
   });

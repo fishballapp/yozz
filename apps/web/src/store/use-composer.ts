@@ -11,7 +11,7 @@ import {
   type DraftContent,
   type DraftFile,
   draftFileOf,
-  ownerAccountFor,
+  ownerMailboxFor,
   sameDraftContent,
 } from '@yozz.app/mail/compose/draft';
 import {
@@ -26,7 +26,7 @@ import type { SendEffects } from '@yozz.app/mail/compose/send-machine';
 import type { SentRecord } from '@yozz.app/mail/compose/sent-record';
 import type { MailConnectionFailure, Result } from '@yozz.app/mail/connection';
 import { describeMailFailure } from '@yozz.app/mail/describe-failure';
-import type { AccountSummaries, VaultSentMessage } from '@yozz.app/mail/threads/summaries';
+import type { MailboxSummaries, VaultSentMessage } from '@yozz.app/mail/threads/summaries';
 import type { Attachment, ThreadState } from '@yozz.app/mail/threads/thread';
 import { VaultApiError } from '@yozz.app/mail/vault/api';
 import type { FileStore } from '@yozz.app/mail/vault/file-store';
@@ -42,7 +42,7 @@ import type { useVault } from '../vault/session';
 import type { SessionEnded } from '../vault/unlock';
 
 /**
- * Split from the mailbox half, which hands it the accounts, the live connections and the threads;
+ * Split from the mailbox half, which hands it the mailboxes, the live connections and the threads;
  * it hands back the composer `useComposer` exposes, the drafts and actions `useMail` carries, and
  * the load and reset the session effect calls.
  */
@@ -215,18 +215,18 @@ export type Composer = {
 export const useComposerStore = ({
   session,
   identities,
-  accounts,
+  mailboxes,
   bindRunOn,
-  currentAccount,
+  currentMailbox,
   sync,
   threadsRef,
-  baseByAccount,
+  baseByMailbox,
   demo,
   activity,
 }: {
   session: ReturnType<typeof useVault>['session'];
   identities: readonly AddressRecord[];
-  accounts: readonly InboundAddress[];
+  mailboxes: readonly InboundAddress[];
   /**
    * The IMAP runner of the session open now, refusing every task once that session has ended.
    * Taken with `watchSession`, before the first await, and carried through the work it starts.
@@ -237,11 +237,11 @@ export const useComposerStore = ({
    * claimed files its Sent copy through this, not the record it was composed from, which an edit
    * may have replaced.
    */
-  currentAccount: (address: string) => InboundAddress | undefined;
+  currentMailbox: (address: string) => InboundAddress | undefined;
   sync: (address?: string) => Promise<void>;
   /** The threads as rendered; read by the draft writes, which run outside a render. */
   threadsRef: RefObject<readonly ThreadState[]>;
-  baseByAccount: AccountSummaries;
+  baseByMailbox: MailboxSummaries;
   demo: boolean;
   /** Where a send reports itself while it is on the network. */
   activity: ActivityTracker;
@@ -344,15 +344,15 @@ export const useComposerStore = ({
     });
   }, [identities]);
 
-  // Retired once its account holds a copy anywhere: in Sent, or wherever it has been moved since.
+  // Retired once its mailbox holds a copy anywhere: in Sent, or wherever it has been moved since.
   useEffect(() => {
     const isSynced = ({ from, messageId }: VaultSentMessage) =>
-      Object.values(baseByAccount[from] ?? {}).some(read =>
+      Object.values(baseByMailbox[from] ?? {}).some(read =>
         read.summaries.some(summary => summary.envelope?.messageId === messageId),
       );
     if (!justSent.some(isSynced)) return;
     setJustSent(current => current.filter(sent => !isSynced(sent)));
-  }, [baseByAccount, justSent]);
+  }, [baseByMailbox, justSent]);
 
   /**
    * Erases a draft's IMAP copy wherever the mirror record says it is. Handed the store and the
@@ -368,11 +368,11 @@ export const useComposerStore = ({
       ]);
       const mirror = await readMirror(store, draftKey);
       const address = mirror?.mirror.locator?.account;
-      const account = address === undefined ? undefined : currentAccount(address);
-      if (account === undefined) return;
-      await expungeMirror(runOn(account), store, draftKey);
+      const mailbox = address === undefined ? undefined : currentMailbox(address);
+      if (mailbox === undefined) return;
+      await expungeMirror(runOn(mailbox), store, draftKey);
     },
-    [currentAccount],
+    [currentMailbox],
   );
 
   /** One implementation of each phase for a live send and a resumed one, in the session it began in. */
@@ -421,14 +421,14 @@ export const useComposerStore = ({
         }
         // The record the address has now: an edit since the claim may have changed its login, and
         // a removal means the person dropped that mailbox, so the send finishes without a copy in it.
-        const mailbox = currentAccount(handle.record.from);
+        const mailbox = currentMailbox(handle.record.from);
         if (mailbox === undefined) return { ok: true, value: null };
         const { storeSentCopy } = await import('@yozz.app/mail/compose/send');
         const assembled = await assembleCopy();
         if (!assembled.ok) return assembled;
         const copied = await storeSentCopy(runOn(mailbox), assembled.value, messageId);
         if (!copied.ok) return copied;
-        // The locator says which account and folder, so a later expunge or open needs no guessing.
+        // The locator says which mailbox and folder, so a later expunge or open needs no guessing.
         return {
           ok: true,
           value: copied.value === null ? null : { ...target, ...copied.value },
@@ -438,7 +438,7 @@ export const useComposerStore = ({
       expungeMirror: handle => expungeMirrorCopy(store, runOn, handle.draftKey),
       now: Date.now,
     }),
-    [expungeMirrorCopy, currentAccount],
+    [expungeMirrorCopy, currentMailbox],
   );
 
   /**
@@ -464,7 +464,7 @@ export const useComposerStore = ({
         ]);
         const progress = await driveSend(sendEffectsFor(stores, runOn, identity, held), handle);
         if (!isCurrent()) return { state: 'ended' };
-        // SMTP refused the message; the account's IMAP host is where the Sent copy was going.
+        // SMTP refused the message; the mailbox's IMAP host is where the Sent copy was going.
         const smtpHost = identity.smtp.host;
         const imapHost = identity.imap?.host ?? identity.address;
         const dropSent = (current: readonly DraftHandle[]) =>
@@ -576,16 +576,16 @@ export const useComposerStore = ({
   }, []);
 
   /** The owner an unstored reply should be filed under. */
-  const ownerAccountOf = useCallback(
+  const ownerMailboxOf = useCallback(
     (composing: ComposeDraft) =>
       composing.ownerAccount ??
-      ownerAccountFor(threadsRef.current, composing.inReplyTo, composing.identityId),
+      ownerMailboxFor(threadsRef.current, composing.inReplyTo, composing.identityId),
     [threadsRef],
   );
 
   /**
    * In demo the send is pretend. Otherwise the message shows from this tab's own copy until the
-   * account's Sent copy syncs.
+   * mailbox's Sent copy syncs.
    */
   const sendCompose = useCallback(
     async (compose: Compose, pressed: ComposeDraft): Promise<SendClaim> => {
@@ -617,7 +617,7 @@ export const useComposerStore = ({
         if (identity === undefined) {
           return { ok: false, error: { kind: 'error', detail: 'Pick an address to send as.' } };
         }
-        const content = contentOf(draft, ownerAccountOf(draft));
+        const content = contentOf(draft, ownerMailboxOf(draft));
         const [{ claimSend, createDraft }, { claimOf }] = await Promise.all([
           import('@yozz.app/mail/compose/draft-vault'),
           import('@yozz.app/mail/compose/send'),
@@ -698,7 +698,7 @@ export const useComposerStore = ({
       clearComposedDraft(compose);
       return { ok: true, value: { settled: Promise.resolve<SendReport>({ state: 'sent' }) } };
     },
-    [identities, bindRunOn, settleSend, clearComposedDraft, ownerAccountOf, mintRecord],
+    [identities, bindRunOn, settleSend, clearComposedDraft, ownerMailboxOf, mintRecord],
   );
 
   const send = useCallback(async (): Promise<SendClaim> => {
@@ -799,7 +799,7 @@ export const useComposerStore = ({
   const openHandleRef = useRef<DraftHandle | null>(null);
   openHandleRef.current = openHandle;
 
-  /** The account's own copy of the open draft, refreshed once typing stops. */
+  /** The mailbox's own copy of the open draft, refreshed once typing stops. */
   useEffect(() => {
     const session = sessionRef.current;
     if (openHandle === null || session === null || isDemo()) return;
@@ -811,19 +811,19 @@ export const useComposerStore = ({
       const isCurrent = watchSession(sessionGeneration);
       const runOn = bindRunOn();
       void (async () => {
-        const [{ draftMirrorMessageId, mirrorAccountOf, mirrorDraft }, { buildOutgoing }] =
+        const [{ draftMirrorMessageId, mirrorMailboxOf, mirrorDraft }, { buildOutgoing }] =
           await Promise.all([
             import('@yozz.app/mail/compose/draft-mirror'),
             import('@yozz.app/mail/compose/send'),
           ]);
         // The live connections are the next session's by now.
         if (!isCurrent()) return;
-        const address = mirrorAccountOf(openHandle.record, candidate =>
-          accounts.some(account => account.address === candidate),
+        const address = mirrorMailboxOf(openHandle.record, candidate =>
+          mailboxes.some(mailbox => mailbox.address === candidate),
         );
-        const account = accounts.find(candidate => candidate.address === address);
+        const mailbox = mailboxes.find(candidate => candidate.address === address);
         // A send-only address belongs to no mailbox, so it has no mirror.
-        if (account === undefined) return;
+        if (mailbox === undefined) return;
         const { record } = openHandle;
         // The mirror holds no files, so the head is the whole message.
         const built = buildOutgoing(identity, {
@@ -833,23 +833,23 @@ export const useComposerStore = ({
           subject: record.subject,
           text: record.body,
           // Derived from the draft key: the handle a later mirror and a discard both search on.
-          messageId: draftMirrorMessageId(openHandle.draftKey, account.address),
+          messageId: draftMirrorMessageId(openHandle.draftKey, mailbox.address),
           ...(record.inReplyTo === undefined ? {} : { inReplyTo: record.inReplyTo }),
           ...(record.references === undefined ? {} : { references: record.references }),
           attachments: [],
         });
         if (!built.ok) return;
         await mirrorDraft(
-          runOn(account),
+          runOn(mailbox),
           session.store,
           openHandle,
           built.value.head,
-          account.address,
+          mailbox.address,
         );
       })();
     }, DRAFT_MIRROR_MS);
     return () => clearTimeout(timer);
-  }, [openHandle, accounts, identities, bindRunOn]);
+  }, [openHandle, mailboxes, identities, bindRunOn]);
 
   /**
    * A frozen draft on screen follows the vault: its lease is what decides when another device's send
@@ -893,7 +893,7 @@ export const useComposerStore = ({
     // `<Message-ID>\0<from>` for every message in a Sent folder. Both halves: ids collide, and a
     // message arriving with a colliding id must not tombstone a draft nobody sent.
     const sent = new Set(
-      Object.values(baseByAccount).flatMap(folders =>
+      Object.values(baseByMailbox).flatMap(folders =>
         (folders.sent?.summaries ?? []).flatMap(summary => {
           const messageId = summary.envelope?.messageId;
           const author = summary.envelope?.from?.[0];
@@ -917,7 +917,7 @@ export const useComposerStore = ({
       const live = await listDrafts(session.store);
       if (isCurrent()) setDrafts(live);
     })();
-  }, [drafts, baseByAccount]);
+  }, [drafts, baseByMailbox]);
 
   useEffect(() => {
     const session = sessionRef.current;
@@ -946,7 +946,7 @@ export const useComposerStore = ({
       compose.saving = saved.promise;
       void (async () => {
         try {
-          const content = contentOf(pending, ownerAccountOf(pending));
+          const content = contentOf(pending, ownerMailboxOf(pending));
           const open = openHandleRef.current;
           // Opening a draft runs this effect too.
           if (
@@ -1004,7 +1004,7 @@ export const useComposerStore = ({
     }, DRAFT_AUTOSAVE_MS);
     autosaveTimerRef.current = timer;
     return () => clearTimeout(timer);
-  }, [draft, ownerAccountOf, writeContent]);
+  }, [draft, ownerMailboxOf, writeContent]);
 
   const resolveDraftConflict = useCallback((choice: 'theirs' | 'mine') => {
     setDraftConflict(theirs => {
@@ -1355,7 +1355,7 @@ export const useComposerStore = ({
             isUntouched(open, compose.opened);
           if (!abandonable) {
             // `setDraft(null)` cancelled the pending debounce, so a record existing is not evidence it holds this text.
-            const content = contentOf(open, ownerAccountOf(open));
+            const content = contentOf(open, ownerMailboxOf(open));
             const saved = openHandleRef.current;
             if (
               saved !== null &&
@@ -1391,7 +1391,7 @@ export const useComposerStore = ({
                 isCurrent,
                 session.store,
                 open.draftId,
-                contentOf({ ...open, attachments }, ownerAccountOf(open)),
+                contentOf({ ...open, attachments }, ownerMailboxOf(open)),
               );
               if (!isCurrent()) return;
               if (!outcome.ok) {
@@ -1505,7 +1505,7 @@ export const useComposerStore = ({
           return { outcome: 'absent' };
         }
         if (session === null || demo) return { outcome: 'absent' };
-        const onScreen = contentOf(open, ownerAccountOf(open));
+        const onScreen = contentOf(open, ownerMailboxOf(open));
         return dropDraft(
           session.store,
           draftKey,
@@ -1584,7 +1584,7 @@ export const useComposerStore = ({
       identities,
       bindRunOn,
       expungeMirrorCopy,
-      ownerAccountOf,
+      ownerMailboxOf,
       dropDraft,
       writeContent,
       startUpload,

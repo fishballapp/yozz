@@ -12,13 +12,13 @@ import * as Semaphore from 'effect/Semaphore';
 import { UsageError } from '../errors.ts';
 import { seal, unseal, writePrivateFile } from '../files.ts';
 
-// One account's mail cache on disk: a file per folder (its sync mark, summaries and previews), a
-// file per cached body named for its folder's UIDVALIDITY, and when the account last synced. Each is `iv ‖ AES-GCM(key, JSON)` with the account and the file's name as
+// One mailbox's mail cache on disk: a file per folder (its sync mark, summaries and previews), a
+// file per cached body named for its folder's UIDVALIDITY, and when the mailbox last synced. Each is `iv ‖ AES-GCM(key, JSON)` with the mailbox and the file's name as
 // additional data, so a file moved to another slot does not open. One that does not open, or no
 // longer decodes, is deleted and read as absent, and the next sync rebuilds it. A file the disk
 // will not read or write is the person's to fix: a `UsageError`, never a defect.
 //
-// ponytail: two `yozz` runs syncing one account at once each write whole files, so the last one
+// ponytail: two `yozz` runs syncing one mailbox at once each write whole files, so the last one
 // wins a folder and the other's newest mail is fetched again by the next sync. Un-park if a cache is
 // ever seen to lose mail for good.
 
@@ -95,14 +95,17 @@ const BodySchema = Schema.Struct({
   dkim: Schema.NullOr(Schema.Struct({ from: Schema.String, domain: Schema.String })),
 });
 
-const AccountFileSchema = Schema.Struct({
-  /** When the account's last sync that landed started, in epoch milliseconds. */
+const MailboxFileSchema = Schema.Struct({
+  /** When the mailbox's last sync that landed started, in epoch milliseconds. */
   syncedAt: Schema.Int,
 });
 
 const FolderJson = Schema.fromJsonString(FolderFileSchema);
 const BodyJson = Schema.fromJsonString(BodySchema);
-const AccountJson = Schema.fromJsonString(AccountFileSchema);
+const MailboxJson = Schema.fromJsonString(MailboxFileSchema);
+
+// The file keeps its old name, so a cache written before the rename still reads.
+const SYNCED_AT_FILE = 'account.bin';
 
 const EMPTY_FOLDER: FolderFile = { sync: null, summaries: [], previews: [] };
 
@@ -124,28 +127,28 @@ export const usingCache = <A>(thunk: () => Promise<A>): Effect.Effect<A, UsageEr
     ),
   );
 
-/** One account's cache under `dir`, sealed with `key`. */
-export const accountCache = Effect.fn('cache.accountCache')(function* ({
+/** One mailbox's cache under `dir`, sealed with `key`. */
+export const mailboxCache = Effect.fn('cache.mailboxCache')(function* ({
   dir,
   key,
-  account,
+  mailbox,
 }: {
   readonly dir: string;
   readonly key: CryptoKey;
-  readonly account: string;
+  readonly mailbox: string;
 }) {
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const context = yield* Effect.context<FileSystem.FileSystem | Path.Path | Crypto.Crypto>();
   const run = Effect.runPromiseWith(context);
   const additionalData = (name: string) =>
-    new TextEncoder().encode(JSON.stringify(['yozz-cli-cache', account, name]));
+    new TextEncoder().encode(JSON.stringify(['yozz-cli-cache', mailbox, name]));
   const unusable =
     (verb: string) =>
     ({ message }: { readonly message: string }) =>
       new UsageError({ message: `The mail cache can't be ${verb} at ${dir}: ${message}` });
 
-  /** A file of this account's failed to open this run, so what the cache holds is not what synced. */
+  /** A file of this mailbox's failed to open this run, so what the cache holds is not what synced. */
   let isDamaged = false;
 
   /** What `name` holds, or none when it is missing, does not open, or no longer decodes. */
@@ -298,11 +301,11 @@ export const accountCache = Effect.fn('cache.accountCache')(function* ({
   return {
     mail,
     /**
-     * When the account's last sync that landed started; none when a folder's file did not open,
+     * When the mailbox's last sync that landed started; none when a folder's file did not open,
      * which the next sync rebuilds. A body that does not open is only fetched again.
      */
     syncedAt: Effect.gen(function* () {
-      const at = yield* read('account.bin', AccountJson);
+      const at = yield* read(SYNCED_AT_FILE, MailboxJson);
       yield* Effect.forEach(FOLDERS, folder => usingCache(() => mail.folder(folder).getSync()), {
         discard: true,
       });
@@ -310,7 +313,7 @@ export const accountCache = Effect.fn('cache.accountCache')(function* ({
     }).pipe(Effect.provideContext(context)),
     /** A sync landed: what the cache holds is what it read. */
     setSyncedAt: (syncedAt: number) =>
-      write('account.bin', AccountJson, { syncedAt }).pipe(
+      write(SYNCED_AT_FILE, MailboxJson, { syncedAt }).pipe(
         Effect.tap(() =>
           Effect.sync(() => {
             isDamaged = false;
@@ -320,9 +323,9 @@ export const accountCache = Effect.fn('cache.accountCache')(function* ({
       ),
     /** What the cache holds may not be where the mail is: the next read syncs first. */
     markStale: fs
-      .remove(path.join(dir, 'account.bin'), { force: true })
+      .remove(path.join(dir, SYNCED_AT_FILE), { force: true })
       .pipe(Effect.mapError(unusable('written'))),
   };
 });
 
-export type AccountCache = Effect.Success<ReturnType<typeof accountCache>>;
+export type MailboxCache = Effect.Success<ReturnType<typeof mailboxCache>>;

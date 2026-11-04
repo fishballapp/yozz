@@ -11,7 +11,7 @@ import { useNavigate } from '@tanstack/react-router';
 import { canMoveTo, type MoveTarget } from '@yozz.app/mail/threads/reconcile';
 import type { ThreadState } from '@yozz.app/mail/threads/thread';
 import { isOnServer } from '@yozz.app/mail/threads/thread';
-import type { MailboxId } from '@yozz.app/mail/threads/views';
+import type { ViewId } from '@yozz.app/mail/threads/views';
 import { Fragment } from 'react';
 import { DISCARD_WARNING } from '../compose/intent';
 import { useMail } from '../store/MailProvider';
@@ -38,7 +38,7 @@ type BulkAction = {
  */
 const useBulkActions = (
   threads: readonly ThreadState[],
-  mailbox: MailboxId,
+  view: ViewId,
   openId: string | undefined,
   onDone: () => void,
 ): readonly { readonly key: string; readonly actions: readonly BulkAction[] }[] => {
@@ -58,7 +58,7 @@ const useBulkActions = (
     onDone();
   };
 
-  if (mailbox === 'drafts') {
+  if (view === 'drafts') {
     const draftIds = draftIdsOf(threads);
     if (draftIds.length === 0) return [];
     return [
@@ -86,7 +86,7 @@ const useBulkActions = (
   const onServer = threads.filter(isOnServer);
   const movable = (to: MoveTarget) => onServer.filter(({ folders }) => canMoveTo(folders, to));
 
-  if (mailbox === 'trash') {
+  if (view === 'trash') {
     const restorable = movable('inbox');
     if (restorable.length === 0) return [];
     return [
@@ -104,7 +104,7 @@ const useBulkActions = (
   }
 
   // In Archive the move goes back to the inbox, and says so.
-  const isArchive = mailbox === 'archive';
+  const isArchive = view === 'archive';
   const archivable = movable(isArchive ? 'inbox' : 'archive');
   const trashable = movable('trash');
   const unread = onServer.filter(thread => thread.isUnread);
@@ -158,8 +158,8 @@ const useBulkActions = (
                   // As the reader's own button does: left open, it would be marked read again.
                   if (openId !== undefined && onServer.some(({ id }) => id === openId)) {
                     void navigate({
-                      to: '/m/$mailbox',
-                      params: { mailbox },
+                      to: '/m/$view',
+                      params: { view },
                       search: previous => previous,
                     });
                   }
@@ -183,16 +183,16 @@ const useBulkActions = (
 
 export const BulkActions = ({
   threads,
-  mailbox,
+  view,
   openId,
   onDone,
 }: {
   threads: readonly ThreadState[];
-  mailbox: MailboxId;
+  view: ViewId;
   openId: string | undefined;
   onDone: () => void;
 }) => {
-  const groups = useBulkActions(threads, mailbox, openId, onDone);
+  const groups = useBulkActions(threads, view, openId, onDone);
 
   return groups.map(({ key, actions }, index) => (
     <Fragment key={key}>

@@ -2,9 +2,9 @@ import type { DraftHandle } from '../compose/draft-vault.ts';
 import { type BodyEntry, type Previews, previewKey, withBodies } from './body-state.ts';
 import type { MailCache } from './cache.ts';
 import {
-  type AccountSummaries,
   type FolderSummaries,
-  threadsFromAccounts,
+  type MailboxSummaries,
+  threadsFromMailboxes,
   type VaultSentMessage,
   withDrafts,
 } from './summaries.ts';
@@ -33,7 +33,7 @@ export const cachedSummaries = async (cache: MailCache): Promise<FolderSummaries
 };
 
 /** Every cached body's text, keyed for `withBodies`, so rows show excerpts before the first open. */
-export const cachedPreviews = async (cache: MailCache, account: string): Promise<Previews> => {
+export const cachedPreviews = async (cache: MailCache, mailbox: string): Promise<Previews> => {
   const folderEntries = await Promise.all(
     FOLDERS.map(async folder => {
       const folderCache = cache.folder(folder);
@@ -43,7 +43,7 @@ export const cachedPreviews = async (cache: MailCache, account: string): Promise
       return previews.map(
         ({ uid, paragraphs }) =>
           [
-            previewKey({ account, folder, uidValidity: mark.uidValidity, uid }),
+            previewKey({ mailbox, folder, uidValidity: mark.uidValidity, uid }),
             paragraphs,
           ] as const,
       );
@@ -53,19 +53,19 @@ export const cachedPreviews = async (cache: MailCache, account: string): Promise
 };
 
 /**
- * The conversations a client shows: one grouping pass over every account, or a conversation two
+ * The conversations a client shows: one grouping pass over every mailbox, or a conversation two
  * addresses are copied on splits in two; then the bodies on hand, the client's own overlay (the web
  * app's pending writes) and the vault's drafts.
  */
 export const threadList = ({
-  byAccount,
+  byMailbox,
   vaultSent = [],
   bodies = {},
   previews = {},
   overlay = threads => threads,
   drafts = [],
 }: {
-  readonly byAccount: AccountSummaries;
+  readonly byMailbox: MailboxSummaries;
   readonly vaultSent?: readonly VaultSentMessage[];
   readonly bodies?: Readonly<Record<string, BodyEntry>>;
   readonly previews?: Previews;
@@ -73,6 +73,6 @@ export const threadList = ({
   readonly drafts?: readonly DraftHandle[];
 }): readonly ThreadState[] =>
   withDrafts(
-    overlay(withBodies(threadsFromAccounts(byAccount, vaultSent), bodies, previews)),
+    overlay(withBodies(threadsFromMailboxes(byMailbox, vaultSent), bodies, previews)),
     drafts,
   );

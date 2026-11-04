@@ -498,7 +498,7 @@ describe('the send state machine', () => {
 
   describe('a Sent copy that fails', () => {
     const noFolder = {
-      copyToSent: async () => ({ ok: false, error: { kind: 'no-sent-mailbox' } }),
+      copyToSent: async () => ({ ok: false, error: { kind: 'no-sent-folder' } }),
     } satisfies Partial<SendEffects>;
 
     it('finishes the send when there is no Sent folder, as no retry could help', async () => {
@@ -508,7 +508,7 @@ describe('the send state machine', () => {
 
       expect(await driveSend(effects, handle)).toEqual({
         done: true,
-        sentCopy: { ok: false, error: { kind: 'no-sent-mailbox' } },
+        sentCopy: { ok: false, error: { kind: 'no-sent-folder' } },
       });
       expect(calls.expunge).toBe(1);
       const record = await readRecord(store, handle.draftKey);
@@ -839,7 +839,7 @@ describe('the send state machine', () => {
       {
         name: 'there is no Sent folder',
         over: {
-          copyToSent: async () => ({ ok: false, error: { kind: 'no-sent-mailbox' } }),
+          copyToSent: async () => ({ ok: false, error: { kind: 'no-sent-folder' } }),
         },
         outcome: 'resolves',
       },

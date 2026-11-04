@@ -7,9 +7,9 @@ import { StatusBar } from './StatusBar';
 // @ts-expect-error React reads it off the global
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
-const ACCOUNT = { address: 'me@example.com', imap: { host: 'imap.example.com' } };
+const MAILBOX = { address: 'me@example.com', imap: { host: 'imap.example.com' } };
 const mail = vi.hoisted(() => ({
-  accounts: [] as unknown[],
+  mailboxes: [] as unknown[],
   isDemo: false,
   syncStates: {} as Record<string, unknown>,
   mailError: null as string | null,
@@ -25,32 +25,32 @@ const notice = () => host.querySelector('footer > p:nth-of-type(2)');
 
 afterEach(async () => {
   await act(async () => root.render(null));
-  Object.assign(mail, { accounts: [ACCOUNT], syncStates: {}, mailError: null });
+  Object.assign(mail, { mailboxes: [MAILBOX], syncStates: {}, mailError: null });
   mail.sync.mockClear();
 });
 
 describe('StatusBar', () => {
   it('says nothing at its right end while all is well', async () => {
-    mail.accounts = [ACCOUNT];
-    mail.syncStates = { [ACCOUNT.address]: { status: 'synced', at: 1000 } };
+    mail.mailboxes = [MAILBOX];
+    mail.syncStates = { [MAILBOX.address]: { status: 'synced', at: 1000 } };
     await show();
     expect(notice()).toBeNull();
   });
 
   it('names a failed sync and retries that address', async () => {
-    mail.accounts = [ACCOUNT];
+    mail.mailboxes = [MAILBOX];
     mail.syncStates = {
-      [ACCOUNT.address]: { status: 'failed', failure: { kind: 'stalled' }, at: 1000 },
+      [MAILBOX.address]: { status: 'failed', failure: { kind: 'stalled' }, at: 1000 },
     };
     await show();
     expect(notice()?.textContent).toBe('imap.example.com stopped responding·Retry');
 
     await act(async () => host.querySelector('button')?.click());
-    expect(mail.sync).toHaveBeenCalledWith(ACCOUNT.address);
+    expect(mail.sync).toHaveBeenCalledWith(MAILBOX.address);
   });
 
   it('says what a move refused', async () => {
-    mail.accounts = [ACCOUNT];
+    mail.mailboxes = [MAILBOX];
     mail.mailError = 'thread not moved · imap.example.com: Archive is read-only';
     await show();
     expect(notice()?.textContent).toBe('thread not moved · imap.example.com: Archive is read-only');

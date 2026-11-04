@@ -153,7 +153,7 @@ describe('AddAddress', () => {
     await submitAll(page);
     await vi.waitFor(() =>
       expect(mocks.navigate).toHaveBeenCalledWith(
-        expect.objectContaining({ params: { mailbox: 'alice@example.com' } }),
+        expect.objectContaining({ params: { view: 'alice@example.com' } }),
       ),
     );
     expect(mocks.putAddress).toHaveBeenCalledWith(

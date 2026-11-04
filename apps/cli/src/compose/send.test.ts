@@ -56,7 +56,7 @@ layer(NodeServices.layer)(it => {
           expect(delivered?.data).toContain('Content-Type: text/html');
           expect(delivered?.data).toContain('<strong>paid</strong>');
           // The Sent copy is those bytes, appended once.
-          const sentBox = server.mailboxes.get('Sent')?.messages ?? [];
+          const sentBox = server.folders.get('Sent')?.messages ?? [];
           expect(sentBox).toHaveLength(1);
           expect(new TextDecoder().decode(sentBox[0]?.raw)).toBe(`${delivered?.data}\r\n`);
           // The draft is a tombstone that remembers what it became.
@@ -100,7 +100,7 @@ layer(NodeServices.layer)(it => {
         expect(delivered?.data.toLowerCase()).not.toContain('bcc');
         expect(delivered?.data).not.toContain('legal@example.com');
         // The copy is that message with the one header in front.
-        const copy = server.mailboxes.get('Sent')?.messages[0]?.raw;
+        const copy = server.folders.get('Sent')?.messages[0]?.raw;
         expect(new TextDecoder().decode(copy)).toBe(
           `Bcc: legal@example.com, sam@example.com\r\n${delivered?.data}\r\n`,
         );
@@ -116,7 +116,7 @@ layer(NodeServices.layer)(it => {
         yield* run(['send', draft.draftId]);
 
         expect(smtp.quietLimits).toEqual([DATA_END_TIMEOUT_MS]);
-        const copy = server.mailboxes.get('Sent')?.messages[0]?.raw;
+        const copy = server.folders.get('Sent')?.messages[0]?.raw;
         expect(server.quietLimits).toEqual([appendQuietLimitMs(copy?.length ?? 0), QUIET_LIMIT_MS]);
       }),
     );
@@ -265,7 +265,7 @@ layer(NodeServices.layer)(it => {
     it.effect('finishes a send with no Sent folder, and says no copy was kept, every time', () =>
       Effect.gen(function* () {
         const { server, smtp, run, drafts } = yield* makeComposeWorld();
-        server.mailboxes.delete('Sent');
+        server.folders.delete('Sent');
         const { draft } = JSON.parse(
           (yield* run(['draft', '--from', ADDRESS, '--to', 'kate@example.com'])).stdout,
         );
@@ -326,7 +326,7 @@ layer(NodeServices.layer)(it => {
         });
         expect(smtp.commands).toHaveLength(commands);
         expect(smtp.delivered).toHaveLength(1);
-        expect(server.mailboxes.get('Sent')?.messages).toHaveLength(1);
+        expect(server.folders.get('Sent')?.messages).toHaveLength(1);
         expect((yield* drafts)[key]?.deletedAt).toBeDefined();
       }),
     );
@@ -411,7 +411,7 @@ layer(NodeServices.layer)(it => {
         expect(data).toContain('filename="receipt.pdf"');
         expect(data).toContain(new TextEncoder().encode('%PDF-1.7 receipt').toBase64());
         // The Sent copy is the same message, and the tombstone stops naming the file.
-        const sentBox = server.mailboxes.get('Sent')?.messages ?? [];
+        const sentBox = server.folders.get('Sent')?.messages ?? [];
         expect(new TextDecoder().decode(sentBox[0]?.raw)).toBe(`${data}\r\n`);
         expect((yield* drafts)[key]?.attachments).toBeUndefined();
         expect((yield* drafts)[key]?.deletedAt).toBeDefined();

@@ -8,7 +8,7 @@ import { Wordmark } from '../ui/Wordmark';
  * stream, and an honest note of what is and is not fetched.
  */
 export const ReaderRest = () => {
-  const { accounts, threads } = useMail();
+  const { mailboxes, threads } = useMail();
 
   return (
     <div className="flex h-full items-center justify-center bg-ink-sunken px-8">
@@ -20,21 +20,21 @@ export const ReaderRest = () => {
         </p>
 
         <p className="label-rule mt-8 border-b border-rule-soft pb-2">Reading</p>
-        {accounts.length === 0 ? (
+        {mailboxes.length === 0 ? (
           <p className="mt-3 text-base leading-relaxed text-paper-faint">
             No address connected yet. Connect one and it appears here.
           </p>
         ) : (
           <ul className="mt-1">
-            {accounts.map(account => {
-              const unread = unreadCount(threads, account.address);
+            {mailboxes.map(mailbox => {
+              const unread = unreadCount(threads, mailbox.address);
               return (
                 <li
-                  key={account.address}
+                  key={mailbox.address}
                   className="flex items-center gap-3 border-b border-rule-soft py-2"
                 >
                   <span className="min-w-0 flex-1 truncate font-mono text-2xs text-paper-dim">
-                    {account.address}
+                    {mailbox.address}
                   </span>
                   <span
                     className={`shrink-0 font-mono text-2xs ${unread > 0 ? 'text-signal' : 'text-paper-faint'}`}

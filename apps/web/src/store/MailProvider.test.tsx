@@ -9,7 +9,7 @@ import { createMailCache } from '../threads/cache';
 import { toast } from '../ui/Toast';
 import { MailProvider, useMail } from './MailProvider';
 
-const { session, moveMessages, prefetchBodies, setFlag, syncAccount, thread, shown } = vi.hoisted(
+const { session, moveMessages, prefetchBodies, setFlag, syncMailbox, thread, shown } = vi.hoisted(
   () => {
     const addresses = ['a@example.com', 'b@example.com'];
     const records = addresses.map(address => {
@@ -28,17 +28,17 @@ const { session, moveMessages, prefetchBodies, setFlag, syncAccount, thread, sho
       moveMessages: vi.fn(),
       prefetchBodies: vi.fn(),
       setFlag: vi.fn(),
-      syncAccount: vi.fn(),
-      // One conversation in both accounts' inboxes, so a move is one command per account.
+      syncMailbox: vi.fn(),
+      // One conversation in both mailboxes' inboxes, so a move is one command per mailbox.
       thread: {
         id: 't1',
-        accounts: addresses,
+        mailboxes: addresses,
         subject: 'Lunch',
         isUnread: false,
         isReplied: false,
         isStarred: false,
         folders: ['inbox'],
-        foldersByAccount: Object.fromEntries(addresses.map(address => [address, ['inbox']])),
+        foldersByMailbox: Object.fromEntries(addresses.map(address => [address, ['inbox']])),
         messages: [
           {
             id: 'm1',
@@ -47,8 +47,8 @@ const { session, moveMessages, prefetchBodies, setFlag, syncAccount, thread, sho
             toAddress: 'a@example.com',
             at: 1,
             body: [],
-            locations: addresses.map(account => ({
-              account,
+            locations: addresses.map(mailbox => ({
+              mailbox,
               folder: 'inbox',
               uidValidity: 1,
               uid: 7,
@@ -69,13 +69,13 @@ vi.mock('../relay/live', () => ({
   createLiveManager: () => ({ run: vi.fn(), close: vi.fn(), closeAll: async () => {} }),
 }));
 vi.mock('@yozz.app/mail/threads/sync', () => ({
-  syncAccount,
+  syncMailbox,
   prefetchBodies,
   moveMessages,
   setFlag,
 }));
 vi.mock('@yozz.app/mail/threads/summaries', () => ({
-  threadsFromAccounts: () => (shown.threads.length > 0 ? shown.threads : [thread]),
+  threadsFromMailboxes: () => (shown.threads.length > 0 ? shown.threads : [thread]),
   withDrafts: (threads: unknown) => threads,
 }));
 
@@ -99,14 +99,14 @@ afterEach(async () => {
   setFlag.mockReset();
   shown.threads = [];
   // A sync that never lands, so nothing but the write under test changes the threads.
-  syncAccount.mockReset().mockReturnValue(new Promise(() => {}));
+  syncMailbox.mockReset().mockReturnValue(new Promise(() => {}));
 });
 
 const mount = async ({ archiveSynced = true } = {}) => {
-  // The inbox each account last synced, which is what a move names its uids against, and the
+  // The inbox each mailbox last synced, which is what a move names its uids against, and the
   // Archive it moves into (UIDVALIDITY 3).
-  for (const account of thread.accounts) {
-    const cache = createMailCache(session.userId, account);
+  for (const mailbox of thread.mailboxes) {
+    const cache = createMailCache(session.userId, mailbox);
     await cache.clear();
     await cache
       .folder('inbox')
@@ -126,11 +126,11 @@ const mount = async ({ archiveSynced = true } = {}) => {
       </MailProvider>,
     ),
   );
-  await vi.waitFor(() => expect(mail().accounts).toHaveLength(2));
+  await vi.waitFor(() => expect(mail().mailboxes).toHaveLength(2));
 };
 
 describe('MailProvider move refusals', () => {
-  it('reports a move every account refused once, and says in the status line what failed', async () => {
+  it('reports a move every mailbox refused once, and says in the status line what failed', async () => {
     moveMessages.mockResolvedValue({
       ok: false,
       error: { kind: 'imap', reason: { kind: 'no', text: 'Archive is read-only' } },
@@ -174,19 +174,19 @@ describe('MailProvider move refusals', () => {
 });
 
 /**
- * `thread` held by one account. Vitest 5.0.1 hands the second of two overlapping dynamic imports
- * of a mocked module the real one, and two accounts' writes or syncs import `threads/sync` at once.
+ * `thread` held by one mailbox. Vitest 5.0.1 hands the second of two overlapping dynamic imports
+ * of a mocked module the real one, and two mailboxes' writes or syncs import `threads/sync` at once.
  */
-const showOneAccount = () => {
-  const account = 'a@example.com';
+const showOneMailbox = () => {
+  const mailbox = 'a@example.com';
   shown.threads = [
     {
       ...thread,
-      accounts: [account],
-      foldersByAccount: { [account]: ['inbox'] },
+      mailboxes: [mailbox],
+      foldersByMailbox: { [mailbox]: ['inbox'] },
       messages: thread.messages.map(message => ({
         ...message,
-        locations: message.locations.filter(location => location.account === account),
+        locations: message.locations.filter(location => location.mailbox === mailbox),
       })),
     },
   ];
@@ -194,10 +194,10 @@ const showOneAccount = () => {
 
 const SYNCED = { state: { status: 'synced', at: 0, complete: [] }, byFolder: {} };
 
-/** A sync of every account that lands only when the test says. */
+/** A sync of every mailbox that lands only when the test says. */
 const heldSyncs = () => {
   const landings: Array<() => void> = [];
-  syncAccount.mockImplementation(
+  syncMailbox.mockImplementation(
     () =>
       new Promise(resolve => {
         landings.push(() => resolve(SYNCED));
@@ -251,7 +251,7 @@ describe('MailProvider confirmed writes', () => {
   it('keeps a confirmed flag without asking for a sync, through a sync that started before it', async () => {
     const syncs = heldSyncs();
     setFlag.mockResolvedValue({ ok: true, value: undefined });
-    showOneAccount();
+    showOneMailbox();
     await mount();
     await vi.waitFor(() => expect(syncs.count()).toBe(2));
 
@@ -261,7 +261,7 @@ describe('MailProvider confirmed writes', () => {
     await vi.waitFor(() => expect(setFlag).toHaveBeenCalledTimes(1));
     // The first syncs read the inbox before the STORE and land after it.
     await syncs.landAll();
-    expect(syncAccount).toHaveBeenCalledTimes(2);
+    expect(syncMailbox).toHaveBeenCalledTimes(2);
     expect(mail().threads[0]?.isStarred).toBe(true);
 
     // The next sync that comes anyway read the server after the STORE, and retires the op.
@@ -276,7 +276,7 @@ describe('MailProvider confirmed writes', () => {
     moveMessages.mockImplementation((_run, targets: readonly FlagTarget[], to: Folder) =>
       Promise.resolve(placed(targets, to)),
     );
-    showOneAccount();
+    showOneMailbox();
     await mount();
     await vi.waitFor(() => expect(syncs.count()).toBe(2));
     await syncs.landAll();
@@ -285,7 +285,7 @@ describe('MailProvider confirmed writes', () => {
       expect(mail().toggleArchive('t1')).toBe(true);
     });
     await vi.waitFor(() => expect(moveMessages).toHaveBeenCalledTimes(1));
-    expect(syncAccount).toHaveBeenCalledTimes(2);
+    expect(syncMailbox).toHaveBeenCalledTimes(2);
     expect(mail().threads[0]?.folders).toEqual(['archive']);
 
     void mail().sync('a@example.com');
@@ -308,7 +308,7 @@ describe('MailProvider confirmed writes', () => {
             : { ok: false, error: { kind: 'imap', reason: { kind: 'no', text: 'Trash is full' } } },
         ),
       );
-      showOneAccount();
+      showOneMailbox();
       await mount();
       await vi.waitFor(() => expect(syncs.count()).toBe(2));
 
@@ -318,7 +318,7 @@ describe('MailProvider confirmed writes', () => {
       await vi.waitFor(() => expect(moveMessages).toHaveBeenCalledTimes(1));
       await syncs.landAll();
       // Not landed: it read the inbox before the move and the archive after, so it goes round. A
-      // landing prefetches; only the other account's pass, which no move touched, has.
+      // landing prefetches; only the other mailbox's pass, which no move touched, has.
       await vi.waitFor(() => expect(syncs.count()).toBe(1));
       expect(prefetchBodies).toHaveBeenCalledTimes(1);
       expect(mail().threads[0]?.folders).toEqual([shown]);
@@ -333,7 +333,7 @@ describe('MailProvider confirmed writes', () => {
 describe('MailProvider stacked writes', () => {
   it('moves the copies where the move before it put them, once that one has answered', async () => {
     const archive = holdMovesInto('archive', targets => placed(targets, 'archive'));
-    showOneAccount();
+    showOneMailbox();
     await mount();
 
     await act(async () => {
@@ -346,7 +346,7 @@ describe('MailProvider stacked writes', () => {
     await archive.answerAll();
     await vi.waitFor(() => expect(moveMessages).toHaveBeenCalledTimes(2));
     expect(moveMessages.mock.calls[1]?.slice(1)).toEqual([
-      [{ folder: 'archive', mailbox: 'Archive', uidValidity: 3, uids: [107] }],
+      [{ folder: 'archive', folderName: 'Archive', uidValidity: 3, uids: [107] }],
       'trash',
     ]);
     expect(mail().mailError).toBeNull();
@@ -355,7 +355,7 @@ describe('MailProvider stacked writes', () => {
   it('writes a flag to the copies a pending move put elsewhere', async () => {
     const archive = holdMovesInto('archive', targets => placed(targets, 'archive'));
     setFlag.mockResolvedValue({ ok: true, value: undefined });
-    showOneAccount();
+    showOneMailbox();
     await mount();
 
     await act(async () => {
@@ -368,7 +368,7 @@ describe('MailProvider stacked writes', () => {
     await archive.answerAll();
     await vi.waitFor(() => expect(setFlag).toHaveBeenCalledTimes(1));
     expect(setFlag.mock.calls[0]?.slice(2)).toEqual([
-      [{ folder: 'archive', mailbox: 'Archive', uidValidity: 3, uids: [107] }],
+      [{ folder: 'archive', folderName: 'Archive', uidValidity: 3, uids: [107] }],
       '\\Flagged',
       true,
     ]);
@@ -379,7 +379,7 @@ describe('MailProvider stacked writes', () => {
       ok: false,
       error: { kind: 'imap', reason: { kind: 'no', text: 'Archive is read-only' } },
     }));
-    showOneAccount();
+    showOneMailbox();
     await mount();
 
     await act(async () => {
@@ -390,7 +390,7 @@ describe('MailProvider stacked writes', () => {
     await archive.answerAll();
     await vi.waitFor(() => expect(moveMessages).toHaveBeenCalledTimes(2));
     expect(moveMessages.mock.calls[1]?.slice(1)).toEqual([
-      [{ folder: 'inbox', mailbox: 'INBOX', uidValidity: 1, uids: [7] }],
+      [{ folder: 'inbox', folderName: 'INBOX', uidValidity: 1, uids: [7] }],
       'trash',
     ]);
     await vi.waitFor(() => expect(mail().threads[0]?.folders).toEqual(['trash']));
@@ -404,7 +404,7 @@ describe('MailProvider stacked writes', () => {
     const archive = holdMovesInto('archive', targets =>
       uidPlus ? placed(targets, 'archive') : unplaced(targets),
     );
-    showOneAccount();
+    showOneMailbox();
     await mount({ archiveSynced });
     await vi.waitFor(() => expect(syncs.count()).toBe(2));
     await syncs.landAll();
@@ -426,25 +426,25 @@ describe('MailProvider stacked writes', () => {
   });
 });
 
-/** A conversation of one message, held in `folder` at `uid` by each of `accounts`. */
+/** A conversation of one message, held in `folder` at `uid` by each of `mailboxes`. */
 const conversation = (
   id: string,
   folder: 'inbox' | 'archive',
   uid: number,
-  accounts: readonly string[] = thread.accounts,
+  mailboxes: readonly string[] = thread.mailboxes,
 ): ThreadState => ({
   ...thread,
   id,
-  accounts: [...accounts],
+  mailboxes: [...mailboxes],
   folders: [folder],
-  foldersByAccount: Object.fromEntries(accounts.map(account => [account, [folder]])),
+  foldersByMailbox: Object.fromEntries(mailboxes.map(mailbox => [mailbox, [folder]])),
   messages: [
     {
       ...thread.messages[0]!,
       id: `${id}/m`,
       // As `mount` writes the marks: INBOX under UIDVALIDITY 1, Archive under 3.
-      locations: accounts.map(account => ({
-        account,
+      locations: mailboxes.map(mailbox => ({
+        mailbox,
         folder,
         uidValidity: folder === 'inbox' ? 1 : 3,
         uid,
@@ -454,7 +454,7 @@ const conversation = (
 });
 
 describe('MailProvider bulk writes', () => {
-  it('moves many threads with one command per account, each naming every folder once', async () => {
+  it('moves many threads with one command per mailbox, each naming every folder once', async () => {
     moveMessages.mockImplementation((_run, targets: readonly FlagTarget[], to: Folder) =>
       Promise.resolve(placed(targets, to)),
     );
@@ -472,14 +472,14 @@ describe('MailProvider bulk writes', () => {
     for (const [, targets, to] of moveMessages.mock.calls) {
       expect(to).toBe('trash');
       expect(targets).toEqual([
-        { folder: 'inbox', mailbox: 'INBOX', uidValidity: 1, uids: [10, 11, 12, 13] },
-        { folder: 'archive', mailbox: 'Archive', uidValidity: 3, uids: [20, 21] },
+        { folder: 'inbox', folderName: 'INBOX', uidValidity: 1, uids: [10, 11, 12, 13] },
+        { folder: 'archive', folderName: 'Archive', uidValidity: 3, uids: [20, 21] },
       ]);
     }
     expect(mail().threads.map(({ folders }) => folders)).toEqual(ids.map(() => ['trash']));
   });
 
-  it('puts back only what the refusing account held, and reports the batch once', async () => {
+  it('puts back only what the refusing mailbox held, and reports the batch once', async () => {
     const syncs = heldSyncs();
     const answers = [
       (targets: readonly FlagTarget[]) => placed(targets, 'archive'),
@@ -503,17 +503,17 @@ describe('MailProvider bulk writes', () => {
     });
     await vi.waitFor(() => expect(onRefused).toHaveBeenCalledTimes(1));
     expect(onRefused).toHaveBeenCalledWith(expect.stringMatching(/: System Error$/));
-    // One account's copies moved, the other's are back in its inbox, in every thread.
+    // One mailbox's copies moved, the other's are back in its inbox, in every thread.
     await vi.waitFor(() =>
       expect(
-        mail().threads.map(({ foldersByAccount }) =>
-          Object.values(foldersByAccount)
+        mail().threads.map(({ foldersByMailbox }) =>
+          Object.values(foldersByMailbox)
             .map(folders => folders.join())
             .toSorted(),
         ),
       ).toEqual(shown.threads.map(() => ['archive', 'inbox'])),
     );
-    // The half-done batch asks its account for one sync, not one per thread.
+    // The half-done batch asks its mailbox for one sync, not one per thread.
     await vi.waitFor(() => expect(syncs.count()).toBe(1));
   });
 
@@ -527,13 +527,13 @@ describe('MailProvider bulk writes', () => {
       false,
     ],
   ])('%s', async (_, uidPlus) => {
-    const account = 'a@example.com';
+    const mailbox = 'a@example.com';
     const archive = holdMovesInto('archive', targets =>
       uidPlus ? placed(targets, 'archive') : unplaced(targets),
     );
     shown.threads = [
-      conversation('first', 'inbox', 7, [account]),
-      conversation('second', 'inbox', 8, [account]),
+      conversation('first', 'inbox', 7, [mailbox]),
+      conversation('second', 'inbox', 8, [mailbox]),
     ];
     await mount();
 
@@ -548,10 +548,10 @@ describe('MailProvider bulk writes', () => {
     expect(moveMessages.mock.calls[1]?.slice(1)).toEqual([
       uidPlus
         ? [
-            { folder: 'archive', mailbox: 'Archive', uidValidity: 3, uids: [107] },
-            { folder: 'inbox', mailbox: 'INBOX', uidValidity: 1, uids: [8] },
+            { folder: 'archive', folderName: 'Archive', uidValidity: 3, uids: [107] },
+            { folder: 'inbox', folderName: 'INBOX', uidValidity: 1, uids: [8] },
           ]
-        : [{ folder: 'inbox', mailbox: 'INBOX', uidValidity: 1, uids: [8] }],
+        : [{ folder: 'inbox', folderName: 'INBOX', uidValidity: 1, uids: [8] }],
       'trash',
     ]);
     if (uidPlus) {
@@ -566,7 +566,7 @@ describe('MailProvider bulk writes', () => {
     expect(mail().threads.find(({ id }) => id === 'second')?.folders).toEqual(['trash']);
   });
 
-  it('writes one flag command per account for many threads', async () => {
+  it('writes one flag command per mailbox for many threads', async () => {
     setFlag.mockResolvedValue({ ok: true, value: undefined });
     shown.threads = [10, 11, 12].map(uid => ({
       ...conversation(`in-${uid}`, 'inbox', uid),
@@ -581,7 +581,7 @@ describe('MailProvider bulk writes', () => {
     await vi.waitFor(() => expect(setFlag).toHaveBeenCalledTimes(2));
     for (const call of setFlag.mock.calls) {
       expect(call.slice(2)).toEqual([
-        [{ folder: 'inbox', mailbox: 'INBOX', uidValidity: 1, uids: [10, 11, 12] }],
+        [{ folder: 'inbox', folderName: 'INBOX', uidValidity: 1, uids: [10, 11, 12] }],
         '\\Seen',
         true,
       ]);
@@ -594,10 +594,10 @@ describe('MailProvider bulk writes', () => {
       ok: false,
       error: { kind: 'imap', reason: { kind: 'no', text: 'System Error' } },
     });
-    const account = 'a@example.com';
+    const mailbox = 'a@example.com';
     shown.threads = [
-      { ...conversation('in-10', 'inbox', 10, [account]), isUnread: true },
-      { ...conversation('ar-20', 'archive', 20, [account]), isUnread: true },
+      { ...conversation('in-10', 'inbox', 10, [mailbox]), isUnread: true },
+      { ...conversation('ar-20', 'archive', 20, [mailbox]), isUnread: true },
     ];
     await mount();
     await vi.waitFor(() => expect(syncs.count()).toBe(2));

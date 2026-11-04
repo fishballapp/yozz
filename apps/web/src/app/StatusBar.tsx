@@ -13,14 +13,14 @@ export const StatusBar = ({
   title: string;
   counts?: { unread: number; total: number };
 }) => {
-  const { accounts, isDemo: demo, syncStates, mailError, sentCopyError, sync } = useMail();
+  const { mailboxes, isDemo: demo, syncStates, mailError, sentCopyError, sync } = useMail();
 
-  const failedAccount = accounts.find(account => syncStates[account.address]?.status === 'failed');
+  const failedMailbox = mailboxes.find(mailbox => syncStates[mailbox.address]?.status === 'failed');
   const failedSync = (() => {
-    if (failedAccount === undefined) return null;
-    const state = syncStates[failedAccount.address];
+    if (failedMailbox === undefined) return null;
+    const state = syncStates[failedMailbox.address];
     if (state?.status !== 'failed') return null;
-    return describeMailFailure(state.failure, failedAccount.imap.host);
+    return describeMailFailure(state.failure, failedMailbox.imap.host);
   })();
 
   const notice = (() => {
@@ -50,12 +50,12 @@ export const StatusBar = ({
           <span className="truncate" title={notice}>
             {notice}
           </span>
-          {!demo && failedSync !== null && failedAccount !== undefined && (
+          {!demo && failedSync !== null && failedMailbox !== undefined && (
             <>
               <span aria-hidden>·</span>
               <button
                 type="button"
-                onClick={() => void sync(failedAccount.address)}
+                onClick={() => void sync(failedMailbox.address)}
                 className="shrink-0 text-paper underline underline-offset-3 transition-colors hover:text-signal"
               >
                 Retry

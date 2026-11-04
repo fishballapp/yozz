@@ -58,8 +58,8 @@ const attachmentsInR2 = (files: readonly FileReference[] | undefined) =>
 const isPrintableMessageId = (messageId: string) =>
   /^<[\x21-\x3d\x3f-\x7e]{1,250}>$/u.test(messageId);
 
-/** Every account's folders, keyed by address: what one grouping pass reads. */
-export type AccountSummaries = Readonly<Record<string, FolderSummaries>>;
+/** Every mailbox's folders, keyed by address: what one grouping pass reads. */
+export type MailboxSummaries = Readonly<Record<string, FolderSummaries>>;
 
 const MONTHS: Record<string, number> = {
   jan: 0,
@@ -147,7 +147,7 @@ const recipientsIn = (addresses: readonly ImapAddress[] | undefined): readonly R
 
 /**
  * `toAddress` is read from a copy that arrived (any folder but Sent); a message with only Sent
- * copies is one you wrote. With copies in two accounts the earliest arriving one wins.
+ * copies is one you wrote. With copies in two mailboxes the earliest arriving one wins.
  */
 const messageFromCopies = (
   id: string,
@@ -157,7 +157,7 @@ const messageFromCopies = (
   const firstFrom = summary.envelope?.from?.[0];
   const fromMailboxHost = addressOf(firstFrom);
   const arrived = locations.find(location => location.folder !== 'sent');
-  const owner = arrived?.account ?? locations[0]?.account ?? '';
+  const owner = arrived?.mailbox ?? locations[0]?.mailbox ?? '';
   const fromName = firstFrom?.name?.trim() || fromMailboxHost || owner;
   const outbound = arrived === undefined || fromMailboxHost?.toLowerCase() === owner.toLowerCase();
   // The server fills an absent Reply-To with From (RFC 9051 §7.5.2), so only another address is news.
@@ -209,7 +209,7 @@ const asImapAddresses = (list: string): readonly ImapAddress[] =>
  */
 const asSyntheticCopy = (message: VaultSentMessage) => ({
   location: {
-    account: message.from,
+    mailbox: message.from,
     folder: 'sent' as const,
     uidValidity: VAULT_UID_VALIDITY,
     uid: 0,
@@ -237,7 +237,7 @@ const asSyntheticCopy = (message: VaultSentMessage) => ({
     gmailThreadId: null,
     attachmentNames: [],
   } satisfies ImapMessageSummary,
-  account: message.from,
+  mailbox: message.from,
   folder: 'sent' as const,
 });
 
@@ -246,13 +246,13 @@ const asSyntheticCopy = (message: VaultSentMessage) => ({
  * subject (not INTERNALDATE, which differs between the Inbox and Sent copies). Flags are the union
  * across copies. See DECISIONS.md, "Threads span accounts, and an id stops naming one".
  */
-export const threadsFromAccounts = (
-  byAccount: AccountSummaries,
+export const threadsFromMailboxes = (
+  byMailbox: MailboxSummaries,
   vaultSent: readonly VaultSentMessage[] = [],
 ): ThreadState[] => {
   const copies = [
     ...vaultSent.map(asSyntheticCopy),
-    ...Object.entries(byAccount).flatMap(([account, byFolder]) =>
+    ...Object.entries(byMailbox).flatMap(([mailbox, byFolder]) =>
       // Drafts are synced for the mirror but are not mail: threaded in, a server-side draft would be
       // counted unread and eligible for flag writes and body loads.
       THREADED_FOLDERS.flatMap(folder => {
@@ -260,9 +260,9 @@ export const threadsFromAccounts = (
         return read === undefined
           ? []
           : read.summaries.map(summary => ({
-              location: { account, folder, uidValidity: read.uidValidity, uid: summary.uid },
+              location: { mailbox, folder, uidValidity: read.uidValidity, uid: summary.uid },
               summary,
-              account,
+              mailbox,
               folder,
             }));
       }),
@@ -298,7 +298,7 @@ export const threadsFromAccounts = (
       return 0;
     });
 
-  // Flags are per copy: a message read in one account is still unread in the other.
+  // Flags are per copy: a message read in one mailbox is still unread in the other.
   type Merged = (typeof ordered)[number] & {
     readonly locations: Location[];
     readonly flags: string[][];
@@ -343,7 +343,7 @@ export const threadsFromAccounts = (
       references: entry.summary.references,
       subject: entry.summary.envelope?.subject ?? null,
       gmailThreadId: entry.summary.gmailThreadId,
-      gmailAccount: entry.account,
+      gmailMailbox: entry.mailbox,
     })),
   );
 
@@ -379,25 +379,25 @@ export const threadsFromAccounts = (
     const folders = FOLDERS.filter(folder =>
       locations.some(location => location.folder === folder),
     );
-    const accounts = [...new Set(locations.map(location => location.account))].toSorted();
-    const foldersByAccount = Object.fromEntries(
-      accounts.map(account => [
-        account,
+    const mailboxes = [...new Set(locations.map(location => location.mailbox))].toSorted();
+    const foldersByMailbox = Object.fromEntries(
+      mailboxes.map(mailbox => [
+        mailbox,
         FOLDERS.filter(folder =>
-          locations.some(location => location.account === account && location.folder === folder),
+          locations.some(location => location.mailbox === mailbox && location.folder === folder),
         ),
       ]),
     );
     threads.push({
       id: rootId,
-      accounts,
+      mailboxes,
       subject: subjectOf(byId.get(rootId)?.summary),
       messages,
       isUnread: flags.some(f => !f.includes('\\SEEN')),
       isReplied: flags.some(f => f.includes('\\ANSWERED')),
       isStarred: flags.some(f => f.includes('\\FLAGGED')),
       folders,
-      foldersByAccount,
+      foldersByMailbox,
     });
   }
   return threads.sort((a, b) => (b.messages.at(-1)?.at ?? 0) - (a.messages.at(-1)?.at ?? 0));
@@ -442,14 +442,14 @@ export const withDrafts = (
     if (parent === undefined) {
       extra.push({
         id: draftIdOf(draftKey),
-        accounts: [],
+        mailboxes: [],
         subject: record.subject === '' ? '(no subject)' : record.subject,
         messages: [message],
         isUnread: false,
         isReplied: false,
         isStarred: false,
         folders: ['drafts'],
-        foldersByAccount: {},
+        foldersByMailbox: {},
       });
       continue;
     }

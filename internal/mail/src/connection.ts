@@ -23,7 +23,7 @@ export type MailConnectionFailure =
 
 export type MailClient = ImapClient & {
   /**
-   * SELECT only if `name` is not already the selected mailbox. Sync calls `client.select` directly
+   * SELECT only if `name` is not already the selected folder. Sync calls `client.select` directly
    * because it wants fresh UIDVALIDITY/UIDNEXT; body fetches and flag writes use this.
    */
   readonly ensureSelected: (name: string) => Promise<ImapResult<ImapSelected>>;
@@ -33,7 +33,7 @@ export type MailTask<T> = {
   readonly run: (client: MailClient) => Promise<Result<T, MailConnectionFailure>>;
   /** User-initiated work (open a body, a flag write, a sync) runs before prefetch. */
   readonly priority: 'user' | 'background';
-  /** A `write` changes the mailbox (a move, a flag, an APPEND); a reload must not drop it unasked. */
+  /** A `write` changes a folder (a move, a flag, an APPEND); a reload must not drop it unasked. */
   readonly effect: 'read' | 'write';
   /** Whether the task may be re-run on a fresh connection after a transport failure. APPEND must not. */
   readonly retry: boolean;
@@ -46,5 +46,5 @@ export type MailTask<T> = {
  */
 export const appendQuietLimitMs = (bytes: number): number => 60_000 + (bytes / 2 ** 20) * 15_000;
 
-/** Runs a task on one account's session. */
+/** Runs a task on one mailbox's session. */
 export type RunTask = <T>(task: MailTask<T>) => Promise<Result<T, MailConnectionFailure>>;

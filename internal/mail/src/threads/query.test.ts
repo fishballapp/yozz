@@ -176,24 +176,24 @@ describe('resolveScope', () => {
 
 describe('isThreadInScope', () => {
   const copy = (
-    account: string,
+    mailbox: string,
     folder: 'inbox' | 'sent' | 'archive' | 'trash',
     uidValidity = 1,
   ) => ({
-    account,
+    mailbox,
     folder,
     uidValidity,
     uid: 1,
   });
   const threadOf = (message: Partial<Message>): ThreadState => ({
     id: 't',
-    accounts: [],
+    mailboxes: [],
     subject: 's',
     isUnread: false,
     isReplied: false,
     isStarred: false,
     folders: [],
-    foldersByAccount: {},
+    foldersByMailbox: {},
     messages: [
       { id: 'm', fromName: 'x', fromAddress: 'x@x.co', toAddress: '', at: 0, body: [], ...message },
     ],

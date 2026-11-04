@@ -133,12 +133,12 @@ const readConversations = Effect.fnUntraced(function* ({
       );
   }
 
-  const { failed: unsynced } = yield* cache.syncSome(mail.accounts, { force: sync });
+  const { failed: unsynced } = yield* cache.syncSome(mail.mailboxes, { force: sync });
   // An id the cache does not hold (a search hit outside the window) is read from the server.
   const cached = resolveHandles(yield* cache.threads(), ids);
   const missing = cached.flatMap(({ id, thread }) => (thread === null ? [id] : []));
   const { extra, failed: unlooked } = yield* lookUp({
-    accounts: mail.accounts.filter(
+    mailboxes: mail.mailboxes.filter(
       ({ address }) => !unsynced.some(error => error.address === address),
     ),
     ids: missing,
@@ -188,7 +188,7 @@ const readConversations = Effect.fnUntraced(function* ({
     const text = (paragraphs: readonly string[]) =>
       untrusted(clip(paragraphs.join('\n\n'), bodyChars));
     const copy = (message.locations ?? []).find(isServerCopy);
-    const account = mail.accounts.find(({ address }) => address === copy?.account);
+    const mailbox = mail.mailboxes.find(({ address }) => address === copy?.mailbox);
     const draft = message.draftKey === undefined ? undefined : draftRecords.get(message.draftKey);
     if (message.draftKey !== undefined && draft !== undefined) {
       return {
@@ -208,7 +208,7 @@ const readConversations = Effect.fnUntraced(function* ({
       };
     }
     // Sent mail the vault holds: its text is already here, and its files are in R2.
-    if (copy === undefined || account === undefined) {
+    if (copy === undefined || mailbox === undefined) {
       const stored = message.attachments ?? [];
       const attachments = yield* Effect.forEach(stored, (attachment, index) =>
         Effect.gen(function* () {
@@ -226,17 +226,17 @@ const readConversations = Effect.fnUntraced(function* ({
         untrusted: { ...addressed, text: text(message.body) },
       };
     }
-    const folderCache = cache.of(account).folder(copy.folder);
+    const folderCache = cache.of(mailbox).folder(copy.folder);
     const cached = yield* usingCache(() => folderCache.getBody(copy.uid));
     const res =
       cached === null
         ? yield* usingCache(() =>
-            fetchBodyAt(mail.runOn(account), folderCache, copy, message.rawSize, mail.lookupTxt),
+            fetchBodyAt(mail.runOn(mailbox), folderCache, copy, message.rawSize, mail.lookupTxt),
           )
         : { ok: true as const, value: cached };
     if (!res.ok) {
       const failed = mailServerError(
-        { address: account.address, host: account.imap.host },
+        { address: mailbox.address, host: mailbox.imap.host },
         res.error,
       );
       return {
@@ -268,7 +268,7 @@ const readConversations = Effect.fnUntraced(function* ({
       json: {
         id: thread.id,
         url: urlOf(webUrl, 'unified', thread),
-        mailboxes: thread.accounts,
+        mailboxes: thread.mailboxes,
         folders: thread.folders,
         isUnread: thread.isUnread,
         isStarred: thread.isStarred,
@@ -283,7 +283,7 @@ const readConversations = Effect.fnUntraced(function* ({
     read: yield* Effect.forEach(found, readThread),
     notFound,
     failed,
-    syncedAt: yield* cache.syncedAt(mail.accounts),
+    syncedAt: yield* cache.syncedAt(mail.mailboxes),
   };
 });
 

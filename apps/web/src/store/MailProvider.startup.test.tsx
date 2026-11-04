@@ -3,7 +3,7 @@ import 'fake-indexeddb/auto';
 import type { ImapMessageSummary } from '@yozz.app/imap';
 import { ADDRESS_RECORD_TYPE, type AddressRecord } from '@yozz.app/mail/addresses/record';
 import { fakeFileStore } from '@yozz.app/mail/testing/fake-file-store';
-import type { syncAccount } from '@yozz.app/mail/threads/sync';
+import type { syncMailbox } from '@yozz.app/mail/threads/sync';
 import type { RecordStore } from '@yozz.app/mail/vault/record-store';
 import { act, type ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
@@ -18,9 +18,9 @@ const noFiles = fakeFileStore().store;
 vi.mock('../relay/connection', () => new Promise(() => {}));
 
 // The module that brings the stack, whose sync runs the moment it loads. Its one task opens the
-// account's connection, which then waits on `relay/connection` for ever.
+// mailbox's connection, which then waits on `relay/connection` for ever.
 const transport = vi.hoisted(() => ({
-  syncAccount: vi.fn((run: Parameters<typeof syncAccount>[0]) =>
+  syncMailbox: vi.fn((run: Parameters<typeof syncMailbox>[0]) =>
     run({
       run: async () => ({ ok: true, value: undefined }),
       priority: 'user',
@@ -30,7 +30,7 @@ const transport = vi.hoisted(() => ({
   ),
 }));
 vi.mock('@yozz.app/mail/threads/sync', () => ({
-  syncAccount: transport.syncAccount,
+  syncMailbox: transport.syncMailbox,
   prefetchBodies: () => {},
 }));
 
@@ -113,7 +113,7 @@ afterEach(async () => {
   await Promise.all(unmounts.splice(0).map(unmount => unmount()));
   vault.session = { userId: 'u1', files: noFiles, store };
   mail = null;
-  transport.syncAccount.mockClear();
+  transport.syncMailbox.mockClear();
   vi.restoreAllMocks();
 });
 
@@ -142,10 +142,10 @@ describe('MailProvider startup', () => {
     await vi.waitFor(() => expect(host.textContent).toContain('Quarterly numbers'));
     // Ample for an import that did not wait for a frame to have loaded and run.
     await new Promise(resolve => setTimeout(resolve, 50));
-    expect(transport.syncAccount).not.toHaveBeenCalled();
+    expect(transport.syncMailbox).not.toHaveBeenCalled();
 
     for (const frame of frames.splice(0)) frame(performance.now());
-    await vi.waitFor(() => expect(transport.syncAccount).toHaveBeenCalledOnce());
+    await vi.waitFor(() => expect(transport.syncMailbox).toHaveBeenCalledOnce());
   });
 
   it("a first sync that outlived its session leaves the next session's sync to be joined", async () => {
@@ -181,9 +181,9 @@ describe('MailProvider startup', () => {
       void mail?.sync(ADDRESS.address);
     });
     await new Promise(resolve => setTimeout(resolve, 50));
-    expect(transport.syncAccount).not.toHaveBeenCalled();
+    expect(transport.syncMailbox).not.toHaveBeenCalled();
     await act(async () => frames[1]?.(performance.now()));
-    await vi.waitFor(() => expect(transport.syncAccount).toHaveBeenCalledOnce());
+    await vi.waitFor(() => expect(transport.syncMailbox).toHaveBeenCalledOnce());
   });
 
   it('syncs an address added after the address list was refused', async () => {

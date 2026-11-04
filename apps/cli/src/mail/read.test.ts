@@ -82,9 +82,10 @@ layer(NodeServices.layer)(it => {
         ]);
         // Bodies are fetched with BODY.PEEK and nothing is stored: read marks nothing read.
         expect(server.commands.some(command => command.startsWith('UID STORE'))).toBe(false);
-        expect([...(server.mailboxes.get('INBOX')?.messages ?? [])].map(m => [...m.flags])).toEqual(
-          [[], []],
-        );
+        expect([...(server.folders.get('INBOX')?.messages ?? [])].map(m => [...m.flags])).toEqual([
+          [],
+          [],
+        ]);
       }),
     );
 

@@ -91,7 +91,7 @@ export const splitQuote = (body: string) => {
   return at === -1 ? { text: body, quote: '' } : { text: body.slice(0, at), quote: body.slice(at) };
 };
 
-/** The address to send as, when it is one of the account's. */
+/** The address to send as, when it is one of the mailbox's. */
 export const identityOf = (identities: readonly AddressRecord[], address: string) => {
   const identity = identities.find(candidate => candidate.address === address);
   return identity === undefined

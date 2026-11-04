@@ -36,8 +36,8 @@ const thread = (
   overrides: Partial<ThreadState> = {},
 ): ThreadState => ({
   id,
-  accounts: ['me@yozz.app'],
-  foldersByAccount: { 'me@yozz.app': folders },
+  mailboxes: ['me@yozz.app'],
+  foldersByMailbox: { 'me@yozz.app': folders },
   subject: `Subject ${id}`,
   messages: [message(`${id}/1`)],
   isUnread: true,
@@ -222,7 +222,7 @@ describe('get_threads', () => {
 
   it('says which mailboxes hold each message, so a mixed thread is legible', async () => {
     const location = (folder: Folder) => ({
-      account: 'me@yozz.app',
+      mailbox: 'me@yozz.app',
       folder,
       uidValidity: 1,
       uid: 7,
@@ -262,7 +262,7 @@ describe('get_threads', () => {
         message('f/1', {
           to: [{ name: 'Doe, Jane', address: 'billing@yozz.app' }],
           cc: [{ name: 'Ops', address: 'ops@example.com' }],
-          locations: [{ account: 'me@yozz.app', folder: 'inbox', uidValidity: 1, uid: 3 }],
+          locations: [{ mailbox: 'me@yozz.app', folder: 'inbox', uidValidity: 1, uid: 3 }],
         }),
       ],
     });
@@ -293,7 +293,7 @@ describe('get_threads', () => {
         message('o/1', {
           fromAddress: 'me@yozz.app',
           to: [{ address: 'ada@example.com' }],
-          locations: [{ account: 'me@yozz.app', folder: 'sent', uidValidity: 1, uid: 4 }],
+          locations: [{ mailbox: 'me@yozz.app', folder: 'sent', uidValidity: 1, uid: 4 }],
         }),
       ],
     });
@@ -443,7 +443,7 @@ describe('get_threads', () => {
     await expect(
       call(tools, 'get_threads', { mailbox: 'archive', query: 'nothing here' }),
     ).resolves.toMatchObject({ threads: [], total: 0 });
-    // An address's own view is the inbox filtered to that account.
+    // An address's own view is the inbox filtered to that mailbox.
     await expect(
       call(tools, 'get_threads', { account: 'someone@else.com' }),
     ).resolves.toMatchObject({ total: 0 });
@@ -583,7 +583,7 @@ describe('update_threads', () => {
       messages: [
         message('a/1', {
           locations: [
-            { account: 'me@yozz.app', folder: 'sent', uidValidity: VAULT_UID_VALIDITY, uid: 0 },
+            { mailbox: 'me@yozz.app', folder: 'sent', uidValidity: VAULT_UID_VALIDITY, uid: 0 },
           ],
         }),
       ],
@@ -675,7 +675,7 @@ describe('save_draft and delete_draft', () => {
     expect(state.written).toEqual([]);
   });
 
-  it('files a reply under the account that holds the conversation', async () => {
+  it('files a reply under the mailbox that holds the conversation', async () => {
     // The sending address may have no mailbox of its own.
     const { tools, state } = fakePort([thread('a', ['inbox'])]);
     await call(tools, 'save_draft', { from: 'alias@yozz.app', threadId: 'a', body: 'On it.' });

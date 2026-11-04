@@ -13,14 +13,14 @@ import type { Folder } from './thread.ts';
 const thread = (
   id: string,
   folders: readonly Folder[],
-  foldersByAccount: Readonly<Record<string, readonly Folder[]>> = { 'me@x': folders },
+  foldersByMailbox: Readonly<Record<string, readonly Folder[]>> = { 'me@x': folders },
   flags = {},
 ) => ({
   id,
   isUnread: true,
   isStarred: false,
   folders,
-  foldersByAccount,
+  foldersByMailbox,
   ...flags,
 });
 
@@ -30,7 +30,7 @@ const op = (
   extra: Partial<PendingOp> = {},
 ): PendingOp => ({
   id: `${threadId}:${JSON.stringify(change)}`,
-  account: 'me@x',
+  mailbox: 'me@x',
   threadId,
   change,
   retireAtSyncSeq: null,
@@ -88,7 +88,7 @@ describe('applyOps', () => {
       isUnread: false,
       isStarred: false,
       folders: ['trash'],
-      foldersByAccount: { 'me@x': ['trash'] },
+      foldersByMailbox: { 'me@x': ['trash'] },
     });
     expect(result[1]).toBe(base[1]);
   });
@@ -98,21 +98,21 @@ describe('applyOps', () => {
     const before = applyOps([thread('a', ['inbox'])], ops);
     const staleSync = applyOps([thread('a', ['inbox'])], ops);
     expect(before[0]?.folders).toEqual(['archive']);
-    expect(before[0]?.foldersByAccount['me@x']).toEqual(['archive']);
+    expect(before[0]?.foldersByMailbox['me@x']).toEqual(['archive']);
     expect(staleSync[0]?.folders).toEqual(['archive']);
-    expect(staleSync[0]?.foldersByAccount['me@x']).toEqual(['archive']);
+    expect(staleSync[0]?.foldersByMailbox['me@x']).toEqual(['archive']);
   });
 
-  it('moves only the op’s own account, and the thread is in every folder any account holds', () => {
+  it('moves only the op’s own mailbox, and the thread is in every folder any mailbox holds', () => {
     const shared = thread('a', ['inbox'], { 'me@x': ['inbox'], 'you@y': ['inbox'] });
     const [result] = applyOps([shared], [op('a', { kind: 'move', to: 'archive' })]);
-    expect(result?.foldersByAccount).toEqual({ 'me@x': ['archive'], 'you@y': ['inbox'] });
+    expect(result?.foldersByMailbox).toEqual({ 'me@x': ['archive'], 'you@y': ['inbox'] });
     expect(result?.folders).toEqual(['inbox', 'archive']);
   });
 
-  it('invents no copy for an account that holds none', () => {
+  it('invents no copy for a mailbox that holds none', () => {
     const base = [thread('a', ['inbox'])];
-    const [result] = applyOps(base, [op('a', { kind: 'move', to: 'inbox' }, { account: 'you@y' })]);
+    const [result] = applyOps(base, [op('a', { kind: 'move', to: 'inbox' }, { mailbox: 'you@y' })]);
     expect(result).toBe(base[0]);
   });
 });
@@ -121,10 +121,10 @@ describe('retireOps', () => {
   const pending = op('a', { kind: 'flag', key: 'isStarred', value: true });
   const ackedEarly = op('b', { kind: 'move', to: 'archive' }, { retireAtSyncSeq: 3 });
   const ackedLate = op('c', { kind: 'move', to: 'archive' }, { retireAtSyncSeq: 5 });
-  const other = op('d', { kind: 'move', to: 'archive' }, { account: 'you@y', retireAtSyncSeq: 1 });
+  const other = op('d', { kind: 'move', to: 'archive' }, { mailbox: 'you@y', retireAtSyncSeq: 1 });
   const ops = [pending, ackedEarly, ackedLate, other];
 
-  it('retires only ops acked before the completed sync started, for that account', () => {
+  it('retires only ops acked before the completed sync started, for that mailbox', () => {
     expect(retireOps(ops, 'me@x', 3)).toEqual([pending, ackedLate, other]);
     expect(retireOps(ops, 'me@x', 4)).toEqual([pending, ackedLate, other]);
     expect(retireOps(ops, 'me@x', 5)).toEqual([pending, other]);
@@ -158,8 +158,8 @@ describe('flagTargets', () => {
         marks,
       ),
     ).toEqual([
-      { folder: 'inbox', mailbox: 'INBOX', uidValidity: 7, uids: [4, 5] },
-      { folder: 'sent', mailbox: 'Sent Items', uidValidity: 3, uids: [9] },
+      { folder: 'inbox', folderName: 'INBOX', uidValidity: 7, uids: [4, 5] },
+      { folder: 'sent', folderName: 'Sent Items', uidValidity: 3, uids: [9] },
     ]);
   });
 

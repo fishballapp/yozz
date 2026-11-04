@@ -189,7 +189,7 @@ const imapServerFor = async (tlsOptions: { key: Buffer; cert: Buffer }) => {
   const modulePath = resolve(CLI_APP, 'src/mail/fake-imap-server.ts') as string;
   const { makeFakeImapServer } = (await import(modulePath)) as {
     readonly makeFakeImapServer: (login: { username: string; password: string }) => {
-      readonly mailboxes: ReadonlyMap<
+      readonly folders: ReadonlyMap<
         string,
         { readonly messages: readonly { readonly raw: Uint8Array }[] }
       >;
@@ -778,10 +778,10 @@ const main = async () => {
     const notesSent = received[4];
     if (notesSent === undefined) throw new Error('nothing received');
     for (let attempt = 0; attempt < 120; attempt += 1) {
-      if ((imap.mailboxes.get('Sent')?.messages.length ?? 0) > 0) break;
+      if ((imap.folders.get('Sent')?.messages.length ?? 0) > 0) break;
       await page.waitForTimeout(500);
     }
-    const [appended] = imap.mailboxes.get('Sent')?.messages ?? [];
+    const [appended] = imap.folders.get('Sent')?.messages ?? [];
     if (appended === undefined) throw new Error('nothing was appended to Sent');
     assert(
       'the APPEND to Sent is the bytes SMTP took',

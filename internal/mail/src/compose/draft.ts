@@ -33,7 +33,7 @@ export type ComposeDraft = {
   /** The Message-ID a reply answers; absent on a new message or a forward. */
   inReplyTo?: string;
   /**
-   * Which account's Drafts and Sent hold this message. Only a reply has one, and only until it is
+   * Which mailbox's Drafts and Sent hold this message. Only a reply has one, and only until it is
    * stored. Carried on the draft because the sending address may have no mailbox of its own.
    */
   ownerAccount?: string;
@@ -112,8 +112,8 @@ export const addressList = (value: string): readonly string[] =>
     .map(address => address.trim())
     .filter(address => address !== '');
 
-/** The sending address's own account when it has a mailbox, else the one holding the conversation. */
-export const ownerAccountFor = (
+/** The sending address's own mailbox when it has a mailbox, else the one holding the conversation. */
+export const ownerMailboxFor = (
   threads: readonly ThreadState[],
   inReplyTo: string | undefined,
   from: string,
@@ -123,7 +123,7 @@ export const ownerAccountFor = (
     candidate.messages.some(message => message.messageId === inReplyTo),
   );
   if (thread === undefined) return undefined;
-  return thread.accounts.includes(from) ? from : thread.accounts[0];
+  return thread.mailboxes.includes(from) ? from : thread.mailboxes[0];
 };
 
 /** Gmail's ceiling; base64 adds a third on top. */

@@ -26,12 +26,12 @@ export type LiveState =
   /** The server or the network ended it; the next task, or a visibility/online event, retries. */
   | { readonly status: 'failed'; readonly failure: MailConnectionFailure; readonly at: number };
 
-/** `LiveManager.run` for one account, as the mail store hands it out. */
-export type RunOn = (account: InboundAddress) => RunTask;
+/** `LiveManager.run` for one mailbox, as the mail store hands it out. */
+export type RunOn = (mailbox: InboundAddress) => RunTask;
 
 export type LiveManager = {
   readonly run: <T>(
-    account: InboundAddress,
+    mailbox: InboundAddress,
     task: MailTask<T>,
   ) => Promise<Result<T, MailConnectionFailure>>;
   readonly close: (address: string) => Promise<void>;
@@ -60,7 +60,7 @@ type Socket = {
   readonly resumed: boolean;
   idle: ImapIdle | null;
   selected: string | null;
-  /** What the last SELECT answered, so a write can check the mailbox has not been renumbered. */
+  /** What the last SELECT answered, so a write can check the folder has not been renumbered. */
   selectedInfo: ImapSelected | null;
 };
 
@@ -173,20 +173,20 @@ export const createLiveManager = (deps: {
   };
 
   const wrapClient = (conn: Connection, socket: () => Socket, client: ImapClient): MailClient => {
-    const select: ImapClient['select'] = async mailbox => {
+    const select: ImapClient['select'] = async folderName => {
       // Always read-write: flag writes and APPEND need it, and EXAMINE would block them.
-      const res = await client.select(mailbox, { readOnly: false });
-      socket().selected = res.ok ? mailbox : null;
+      const res = await client.select(folderName, { readOnly: false });
+      socket().selected = res.ok ? folderName : null;
       socket().selectedInfo = res.ok ? res.value : null;
       return res;
     };
     return {
       ...client,
       select,
-      append: async (mailbox, message, flags, internalDate) => {
+      append: async (folderName, message, flags, internalDate) => {
         conn.stallAfterMs = appendQuietLimitMs(message.length);
         try {
-          return await client.append(mailbox, message, flags, internalDate);
+          return await client.append(folderName, message, flags, internalDate);
         } finally {
           conn.stallAfterMs = STALL_MS;
           // A long wait is over, so the shorter limit does not count it.
@@ -477,19 +477,19 @@ export const createLiveManager = (deps: {
     }, STALL_CHECK_MS);
   };
 
-  const getOrCreate = (account: InboundAddress): Connection => {
-    const key = imapKeyOf(account.imap);
-    const existing = connections.get(account.address);
+  const getOrCreate = (mailbox: InboundAddress): Connection => {
+    const key = imapKeyOf(mailbox.imap);
+    const existing = connections.get(mailbox.address);
     if (existing !== undefined) {
       // Changed credentials: the running task finishes on the socket it started on, and
       // `dropStaleSocket` closes it before the next one starts. Never a LOGOUT mid-task.
-      existing.imap = account.imap;
+      existing.imap = mailbox.imap;
       existing.imapKey = key;
       return existing;
     }
     const conn: Connection = {
-      address: account.address,
-      imap: account.imap,
+      address: mailbox.address,
+      imap: mailbox.imap,
       imapKey: key,
       socket: null,
       socketKey: null,
@@ -506,7 +506,7 @@ export const createLiveManager = (deps: {
       stallAfterMs: STALL_MS,
       abort: null,
     };
-    connections.set(account.address, conn);
+    connections.set(mailbox.address, conn);
     return conn;
   };
 
@@ -520,9 +520,9 @@ export const createLiveManager = (deps: {
   };
 
   return {
-    run: (account, task) =>
+    run: (mailbox, task) =>
       new Promise(resolve => {
-        const conn = getOrCreate(account);
+        const conn = getOrCreate(mailbox);
         // An idle connection's last progress is old news; the clock starts with this work.
         if (!hasWork(conn)) conn.progressAt = now();
         const end = deps.activity?.begin({ effect: task.effect, priority: task.priority });

@@ -14,7 +14,7 @@ type FakeClient = ImapClient & {
   failNext: MailConnectionFailure | null;
 };
 
-const ACCOUNT: InboundAddress = {
+const MAILBOX: InboundAddress = {
   address: 'me@x.test',
   smtp: { host: 'smtp.x', port: 465, username: 'me', password: 'p' },
   imap: { host: 'imap.x', port: 993, username: 'me', password: 'p' },
@@ -226,8 +226,8 @@ describe('createLiveManager', () => {
     const activity = createActivityTracker();
     const manager = createManager(['IDLE'], activity);
     const slow = hanging();
-    const running = manager.run(ACCOUNT, { ...slow.task, effect: 'write' });
-    const queued = manager.run(ACCOUNT, quick);
+    const running = manager.run(MAILBOX, { ...slow.task, effect: 'write' });
+    const queued = manager.run(MAILBOX, quick);
     await flush();
     expect(activity.snapshot()).toMatchObject([
       { effect: 'write', priority: 'user' },
@@ -241,9 +241,9 @@ describe('createLiveManager', () => {
 
   it('fails the work behind a server that stops answering, a minute after it last moved', async () => {
     const manager = createManager();
-    void manager.run(ACCOUNT, hanging().task);
+    void manager.run(MAILBOX, hanging().task);
     let behind: unknown = 'waiting';
-    void manager.run(ACCOUNT, quick).then(result => {
+    void manager.run(MAILBOX, quick).then(result => {
       behind = result;
     });
     await flush();
@@ -285,7 +285,7 @@ describe('createLiveManager', () => {
         value: { client: createFakeClient(), close: () => aborted, resumed: false },
       };
     }, activity);
-    const write = manager.run(ACCOUNT, {
+    const write = manager.run(MAILBOX, {
       priority: 'user',
       effect: 'write',
       retry: false,
@@ -311,7 +311,7 @@ describe('createLiveManager', () => {
         })),
       activity,
     );
-    const read = manager.run(ACCOUNT, quick);
+    const read = manager.run(MAILBOX, quick);
     await flush();
 
     await advance(70_000);
@@ -323,7 +323,7 @@ describe('createLiveManager', () => {
   it('leaves slow work alone while bytes keep crossing the connection', async () => {
     const manager = createManager();
     const slow = hanging();
-    const running = manager.run(ACCOUNT, slow.task);
+    const running = manager.run(MAILBOX, slow.task);
     await flush();
     for (let minute = 0; minute < 6; minute++) {
       await advance(30_000);
@@ -355,7 +355,7 @@ describe('createLiveManager', () => {
         };
       }, activity);
       const append = (bytes: number): Promise<unknown> =>
-        manager.run(ACCOUNT, {
+        manager.run(MAILBOX, {
           priority: 'user',
           effect: 'write',
           retry: false,
@@ -395,7 +395,7 @@ describe('createLiveManager', () => {
       const { manager, append } = appending();
       const written = append(1024);
       let behind: unknown = 'waiting';
-      void manager.run(ACCOUNT, quick).then(result => {
+      void manager.run(MAILBOX, quick).then(result => {
         behind = result;
       });
       await flush();
@@ -412,7 +412,7 @@ describe('createLiveManager', () => {
       const { manager, append, answer } = appending(undefined, () => closing.promise);
       const written = append(33 * MIB);
       let behind: unknown = 'waiting';
-      void manager.run(ACCOUNT, quick).then(result => {
+      void manager.run(MAILBOX, quick).then(result => {
         behind = result;
       });
       await flush();
@@ -437,7 +437,7 @@ describe('createLiveManager', () => {
       answer.resolve({ ok: true, value: null });
       await append(33 * MIB);
 
-      const read = manager.run(ACCOUNT, hanging().task);
+      const read = manager.run(MAILBOX, hanging().task);
       await flush();
       await advance(70_000);
       expect(states.at(-1)).toMatchObject({ status: 'failed', failure: { kind: 'stalled' } });
@@ -454,9 +454,9 @@ describe('createLiveManager', () => {
     };
     for (let delay = 0; delay < 12; delay++) {
       const manager = createManager();
-      const second = manager.run(ACCOUNT, task).then(async () => {
+      const second = manager.run(MAILBOX, task).then(async () => {
         for (let i = 0; i < delay; i++) await Promise.resolve();
-        return manager.run(ACCOUNT, task);
+        return manager.run(MAILBOX, task);
       });
       let isDone = false;
       void second.then(() => {
@@ -472,7 +472,7 @@ describe('createLiveManager', () => {
     const manager = createManager();
     const order: string[] = [];
     const tasks = [
-      manager.run(ACCOUNT, {
+      manager.run(MAILBOX, {
         priority: 'user',
         effect: 'read',
         retry: true,
@@ -481,7 +481,7 @@ describe('createLiveManager', () => {
           return { ok: true, value: 1 };
         },
       }),
-      manager.run(ACCOUNT, {
+      manager.run(MAILBOX, {
         priority: 'background',
         effect: 'read',
         retry: true,
@@ -490,7 +490,7 @@ describe('createLiveManager', () => {
           return { ok: true, value: 2 };
         },
       }),
-      manager.run(ACCOUNT, {
+      manager.run(MAILBOX, {
         priority: 'user',
         effect: 'read',
         retry: true,
@@ -504,9 +504,9 @@ describe('createLiveManager', () => {
     expect(order).toEqual(['u1', 'u2', 'b1']);
   });
 
-  it('ensureSelected skips a second SELECT of the same mailbox', async () => {
+  it('ensureSelected skips a second SELECT of the same folder', async () => {
     const manager = createManager();
-    await manager.run(ACCOUNT, {
+    await manager.run(MAILBOX, {
       priority: 'user',
       effect: 'read',
       retry: true,
@@ -523,7 +523,7 @@ describe('createLiveManager', () => {
 
   it('enters idle after the queue drains and done() runs before the next task', async () => {
     const manager = createManager();
-    await manager.run(ACCOUNT, {
+    await manager.run(MAILBOX, {
       priority: 'user',
       effect: 'read',
       retry: true,
@@ -532,13 +532,13 @@ describe('createLiveManager', () => {
     await vi.waitFor(() => expect(states.at(-1)).toMatchObject({ status: 'live', idling: true }));
 
     let ran = false;
-    const next = manager.run(ACCOUNT, {
+    const next = manager.run(MAILBOX, {
       priority: 'user',
       effect: 'read',
       retry: true,
       run: async () => {
         ran = true;
-        expect(manager.state(ACCOUNT.address)).toMatchObject({ status: 'live', idling: false });
+        expect(manager.state(MAILBOX.address)).toMatchObject({ status: 'live', idling: false });
         return { ok: true, value: undefined };
       },
     });
@@ -548,7 +548,7 @@ describe('createLiveManager', () => {
 
   it('debounces exists during idle to one onMailboxChanged per second', async () => {
     const manager = createManager();
-    await manager.run(ACCOUNT, {
+    await manager.run(MAILBOX, {
       priority: 'user',
       effect: 'read',
       retry: true,
@@ -560,16 +560,16 @@ describe('createLiveManager', () => {
     client.emitUntagged({ kind: 'exists', count: 1 });
     client.emitUntagged({ kind: 'exists', count: 2 });
     client.emitUntagged({ kind: 'fetch', seq: 1, items: [] });
-    expect(mailboxChanges).toEqual([ACCOUNT.address]);
+    expect(mailboxChanges).toEqual([MAILBOX.address]);
     await advance(1000);
     client.emitUntagged({ kind: 'expunge', seq: 1 });
-    expect(mailboxChanges).toEqual([ACCOUNT.address, ACCOUNT.address]);
+    expect(mailboxChanges).toEqual([MAILBOX.address, MAILBOX.address]);
   });
 
   it('retries a transport failure once when retry is true', async () => {
     const manager = createManager();
     let attempts = 0;
-    const result = await manager.run(ACCOUNT, {
+    const result = await manager.run(MAILBOX, {
       priority: 'user',
       effect: 'read',
       retry: true,
@@ -592,7 +592,7 @@ describe('createLiveManager', () => {
   it('does not retry when retry is false', async () => {
     const manager = createManager();
     let attempts = 0;
-    const result = await manager.run(ACCOUNT, {
+    const result = await manager.run(MAILBOX, {
       priority: 'user',
       effect: 'read',
       retry: false,
@@ -611,7 +611,7 @@ describe('createLiveManager', () => {
 
   it('keeps the connection open past the two minutes a hidden tab used to get, idling in INBOX', async () => {
     const manager = createManager();
-    await manager.run(ACCOUNT, {
+    await manager.run(MAILBOX, {
       priority: 'user',
       effect: 'read',
       retry: true,
@@ -621,13 +621,13 @@ describe('createLiveManager', () => {
 
     await advance(10 * 60 * 1000);
     expect(clients[0]?.logouts).toBe(0);
-    expect(manager.state(ACCOUNT.address)).toMatchObject({ status: 'live', idling: true });
+    expect(manager.state(MAILBOX.address)).toMatchObject({ status: 'live', idling: true });
     expect(clients).toHaveLength(1);
   });
 
   it('a connection that stays open still reports a mailbox change while idling', async () => {
     const manager = createManager();
-    await manager.run(ACCOUNT, {
+    await manager.run(MAILBOX, {
       priority: 'user',
       effect: 'read',
       retry: true,
@@ -637,7 +637,7 @@ describe('createLiveManager', () => {
     await advance(10 * 60 * 1000);
 
     clients[0]?.emitUntagged({ kind: 'exists', count: 3 });
-    expect(mailboxChanges).toEqual([ACCOUNT.address]);
+    expect(mailboxChanges).toEqual([MAILBOX.address]);
     expect(clients[0]?.logouts).toBe(0);
   });
 
@@ -647,7 +647,7 @@ describe('createLiveManager', () => {
     const gate = new Promise<void>(resolve => {
       release = resolve;
     });
-    const running = manager.run(ACCOUNT, {
+    const running = manager.run(MAILBOX, {
       priority: 'user',
       effect: 'read',
       retry: true,
@@ -656,7 +656,7 @@ describe('createLiveManager', () => {
         return { ok: true, value: 'done' };
       },
     });
-    const queued = manager.run(ACCOUNT, {
+    const queued = manager.run(MAILBOX, {
       priority: 'user',
       effect: 'read',
       retry: true,
@@ -677,7 +677,7 @@ describe('createLiveManager', () => {
 
   it('a changed password closes the old connection before the next task', async () => {
     const manager = createManager();
-    await manager.run(ACCOUNT, {
+    await manager.run(MAILBOX, {
       priority: 'user',
       effect: 'read',
       retry: true,
@@ -686,8 +686,8 @@ describe('createLiveManager', () => {
     const first = clients[0];
     if (first === undefined) throw new Error('no client');
     const changed: InboundAddress = {
-      ...ACCOUNT,
-      imap: { ...ACCOUNT.imap, password: 'new' },
+      ...MAILBOX,
+      imap: { ...MAILBOX.imap, password: 'new' },
     };
     await manager.run(changed, {
       priority: 'user',
@@ -706,7 +706,7 @@ describe('createLiveManager', () => {
       release = resolve;
     });
     const commandsAfterChange: number[] = [];
-    const running = manager.run(ACCOUNT, {
+    const running = manager.run(MAILBOX, {
       priority: 'user',
       effect: 'read',
       retry: false,
@@ -719,7 +719,7 @@ describe('createLiveManager', () => {
       },
     });
     await vi.waitFor(() => expect(clients).toHaveLength(1));
-    const changed: InboundAddress = { ...ACCOUNT, imap: { ...ACCOUNT.imap, password: 'new' } };
+    const changed: InboundAddress = { ...MAILBOX, imap: { ...MAILBOX.imap, password: 'new' } };
     const next = manager.run(changed, {
       priority: 'user',
       effect: 'read',
@@ -737,7 +737,7 @@ describe('createLiveManager', () => {
   it('a task that throws is retried once on a fresh socket, like a closed one', async () => {
     const manager = createManager();
     let attempts = 0;
-    const result = await manager.run(ACCOUNT, {
+    const result = await manager.run(MAILBOX, {
       priority: 'user',
       effect: 'read',
       retry: true,
@@ -751,7 +751,7 @@ describe('createLiveManager', () => {
     expect(clients).toHaveLength(2);
     expect(clients[0]?.logouts).toBe(1);
 
-    const twice = await manager.run(ACCOUNT, {
+    const twice = await manager.run(MAILBOX, {
       priority: 'user',
       effect: 'read',
       retry: true,
@@ -760,12 +760,12 @@ describe('createLiveManager', () => {
       },
     });
     expect(twice).toEqual({ ok: false, error: { kind: 'error', detail: 'still boom' } });
-    expect(manager.state(ACCOUNT.address)).toMatchObject({ status: 'failed' });
+    expect(manager.state(MAILBOX.address)).toMatchObject({ status: 'failed' });
   });
 
   it('without IDLE, NOOPs every 5 min and onMailboxChanged every 2 min, without piling up', async () => {
     const manager = createManager([]);
-    await manager.run(ACCOUNT, {
+    await manager.run(MAILBOX, {
       priority: 'user',
       effect: 'read',
       retry: true,
@@ -774,7 +774,7 @@ describe('createLiveManager', () => {
     await flush();
     expect(clients[0]?.noops).toBe(0);
     await advance(2 * 60 * 1000);
-    expect(mailboxChanges).toEqual([ACCOUNT.address]);
+    expect(mailboxChanges).toEqual([MAILBOX.address]);
     await advance(3 * 60 * 1000);
     expect(clients[0]?.noops).toBe(1);
     // Ten minutes in: five polls and two NOOPs, not a growing chain of timers.
@@ -785,7 +785,7 @@ describe('createLiveManager', () => {
 
   it("ignores a command's own EXISTS/FETCH responses; only an idling connection reports a change", async () => {
     const manager = createManager();
-    await manager.run(ACCOUNT, {
+    await manager.run(MAILBOX, {
       priority: 'user',
       effect: 'read',
       retry: true,
@@ -800,12 +800,12 @@ describe('createLiveManager', () => {
     expect(mailboxChanges).toEqual([]);
     await vi.waitFor(() => expect(states.at(-1)).toMatchObject({ status: 'live', idling: true }));
     clients[0]?.emitUntagged({ kind: 'exists', count: 10 });
-    expect(mailboxChanges).toEqual([ACCOUNT.address]);
+    expect(mailboxChanges).toEqual([MAILBOX.address]);
   });
 
   it('reopens and idles again when the server drops an IDLE', async () => {
     const manager = createManager();
-    await manager.run(ACCOUNT, {
+    await manager.run(MAILBOX, {
       priority: 'user',
       effect: 'read',
       retry: true,
@@ -824,7 +824,7 @@ describe('createLiveManager', () => {
 
   it('a transport failure that survives the retry marks the connection failed', async () => {
     const manager = createManager();
-    const result = await manager.run(ACCOUNT, {
+    const result = await manager.run(MAILBOX, {
       priority: 'user',
       effect: 'read',
       retry: true,
@@ -832,13 +832,13 @@ describe('createLiveManager', () => {
     });
     expect(result.ok).toBe(false);
     expect(clients).toHaveLength(2);
-    expect(manager.state(ACCOUNT.address)).toMatchObject({ status: 'failed' });
+    expect(manager.state(MAILBOX.address)).toMatchObject({ status: 'failed' });
     expect(clients.map(client => client.logouts)).toEqual([1, 1]);
   });
 
   it('without IDLE, keeps polling for mail past the two minutes, and never closes', async () => {
     const manager = createManager([]);
-    await manager.run(ACCOUNT, {
+    await manager.run(MAILBOX, {
       priority: 'user',
       effect: 'read',
       retry: true,
@@ -848,6 +848,6 @@ describe('createLiveManager', () => {
     await advance(10 * 60 * 1000);
     expect(mailboxChanges).toHaveLength(5);
     expect(clients[0]?.logouts).toBe(0);
-    expect(manager.state(ACCOUNT.address)).toMatchObject({ status: 'live', idling: false });
+    expect(manager.state(MAILBOX.address)).toMatchObject({ status: 'live', idling: false });
   });
 });

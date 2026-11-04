@@ -4,7 +4,7 @@ import { useState } from 'react';
  * Which rows of the list are ticked, as Gmail does it: a box per row, Shift-click for a range, and
  * one box over them all that ticks everything or, once anything is ticked, clears it.
  *
- * A selection belongs to one `scope` (mailbox, search and open message): change any of them and it
+ * A selection belongs to one `scope` (view, search and open message): change any of them and it
  * is gone, so opening a message clears it without anything having to say so. Below `lg`, where a
  * row has no box until you ask, `isSelecting` is the Select button's mode, and unticking the last
  * row leaves it.

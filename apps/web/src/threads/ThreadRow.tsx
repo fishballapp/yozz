@@ -15,7 +15,7 @@ import {
   isOnServer,
   newestInbound,
 } from '@yozz.app/mail/threads/thread';
-import { latestOf, type MailboxId, previewOf } from '@yozz.app/mail/threads/views';
+import { latestOf, previewOf, type ViewId } from '@yozz.app/mail/threads/views';
 import { cn } from 'cn';
 import { DISCARD_WARNING } from '../compose/intent';
 import { useMail } from '../store/MailProvider';
@@ -43,7 +43,7 @@ const REVEALED = {
     'w-0 overflow-hidden group-hover:w-12 group-has-[:focus-visible]:w-12 group-has-[[aria-expanded=true]]:w-12',
 };
 
-export type RowProps = { thread: ThreadState; mailbox: MailboxId; isSelected: boolean };
+export type RowProps = { thread: ThreadState; view: ViewId; isSelected: boolean };
 
 /**
  * Derived in one place so the row and its link's accessible name cannot disagree. `latest` decides
@@ -64,13 +64,13 @@ const useRecord = (thread: ThreadState) => {
  * One link covers the row and carries the whole record as its accessible name; the visible spans
  * are decorative. It stays the current one while the open row's bar gives way to ticked rows.
  */
-const RowLink = ({ thread, mailbox, isSelected, isBarred }: RowProps & { isBarred: boolean }) => {
+const RowLink = ({ thread, view, isSelected, isBarred }: RowProps & { isBarred: boolean }) => {
   const { latest, inbound, attachments } = useRecord(thread);
 
   return (
     <Link
-      to="/m/$mailbox/t/$"
-      params={{ mailbox, _splat: thread.id }}
+      to="/m/$view/t/$"
+      params={{ view, _splat: thread.id }}
       // Spread rather than replace: opening a message must not clear the search that found it.
       search={previous => previous}
       aria-current={isSelected ? true : undefined}
@@ -94,7 +94,7 @@ const StarButton = ({
   thread,
   isSelected,
   className,
-}: Omit<RowProps, 'mailbox'> & { className: string }) => {
+}: Omit<RowProps, 'view'> & { className: string }) => {
   const { toggleStar } = useMail();
   if (!isOnServer(thread)) return null;
 
@@ -142,7 +142,7 @@ type RowAction = {
 };
 
 /** Archive and delete for server messages; undo in Trash; discard in Drafts; nothing otherwise. */
-const useRowActions = ({ thread, mailbox, isSelected }: RowProps): readonly RowAction[] => {
+const useRowActions = ({ thread, view, isSelected }: RowProps): readonly RowAction[] => {
   const { toggleArchive, trashThread, restoreThread, removeDraft } = useMail();
   const advancePast = useAdvancePast();
   // Filing the open thread from its row moves the reader on, as the reader's own buttons do; a
@@ -157,7 +157,7 @@ const useRowActions = ({ thread, mailbox, isSelected }: RowProps): readonly RowA
   // A draft has no IMAP copy, so archive and delete can do nothing to it.
   const draftIds = draftIdsOf([thread]);
   return (() => {
-    if (mailbox === 'drafts' && draftIds.length > 0) {
+    if (view === 'drafts' && draftIds.length > 0) {
       return [
         {
           icon: TrashIcon,
@@ -175,7 +175,7 @@ const useRowActions = ({ thread, mailbox, isSelected }: RowProps): readonly RowA
     }
     // A just-sent message or vault-held sent mail alone: no server holds a copy to file.
     if (!isOnServer(thread)) return [];
-    if (mailbox === 'trash') {
+    if (view === 'trash') {
       if (!canMoveTo(thread.folders, 'inbox')) return [];
       return [
         {
@@ -274,7 +274,7 @@ type CheckProps = {
  */
 export const ThreadRow = ({
   thread,
-  mailbox,
+  view,
   isSelected,
   isChecked,
   hasSelection,
@@ -284,7 +284,7 @@ export const ThreadRow = ({
   const isBarred = isSelected && !hasSelection;
   const isUnread = thread.isUnread;
   const { latest, inbound, attachments } = useRecord(thread);
-  const actions = useRowActions({ thread, mailbox, isSelected });
+  const actions = useRowActions({ thread, view, isSelected });
 
   return (
     <div
@@ -300,7 +300,7 @@ export const ThreadRow = ({
         })(),
       )}
     >
-      <RowLink thread={thread} mailbox={mailbox} isSelected={isSelected} isBarred={isBarred} />
+      <RowLink thread={thread} view={view} isSelected={isSelected} isBarred={isBarred} />
 
       {/* While selecting, a tap anywhere on a phone's row ticks it rather than opening it. The box
           is the control a keyboard or screen reader uses; this only widens its target. */}

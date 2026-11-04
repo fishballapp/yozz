@@ -8,8 +8,8 @@ import { useAdvancePast } from './use-advance';
 
 /** Resolved against the whole store, not the filtered list, so a search must not unmount the open message. */
 export const ThreadPage = () => {
-  const { mailbox, _splat: threadId } = useParams({ from: '/_app/m/$mailbox/t/$' });
-  const navigate = useNavigate({ from: '/m/$mailbox/t/$' });
+  const { view, _splat: threadId } = useParams({ from: '/_app/m/$view/t/$' });
+  const navigate = useNavigate({ from: '/m/$view/t/$' });
   const { threads, markRead, loadBody } = useMail();
   const advancePast = useAdvancePast();
   // The root can change under a URL (paging, a move), so the id is tried as a message of a thread before it is called missing.
@@ -39,9 +39,7 @@ export const ThreadPage = () => {
       thread={thread}
       onTriaged={() => advancePast(thread.id)}
       // Closing keeps the search.
-      onClose={() =>
-        navigate({ to: '/m/$mailbox', params: { mailbox }, search: previous => previous })
-      }
+      onClose={() => navigate({ to: '/m/$view', params: { view }, search: previous => previous })}
     />
   );
 };
@@ -54,8 +52,8 @@ const ThreadMissing = () => (
       This link points at a message that is not in your mail. It may have been archived or removed.
     </p>
     <Link
-      to="/m/$mailbox"
-      params={{ mailbox: 'unified' }}
+      to="/m/$view"
+      params={{ view: 'unified' }}
       search={keepCompose}
       className="text-base text-signal underline-offset-2 hover:underline"
     >

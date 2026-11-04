@@ -91,7 +91,7 @@ export type Message = {
   references?: readonly string[];
   /**
    * Every physical copy on a server; every IMAP command addresses one of these, since a copy's uid
-   * changes on every move while `id` does not. A list because one message can sit in two accounts
+   * changes on every move while `id` does not. A list because one message can sit in two mailboxes
    * once threads span them.
    */
   locations?: readonly Location[];
@@ -113,8 +113,8 @@ export const toParagraphs = (text: string): string[] =>
 
 export type Thread = {
   id: string;
-  /** Every account holding some of this conversation, in address order. */
-  accounts: readonly string[];
+  /** Every mailbox holding some of this conversation, in address order. */
+  mailboxes: readonly string[];
   subject: string;
   messages: Message[];
   isUnread: boolean;
@@ -124,20 +124,20 @@ export type Thread = {
 
 /** One physical copy. `uidValidity` rides along because a uid means nothing without it. */
 export type Location = {
-  readonly account: string;
+  readonly mailbox: string;
   readonly folder: Folder;
   readonly uidValidity: number;
   readonly uid: number;
 };
 
-/** The IMAP mailboxes a sync reads. A closed set, so an id can carry one. */
+/** The IMAP folders a sync reads. A closed set, so an id can carry one. */
 export type Folder = 'inbox' | 'sent' | 'archive' | 'trash' | 'drafts';
 
 export const FOLDERS: readonly Folder[] = ['inbox', 'sent', 'archive', 'trash', 'drafts'];
 
 /**
- * `mid/<Message-ID>` when that Message-ID names exactly one displayed message across every account,
- * else the physical form below. No account prefix, and the form survives a move; see DECISIONS.md.
+ * `mid/<Message-ID>` when that Message-ID names exactly one displayed message across every mailbox,
+ * else the physical form below. No mailbox prefix, and the form survives a move; see DECISIONS.md.
  * The URL carries it as a splat, so `/t/mid/<abc@example.com>` reads as typed.
  */
 export const messageIdOf = (messageId: string) => `mid/${messageId}`;
@@ -178,8 +178,8 @@ export const renumberedText = (folder: Folder) =>
   `${folder} was renumbered; reopen the conversation`;
 
 /** The fallback for mail with no unique Message-ID: one physical copy, which changes when that copy moves. */
-export const physicalIdOf = ({ account, folder, uidValidity, uid }: Location) =>
-  `${account}/${folder}/${uidValidity}/${uid}`;
+export const physicalIdOf = ({ mailbox, folder, uidValidity, uid }: Location) =>
+  `${mailbox}/${folder}/${uidValidity}/${uid}`;
 
 /** Where a thread's messages sit; a conversation is spread across folders. */
 type Foldered = { readonly folders: readonly Folder[] };
@@ -213,18 +213,18 @@ export const isOnServer = ({ messages }: Pick<Thread, 'messages'>) =>
   messages.some(message => (message.locations ?? []).some(isServerCopy));
 
 /**
- * The accounts a message arrived at, once each. Empty for mail you sent, unless another of your
- * addresses received it too. The account that sent it is never an arrival, which keeps a deleted
+ * The mailboxes a message arrived at, once each. Empty for mail you sent, unless another of your
+ * addresses received it too. The mailbox that sent it is never an arrival, which keeps a deleted
  * Sent copy, now in Trash, from reading as received.
  */
 export const inboxesOf = (message: Message): readonly string[] => [
   ...new Set(
     (message.locations ?? [])
       .filter(
-        ({ account, folder }) =>
-          folder !== 'sent' && account.toLowerCase() !== message.fromAddress.toLowerCase(),
+        ({ mailbox, folder }) =>
+          folder !== 'sent' && mailbox.toLowerCase() !== message.fromAddress.toLowerCase(),
       )
-      .map(({ account }) => account),
+      .map(({ mailbox }) => mailbox),
   ),
 ];
 
@@ -251,10 +251,10 @@ export const newestInbound = (thread: Thread, ownedAddresses: readonly string[])
   thread.messages.findLast(message => ownedAddresses.includes(message.toAddress)) ??
   thread.messages[thread.messages.length - 1];
 
-/** A thread as a mailbox sees it: which folders it occupies, and the questions the views ask of that. */
+/** A thread as a view shows it: which folders it occupies, and the questions the views ask of that. */
 export type ThreadState = Thread & {
-  /** Every mailbox this conversation occupies, across all accounts. */
+  /** Every folder this conversation occupies, across all mailboxes. */
   readonly folders: readonly Folder[];
-  /** Per account: an address's view is a predicate over one account's copies. */
-  readonly foldersByAccount: Readonly<Record<string, readonly Folder[]>>;
+  /** Per mailbox: an address's view is a predicate over one mailbox's copies. */
+  readonly foldersByMailbox: Readonly<Record<string, readonly Folder[]>>;
 };

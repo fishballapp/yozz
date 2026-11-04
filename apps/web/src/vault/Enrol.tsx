@@ -229,8 +229,8 @@ export const Enrol = () => {
                   const session = await createPasskeyVault({ account });
                   setSession(session);
                   void navigate({
-                    to: '/m/$mailbox',
-                    params: { mailbox: 'unified' },
+                    to: '/m/$view',
+                    params: { view: 'unified' },
                     search: previous => previous,
                   });
                 } catch (err) {
@@ -309,8 +309,8 @@ export const Enrol = () => {
                 const session = await createPasswordVault({ account, password });
                 setSession(session);
                 void navigate({
-                  to: '/m/$mailbox',
-                  params: { mailbox: 'unified' },
+                  to: '/m/$view',
+                  params: { view: 'unified' },
                   search: previous => previous,
                 });
               } catch (err) {

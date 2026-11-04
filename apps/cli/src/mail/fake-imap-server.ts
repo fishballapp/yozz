@@ -38,7 +38,7 @@ type Stored = {
   readonly raw: Uint8Array;
 };
 
-type Mailbox = {
+type ServerFolder = {
   readonly attributes: readonly string[];
   uidValidity: number;
   uidNext: number;
@@ -236,9 +236,9 @@ const select = (set: string, stored: readonly Stored[], byUid: boolean): Stored[
 export type FakeImapServer = {
   /** Every command the server received, without its tag. */
   readonly commands: string[];
-  readonly mailboxes: Map<string, Mailbox>;
-  /** Files a message in a mailbox, telling any connection idling on it. */
-  readonly deliver: (mailbox: string, message: FakeMessage, flags?: readonly string[]) => number;
+  readonly folders: Map<string, ServerFolder>;
+  /** Files a message in a folder, telling any connection idling on it. */
+  readonly deliver: (folderName: string, message: FakeMessage, flags?: readonly string[]) => number;
   /** Opens a connection, as `MailServers.open` would. */
   readonly open: () => MailSocket;
   /** How many connections were opened. */
@@ -252,7 +252,7 @@ export const makeFakeImapServer = ({
   password,
   capabilities = ['IMAP4rev1', 'SASL-IR', 'AUTH=PLAIN', 'UIDPLUS', 'MOVE', 'IDLE'],
   quirks = {},
-  mailboxes = [
+  folders = [
     { name: 'INBOX', attributes: [] },
     { name: 'Sent', attributes: ['\\Sent'] },
     { name: 'Archive', attributes: ['\\Archive'] },
@@ -262,22 +262,22 @@ export const makeFakeImapServer = ({
   readonly username: string;
   readonly password: string;
   readonly capabilities?: readonly string[];
-  readonly mailboxes?: readonly { readonly name: string; readonly attributes: readonly string[] }[];
+  readonly folders?: readonly { readonly name: string; readonly attributes: readonly string[] }[];
   /** Misbehaviour to stage: a SELECT held this long, a connection dropped on a command. */
   readonly quirks?: {
-    readonly selectDelayMs?: (mailbox: string, nth: number) => number;
+    readonly selectDelayMs?: (folderName: string, nth: number) => number;
     /** True for a command (as `commands` lists it) that closes the connection, unanswered. */
     readonly dropsOn?: (command: string) => boolean;
   };
 }): FakeImapServer => {
   const commands: string[] = [];
-  const boxes = new Map<string, Mailbox>(
-    mailboxes.map(({ name, attributes }, index) => [
+  const boxes = new Map<string, ServerFolder>(
+    folders.map(({ name, attributes }, index) => [
       name,
       { attributes, uidValidity: 100 + index, uidNext: 1, messages: [] },
     ]),
   );
-  const idlers = new Set<(mailbox: string) => void>();
+  const idlers = new Set<(folderName: string) => void>();
   const selects = new Map<string, number>();
   let opened = 0;
 
@@ -363,12 +363,12 @@ export const makeFakeImapServer = ({
         bytes(')\r\n'),
       );
     };
-    const seqOf = (mailbox: Mailbox, message: Stored) => mailbox.messages.indexOf(message) + 1;
+    const seqOf = (folder: ServerFolder, message: Stored) => folder.messages.indexOf(message) + 1;
 
     const handle = async (tag: string, command: string, rest: string): Promise<boolean> => {
       const ok = (text = `${command} completed`) => send(`${tag} OK ${text}\r\n`);
       const no = (text: string) => send(`${tag} NO ${text}\r\n`);
-      const mailbox = box();
+      const folder = box();
       switch (command) {
         case 'CAPABILITY':
           await send(`* CAPABILITY ${capabilities.join(' ')}\r\n`);
@@ -447,7 +447,7 @@ export const makeFakeImapServer = ({
         }
         case 'FETCH':
         case 'UID': {
-          if (mailbox === undefined) {
+          if (folder === undefined) {
             await send(`${tag} BAD No mailbox selected\r\n`);
             return true;
           }
@@ -456,8 +456,8 @@ export const makeFakeImapServer = ({
           const set = args[0] ?? '';
           const items = args.slice(1).join(' ');
           if (verb === 'FETCH') {
-            for (const message of select(set, mailbox.messages, isUid)) {
-              const seq = seqOf(mailbox, message);
+            for (const message of select(set, folder.messages, isUid)) {
+              const seq = seqOf(folder, message);
               if (items.includes('ENVELOPE')) {
                 await send(summary(message, seq));
               } else if (items.includes('BODYSTRUCTURE')) {
@@ -482,7 +482,7 @@ export const makeFakeImapServer = ({
           if (verb === 'STORE') {
             const [mode = '', ...flagWords] = args.slice(1);
             const flags = flagWords.join(' ').replace(/[()]/g, '').split(' ').filter(Boolean);
-            for (const message of select(set, mailbox.messages, true)) {
+            for (const message of select(set, folder.messages, true)) {
               for (const flag of flags) {
                 if (mode.startsWith('+')) {
                   message.flags.add(flag);
@@ -491,7 +491,7 @@ export const makeFakeImapServer = ({
                 }
               }
               await send(
-                `* ${seqOf(mailbox, message)} FETCH (UID ${message.uid} FLAGS (${[...message.flags].join(' ')}))\r\n`,
+                `* ${seqOf(folder, message)} FETCH (UID ${message.uid} FLAGS (${[...message.flags].join(' ')}))\r\n`,
               );
             }
             await ok('STORE completed');
@@ -503,7 +503,7 @@ export const makeFakeImapServer = ({
               await no('[TRYCREATE] No such mailbox');
               return true;
             }
-            const moving = select(set, mailbox.messages, true);
+            const moving = select(set, folder.messages, true);
             const sources: number[] = [];
             const targets: number[] = [];
             for (const message of moving) {
@@ -518,8 +518,8 @@ export const makeFakeImapServer = ({
               );
             }
             for (const message of moving.toReversed()) {
-              await send(`* ${seqOf(mailbox, message)} EXPUNGE\r\n`);
-              mailbox.messages = mailbox.messages.filter(candidate => candidate !== message);
+              await send(`* ${seqOf(folder, message)} EXPUNGE\r\n`);
+              folder.messages = folder.messages.filter(candidate => candidate !== message);
             }
             await ok('MOVE completed');
             return true;
@@ -535,7 +535,7 @@ export const makeFakeImapServer = ({
               key ?? [];
             const name = headerName ?? textKey ?? '';
             const needle = (headerValue ?? textValue ?? '').replace(/\\(.)/gu, '$1').toLowerCase();
-            const hits = mailbox.messages.filter(message => {
+            const hits = folder.messages.filter(message => {
               if (flagKey === 'UNSEEN') return !message.flags.has('\\Seen');
               if (flagKey === 'FLAGGED') return message.flags.has('\\Flagged');
               if (dateKey !== undefined) {
@@ -561,8 +561,8 @@ export const makeFakeImapServer = ({
         case 'IDLE': {
           await send('+ idling\r\n');
           const notify = (name: string) => {
-            if (name === selected && mailbox !== undefined) {
-              void send(`* ${mailbox.messages.length} EXISTS\r\n`);
+            if (name === selected && folder !== undefined) {
+              void send(`* ${folder.messages.length} EXISTS\r\n`);
             }
           };
           idlers.add(notify);
@@ -604,7 +604,7 @@ export const makeFakeImapServer = ({
   const quietLimits: number[] = [];
   return {
     commands,
-    mailboxes: boxes,
+    folders: boxes,
     deliver,
     open: () => {
       opened += 1;

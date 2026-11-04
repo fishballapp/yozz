@@ -20,7 +20,7 @@ export type FetchedBody = {
   readonly attachments: Attachment[];
   /**
    * The From address a DKIM signature vouches for and the domain that signed it, or null. A property
-   * of the message, not of the account that received the copy; `senderCheckOf` compares `from` with
+   * of the message, not of the mailbox that received the copy; `senderCheckOf` compares `from` with
    * the address the reader shows.
    */
   readonly dkim: { readonly from: string; readonly domain: string } | null;
@@ -225,11 +225,11 @@ export const parseBody = async (raw: Uint8Array, lookupTxt: TxtLookup): Promise<
   };
 };
 
-/** Fetch one message body on the account's live connection. */
+/** Fetch one message body on the mailbox's live connection. */
 export const fetchBody = async (
   run: RunTask,
-  /** The IMAP mailbox name the uid belongs to, from the folder's sync mark. */
-  mailbox: string,
+  /** The IMAP folder name the uid belongs to, from the folder's sync mark. */
+  folderName: string,
   uid: number,
   expectedRawSize: number | undefined,
   lookupTxt: TxtLookup,
@@ -254,7 +254,7 @@ export const fetchBody = async (
     effect: 'read',
     retry: true,
     run: async client => {
-      const selectRes = await client.ensureSelected(mailbox);
+      const selectRes = await client.ensureSelected(folderName);
       if (!selectRes.ok) return { ok: false, error: { kind: 'imap', reason: selectRes.reason } };
       const rawRes = await client.fetchRaw(uid);
       if (!rawRes.ok) return { ok: false, error: { kind: 'imap', reason: rawRes.reason } };
@@ -284,7 +284,7 @@ export const fetchBodyAt = async (
     readonly getSync: () => Promise<{ readonly name: string; readonly uidValidity: number } | null>;
     readonly putBody: (uid: number, body: FetchedBody) => Promise<void>;
   },
-  copy: Omit<Location, 'account'>,
+  copy: Omit<Location, 'mailbox'>,
   expectedRawSize: number | undefined,
   lookupTxt: TxtLookup,
   /** The cache this was fetched for has been cleared since (a lock, an address removed): keep nothing. */

@@ -187,7 +187,7 @@ export const isMessageInScope =
       mailboxes.some(mailbox => mailbox.address.toLowerCase() === address.toLowerCase());
     if (message.isDraft === true) return folders.includes('drafts') && isOurs(message.fromAddress);
     return (message.locations ?? []).some(
-      ({ account, folder }) => folders.includes(folder) && isOurs(account),
+      ({ mailbox, folder }) => folders.includes(folder) && isOurs(mailbox),
     );
   };
 

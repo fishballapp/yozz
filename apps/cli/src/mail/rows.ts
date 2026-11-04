@@ -1,6 +1,6 @@
 import { clip, RECIPIENTS_LISTED, SNIPPET_CHARS } from '@yozz.app/mail/agent-budgets';
 import type { Message, Recipient, ThreadState } from '@yozz.app/mail/threads/thread';
-import { latestOf, type MailboxId, previewOf } from '@yozz.app/mail/threads/views';
+import { latestOf, previewOf, type ViewId } from '@yozz.app/mail/threads/views';
 import type { MailServerError } from '../errors.ts';
 
 // The JSON every mail command prints. A string that came from mail sits under `untrusted`, cleaned of
@@ -41,12 +41,12 @@ export const addressesOf = (recipients: readonly Recipient[]) =>
   );
 
 /** The yozz.app page that shows the conversation, or the composer on a conversation of drafts alone. */
-export const urlOf = (webUrl: string, mailbox: MailboxId, thread: ThreadState) => {
+export const urlOf = (webUrl: string, view: ViewId, thread: ThreadState) => {
   const draft = thread.messages.find(message => message.isDraft === true);
   if (thread.id === draft?.id && draft.draftKey !== undefined) {
     return `${webUrl}/m/drafts?compose=${encodeURIComponent(`draft:${draft.draftKey}`)}`;
   }
-  return `${webUrl}/m/${encodeURIComponent(mailbox)}/t/${encodeURIComponent(thread.id)}`;
+  return `${webUrl}/m/${encodeURIComponent(view)}/t/${encodeURIComponent(thread.id)}`;
 };
 
 /** What `read` says of every message before its content: its id, its time, whether it is a draft. */
@@ -72,17 +72,14 @@ export const failedOf = (failed: readonly MailServerError[]) =>
       };
 
 /** A conversation as a list shows it. */
-export const rowOf = (
-  thread: ThreadState,
-  { webUrl, mailbox }: { webUrl: string; mailbox: MailboxId },
-) => {
+export const rowOf = (thread: ThreadState, { webUrl, view }: { webUrl: string; view: ViewId }) => {
   const latest = latestOf(thread);
   const draftId = draftIdOf(thread);
   return {
     id: thread.id,
-    url: urlOf(webUrl, mailbox, thread),
+    url: urlOf(webUrl, view, thread),
     at: new Date(latest.at).toISOString(),
-    mailboxes: thread.accounts,
+    mailboxes: thread.mailboxes,
     folders: thread.folders,
     isUnread: thread.isUnread,
     isStarred: thread.isStarred,

@@ -7,8 +7,8 @@ import type { RecordStore } from '../vault/record-store.ts';
 import {
   draftMirrorMessageId,
   expungeMirror,
-  mirrorAccountOf,
   mirrorDraft,
+  mirrorMailboxOf,
 } from './draft-mirror.ts';
 import { createDraft, type DraftHandle, readMirror, writeMirror } from './draft-vault.ts';
 
@@ -29,8 +29,8 @@ const server = (present: readonly number[] = [], over: Partial<ImapClient> = {})
       did.push(`search ${criterion.header} ${criterion.value}`);
       return { ok: true, value: [...present] };
     },
-    append: async mailbox => {
-      did.push(`append ${mailbox}`);
+    append: async folderName => {
+      did.push(`append ${folderName}`);
       return { ok: true, value: { uidValidity: 1, uid: 77 } };
     },
     storeFlags: async (uidSet, mode, flags) => {
@@ -95,7 +95,7 @@ describe('the draft mirror', () => {
     });
   });
 
-  it('leaves the old copy alone when the mailbox has been renumbered', async () => {
+  it('leaves the old copy alone when the folder has been renumbered', async () => {
     // Same uid, different message.
     const { store } = fakeRecordStore();
     const handle = await draftFor(store);
@@ -161,15 +161,15 @@ describe('the draft mirror', () => {
     expect((await readMirror(store, handle.draftKey))?.mirror).toEqual({ mirroredVersion: 1 });
   });
 
-  it('mirrors a send-only reply into the account that owns the thread', () => {
+  it('mirrors a send-only reply into the mailbox that owns the thread', () => {
     const inbound = (address: string) => address === 'work@x.co';
     const base = { to: '', cc: '', bcc: '', subject: '', body: '', contentVersion: 1 };
-    expect(mirrorAccountOf({ ...base, from: 'work@x.co' }, inbound)).toBe('work@x.co');
+    expect(mirrorMailboxOf({ ...base, from: 'work@x.co' }, inbound)).toBe('work@x.co');
     expect(
-      mirrorAccountOf({ ...base, from: 'alias@x.co', ownerAccount: 'work@x.co' }, inbound),
+      mirrorMailboxOf({ ...base, from: 'alias@x.co', ownerAccount: 'work@x.co' }, inbound),
     ).toBe('work@x.co');
     // A new message from an address with no mailbox is mirrored nowhere.
-    expect(mirrorAccountOf({ ...base, from: 'alias@x.co' }, inbound)).toBeNull();
+    expect(mirrorMailboxOf({ ...base, from: 'alias@x.co' }, inbound)).toBeNull();
   });
 });
 

@@ -6,8 +6,8 @@ export const NotFound = () => (
     <p className="font-mono text-2xs tracking-[0.14em] text-paper-faint uppercase">404</p>
     <p className="text-base text-paper-dim">There is nothing at this address.</p>
     <Link
-      to="/m/$mailbox"
-      params={{ mailbox: 'unified' }}
+      to="/m/$view"
+      params={{ view: 'unified' }}
       search={{}}
       className={buttonClass({ variant: 'primary' })}
     >

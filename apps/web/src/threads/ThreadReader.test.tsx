@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ThreadReader } from './ThreadReader';
 
 vi.mock('@tanstack/react-router', () => ({
-  useParams: () => ({ mailbox: 'unified' }),
+  useParams: () => ({ view: 'unified' }),
   Link: () => null,
 }));
 vi.mock('../store/MailProvider', () => ({
@@ -30,7 +30,7 @@ const received = (overrides: Partial<Message>): Message => ({
   to: [{ address: 'me@example.com' }],
   at: 0,
   body: ['Your invoice.'],
-  locations: [{ account: 'me@example.com', folder: 'inbox', uidValidity: 1, uid: 1 }],
+  locations: [{ mailbox: 'me@example.com', folder: 'inbox', uidValidity: 1, uid: 1 }],
   ...overrides,
 });
 
@@ -45,13 +45,13 @@ const stubViewport = (isWide: boolean) =>
 const mount = async (message: Message, { shouldOpen = true } = {}) => {
   const thread: ThreadState = {
     id: 't',
-    accounts: ['me@example.com'],
+    mailboxes: ['me@example.com'],
     subject: 'Invoice',
     isUnread: false,
     isReplied: false,
     isStarred: false,
     folders: ['inbox'],
-    foldersByAccount: { 'me@example.com': ['inbox'] },
+    foldersByMailbox: { 'me@example.com': ['inbox'] },
     messages: [message],
   };
   const container = document.createElement('div');
@@ -104,7 +104,7 @@ describe('the message details panel: signed by', () => {
         fromName: 'Me',
         fromAddress: 'me@example.com',
         to: [{ address: 'ada@example.org' }],
-        locations: [{ account: 'me@example.com', folder: 'sent', uidValidity: 1, uid: 2 }],
+        locations: [{ mailbox: 'me@example.com', folder: 'sent', uidValidity: 1, uid: 2 }],
         senderCheck: { status: 'unverified' },
       }),
     );

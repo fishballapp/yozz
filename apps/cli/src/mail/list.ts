@@ -123,7 +123,7 @@ export const listCommand = Command.make(
     const cache = yield* Cache;
     const { webUrl } = yield* Settings;
     const parsed = parseQuery(text);
-    const scope = resolveScope(parsed, mail.accounts);
+    const scope = resolveScope(parsed, mail.mailboxes);
     if (!scope.ok) return yield* new UsageError({ message: scope.error.message });
     const { folders, mailboxes: shown } = scope.value;
     const view = viewOfFolders(folders);
@@ -156,7 +156,7 @@ export const listCommand = Command.make(
         };
       }
       const { extra, isHit, hasMoreMatches, failed } = yield* searchMail({
-        accounts: searched,
+        mailboxes: searched,
         folders: inFolders,
         query: parsed,
       });
@@ -201,14 +201,14 @@ export const listCommand = Command.make(
         });
       }
       const { arrived, failed } = yield* waitForMail({
-        accounts: shown,
+        mailboxes: shown,
         deadline: startedAt + wait.value * 1000,
         // New mail lands in the inbox, so nothing else is worth asking a server about each round.
         rowsOf: (watched, isWanted) => candidates(watched, isWanted, ['inbox']),
       });
       return yield* printJson({
         notice: NOTICE,
-        threads: arrived.slice(0, limit).map(thread => rowOf(thread, { webUrl, mailbox: view })),
+        threads: arrived.slice(0, limit).map(thread => rowOf(thread, { webUrl, view })),
         nextCursor: null,
         syncedAt: yield* cache.syncedAt(shown),
         ...failedOf(failed),
@@ -246,7 +246,7 @@ export const listCommand = Command.make(
         if (frontier === null || reached.length >= limit || windows === 0) {
           return { found: reached, hasOlder, hasMoreMatches, failed };
         }
-        yield* cache.loadOlder(frontier.account, frontier.folder);
+        yield* cache.loadOlder(frontier.mailbox, frontier.folder);
         return yield* filled(windows - 1);
       });
     const {
@@ -266,7 +266,7 @@ export const listCommand = Command.make(
         : { at: latestOf(last).at, id: last.id };
     yield* printJson({
       ...(rows.length > 0 ? { notice: NOTICE } : {}),
-      threads: rows.map(thread => rowOf(thread, { webUrl, mailbox: view })),
+      threads: rows.map(thread => rowOf(thread, { webUrl, view })),
       nextCursor: isMore ? encodeCursor(resumeAt) : null,
       ...(hasMoreMatches ? { moreMatches: true } : {}),
       syncedAt: yield* cache.syncedAt(shown),

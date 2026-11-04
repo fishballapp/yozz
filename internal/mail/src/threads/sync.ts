@@ -5,7 +5,7 @@ import {
   type ImapMessageSummary,
   uidSets,
 } from '@yozz.app/imap';
-import { ensureMailbox, resolveFolders } from '../addresses/mailboxes.ts';
+import { ensureFolderName, resolveFolders } from '../addresses/folder-names.ts';
 import type { MailConnectionFailure, Result, RunTask } from '../connection.ts';
 import { type FetchedBody, parseBody } from './bodies.ts';
 import type { FolderCache, FolderSync, MailCache } from './cache.ts';
@@ -13,7 +13,7 @@ import type { TxtLookup } from './dkim.ts';
 import type { FolderSummaries } from './summaries.ts';
 import { FOLDERS, type Folder, type Location } from './thread.ts';
 
-export type AccountSyncState =
+export type MailboxSyncState =
   | { readonly status: 'idle' }
   | { readonly status: 'syncing' }
   | {
@@ -44,12 +44,12 @@ type FolderOutcome =
     }
   | { readonly ok: false; readonly failure: MailConnectionFailure; readonly invalidated: boolean };
 
-/** SELECT, then the initial window or the incremental pair. A changed `UIDVALIDITY` drops the whole account's cache. */
+/** SELECT, then the initial window or the incremental pair. A changed `UIDVALIDITY` drops the whole mailbox's cache. */
 const syncFolder = async (
   client: ImapClient,
   folderCache: FolderCache,
   name: string,
-  clearAccount: () => Promise<void>,
+  clearMailbox: () => Promise<void>,
   isStale: () => boolean,
 ): Promise<FolderOutcome> => {
   let invalidated = false;
@@ -66,7 +66,7 @@ const syncFolder = async (
 
   let mark = await folderCache.getSync();
   if (mark !== null && mark.uidValidity !== uidValidity) {
-    await clearAccount();
+    await clearMailbox();
     mark = null;
     invalidated = true;
   }
@@ -74,7 +74,7 @@ const syncFolder = async (
   const kept: ImapMessageSummary[] = [];
   let fetched: readonly ImapMessageSummary[] = [];
   if (mark === null) {
-    // The newest WINDOW messages by sequence number; a mailbox no bigger than the window is read whole.
+    // The newest WINDOW messages by sequence number; a folder no bigger than the window is read whole.
     if (exists > 0) {
       const res = await client.fetchSummariesBySeq(`${Math.max(1, exists - WINDOW + 1)}:*`);
       if (!res.ok) return failed({ kind: 'imap', reason: res.reason });
@@ -139,15 +139,15 @@ const syncFolder = async (
 
 /**
  * LIST, then each folder in turn, inbox first. Each folder is its own task, so a click queued
- * meanwhile (a body, a flag, a move) runs before the next folder rather than after the account.
+ * meanwhile (a body, a flag, a move) runs before the next folder rather than after the mailbox.
  */
-export const syncAccount = async (
+export const syncMailbox = async (
   run: RunTask,
   cache: MailCache,
-  /** Skips persisting when the account was removed or the vault locked mid-sync. */
+  /** Skips persisting when the mailbox was removed or the vault locked mid-sync. */
   isStale: () => boolean = () => false,
 ): Promise<{
-  readonly state: AccountSyncState;
+  readonly state: MailboxSyncState;
   readonly byFolder: FolderSummaries;
 }> => {
   const failed = (failure: MailConnectionFailure, invalidated = false) => ({
@@ -203,7 +203,7 @@ export const syncAccount = async (
 export const loadOlder = async (
   run: RunTask,
   folderCache: FolderCache,
-  /** Skips persisting when the account was removed or the vault locked mid-load. */
+  /** Skips persisting when the mailbox was removed or the vault locked mid-load. */
   isStale: () => boolean = () => false,
 ): Promise<
   Result<{ readonly loaded: number; readonly complete: boolean }, MailConnectionFailure>
@@ -243,7 +243,7 @@ export const loadOlder = async (
       const from = Math.max(1, anchor.seq - WINDOW);
       const res = await client.fetchSummariesBySeq(`${from}:${anchor.seq - 1}`);
       if (!res.ok) return { ok: false, error: { kind: 'imap', reason: res.reason } };
-      // The account may have been removed, or the vault locked, while IMAP was answering.
+      // The mailbox may have been removed, or the vault locked, while IMAP was answering.
       if (isStale()) return { ok: false, error: { kind: 'error', detail: 'load superseded' } };
       await folderCache.putSummaries(res.value);
       const complete = from === 1;
@@ -256,7 +256,7 @@ export const loadOlder = async (
 /** One folder's worth of a flag write or a move, off the sync mark: one command per uid set. */
 export type FlagTarget = {
   readonly folder: Folder;
-  readonly mailbox: string;
+  readonly folderName: string;
   readonly uids: readonly number[];
   /** Checked against what the SELECT answers: across a renumbering the same uid names different mail. */
   readonly uidValidity: number;
@@ -267,7 +267,7 @@ const RENUMBERED: MailConnectionFailure = {
   detail: 'that mailbox was renumbered; it will sync again before this can be written',
 };
 
-/** The mailbox the server just selected is not the one these uids came from. */
+/** The folder the server just selected is not the one these uids came from. */
 const renumbered = (target: FlagTarget, selected: { readonly uidValidity: number | null }) =>
   selected.uidValidity !== null && selected.uidValidity !== target.uidValidity;
 
@@ -293,9 +293,9 @@ export const setFlag = async (
     retry: true,
     run: async client => {
       for (const target of targets) {
-        const { folder, mailbox, uids } = target;
+        const { folder, folderName, uids } = target;
         if (uids.length === 0) continue;
-        const selectRes = await client.ensureSelected(mailbox);
+        const selectRes = await client.ensureSelected(folderName);
         if (!selectRes.ok) return { ok: false, error: { kind: 'imap', reason: selectRes.reason } };
         if (renumbered(target, selectRes.value)) return { ok: false, error: RENUMBERED };
         for (const set of uidSets(uids)) {
@@ -313,8 +313,8 @@ export const setFlag = async (
 
 /** Where a `UID MOVE` put one message; `to` is null when the server did not say (no UIDPLUS). */
 export type MovedCopy = {
-  readonly from: Omit<Location, 'account'>;
-  readonly to: Omit<Location, 'account'> | null;
+  readonly from: Omit<Location, 'mailbox'>;
+  readonly to: Omit<Location, 'mailbox'> | null;
 };
 
 const destinationOf = (copy: CopyUid | null, folder: Folder, uid: number) => {
@@ -324,8 +324,8 @@ const destinationOf = (copy: CopyUid | null, folder: Folder, uid: number) => {
 };
 
 /**
- * `UID MOVE` every source mailbox's uids into `to`, answering where each went: one command per
- * mailbox, however many conversations it carries. Not retried: a half-done MOVE must not re-run.
+ * `UID MOVE` every source folder's uids into `to`, answering where each went: one command per
+ * folder, however many conversations it carries. Not retried: a half-done MOVE must not re-run.
  */
 export const moveMessages = async (
   run: RunTask,
@@ -338,13 +338,15 @@ export const moveMessages = async (
     retry: false,
     run: async client => {
       const destination =
-        to === 'inbox' ? ({ ok: true, value: 'INBOX' } as const) : await ensureMailbox(client, to);
+        to === 'inbox'
+          ? ({ ok: true, value: 'INBOX' } as const)
+          : await ensureFolderName(client, to);
       if (!destination.ok) return destination;
       const moved: MovedCopy[] = [];
       for (const source of sources) {
-        const { mailbox, uids } = source;
+        const { folderName, uids } = source;
         if (uids.length === 0) continue;
-        const selectRes = await client.ensureSelected(mailbox);
+        const selectRes = await client.ensureSelected(folderName);
         if (!selectRes.ok) return { ok: false, error: { kind: 'imap', reason: selectRes.reason } };
         if (renumbered(source, selectRes.value)) return { ok: false, error: RENUMBERED };
         const answers: (CopyUid | null)[] = [];
@@ -416,7 +418,7 @@ export const prefetchBodies = (
   perFolder: number,
   lookupTxt: TxtLookup,
   isStale: () => boolean = () => false,
-  onBody: (at: Omit<Location, 'account'>, body: FetchedBody) => void = () => {},
+  onBody: (at: Omit<Location, 'mailbox'>, body: FetchedBody) => void = () => {},
 ): void => {
   for (const folder of FOLDERS) {
     const read = byFolder[folder];

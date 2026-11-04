@@ -62,7 +62,7 @@ export type SendProgress =
   /** The draft is a tombstone that remembers what it became. With no Sent folder it has no copy, and no retry could give it one. */
   | {
       readonly done: true;
-      readonly sentCopy: Result<void, Extract<SentCopyFailure, { kind: 'no-sent-mailbox' }>>;
+      readonly sentCopy: Result<void, Extract<SentCopyFailure, { kind: 'no-sent-folder' }>>;
     }
   /** SMTP refused it before the end of `DATA`, or a file could not be read for it: the claim is lifted. */
   | {
@@ -144,7 +144,7 @@ const runSend = async (effects: SendEffects, claimed: DraftHandle): Promise<Send
   if (held?.state === 'submitted') {
     const copied = await effects.copyToSent(target, { message, assembleCopy }, handle);
     if (!copied.ok) {
-      if (copied.error.kind === 'no-sent-mailbox') {
+      if (copied.error.kind === 'no-sent-folder') {
         // Not `copied`: there is no copy, and a crash here only asks the same question again.
         await completeSend(effects.store, handle.draftId, send.messageId, effects.now(), {
           isSentWithoutCopy: true,

@@ -2,21 +2,22 @@ import { z } from 'zod';
 import type { MailConnectionFailure } from '../connection.ts';
 import { threadMatches } from './match.ts';
 import { hasCriteria, parseQuery } from './query.ts';
-import type { AccountSyncState } from './sync.ts';
+import type { MailboxSyncState } from './sync.ts';
 import { type Folder, isArchived, isTrashed, type Thread, type ThreadState } from './thread.ts';
 
 /**
- * A mailbox id is a URL segment: views are a closed set, an address is any email string, and an
- * unconnected address is an in-pane state.
+ * A view id is a URL segment: a named view is one of a closed set, an address is any email string,
+ * and an unconnected address is an in-pane state.
  */
-const viewIdSchema = z.enum(['unified', 'starred', 'archive', 'sent', 'trash', 'drafts']);
-type ViewId = z.infer<typeof viewIdSchema>;
+const namedViewSchema = z.enum(['unified', 'starred', 'archive', 'sent', 'trash', 'drafts']);
+type NamedView = z.infer<typeof namedViewSchema>;
 
-export const isViewId = (value: string): value is ViewId => viewIdSchema.safeParse(value).success;
+export const isNamedView = (value: string): value is NamedView =>
+  namedViewSchema.safeParse(value).success;
 
-export const mailboxIdSchema = z.union([viewIdSchema, z.string().email()]);
+export const viewIdSchema = z.union([namedViewSchema, z.string().email()]);
 
-export type MailboxId = z.infer<typeof mailboxIdSchema>;
+export type ViewId = z.infer<typeof viewIdSchema>;
 
 /** The most recent message decides a thread's position and its list timestamp. */
 export const latestOf = (thread: Thread) => {
@@ -34,7 +35,7 @@ export const previewOf = (thread: Thread) => {
 };
 
 /** One question per view about a thread's `folders`; adding a view does not compile until it answers. */
-const VIEW_SHOWS: Record<ViewId, (thread: ThreadState) => boolean> = {
+const VIEW_SHOWS: Record<NamedView, (thread: ThreadState) => boolean> = {
   unified: thread => thread.folders.includes('inbox'),
   starred: thread => thread.isStarred && !isTrashed(thread),
   archive: isArchived,
@@ -46,7 +47,7 @@ const VIEW_SHOWS: Record<ViewId, (thread: ThreadState) => boolean> = {
 };
 
 /** Starred and an address are filters of the inbox, so paging either pages the inbox. */
-const VIEW_PAGES: Record<ViewId, Folder> = {
+const VIEW_PAGES: Record<NamedView, Folder> = {
   unified: 'inbox',
   starred: 'inbox',
   archive: 'archive',
@@ -56,80 +57,80 @@ const VIEW_PAGES: Record<ViewId, Folder> = {
   drafts: 'drafts',
 };
 
-export const folderPaged = (mailbox: MailboxId): Folder => {
-  const view = viewIdSchema.safeParse(mailbox);
-  return view.success ? VIEW_PAGES[view.data] : 'inbox';
+export const folderPaged = (view: ViewId): Folder => {
+  const named = namedViewSchema.safeParse(view);
+  return named.success ? VIEW_PAGES[named.data] : 'inbox';
 };
 
-/** Every account for a view, the named one for an address. */
-export const accountsShown = <T extends { readonly address: string }>(
-  accounts: readonly T[],
-  mailbox: MailboxId,
+/** Every mailbox for a view, the named one for an address. */
+export const mailboxesShown = <T extends { readonly address: string }>(
+  mailboxes: readonly T[],
+  view: ViewId,
 ): readonly T[] =>
-  isViewId(mailbox) ? accounts : accounts.filter(account => account.address === mailbox);
+  isNamedView(view) ? mailboxes : mailboxes.filter(mailbox => mailbox.address === view);
 
-/** An account that never synced or failed answers no: the foot control is hidden, so nothing may imply more mail. */
+/** A mailbox that never synced or failed answers no: the foot control is hidden, so nothing may imply more mail. */
 export const olderAvailable = (
-  syncStates: Readonly<Record<string, AccountSyncState>>,
-  accounts: readonly { readonly address: string }[],
-  mailbox: MailboxId,
+  syncStates: Readonly<Record<string, MailboxSyncState>>,
+  mailboxes: readonly { readonly address: string }[],
+  view: ViewId,
 ): boolean => {
-  const folder = folderPaged(mailbox);
-  return accountsShown(accounts, mailbox).some(account => {
-    const state = syncStates[account.address];
+  const folder = folderPaged(view);
+  return mailboxesShown(mailboxes, view).some(mailbox => {
+    const state = syncStates[mailbox.address];
     return state?.status === 'synced' && !state.complete.includes(folder);
   });
 };
 
 /** Asked of the whole set on screen; asking the single-address question of `/m/unified` read "Nothing here yet" through the first sync. */
 export const syncProgressIn = <T extends { readonly address: string }>(
-  syncStates: Readonly<Record<string, AccountSyncState>>,
-  accounts: readonly T[],
-  mailbox: MailboxId,
+  syncStates: Readonly<Record<string, MailboxSyncState>>,
+  mailboxes: readonly T[],
+  view: ViewId,
 ): {
   readonly pending: readonly T[];
-  readonly failed: readonly { readonly account: T; readonly failure: MailConnectionFailure }[];
+  readonly failed: readonly { readonly mailbox: T; readonly failure: MailConnectionFailure }[];
 } => {
-  const shown = accountsShown(accounts, mailbox);
+  const shown = mailboxesShown(mailboxes, view);
   return {
     // No state yet reads the same as mid-fetch to someone waiting.
-    pending: shown.filter(account => {
-      const status = syncStates[account.address]?.status;
+    pending: shown.filter(mailbox => {
+      const status = syncStates[mailbox.address]?.status;
       return status === undefined || status === 'idle' || status === 'syncing';
     }),
-    failed: shown.flatMap(account => {
-      const state = syncStates[account.address];
-      return state?.status === 'failed' ? [{ account, failure: state.failure }] : [];
+    failed: shown.flatMap(mailbox => {
+      const state = syncStates[mailbox.address];
+      return state?.status === 'failed' ? [{ mailbox, failure: state.failure }] : [];
     }),
   };
 };
 
-/** Which threads a mailbox shows, newest first. */
-export const threadsIn = (threads: readonly ThreadState[], mailbox: MailboxId) => {
-  const view = viewIdSchema.safeParse(mailbox);
-  const shows = view.success
-    ? VIEW_SHOWS[view.data]
-    : // An address's view is a predicate over that account's copies alone.
-      (thread: ThreadState) => (thread.foldersByAccount[mailbox] ?? []).includes('inbox');
+/** Which threads a view shows, newest first. */
+export const threadsIn = (threads: readonly ThreadState[], view: ViewId) => {
+  const named = namedViewSchema.safeParse(view);
+  const shows = named.success
+    ? VIEW_SHOWS[named.data]
+    : // An address's view is a predicate over that mailbox's copies alone.
+      (thread: ThreadState) => (thread.foldersByMailbox[view] ?? []).includes('inbox');
   return threads.filter(shows).toSorted((a, b) => latestOf(b).at - latestOf(a).at);
 };
 
-export const unreadCount = (threads: readonly ThreadState[], mailbox: MailboxId) =>
-  threadsIn(threads, mailbox).filter(thread => thread.isUnread).length;
+export const unreadCount = (threads: readonly ThreadState[], view: ViewId) =>
+  threadsIn(threads, view).filter(thread => thread.isUnread).length;
 
 /**
- * The rows a mailbox shows that the query's criteria hold for. One function because the list and
+ * The rows a view shows that the query's criteria hold for. One function because the list and
  * the status line need the same answer. A view is its own scope here, so `in:` and `mailbox:` say
  * nothing.
  */
 export const visibleThreads = (
   threads: readonly ThreadState[],
-  mailbox: MailboxId,
+  view: ViewId,
   query: string | undefined,
 ) => {
   const parsed = parseQuery(query ?? '');
-  const inMailbox = threadsIn(threads, mailbox);
-  return hasCriteria(parsed) ? inMailbox.filter(threadMatches(parsed)) : inMailbox;
+  const inView = threadsIn(threads, view);
+  return hasCriteria(parsed) ? inView.filter(threadMatches(parsed)) : inView;
 };
 
 /** Where the reader goes when `threadId` is filed out of `list`: the row below, else the row above. */
@@ -139,4 +140,4 @@ export const neighbourOf = (list: readonly ThreadState[], threadId: string) => {
 };
 
 /** The id stays `unified`; on screen this is the inbox (DECISIONS.md, "Inbox", not "Unified"). */
-export const mailboxLabel = (mailbox: MailboxId) => (mailbox === 'unified' ? 'inbox' : mailbox);
+export const viewLabel = (view: ViewId) => (view === 'unified' ? 'inbox' : view);

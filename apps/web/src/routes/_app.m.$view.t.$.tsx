@@ -6,4 +6,4 @@ import { ThreadPage } from '../threads/ThreadPage';
  * the way out. A thread id is data, so an unknown one is a matched route that finds nothing (an
  * in-pane empty state), not a 404; see DECISIONS.md, "A bad address".
  */
-export const Route = createFileRoute('/_app/m/$mailbox/t/$')({ component: ThreadPage });
+export const Route = createFileRoute('/_app/m/$view/t/$')({ component: ThreadPage });

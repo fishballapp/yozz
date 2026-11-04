@@ -17,11 +17,11 @@ const summary = (uid: number): ImapMessageSummary => ({
 });
 
 describe('mail cache', () => {
-  it('keeps summaries, bodies and the sync mark per user, account and folder', async () => {
+  it('keeps summaries, bodies and the sync mark per user, mailbox and folder', async () => {
     const idb = new IDBFactory();
-    const account = createMailCache('u1', 'me@x', idb);
-    const inbox = account.folder('inbox');
-    const sent = account.folder('sent');
+    const mailbox = createMailCache('u1', 'me@x', idb);
+    const inbox = mailbox.folder('inbox');
+    const sent = mailbox.folder('sent');
     const other = createMailCache('u1', 'other@x', idb).folder('inbox');
     expect(await inbox.getSync()).toBeNull();
     await inbox.putSync({ name: 'INBOX', uidValidity: 7, lastUid: 3, complete: false });
@@ -54,7 +54,7 @@ describe('mail cache', () => {
     await inbox.deleteSummaries([1]);
     expect((await inbox.listSummaries()).map(s => s.uid)).toEqual([3]);
 
-    await account.clear();
+    await mailbox.clear();
     expect(await inbox.getSync()).toBeNull();
     expect(await inbox.listSummaries()).toEqual([]);
     expect(await sent.listSummaries()).toEqual([]);
@@ -108,8 +108,8 @@ describe('mail cache', () => {
 
   it("lists a folder's cached body uids", async () => {
     const idb = new IDBFactory();
-    const account = createMailCache('u1', 'me@x', idb);
-    const inbox = account.folder('inbox');
+    const mailbox = createMailCache('u1', 'me@x', idb);
+    const inbox = mailbox.folder('inbox');
     const body = {
       paragraphs: ['hi'],
       hasTextPart: true,
@@ -120,7 +120,7 @@ describe('mail cache', () => {
     expect(await inbox.listBodyUids()).toEqual(new Set());
     await inbox.putBody(10, body);
     await inbox.putBody(20, body);
-    await account.folder('sent').putBody(30, body);
+    await mailbox.folder('sent').putBody(30, body);
     await createMailCache('u1', 'other@x', idb).folder('inbox').putBody(40, body);
     expect(await inbox.listBodyUids()).toEqual(new Set([10, 20]));
   });

@@ -423,7 +423,7 @@ export const ThreadReader = ({
   const inbound = newestInbound(thread, ownedAddresses) ?? newest;
   // Read from the same place `seedFor` reads, or a button would appear that seeds nothing.
   const canReplyAll = replyAllCc(inbound, ownedAddresses).length > 0;
-  const { mailbox } = useParams({ strict: false });
+  const { view } = useParams({ strict: false });
   const [pane, setPane] = useState<HTMLDivElement | null>(null);
   // A move the store refused leaves the reader where it is and says why, now or when the server answers.
   const file =
@@ -444,7 +444,7 @@ export const ThreadReader = ({
             on to the next in the list — the one you just filed is not the one you are reading —
             while marking unread closes it, since it would be read again the moment it stayed
             open. Opened from Trash, a thread offers the one move that gets it out — the row it
-            came from offered the same, and a conversation only half in the bin must not lose it.
+            came from offered the same, and a conversation only half in Trash must not lose it.
             A move with nothing in its source folders is not offered at all, nor is any mark on a
             conversation no server holds a copy of. */}
         <div className="flex h-11 items-center border-b border-rule-soft px-5">
@@ -461,7 +461,7 @@ export const ThreadReader = ({
             <>
               <span aria-hidden className="mx-1.5 h-5 w-px bg-rule lg:hidden" />
               <div className="flex items-center gap-0.5 lg:-ml-1.5">
-                {mailbox === 'trash' ? (
+                {view === 'trash' ? (
                   canMoveTo(thread.folders, 'inbox') && (
                     <Button
                       variant="ghost"

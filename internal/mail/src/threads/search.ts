@@ -3,7 +3,7 @@ import type { MailConnectionFailure, MailTask, Result, RunTask } from '../connec
 import type { MailCache } from './cache.ts';
 import { includesText } from './match.ts';
 import { hasCriteria, type SearchQuery, type TermField } from './query.ts';
-import type { AccountSummaries, FolderSummaries } from './summaries.ts';
+import type { FolderSummaries, MailboxSummaries } from './summaries.ts';
 import type { Folder, Location, ThreadState } from './thread.ts';
 
 /** How many matches a query reads in each folder, newest first: one sync window's worth. */
@@ -79,13 +79,13 @@ type FolderMatches = {
  */
 const searchFolderTask = ({
   folder,
-  mailbox,
+  folderName,
   uidValidity,
   cached,
   query,
 }: {
   readonly folder: Folder;
-  readonly mailbox: string;
+  readonly folderName: string;
   readonly uidValidity: number;
   readonly cached: readonly ImapMessageSummary[];
   readonly query: SearchQuery;
@@ -94,7 +94,7 @@ const searchFolderTask = ({
   effect: 'read',
   retry: true,
   run: async client => {
-    const selected = await client.ensureSelected(mailbox);
+    const selected = await client.ensureSelected(folderName);
     if (!selected.ok) return { ok: false, error: { kind: 'imap', reason: selected.reason } };
     if (selected.value.uidValidity !== null && selected.value.uidValidity !== uidValidity) {
       return {
@@ -154,7 +154,7 @@ export const searchMailbox = async ({
     const answered = await run(
       searchFolderTask({
         folder,
-        mailbox: mark.name,
+        folderName: mark.name,
         uidValidity: mark.uidValidity,
         cached,
         query,
@@ -166,8 +166,8 @@ export const searchMailbox = async ({
   return { ok: true, value: matches };
 };
 
-const hitKey = ({ account, folder, uid }: Omit<Location, 'uidValidity'>) =>
-  `${account}/${folder}/${uid}`;
+const hitKey = ({ mailbox, folder, uid }: Omit<Location, 'uidValidity'>) =>
+  `${mailbox}/${folder}/${uid}`;
 
 /**
  * What the mailboxes that answered add up to: the summaries to thread in beside the cache, whether
@@ -182,7 +182,7 @@ export const assembleMatches = (
   const hits = new Set(
     answers.flatMap(({ address, matches }) =>
       matches.flatMap(({ folder, hits }) =>
-        hits.map(uid => hitKey({ account: address, folder, uid })),
+        hits.map(uid => hitKey({ mailbox: address, folder, uid })),
       ),
     ),
   );
@@ -194,7 +194,7 @@ export const assembleMatches = (
           matches.map(({ folder, uidValidity, summaries }) => [folder, { uidValidity, summaries }]),
         ) satisfies FolderSummaries,
       ]),
-    ) satisfies AccountSummaries,
+    ) satisfies MailboxSummaries,
     hasMoreMatches: answers.some(({ matches }) => matches.some(({ hasMore }) => hasMore)),
     isHit: (thread: ThreadState) =>
       thread.messages.some(message =>

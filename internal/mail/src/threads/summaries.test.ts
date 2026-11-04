@@ -5,7 +5,7 @@ import { parseQuery } from './query.ts';
 import {
   type FolderSummaries,
   parseInternalDate,
-  threadsFromAccounts,
+  threadsFromMailboxes,
   withDrafts,
 } from './summaries.ts';
 import type { ThreadState } from './thread.ts';
@@ -47,13 +47,13 @@ const only = (threads: readonly ThreadState[]) => {
 };
 
 /** One summary makes one thread; multi-message threading is `lib/threading.test.ts`. */
-const threadFromSummary = (summary: ImapMessageSummary, account: string) =>
-  only(threadsFromSummaries(read({ inbox: [summary] }), account));
+const threadFromSummary = (summary: ImapMessageSummary, mailbox: string) =>
+  only(threadsFromSummaries(read({ inbox: [summary] }), mailbox));
 
 /** UIDVALIDITY is irrelevant to grouping; renumbering lives in `sync.test.ts`. */
-/** One account's folders through the global pass. */
-const threadsFromSummaries = (byFolder: FolderSummaries, account: string) =>
-  threadsFromAccounts({ [account]: byFolder });
+/** One mailbox's folders through the global pass. */
+const threadsFromSummaries = (byFolder: FolderSummaries, mailbox: string) =>
+  threadsFromMailboxes({ [mailbox]: byFolder });
 
 const read = (byFolder: Partial<Record<Folder, readonly ImapMessageSummary[]>>): FolderSummaries =>
   Object.fromEntries(
@@ -89,7 +89,7 @@ describe('parseInternalDate', () => {
 
 describe('threadFromSummary', () => {
   it('carries who a vault-held message was blind-copied to, so a search can find it', () => {
-    const [thread] = threadsFromAccounts({}, [
+    const [thread] = threadsFromMailboxes({}, [
       {
         messageId: '<sent-1@x.co>',
         at: 1,
@@ -112,7 +112,7 @@ describe('threadFromSummary', () => {
   it('keeps each message its own flags beside the conversation’s', () => {
     const inbox = (uid: number, flags: readonly string[], over = {}) =>
       summaryOf({ uid, flags, envelope: envelope({ messageId: `<m${uid}@x.co>`, ...over }) });
-    const [thread] = threadsFromAccounts({
+    const [thread] = threadsFromMailboxes({
       'user@yozz.app': {
         inbox: {
           uidValidity: 1,
@@ -136,9 +136,9 @@ describe('threadFromSummary', () => {
 
   it('maps a summary with flags correctly', () => {
     const thread = threadFromSummary(summaryOf(), 'user@yozz.app');
-    // No account prefix: the same mail delivered to two of your addresses is one message.
+    // No mailbox prefix: the same mail delivered to two of your addresses is one message.
     expect(thread.id).toBe('mid/<msg-1@example.com>');
-    expect(thread.accounts).toEqual(['user@yozz.app']);
+    expect(thread.mailboxes).toEqual(['user@yozz.app']);
     expect(thread.subject).toBe('Important update');
     expect(thread.isUnread).toBe(false);
     expect(thread.isStarred).toBe(true);
@@ -151,7 +151,7 @@ describe('threadFromSummary', () => {
     if (!message) return;
     expect(message.id).toBe('mid/<msg-1@example.com>');
     expect(message.locations).toEqual([
-      { account: 'user@yozz.app', folder: 'inbox', uidValidity: 1, uid: 101 },
+      { mailbox: 'user@yozz.app', folder: 'inbox', uidValidity: 1, uid: 101 },
     ]);
     expect(message.fromName).toBe('Alice Smith');
     expect(message.fromAddress).toBe('alice@example.com');
@@ -417,7 +417,7 @@ describe('ids that survive a move', () => {
     const after = threadsFromSummaries(read({ archive: [summaryOf({ uid: 31 })] }), me);
     expect(after.map(t => t.id)).toEqual(before.map(t => t.id));
     expect(after[0]?.messages[0]?.locations).toEqual([
-      { account: me, folder: 'archive', uidValidity: 1, uid: 31 },
+      { mailbox: me, folder: 'archive', uidValidity: 1, uid: 31 },
     ]);
   });
 
@@ -461,8 +461,8 @@ describe('ids that survive a move', () => {
     expect(messages.map(m => m.id)).toEqual(['mid/<msg-1@example.com>']);
     // One row on screen, two copies underneath.
     expect(messages[0]?.locations).toEqual([
-      { account: me, folder: 'inbox', uidValidity: 1, uid: 5 },
-      { account: me, folder: 'archive', uidValidity: 1, uid: 6 },
+      { mailbox: me, folder: 'inbox', uidValidity: 1, uid: 5 },
+      { mailbox: me, folder: 'archive', uidValidity: 1, uid: 6 },
     ]);
   });
 
@@ -483,31 +483,31 @@ describe('ids that survive a move', () => {
   });
 });
 
-describe('threads that span accounts', () => {
+describe('threads that span mailboxes', () => {
   const work = 'work@yozz.app';
   const home = 'home@yozz.app';
 
   it('is one thread when the same mail reached two of your addresses', () => {
     // One RFC message delivered twice is one conversation.
     const delivered = summaryOf({ uid: 1 });
-    const threads = threadsFromAccounts({
+    const threads = threadsFromMailboxes({
       [work]: read({ inbox: [delivered] }),
       [home]: read({ inbox: [{ ...delivered, uid: 42 }] }),
     });
     expect(threads).toHaveLength(1);
-    expect(threads[0]?.accounts).toEqual([home, work]);
+    expect(threads[0]?.mailboxes).toEqual([home, work]);
     expect(threads[0]?.messages).toHaveLength(1);
     // Same folder and instant, so the tie breaks on the physical id.
     expect(threads[0]?.messages[0]?.locations).toEqual([
-      { account: home, folder: 'inbox', uidValidity: 1, uid: 42 },
-      { account: work, folder: 'inbox', uidValidity: 1, uid: 1 },
+      { mailbox: home, folder: 'inbox', uidValidity: 1, uid: 42 },
+      { mailbox: work, folder: 'inbox', uidValidity: 1, uid: 1 },
     ]);
   });
 
-  it('is unread when ANY account holds an unread copy of the same message', () => {
-    // A message read on one account is still unread on the other.
+  it('is unread when ANY mailbox holds an unread copy of the same message', () => {
+    // A message read on one mailbox is still unread on the other.
     const delivered = summaryOf({ uid: 1, flags: [] });
-    const threads = threadsFromAccounts({
+    const threads = threadsFromMailboxes({
       [work]: read({ inbox: [delivered] }),
       [home]: read({ inbox: [{ ...delivered, uid: 2, flags: ['\\Seen'] }] }),
     });
@@ -515,9 +515,9 @@ describe('threads that span accounts', () => {
     expect(threads[0]?.isUnread).toBe(true);
   });
 
-  it('is starred when any copy is, whichever account holds it', () => {
+  it('is starred when any copy is, whichever mailbox holds it', () => {
     const delivered = summaryOf({ uid: 1, flags: ['\\Seen', '\\Flagged'] });
-    const threads = threadsFromAccounts({
+    const threads = threadsFromMailboxes({
       [work]: read({ inbox: [delivered] }),
       [home]: read({ inbox: [{ ...delivered, uid: 2, flags: ['\\Seen'] }] }),
     });
@@ -526,7 +526,7 @@ describe('threads that span accounts', () => {
 
   it('leaves the Drafts folder out of threading entirely', () => {
     // Synced for the mirror, but not mail.
-    const threads = threadsFromAccounts({
+    const threads = threadsFromMailboxes({
       [work]: read({ inbox: [summaryOf({ uid: 1 })], drafts: [summaryOf({ uid: 2 })] }),
     });
     expect(threads).toHaveLength(1);
@@ -534,7 +534,7 @@ describe('threads that span accounts', () => {
     expect(threads[0]?.folders).toEqual(['inbox']);
   });
 
-  it('joins a reply that only one account holds, and says which folders each account has it in', () => {
+  it('joins a reply that only one mailbox holds, and says which folders each mailbox has it in', () => {
     const root = summaryOf({ uid: 1 });
     const reply = summaryOf({
       uid: 2,
@@ -546,21 +546,21 @@ describe('threads that span accounts', () => {
         inReplyTo: '<msg-1@example.com>',
       }),
     });
-    const threads = threadsFromAccounts({
+    const threads = threadsFromMailboxes({
       [work]: read({ archive: [root] }),
       [home]: read({ inbox: [reply] }),
     });
     expect(threads).toHaveLength(1);
     const thread = threads[0];
     expect(thread?.messages.map(m => m.id)).toEqual(['mid/<msg-1@example.com>', 'mid/<reply@x>']);
-    // Globally in both folders, per account in exactly one.
+    // Globally in both folders, per mailbox in exactly one.
     expect(thread?.folders).toEqual(['inbox', 'archive']);
-    expect(thread?.foldersByAccount).toEqual({ [work]: ['archive'], [home]: ['inbox'] });
+    expect(thread?.foldersByMailbox).toEqual({ [work]: ['archive'], [home]: ['inbox'] });
   });
 
   it('threads mail the vault holds for a send-only address, body and all', () => {
     // Nothing on any server holds this message.
-    const threads = threadsFromAccounts({ [work]: read({ inbox: [summaryOf({ uid: 1 })] }) }, [
+    const threads = threadsFromMailboxes({ [work]: read({ inbox: [summaryOf({ uid: 1 })] }) }, [
       {
         messageId: '<sent@alias>',
         at: 1_700_000_000_000,
@@ -591,7 +591,7 @@ describe('threads that span accounts', () => {
     const sent = thread.messages[1];
     if (sent === undefined) throw new Error('the vault copy lost its message');
     expect(sent.locations).toEqual([
-      { account: 'alias@example.com', folder: 'sent', uidValidity: VAULT_UID_VALIDITY, uid: 0 },
+      { mailbox: 'alias@example.com', folder: 'sent', uidValidity: VAULT_UID_VALIDITY, uid: 0 },
     ]);
   });
 
@@ -606,7 +606,7 @@ describe('threads that span accounts', () => {
         from: [{ name: null, mailbox: 'alias', host: 'example.com' }],
       }),
     });
-    const threads = threadsFromAccounts({ [work]: read({ sent: [real] }) }, [
+    const threads = threadsFromMailboxes({ [work]: read({ sent: [real] }) }, [
       {
         messageId: '<sent@alias>',
         at: 1_700_000_000_000,
@@ -621,12 +621,12 @@ describe('threads that span accounts', () => {
     const thread = only(threads);
     expect(thread.messages).toHaveLength(1);
     // The server's copy leads, so a fetch and a move act on it.
-    expect(thread.messages[0]?.locations?.[0]?.account).toBe(work);
-    expect(thread.messages[0]?.locations?.map(l => l.account)).toContain('alias@example.com');
+    expect(thread.messages[0]?.locations?.[0]?.mailbox).toBe(work);
+    expect(thread.messages[0]?.locations?.map(l => l.mailbox)).toContain('alias@example.com');
   });
 
   it('shows a draft in the conversation it replies to, and alone when it replies to nothing', () => {
-    const threads = threadsFromAccounts({ [work]: read({ inbox: [summaryOf({ uid: 1 })] }) });
+    const threads = threadsFromMailboxes({ [work]: read({ inbox: [summaryOf({ uid: 1 })] }) });
     const draft = (over: Record<string, unknown>) => ({
       draftKey: 'k1',
       draftId: 'k1@2',

@@ -4,10 +4,10 @@ import { defaultRangeExtractor, useVirtualizer } from '@tanstack/react-virtual';
 import { describeMailFailure } from '@yozz.app/mail/describe-failure';
 import { type ThreadState, threadByHandle } from '@yozz.app/mail/threads/thread';
 import {
-  isViewId,
-  type MailboxId,
+  isNamedView,
   olderAvailable,
   syncProgressIn,
+  type ViewId,
 } from '@yozz.app/mail/threads/views';
 import { cn } from 'cn';
 import { type ReactNode, useEffect, useEffectEvent, useRef, useState } from 'react';
@@ -18,7 +18,7 @@ import { BulkActions } from './BulkActions';
 import { useSelection } from './selection';
 import { ThreadRow } from './ThreadRow';
 
-/** The list over a mailbox: search, the rows, the empty states and Older mail. */
+/** The list over a view: search, the rows, the empty states and Older mail. */
 
 const EmptyState = ({
   title,
@@ -37,17 +37,17 @@ const EmptyState = ({
 );
 
 /**
- * Only the rows in view, and a few either side, are in the DOM, so a mailbox of thousands renders
+ * Only the rows in view, and a few either side, are in the DOM, so a view of thousands renders
  * like one of thirty. Each row is measured: below `lg` a record folds to two lines.
  */
 const ThreadRows = ({
   threads,
-  mailbox,
+  view,
   openId,
   selection,
 }: {
   threads: readonly ThreadState[];
-  mailbox: MailboxId;
+  view: ViewId;
   openId: string | undefined;
   selection: ReturnType<typeof useSelection>;
 }) => {
@@ -108,7 +108,7 @@ const ThreadRows = ({
             >
               <ThreadRow
                 thread={thread}
-                mailbox={mailbox}
+                view={view}
                 isSelected={thread.id === openId}
                 isChecked={selection.isChecked(thread.id)}
                 hasSelection={selection.checkedIds.length > 0}
@@ -125,12 +125,12 @@ const ThreadRows = ({
 
 export const ThreadList = ({
   threads,
-  mailbox,
+  view,
   query,
   onQueryChange,
 }: {
   threads: readonly ThreadState[];
-  mailbox: MailboxId;
+  view: ViewId;
   query: string;
   onQueryChange: (query: string) => void;
 }) => {
@@ -138,11 +138,12 @@ export const ThreadList = ({
   // Resolved the way `ThreadPage` resolves it: a message id in the URL names its conversation.
   const { _splat: handle } = useParams({ strict: false });
   const openId = handle === undefined ? undefined : threadByHandle(threads, handle)?.id;
-  const { accounts, recordsError, syncStates, sync, loadOlder, isLoadingOlder, isDemo } = useMail();
-  // Opening a message, another mailbox or another search each start a new selection.
+  const { mailboxes, recordsError, syncStates, sync, loadOlder, isLoadingOlder, isDemo } =
+    useMail();
+  // Opening a message, another view or another search each start a new selection.
   const selection = useSelection(
     threads.map(({ id }) => id),
-    [mailbox, query, handle ?? ''].join('\n'),
+    [view, query, handle ?? ''].join('\n'),
   );
   const checked = threads.filter(({ id }) => selection.isChecked(id));
 
@@ -165,13 +166,13 @@ export const ThreadList = ({
         </div>
       );
     }
-    if (!isViewId(mailbox)) {
-      const currentAccount = accounts.find(account => account.address === mailbox);
-      if (currentAccount === undefined) {
+    if (!isNamedView(view)) {
+      const currentMailbox = mailboxes.find(mailbox => mailbox.address === view);
+      if (currentMailbox === undefined) {
         return (
           <EmptyState
             title="Not one of your addresses"
-            body={`Nothing is connected at ${mailbox}.`}
+            body={`Nothing is connected at ${view}.`}
             action={
               <Link
                 to="/settings/new"
@@ -185,7 +186,7 @@ export const ThreadList = ({
         );
       }
     }
-    if (accounts.length === 0) {
+    if (mailboxes.length === 0) {
       return (
         <EmptyState
           title="No address connected"
@@ -204,7 +205,7 @@ export const ThreadList = ({
     }
     // Demo fixtures never sync, so an empty demo folder is empty rather than pending.
     if (!isDemo) {
-      const { pending, failed } = syncProgressIn(syncStates, accounts, mailbox);
+      const { pending, failed } = syncProgressIn(syncStates, mailboxes, view);
       const [waitingOn] = pending;
       if (waitingOn !== undefined) {
         return (
@@ -223,12 +224,12 @@ export const ThreadList = ({
         return (
           <EmptyState
             title="Sync failed"
-            body={describeMailFailure(firstFailure.failure, firstFailure.account.imap.host)}
+            body={describeMailFailure(firstFailure.failure, firstFailure.mailbox.imap.host)}
             action={
               <button
                 type="button"
                 // A view is retried whole; an address, on its own.
-                onClick={() => void sync(isViewId(mailbox) ? undefined : mailbox)}
+                onClick={() => void sync(isNamedView(view) ? undefined : view)}
                 className={buttonClass({ variant: 'secondary' })}
               >
                 Retry
@@ -256,12 +257,7 @@ export const ThreadList = ({
         />
         {selection.isSelecting ? (
           <div className="flex min-w-0 flex-1 items-center lg:pl-1">
-            <BulkActions
-              threads={checked}
-              mailbox={mailbox}
-              openId={openId}
-              onDone={selection.clear}
-            />
+            <BulkActions threads={checked} view={view} openId={openId} onDone={selection.clear} />
           </div>
         ) : (
           <>
@@ -296,21 +292,21 @@ export const ThreadList = ({
       {threads.length === 0 ? (
         empty
       ) : (
-        <ThreadRows threads={threads} mailbox={mailbox} openId={openId} selection={selection} />
+        <ThreadRows threads={threads} view={view} openId={openId} selection={selection} />
       )}
-      {/* Hidden, not disabled, once every account shown has its folder's start cached: a
+      {/* Hidden, not disabled, once every mailbox shown has its folder's start cached: a
           control that stays on screen implies there is more mail behind it. Search reads what
           is cached, so paging under a query would answer a different question than it asks. It
           stands under an empty list too: a Starred view with nothing in the newest window is
           exactly where older mail is wanted. */}
-      {query.trim() === '' && olderAvailable(syncStates, accounts, mailbox) && (
+      {query.trim() === '' && olderAvailable(syncStates, mailboxes, view) && (
         <button
           type="button"
-          onClick={() => void loadOlder(mailbox)}
-          disabled={isLoadingOlder(mailbox)}
+          onClick={() => void loadOlder(view)}
+          disabled={isLoadingOlder(view)}
           className="label-rule h-9 shrink-0 border-t border-rule-soft text-center -outline-offset-2 hover:bg-ink-hover disabled:hover:bg-transparent"
         >
-          {isLoadingOlder(mailbox) ? 'Loading…' : 'Older mail'}
+          {isLoadingOlder(view) ? 'Loading…' : 'Older mail'}
         </button>
       )}
     </div>

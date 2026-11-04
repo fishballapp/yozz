@@ -9,7 +9,7 @@ import {
   TrashIcon,
 } from '@phosphor-icons/react';
 import { Link, useLocation, useParams } from '@tanstack/react-router';
-import { isViewId, type MailboxId, unreadCount } from '@yozz.app/mail/threads/views';
+import { isNamedView, unreadCount, type ViewId } from '@yozz.app/mail/threads/views';
 import { cn } from 'cn';
 import type { ReactNode } from 'react';
 import { keepCompose, withCompose } from '../compose/intent';
@@ -18,22 +18,22 @@ import { buttonClass } from '../ui/Button';
 import { Wordmark } from '../ui/Wordmark';
 
 /**
- * Address-first (PRODUCT.md principle 2), so connecting an account lives in Settings. The Inbox
+ * Address-first (PRODUCT.md principle 2), so connecting a mailbox lives in Settings. The Inbox
  * row's id stays `unified` (DECISIONS.md), and every link uses `keepCompose`.
  */
 
 /**
- * A rail row's click opens its mailbox, or, on the mailbox already open, syncs what it shows: every
+ * A rail row's click opens its view, or, on the view already open, syncs what it shows: every
  * address for a view, one for an address, as Gmail does. The activity bar says it happened.
  */
-const useRowClick = (mailbox: MailboxId, onNavigate: (() => void) | undefined) => {
+const useRowClick = (view: ViewId, onNavigate: (() => void) | undefined) => {
   const params = useParams({ strict: false });
   const { sync } = useMail();
-  const isActive = params.mailbox === mailbox;
+  const isActive = params.view === view;
   return {
     isActive,
     onClick: () => {
-      if (isActive) void sync(isViewId(mailbox) ? undefined : mailbox);
+      if (isActive) void sync(isNamedView(view) ? undefined : view);
       onNavigate?.();
     },
   };
@@ -46,8 +46,8 @@ const UnifiedRow = ({ onNavigate }: { onNavigate?: () => void }) => {
 
   return (
     <Link
-      to="/m/$mailbox"
-      params={{ mailbox: 'unified' }}
+      to="/m/$view"
+      params={{ view: 'unified' }}
       search={keepCompose}
       onClick={onClick}
       aria-current={isActive ? 'page' : undefined}
@@ -72,25 +72,25 @@ const UnifiedRow = ({ onNavigate }: { onNavigate?: () => void }) => {
 };
 
 const RailRow = ({
-  mailbox,
+  view,
   mark,
   label,
   count,
   onNavigate,
 }: {
-  mailbox: MailboxId;
+  view: ViewId;
   /** A view's icon. An address row has none: the address is its own label. */
   mark?: ReactNode;
   label: string;
   count?: number;
   onNavigate?: () => void;
 }) => {
-  const { isActive, onClick } = useRowClick(mailbox, onNavigate);
+  const { isActive, onClick } = useRowClick(view, onNavigate);
 
   return (
     <Link
-      to="/m/$mailbox"
-      params={{ mailbox }}
+      to="/m/$view"
+      params={{ view }}
       search={keepCompose}
       onClick={onClick}
       // Explicit rather than inherited from TanStack Router's own `aria-current`.
@@ -132,15 +132,15 @@ const SectionLabel = ({ children }: { children: ReactNode }) => (
 );
 
 export const AddressRail = ({ onNavigate }: { onNavigate?: () => void }) => {
-  const { accounts, threads } = useMail();
+  const { mailboxes, threads } = useMail();
   const isSettings = useLocation({ select: location => location.pathname.startsWith('/settings') });
 
   return (
     <nav className="flex h-full flex-col bg-ink-raised" aria-label="Mailboxes">
       <div className="px-3 pt-4 pb-3">
         <Link
-          to="/m/$mailbox"
-          params={{ mailbox: 'unified' }}
+          to="/m/$view"
+          params={{ view: 'unified' }}
           search={keepCompose}
           onClick={onNavigate}
           className="inline-flex text-paper"
@@ -166,42 +166,42 @@ export const AddressRail = ({ onNavigate }: { onNavigate?: () => void }) => {
         <UnifiedRow onNavigate={onNavigate} />
 
         <SectionLabel>Addresses</SectionLabel>
-        {accounts.map(account => (
+        {mailboxes.map(mailbox => (
           <RailRow
-            key={account.address}
-            mailbox={account.address}
-            label={account.address}
-            count={unreadCount(threads, account.address)}
+            key={mailbox.address}
+            view={mailbox.address}
+            label={mailbox.address}
+            count={unreadCount(threads, mailbox.address)}
             onNavigate={onNavigate}
           />
         ))}
         <SectionLabel>Views</SectionLabel>
         <RailRow
-          mailbox="starred"
+          view="starred"
           mark={<StarIcon size={13} />}
           label="Starred"
           onNavigate={onNavigate}
         />
         <RailRow
-          mailbox="drafts"
+          view="drafts"
           mark={<NotePencilIcon size={13} />}
           label="Drafts"
           onNavigate={onNavigate}
         />
         <RailRow
-          mailbox="sent"
+          view="sent"
           mark={<PaperPlaneTiltIcon size={13} />}
           label="Sent"
           onNavigate={onNavigate}
         />
         <RailRow
-          mailbox="archive"
+          view="archive"
           mark={<ArchiveIcon size={13} />}
           label="Archive"
           onNavigate={onNavigate}
         />
         <RailRow
-          mailbox="trash"
+          view="trash"
           mark={<TrashIcon size={13} />}
           label="Trash"
           onNavigate={onNavigate}

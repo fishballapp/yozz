@@ -12,10 +12,10 @@ import { ThreadList } from './ThreadList';
  * one by one, and the virtualizer would scroll the list down for each of them.
  */
 
-export const Mailbox = () => {
-  const { mailbox } = useParams({ from: '/_app/m/$mailbox' });
-  const { q } = useSearch({ from: '/_app/m/$mailbox' });
-  // `to: '.'` with no `from`: `from: '/m/$mailbox'` resolved without `/t/$` and typing in the
+export const ViewPage = () => {
+  const { view } = useParams({ from: '/_app/m/$view' });
+  const { q } = useSearch({ from: '/_app/m/$view' });
+  // `to: '.'` with no `from`: `from: '/m/$view'` resolved without `/t/$` and typing in the
   // search box closed the open message.
   const navigate = useNavigate();
   const { threads } = useMail();
@@ -40,8 +40,8 @@ export const Mailbox = () => {
         aria-label="Messages"
       >
         <ThreadList
-          threads={visibleThreads(threads, mailbox, q)}
-          mailbox={mailbox}
+          threads={visibleThreads(threads, view, q)}
+          view={view}
           query={q ?? ''}
           // `replace`: a search box is one thought, not one history entry per keystroke.
           onQueryChange={query =>

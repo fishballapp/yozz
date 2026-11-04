@@ -16,8 +16,8 @@ const message = (id: string): Message => ({
 
 const thread = (id: string, folders: readonly Folder[]): ThreadState => ({
   id,
-  accounts: ['me@x'],
-  foldersByAccount: { 'me@x': folders },
+  mailboxes: ['me@x'],
+  foldersByMailbox: { 'me@x': folders },
   subject: id,
   messages: [message(`${id}/1`)],
   isUnread: false,
@@ -27,21 +27,21 @@ const thread = (id: string, folders: readonly Folder[]): ThreadState => ({
 });
 
 describe('a pending move in an address view', () => {
-  const move = (threadId: string, account: string, to: MoveTarget): PendingOp => ({
-    id: `${threadId}:${account}:${to}`,
-    account,
+  const move = (threadId: string, mailbox: string, to: MoveTarget): PendingOp => ({
+    id: `${threadId}:${mailbox}:${to}`,
+    mailbox,
     threadId,
     change: { kind: 'move', to },
     retireAtSyncSeq: null,
   });
-  const unreadIn = (foldersByAccount: Readonly<Record<string, readonly Folder[]>>) => ({
+  const unreadIn = (foldersByMailbox: Readonly<Record<string, readonly Folder[]>>) => ({
     ...thread('t', ['inbox']),
-    accounts: Object.keys(foldersByAccount),
-    foldersByAccount,
+    mailboxes: Object.keys(foldersByMailbox),
+    foldersByMailbox,
     isUnread: true,
   });
-  const idsIn = (threads: readonly ThreadState[], mailbox: string) =>
-    threadsIn(threads, mailbox).map(t => t.id);
+  const idsIn = (threads: readonly ThreadState[], view: string) =>
+    threadsIn(threads, view).map(t => t.id);
 
   it('leaves and returns at once, and the address’s unread count follows', () => {
     const base = [unreadIn({ 'me@x': ['inbox'] })];
@@ -57,7 +57,7 @@ describe('a pending move in an address view', () => {
     expect(unreadCount(restored, 'me@x')).toBe(1);
   });
 
-  it('archives one account’s copy and leaves the other’s inbox, and the unified one, showing it', () => {
+  it('archives one mailbox’s copy and leaves the other’s inbox, and the unified one, showing it', () => {
     const base = [unreadIn({ 'me@x': ['inbox'], 'you@y': ['inbox'] })];
 
     const one = applyOps(base, [move('t', 'me@x', 'archive')]);

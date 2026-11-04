@@ -42,8 +42,8 @@ export const Login = ({
   const navigateOnward = () =>
     cliApproval === undefined
       ? navigate({
-          to: '/m/$mailbox',
-          params: { mailbox: 'unified' },
+          to: '/m/$view',
+          params: { view: 'unified' },
           search: previous => previous,
         })
       : navigate({ href: approvalHref(cliApproval), replace: true });
@@ -56,12 +56,7 @@ export const Login = ({
       return <Navigate to="/cli/approve" href={approvalHref(cliApproval)} replace />;
     }
     return (
-      <Navigate
-        to="/m/$mailbox"
-        params={{ mailbox: 'unified' }}
-        search={previous => previous}
-        replace
-      />
+      <Navigate to="/m/$view" params={{ view: 'unified' }} search={previous => previous} replace />
     );
   }
 

@@ -23,11 +23,11 @@ export type BodyEntry = { readonly status: 'loading' } | BodyOutcome;
 export type Previews = Readonly<Record<string, readonly string[]>>;
 
 /** uidValidity is part of the key: after a reset a reused uid must not inherit another message's text. */
-export const previewKey = ({ account, folder, uidValidity, uid }: Location) =>
-  `${account}/${folder}/${uidValidity}/${uid}`;
+export const previewKey = ({ mailbox, folder, uidValidity, uid }: Location) =>
+  `${mailbox}/${folder}/${uidValidity}/${uid}`;
 
-export const withoutAccountPreviews = (previews: Previews, account: string): Previews =>
-  Object.fromEntries(Object.entries(previews).filter(([key]) => !key.startsWith(`${account}/`)));
+export const withoutMailboxPreviews = (previews: Previews, mailbox: string): Previews =>
+  Object.fromEntries(Object.entries(previews).filter(([key]) => !key.startsWith(`${mailbox}/`)));
 
 export const withBodies = (
   threads: readonly ThreadState[],

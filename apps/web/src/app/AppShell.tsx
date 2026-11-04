@@ -1,7 +1,7 @@
 import { Dialog } from '@base-ui/react/dialog';
 import { ListIcon, PlusIcon, XIcon } from '@phosphor-icons/react';
 import { Link, Navigate, Outlet, useMatches, useParams, useSearch } from '@tanstack/react-router';
-import { mailboxLabel, visibleThreads } from '@yozz.app/mail/threads/views';
+import { viewLabel, visibleThreads } from '@yozz.app/mail/threads/views';
 import { useEffect, useState } from 'react';
 import { AddressRail } from '../addresses/AddressRail';
 import { AgentTools } from '../agent/AgentTools';
@@ -78,21 +78,21 @@ const AppShellBody = () => {
   }, []);
 
   // `strict: false`: this sits above every page and reads whichever is matched.
-  const { mailbox } = useParams({ strict: false });
+  const { view } = useParams({ strict: false });
   const { q } = useSearch({ strict: false });
   const pageTitle = useMatches({
     select: matches => matches.findLast(match => match.staticData.title !== undefined)?.staticData,
   })?.title;
 
   // The same derivation the list runs, from one function.
-  const visible = mailbox === undefined ? undefined : visibleThreads(threads, mailbox, q);
+  const visible = view === undefined ? undefined : visibleThreads(threads, view, q);
   const counts =
     visible === undefined
       ? undefined
       : { unread: visible.filter(thread => thread.isUnread).length, total: visible.length };
 
-  // Lowercased at this seam: mailbox labels already are.
-  const title = mailbox === undefined ? (pageTitle?.toLowerCase() ?? '') : mailboxLabel(mailbox);
+  // Lowercased at this seam: view labels already are.
+  const title = view === undefined ? (pageTitle?.toLowerCase() ?? '') : viewLabel(view);
 
   return (
     <div className="flex h-dvh flex-col bg-ink">
@@ -123,7 +123,7 @@ const AppShellBody = () => {
         </Link>
       </div>
 
-      {/* `relative`: below `lg` an open message lies over the list (`Mailbox`). */}
+      {/* `relative`: below `lg` an open message lies over the list (`ViewPage`). */}
       <div className="relative flex min-h-0 flex-1">
         <aside className="hidden shrink-0 lg:block" style={{ width: railWidth }}>
           <AddressRail />

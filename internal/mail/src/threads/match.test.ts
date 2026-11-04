@@ -79,14 +79,14 @@ describe('threadMatches', () => {
   const thread = (messages: readonly Partial<Message>[], over: Partial<ThreadState> = {}) =>
     ({
       id: 't',
-      accounts: [],
+      mailboxes: [],
       subject: 'Your receipt',
       messages: messages.map(message),
       isUnread: false,
       isReplied: false,
       isStarred: false,
       folders: ['inbox'],
-      foldersByAccount: {},
+      foldersByMailbox: {},
       ...over,
     }) satisfies ThreadState;
   const holds = (text: string, target: ThreadState) => threadMatches(parseQuery(text))(target);
@@ -127,8 +127,8 @@ describe('threadMatches', () => {
   describe('visibleThreads', () => {
     const inbox = thread([{ body: ['alpha'] }], { id: 'in-inbox' });
     const archived = thread([{ body: ['alpha'] }], { id: 'archived', folders: ['archive'] });
-    const idsOf = (query: string | undefined, mailbox = 'unified') =>
-      visibleThreads([inbox, archived], mailbox, query).map(({ id }) => id);
+    const idsOf = (query: string | undefined, view = 'unified') =>
+      visibleThreads([inbox, archived], view, query).map(({ id }) => id);
 
     it('applies the criteria inside the view, whatever in: and mailbox: say', () => {
       expect(idsOf(undefined)).toEqual(['in-inbox']);

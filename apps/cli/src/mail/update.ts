@@ -118,31 +118,31 @@ export const updateCommand = Command.make(
     const mail = yield* Mail;
     const cache = yield* Cache;
 
-    // Named against the cache, then every account they touch syncs first, so no write acts on a
+    // Named against the cache, then every mailbox they touch syncs first, so no write acts on a
     // location yozz.app changed a minute ago; then named again against what the sync found. An id
     // the cache does not hold (a search hit outside the window) is looked up on the servers.
-    yield* cache.sync(mail.accounts, { force: false });
+    yield* cache.sync(mail.mailboxes, { force: false });
     const named = resolveHandles(yield* cache.threads(), ids);
     const touched = new Set(
       named
         .flatMap(({ thread }) => (thread === null ? [] : serverCopies(thread)))
-        .map(({ account }) => account),
+        .map(({ mailbox }) => mailbox),
     );
-    // An account that cannot sync is not written: its rows carry the failure.
+    // A mailbox that cannot sync is not written: its rows carry the failure.
     const unsynced = new Map(
       (yield* cache.sync(
-        mail.accounts.filter(({ address }) => touched.has(address)),
+        mail.mailboxes.filter(({ address }) => touched.has(address)),
         { force: true },
       )).failed.map(error => [error.address, error] as const),
     );
-    const live = mail.accounts.filter(({ address }) => !unsynced.has(address));
+    const live = mail.mailboxes.filter(({ address }) => !unsynced.has(address));
     const synced = resolveHandles(yield* cache.threads(), ids);
     const remote = synced.flatMap(({ id, thread }) => (thread === null ? [id] : []));
     const entries =
       remote.length === 0
         ? synced
         : resolveHandles(
-            yield* cache.threads((yield* lookUp({ accounts: live, ids: remote })).extra),
+            yield* cache.threads((yield* lookUp({ mailboxes: live, ids: remote })).extra),
             ids,
           );
     const found = entries.flatMap(({ thread }) => (thread === null ? [] : [thread]));
@@ -152,23 +152,23 @@ export const updateCommand = Command.make(
     const refused = new Map<string, { readonly code: string; readonly message: string }>();
     const offServer = new Set<string>();
 
-    /** One command per account and folder over every conversation `write` changes. */
+    /** One command per mailbox and folder over every conversation `write` changes. */
     const apply = Effect.fnUntraced(function* (write: Write) {
       const changing = found.filter(thread => !refused.has(thread.id) && write.isNeeded(thread));
       for (const thread of changing) {
         if (serverCopies(thread).length === 0) offServer.add(thread.id);
       }
       yield* Effect.forEach(
-        mail.accounts,
-        Effect.fnUntraced(function* (account: InboundAddress) {
+        mail.mailboxes,
+        Effect.fnUntraced(function* (mailbox: InboundAddress) {
           const work = changing.flatMap(thread => {
             const copies = serverCopies(thread).filter(
-              ({ account: holder, folder }) => holder === account.address && write.picks(folder),
+              ({ mailbox: holder, folder }) => holder === mailbox.address && write.picks(folder),
             );
             return copies.length === 0 ? [] : [{ thread, copies }];
           });
           if (work.length === 0) return;
-          const failedSync = unsynced.get(account.address);
+          const failedSync = unsynced.get(mailbox.address);
           if (failedSync !== undefined) {
             for (const { thread } of work) {
               refused.set(thread.id, { code: failedSync._tag, message: failedSync.message });
@@ -177,14 +177,14 @@ export const updateCommand = Command.make(
           }
           const res = yield* usingCache(() =>
             command(
-              account,
+              mailbox,
               write,
               work.flatMap(({ copies }) => copies),
             ),
           );
           if (!res.ok) {
             const error = mailServerError(
-              { address: account.address, host: account.imap.host },
+              { address: mailbox.address, host: mailbox.imap.host },
               res.error,
             );
             for (const { thread } of work) {
@@ -193,11 +193,11 @@ export const updateCommand = Command.make(
             return;
           }
           // No COPYUID, or a destination no sync has read (just created): the next read syncs first.
-          if (!res.value.isRecorded) yield* cache.markStale(account);
+          if (!res.value.isRecorded) yield* cache.markStale(mailbox);
           ops.push(
             ...work.map(({ thread }) => ({
-              id: `${account.address}\n${thread.id}\n${ops.length}`,
-              account: account.address,
+              id: `${mailbox.address}\n${thread.id}\n${ops.length}`,
+              mailbox: mailbox.address,
               threadId: thread.id,
               change: write.change,
               retireAtSyncSeq: null,
@@ -210,17 +210,17 @@ export const updateCommand = Command.make(
 
     /** The write itself, written into the cache as it lands, so the next list shows it. */
     const command = async (
-      account: InboundAddress,
+      mailbox: InboundAddress,
       write: Write,
       copies: readonly Location[],
       /** Whether the cache now holds where every copy went. */
     ): Promise<Result<{ readonly isRecorded: boolean }, MailConnectionFailure>> => {
-      const accountCache = cache.of(account);
+      const mailboxCache = cache.of(mailbox);
       const folders = new Set(copies.map(({ folder }) => folder));
       const marks = new Map<Folder, FolderSync | null>(
         await Promise.all(
           [...folders].map(
-            async folder => [folder, await accountCache.folder(folder).getSync()] as const,
+            async folder => [folder, await mailboxCache.folder(folder).getSync()] as const,
           ),
         ),
       );
@@ -235,17 +235,17 @@ export const updateCommand = Command.make(
         }
       }
       const targets = flagTargets(copies, marks);
-      const run = mail.runOn(account);
+      const run = mail.runOn(mailbox);
       const { change } = write;
       if (change.kind === 'flag') {
         const flag = change.key === 'isUnread' ? '\\Seen' : '\\Flagged';
         const on = change.key === 'isUnread' ? !change.value : change.value;
-        const flagged = await setFlag(run, accountCache, targets, flag, on);
+        const flagged = await setFlag(run, mailboxCache, targets, flag, on);
         return flagged.ok ? { ok: true, value: { isRecorded: true } } : flagged;
       }
       const moved = await moveMessages(run, targets, change.to);
       if (!moved.ok) return moved;
-      const { isComplete } = await recordMoves(accountCache, moved.value);
+      const { isComplete } = await recordMoves(mailboxCache, moved.value);
       return { ok: true, value: { isRecorded: isComplete } };
     };
 
@@ -279,7 +279,7 @@ export const updateCommand = Command.make(
     const output = {
       notice: NOTICE,
       threads: rows,
-      syncedAt: yield* cache.syncedAt(mail.accounts.filter(({ address }) => touched.has(address))),
+      syncedAt: yield* cache.syncedAt(mail.mailboxes.filter(({ address }) => touched.has(address))),
     };
     const failed = rows.filter(row => 'error' in row).length;
     if (failed > 0) {

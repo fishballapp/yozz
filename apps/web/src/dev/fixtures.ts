@@ -110,7 +110,7 @@ export const DEMO_ADDRESSES: readonly AddressRecord[] = [
 const AUTHORED: readonly Thread[] = [
   {
     id: 't-deploy',
-    accounts: ['jason@northlane.example'],
+    mailboxes: ['jason@northlane.example'],
     subject: 'Deploy failed on main',
     isUnread: true,
     isReplied: false,
@@ -143,7 +143,7 @@ const AUTHORED: readonly Thread[] = [
   },
   {
     id: 't-stripe',
-    accounts: ['jason@northlane.example'],
+    mailboxes: ['jason@northlane.example'],
     subject: 'Your receipt from Acme',
     isUnread: false,
     isReplied: false,
@@ -168,7 +168,7 @@ const AUTHORED: readonly Thread[] = [
   },
   {
     id: 't-dune',
-    accounts: ['jason@jyu.example'],
+    mailboxes: ['jason@jyu.example'],
     subject: 'Last 24 hours — up to 30% off sleep essentials',
     isUnread: true,
     isReplied: false,
@@ -212,7 +212,7 @@ const AUTHORED: readonly Thread[] = [
   },
   {
     id: 't-hollis',
-    accounts: ['jason@northlane.example'],
+    mailboxes: ['jason@northlane.example'],
     subject: 'Your beans ship tomorrow',
     isUnread: true,
     isReplied: false,
@@ -248,7 +248,7 @@ const AUTHORED: readonly Thread[] = [
   },
   {
     id: 't-mum',
-    accounts: ['jason@jyu.example'],
+    mailboxes: ['jason@jyu.example'],
     subject: 'Sunday lunch?',
     isUnread: true,
     isReplied: false,
@@ -277,7 +277,7 @@ const AUTHORED: readonly Thread[] = [
   },
   {
     id: 't-linear',
-    accounts: ['jason@northlane.example'],
+    mailboxes: ['jason@northlane.example'],
     subject: '3 issues assigned to you',
     isUnread: false,
     isReplied: false,
@@ -300,7 +300,7 @@ const AUTHORED: readonly Thread[] = [
   },
   {
     id: 't-github',
-    accounts: ['jason@northlane.example'],
+    mailboxes: ['jason@northlane.example'],
     subject: 'PR #204 ready for review',
     isUnread: false,
     isReplied: true,
@@ -340,7 +340,7 @@ const AUTHORED: readonly Thread[] = [
   },
   {
     id: 't-notion',
-    accounts: ['jason@jyu.example'],
+    mailboxes: ['jason@jyu.example'],
     subject: 'Weekly digest',
     isUnread: false,
     isReplied: false,
@@ -362,7 +362,7 @@ const AUTHORED: readonly Thread[] = [
   },
   {
     id: 't-vercel',
-    accounts: ['jason@northlane.example'],
+    mailboxes: ['jason@northlane.example'],
     subject: 'Build succeeded for yozz-web',
     isUnread: false,
     isReplied: false,
@@ -385,7 +385,7 @@ const AUTHORED: readonly Thread[] = [
   },
   {
     id: 't-kate',
-    accounts: ['jason@northlane.example'],
+    mailboxes: ['jason@northlane.example'],
     subject: 'Contract for review',
     isUnread: true,
     isReplied: false,
@@ -416,7 +416,7 @@ const AUTHORED: readonly Thread[] = [
   },
   {
     id: 't-fastmail',
-    accounts: ['jason@jyu.example'],
+    mailboxes: ['jason@jyu.example'],
     subject: 'Password changed',
     isUnread: false,
     isReplied: false,
@@ -438,7 +438,7 @@ const AUTHORED: readonly Thread[] = [
   },
   {
     id: 't-hn',
-    accounts: ['jason@jyu.example'],
+    mailboxes: ['jason@jyu.example'],
     subject: 'Top stories today',
     isUnread: true,
     isReplied: false,
@@ -461,7 +461,7 @@ const AUTHORED: readonly Thread[] = [
   },
   {
     id: 't-dad',
-    accounts: ['jason@jyu.example'],
+    mailboxes: ['jason@jyu.example'],
     subject: 'Photos from the weekend',
     isUnread: false,
     isReplied: true,
@@ -508,7 +508,7 @@ const AUTHORED: readonly Thread[] = [
   },
   {
     id: 't-cloudflare',
-    accounts: ['jason@northlane.example'],
+    mailboxes: ['jason@northlane.example'],
     subject: 'Zone yozz.app is active',
     isUnread: false,
     isReplied: false,
@@ -531,7 +531,7 @@ const AUTHORED: readonly Thread[] = [
   },
   {
     id: 't-support-refund',
-    accounts: ['hello@stillwater.example'],
+    mailboxes: ['hello@stillwater.example'],
     subject: 'Refund request — bought twice by mistake',
     isUnread: true,
     isReplied: false,
@@ -553,7 +553,7 @@ const AUTHORED: readonly Thread[] = [
   },
   {
     id: 't-indie-monday',
-    accounts: ['hello@stillwater.example'],
+    mailboxes: ['hello@stillwater.example'],
     subject: 'Issue #212 — the pricing page nobody reads',
     isUnread: true,
     isReplied: false,
@@ -585,7 +585,7 @@ const AUTHORED: readonly Thread[] = [
   },
   {
     id: 't-appstore',
-    accounts: ['hello@stillwater.example'],
+    mailboxes: ['hello@stillwater.example'],
     subject: 'Your app status changed to Ready for Sale',
     isUnread: false,
     isReplied: false,
@@ -607,7 +607,7 @@ const AUTHORED: readonly Thread[] = [
   },
   {
     id: 't-feedback',
-    accounts: ['hello@stillwater.example'],
+    mailboxes: ['hello@stillwater.example'],
     subject: 'Feature request: recurring shuffles',
     isUnread: false,
     isReplied: true,
@@ -641,7 +641,7 @@ const AUTHORED: readonly Thread[] = [
   },
   {
     id: 't-domain',
-    accounts: ['jason@jyu.example'],
+    mailboxes: ['jason@jyu.example'],
     subject: 'Renewal reminder for jyu.example',
     isUnread: false,
     isReplied: false,
@@ -663,16 +663,16 @@ const AUTHORED: readonly Thread[] = [
   },
 ];
 
-/** One copy per message: in the sending account's Sent when it is yours, else in the inbox it landed in. */
+/** One copy per message: in the sending mailbox's Sent when it is yours, else in the inbox it landed in. */
 const filed = (thread: Thread): Thread => ({
   ...thread,
   messages: thread.messages.map((message, index) => {
-    const isOwn = thread.accounts.includes(message.fromAddress);
+    const isOwn = thread.mailboxes.includes(message.fromAddress);
     return {
       ...message,
       locations: [
         {
-          account: isOwn ? message.fromAddress : message.toAddress,
+          mailbox: isOwn ? message.fromAddress : message.toAddress,
           folder: isOwn ? 'sent' : 'inbox',
           uidValidity: 1,
           uid: index + 1,

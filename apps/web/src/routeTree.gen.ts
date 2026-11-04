@@ -16,16 +16,16 @@ import { Route as LoginRouteImport } from './routes/login'
 import { Route as WelcomeRouteImport } from './routes/welcome'
 import { Route as AppSettingsRouteImport } from './routes/_app.settings'
 import { Route as CliApproveRouteImport } from './routes/cli.approve'
-import { Route as AppMMailboxRouteImport } from './routes/_app.m.$mailbox'
+import { Route as AppMViewRouteImport } from './routes/_app.m.$view'
 import { Route as AppSettingsIndexRouteImport } from './routes/_app.settings.index'
 import { Route as AppSettingsAccountRouteImport } from './routes/_app.settings.account'
 import { Route as AppSettingsImagesRouteImport } from './routes/_app.settings.images'
 import { Route as AppSettingsNewRouteImport } from './routes/_app.settings.new'
-import { Route as AppMMailboxIndexRouteImport } from './routes/_app.m.$mailbox.index'
+import { Route as AppMViewIndexRouteImport } from './routes/_app.m.$view.index'
 import { Route as AppSettingsAAddressRouteImport } from './routes/_app.settings.a.$address'
 import { Route as AppSettingsAccountPasskeyRouteImport } from './routes/_app.settings.account_.passkey'
 import { Route as AppSettingsAccountPasswordRouteImport } from './routes/_app.settings.account_.password'
-import { Route as AppMMailboxTSplatRouteImport } from './routes/_app.m.$mailbox.t.$'
+import { Route as AppMViewTSplatRouteImport } from './routes/_app.m.$view.t.$'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -61,9 +61,9 @@ const CliApproveRoute = CliApproveRouteImport.update({
   path: '/cli/approve',
   getParentRoute: () => rootRouteImport,
 } as any)
-const AppMMailboxRoute = AppMMailboxRouteImport.update({
-  id: '/m/$mailbox',
-  path: '/m/$mailbox',
+const AppMViewRoute = AppMViewRouteImport.update({
+  id: '/m/$view',
+  path: '/m/$view',
   getParentRoute: () => AppRoute,
 } as any)
 const AppSettingsIndexRoute = AppSettingsIndexRouteImport.update({
@@ -86,10 +86,10 @@ const AppSettingsNewRoute = AppSettingsNewRouteImport.update({
   path: '/new',
   getParentRoute: () => AppSettingsRoute,
 } as any)
-const AppMMailboxIndexRoute = AppMMailboxIndexRouteImport.update({
+const AppMViewIndexRoute = AppMViewIndexRouteImport.update({
   id: '/',
   path: '/',
-  getParentRoute: () => AppMMailboxRoute,
+  getParentRoute: () => AppMViewRoute,
 } as any)
 const AppSettingsAAddressRoute = AppSettingsAAddressRouteImport.update({
   id: '/a/$address',
@@ -108,10 +108,10 @@ const AppSettingsAccountPasswordRoute =
     path: '/account/password',
     getParentRoute: () => AppSettingsRoute,
   } as any)
-const AppMMailboxTSplatRoute = AppMMailboxTSplatRouteImport.update({
+const AppMViewTSplatRoute = AppMViewTSplatRouteImport.update({
   id: '/t/$',
   path: '/t/$',
-  getParentRoute: () => AppMMailboxRoute,
+  getParentRoute: () => AppMViewRoute,
 } as any)
 
 export interface FileRoutesByFullPath {
@@ -121,7 +121,7 @@ export interface FileRoutesByFullPath {
   '/welcome': typeof WelcomeRoute
   '/settings': typeof AppSettingsRouteWithChildren
   '/cli/approve': typeof CliApproveRoute
-  '/m/$mailbox': typeof AppMMailboxRouteWithChildren
+  '/m/$view': typeof AppMViewRouteWithChildren
   '/settings/account': typeof AppSettingsAccountRoute
   '/settings/images': typeof AppSettingsImagesRoute
   '/settings/new': typeof AppSettingsNewRoute
@@ -129,8 +129,8 @@ export interface FileRoutesByFullPath {
   '/settings/a/$address': typeof AppSettingsAAddressRoute
   '/settings/account/passkey': typeof AppSettingsAccountPasskeyRoute
   '/settings/account/password': typeof AppSettingsAccountPasswordRoute
-  '/m/$mailbox/': typeof AppMMailboxIndexRoute
-  '/m/$mailbox/t/$': typeof AppMMailboxTSplatRoute
+  '/m/$view/': typeof AppMViewIndexRoute
+  '/m/$view/t/$': typeof AppMViewTSplatRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -145,8 +145,8 @@ export interface FileRoutesByTo {
   '/settings/a/$address': typeof AppSettingsAAddressRoute
   '/settings/account/passkey': typeof AppSettingsAccountPasskeyRoute
   '/settings/account/password': typeof AppSettingsAccountPasswordRoute
-  '/m/$mailbox': typeof AppMMailboxIndexRoute
-  '/m/$mailbox/t/$': typeof AppMMailboxTSplatRoute
+  '/m/$view': typeof AppMViewIndexRoute
+  '/m/$view/t/$': typeof AppMViewTSplatRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -157,7 +157,7 @@ export interface FileRoutesById {
   '/welcome': typeof WelcomeRoute
   '/_app/settings': typeof AppSettingsRouteWithChildren
   '/cli/approve': typeof CliApproveRoute
-  '/_app/m/$mailbox': typeof AppMMailboxRouteWithChildren
+  '/_app/m/$view': typeof AppMViewRouteWithChildren
   '/_app/settings/account': typeof AppSettingsAccountRoute
   '/_app/settings/images': typeof AppSettingsImagesRoute
   '/_app/settings/new': typeof AppSettingsNewRoute
@@ -165,8 +165,8 @@ export interface FileRoutesById {
   '/_app/settings/a/$address': typeof AppSettingsAAddressRoute
   '/_app/settings/account_/passkey': typeof AppSettingsAccountPasskeyRoute
   '/_app/settings/account_/password': typeof AppSettingsAccountPasswordRoute
-  '/_app/m/$mailbox/': typeof AppMMailboxIndexRoute
-  '/_app/m/$mailbox/t/$': typeof AppMMailboxTSplatRoute
+  '/_app/m/$view/': typeof AppMViewIndexRoute
+  '/_app/m/$view/t/$': typeof AppMViewTSplatRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -177,7 +177,7 @@ export interface FileRouteTypes {
     | '/welcome'
     | '/settings'
     | '/cli/approve'
-    | '/m/$mailbox'
+    | '/m/$view'
     | '/settings/account'
     | '/settings/images'
     | '/settings/new'
@@ -185,8 +185,8 @@ export interface FileRouteTypes {
     | '/settings/a/$address'
     | '/settings/account/passkey'
     | '/settings/account/password'
-    | '/m/$mailbox/'
-    | '/m/$mailbox/t/$'
+    | '/m/$view/'
+    | '/m/$view/t/$'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -201,8 +201,8 @@ export interface FileRouteTypes {
     | '/settings/a/$address'
     | '/settings/account/passkey'
     | '/settings/account/password'
-    | '/m/$mailbox'
-    | '/m/$mailbox/t/$'
+    | '/m/$view'
+    | '/m/$view/t/$'
   id:
     | '__root__'
     | '/'
@@ -212,7 +212,7 @@ export interface FileRouteTypes {
     | '/welcome'
     | '/_app/settings'
     | '/cli/approve'
-    | '/_app/m/$mailbox'
+    | '/_app/m/$view'
     | '/_app/settings/account'
     | '/_app/settings/images'
     | '/_app/settings/new'
@@ -220,8 +220,8 @@ export interface FileRouteTypes {
     | '/_app/settings/a/$address'
     | '/_app/settings/account_/passkey'
     | '/_app/settings/account_/password'
-    | '/_app/m/$mailbox/'
-    | '/_app/m/$mailbox/t/$'
+    | '/_app/m/$view/'
+    | '/_app/m/$view/t/$'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -284,11 +284,11 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof CliApproveRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/_app/m/$mailbox': {
-      id: '/_app/m/$mailbox'
-      path: '/m/$mailbox'
-      fullPath: '/m/$mailbox'
-      preLoaderRoute: typeof AppMMailboxRouteImport
+    '/_app/m/$view': {
+      id: '/_app/m/$view'
+      path: '/m/$view'
+      fullPath: '/m/$view'
+      preLoaderRoute: typeof AppMViewRouteImport
       parentRoute: typeof AppRoute
     }
     '/_app/settings/': {
@@ -319,12 +319,12 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppSettingsNewRouteImport
       parentRoute: typeof AppSettingsRoute
     }
-    '/_app/m/$mailbox/': {
-      id: '/_app/m/$mailbox/'
+    '/_app/m/$view/': {
+      id: '/_app/m/$view/'
       path: '/'
-      fullPath: '/m/$mailbox/'
-      preLoaderRoute: typeof AppMMailboxIndexRouteImport
-      parentRoute: typeof AppMMailboxRoute
+      fullPath: '/m/$view/'
+      preLoaderRoute: typeof AppMViewIndexRouteImport
+      parentRoute: typeof AppMViewRoute
     }
     '/_app/settings/a/$address': {
       id: '/_app/settings/a/$address'
@@ -347,12 +347,12 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppSettingsAccountPasswordRouteImport
       parentRoute: typeof AppSettingsRoute
     }
-    '/_app/m/$mailbox/t/$': {
-      id: '/_app/m/$mailbox/t/$'
+    '/_app/m/$view/t/$': {
+      id: '/_app/m/$view/t/$'
       path: '/t/$'
-      fullPath: '/m/$mailbox/t/$'
-      preLoaderRoute: typeof AppMMailboxTSplatRouteImport
-      parentRoute: typeof AppMMailboxRoute
+      fullPath: '/m/$view/t/$'
+      preLoaderRoute: typeof AppMViewTSplatRouteImport
+      parentRoute: typeof AppMViewRoute
     }
   }
 }
@@ -381,28 +381,28 @@ const AppSettingsRouteWithChildren = AppSettingsRoute._addFileChildren(
   AppSettingsRouteChildren,
 )
 
-interface AppMMailboxRouteChildren {
-  AppMMailboxIndexRoute: typeof AppMMailboxIndexRoute
-  AppMMailboxTSplatRoute: typeof AppMMailboxTSplatRoute
+interface AppMViewRouteChildren {
+  AppMViewIndexRoute: typeof AppMViewIndexRoute
+  AppMViewTSplatRoute: typeof AppMViewTSplatRoute
 }
 
-const AppMMailboxRouteChildren: AppMMailboxRouteChildren = {
-  AppMMailboxIndexRoute: AppMMailboxIndexRoute,
-  AppMMailboxTSplatRoute: AppMMailboxTSplatRoute,
+const AppMViewRouteChildren: AppMViewRouteChildren = {
+  AppMViewIndexRoute: AppMViewIndexRoute,
+  AppMViewTSplatRoute: AppMViewTSplatRoute,
 }
 
-const AppMMailboxRouteWithChildren = AppMMailboxRoute._addFileChildren(
-  AppMMailboxRouteChildren,
+const AppMViewRouteWithChildren = AppMViewRoute._addFileChildren(
+  AppMViewRouteChildren,
 )
 
 interface AppRouteChildren {
   AppSettingsRoute: typeof AppSettingsRouteWithChildren
-  AppMMailboxRoute: typeof AppMMailboxRouteWithChildren
+  AppMViewRoute: typeof AppMViewRouteWithChildren
 }
 
 const AppRouteChildren: AppRouteChildren = {
   AppSettingsRoute: AppSettingsRouteWithChildren,
-  AppMMailboxRoute: AppMMailboxRouteWithChildren,
+  AppMViewRoute: AppMViewRouteWithChildren,
 }
 
 const AppRouteWithChildren = AppRoute._addFileChildren(AppRouteChildren)

@@ -15,7 +15,7 @@ export const AgentTools = () => {
   const mail = useMail();
   const navigate = useNavigate();
   // `strict: false`: this sits above every page.
-  const { mailbox } = useParams({ strict: false });
+  const { view } = useParams({ strict: false });
 
   const mailRef = useRef(mail);
   const port: AgentPort = {
@@ -38,8 +38,8 @@ export const AgentTools = () => {
     removeDraft: draftId => mailRef.current.removeDraft(draftId),
     openThread: async thread => {
       await navigate({
-        to: '/m/$mailbox/t/$',
-        params: { mailbox: mailbox ?? 'unified', _splat: thread.id },
+        to: '/m/$view/t/$',
+        params: { view: view ?? 'unified', _splat: thread.id },
         search: previous => previous,
       });
     },

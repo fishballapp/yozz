@@ -31,7 +31,7 @@ const ownedAddresses = ADDRESSES.map(address => address.address);
 /** Inbound from Dad, then outbound from Jason, so its newest message is your own. Dad's carries the attachments. */
 const DAD: Thread = {
   id: 't-dad',
-  accounts: ['jason@jyu.example'],
+  mailboxes: ['jason@jyu.example'],
   subject: 'Photos from the weekend',
   isUnread: false,
   isReplied: true,
@@ -117,7 +117,7 @@ describe('seedFor — forward', () => {
 /** A group thread: `to` and `cc` come off a real envelope. */
 const GROUP: Thread = {
   id: 't-group',
-  accounts: ['jason@jyu.example'],
+  mailboxes: ['jason@jyu.example'],
   subject: 'Friday',
   isUnread: false,
   isReplied: false,
@@ -141,7 +141,7 @@ const GROUP_OWNED = ['jason@jyu.example', 'me@jyu.example'];
 /** A chain of Message-IDs. */
 const CHAIN: Thread = {
   id: 't-chain',
-  accounts: ['jason@jyu.example'],
+  mailboxes: ['jason@jyu.example'],
   subject: 'Deploy',
   isUnread: false,
   isReplied: false,

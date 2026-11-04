@@ -5,12 +5,12 @@ import type { MailConnectionFailure } from '@yozz.app/mail/connection';
 import type { MailCache } from '@yozz.app/mail/threads/cache';
 import { cachedPreviews, cachedSummaries, threadList } from '@yozz.app/mail/threads/hydrate';
 import {
-  type AccountSummaries,
   type FolderSummaries,
+  type MailboxSummaries,
   parseInternalDate,
 } from '@yozz.app/mail/threads/summaries';
-import { loadOlder, syncAccount } from '@yozz.app/mail/threads/sync';
-import { staleAccounts } from '@yozz.app/mail/threads/sync-staleness';
+import { loadOlder, syncMailbox } from '@yozz.app/mail/threads/sync';
+import { staleMailboxes } from '@yozz.app/mail/threads/sync-staleness';
 import { FOLDERS, type Folder, type ThreadState } from '@yozz.app/mail/threads/thread';
 import * as Clock from 'effect/Clock';
 import * as Context from 'effect/Context';
@@ -30,7 +30,7 @@ import type {
 import { Mail, mailServerError } from '../mail/mail.ts';
 import { Settings } from '../settings.ts';
 import { Vault } from '../vault/vault.ts';
-import { type AccountCache, accountCache, usingCache } from './disk.ts';
+import { type MailboxCache, mailboxCache, usingCache } from './disk.ts';
 
 type VaultFailure =
   | KeyRevoked
@@ -43,48 +43,48 @@ type VaultFailure =
 export class Cache extends Context.Service<
   Cache,
   {
-    /** The account's `MailCache`, `@yozz.app/mail`'s port. */
-    readonly of: (account: InboundAddress) => MailCache;
+    /** The mailbox's `MailCache`, `@yozz.app/mail`'s port. */
+    readonly of: (mailbox: InboundAddress) => MailCache;
     /**
-     * Syncs each account whose last sync started two minutes or more ago, the web app's own
+     * Syncs each mailbox whose last sync started two minutes or more ago, the web app's own
      * threshold (`RETURN_SYNC_FRESH_MS`), or every one when `force`d. The rest answer from the cache,
-     * and so does an account whose sync failed: it is answered among `failed`, and the others go on.
+     * and so does a mailbox whose sync failed: it is answered among `failed`, and the others go on.
      */
     readonly sync: (
-      accounts: readonly InboundAddress[],
+      mailboxes: readonly InboundAddress[],
       options: { readonly force: boolean },
     ) => Effect.Effect<{ readonly failed: readonly MailServerError[] }, UsageError>;
-    /** `sync` for a read: fails only when every one of `accounts` failed, as nothing could answer. */
+    /** `sync` for a read: fails only when every one of `mailboxes` failed, as nothing could answer. */
     readonly syncSome: (
-      accounts: readonly InboundAddress[],
+      mailboxes: readonly InboundAddress[],
       options: { readonly force: boolean },
     ) => Effect.Effect<
       { readonly failed: readonly MailServerError[] },
       MailServerError | UsageError
     >;
-    /** When each account's last sync started, as ISO; null for one never synced. */
+    /** When each mailbox's last sync started, as ISO; null for one never synced. */
     readonly syncedAt: (
-      accounts: readonly InboundAddress[],
+      mailboxes: readonly InboundAddress[],
     ) => Effect.Effect<Readonly<Record<string, string | null>>, UsageError>;
     /**
-     * Every conversation the cache and the vault hold, threaded across every account as the web app
+     * Every conversation the cache and the vault hold, threaded across every mailbox as the web app
      * does, so the ids are its own. `extra` (search hits) is threaded in without being stored.
      */
     readonly threads: (
-      extra?: AccountSummaries,
+      extra?: MailboxSummaries,
     ) => Effect.Effect<readonly ThreadState[], VaultFailure>;
-    /** The account's cache may not be where its mail is now: its next read syncs first. */
-    readonly markStale: (account: InboundAddress) => Effect.Effect<void, UsageError>;
+    /** The mailbox's cache may not be where its mail is now: its next read syncs first. */
+    readonly markStale: (mailbox: InboundAddress) => Effect.Effect<void, UsageError>;
     /**
      * The folder that stops short soonest of those holding older mail than the cache reaches, or
      * null when none does. Older than `reachedAt`, a list across them may be missing mail.
      */
     readonly olderFrontier: (
-      accounts: readonly InboundAddress[],
+      mailboxes: readonly InboundAddress[],
       folders: readonly Folder[],
     ) => Effect.Effect<
       {
-        readonly account: InboundAddress;
+        readonly mailbox: InboundAddress;
         readonly folder: Folder;
         readonly reachedAt: number;
       } | null,
@@ -92,12 +92,12 @@ export class Cache extends Context.Service<
     >;
     /** One window further back in that folder, as Older mail does. */
     readonly loadOlder: (
-      account: InboundAddress,
+      mailbox: InboundAddress,
       folder: Folder,
     ) => Effect.Effect<void, MailServerError | UsageError>;
   }
 >()('@yozz.app/cli/Cache') {
-  /** `$XDG_CACHE_HOME/yozz/<userId>/`, a directory per account, sealed under the vault's cache key. */
+  /** `$XDG_CACHE_HOME/yozz/<userId>/`, a directory per mailbox, sealed under the vault's cache key. */
   static readonly layer = Layer.effect(
     Cache,
     Effect.gen(function* () {
@@ -106,17 +106,17 @@ export class Cache extends Context.Service<
       const settings = yield* Settings;
       const path = yield* Path.Path;
       const root = settings.cacheDir(vault.account.userId);
-      const caches = new Map<string, AccountCache>(
+      const caches = new Map<string, MailboxCache>(
         yield* Effect.forEach(
-          mail.accounts,
-          Effect.fnUntraced(function* (account) {
+          mail.mailboxes,
+          Effect.fnUntraced(function* (mailbox) {
             // The address and the mailbox it reads: an address moved to another server or login
             // starts a new, empty cache, so no uid of the old one names the new one's mail.
-            const { host, port, username } = account.imap;
+            const { host, port, username } = mailbox.imap;
             const digest = yield* Effect.promise(() =>
               crypto.subtle.digest(
                 'SHA-256',
-                new TextEncoder().encode(JSON.stringify([account.address, host, port, username])),
+                new TextEncoder().encode(JSON.stringify([mailbox.address, host, port, username])),
               ),
             );
             // Hex, not the address: a case-insensitive file system would fold two addresses into one.
@@ -124,57 +124,57 @@ export class Cache extends Context.Service<
             // guess which addresses have a cache here. The mail inside stays sealed. Un-park if the
             // directory names are ever held to the zero-knowledge claim.
             const name = new Uint8Array(digest).toHex().slice(0, 32);
-            const cache = yield* accountCache({
+            const cache = yield* mailboxCache({
               dir: path.join(root, name),
               key: vault.cacheKey,
-              account: account.address,
+              mailbox: mailbox.address,
             });
-            return [account.address, cache] as const;
+            return [mailbox.address, cache] as const;
           }),
           { concurrency: 'unbounded' },
         ),
       );
-      const cacheOf = (account: { readonly address: string }) => {
-        const cache = caches.get(account.address);
-        if (cache === undefined) throw new Error(`${account.address} has no cache`);
+      const cacheOf = (mailbox: { readonly address: string }) => {
+        const cache = caches.get(mailbox.address);
+        if (cache === undefined) throw new Error(`${mailbox.address} has no cache`);
         return cache;
       };
-      const failed = (account: InboundAddress, failure: MailConnectionFailure) =>
-        mailServerError({ address: account.address, host: account.imap.host }, failure);
+      const failed = (mailbox: InboundAddress, failure: MailConnectionFailure) =>
+        mailServerError({ address: mailbox.address, host: mailbox.imap.host }, failure);
 
       /**
-       * One pass over the account. A `UIDVALIDITY` change found partway clears the whole cache,
+       * One pass over the mailbox. A `UIDVALIDITY` change found partway clears the whole cache,
        * folders already written included, so that pass goes round once more before it counts.
        */
-      const syncNow = Effect.fnUntraced(function* (account: InboundAddress) {
+      const syncNow = Effect.fnUntraced(function* (mailbox: InboundAddress) {
         const startedAt = yield* Clock.currentTimeMillis;
         const { state } = yield* usingCache(() =>
-          syncAccount(mail.runOn(account), cacheOf(account).mail),
+          syncMailbox(mail.runOn(mailbox), cacheOf(mailbox).mail),
         );
-        if (state.status === 'failed') return yield* failed(account, state.failure);
-        yield* cacheOf(account).setSyncedAt(startedAt);
+        if (state.status === 'failed') return yield* failed(mailbox, state.failure);
+        yield* cacheOf(mailbox).setSyncedAt(startedAt);
       });
 
       const sync = Effect.fn('Cache.sync')(function* (
-        accounts: readonly InboundAddress[],
+        mailboxes: readonly InboundAddress[],
         { force }: { readonly force: boolean },
       ) {
         const now = yield* Clock.currentTimeMillis;
         const lastStartedAt = new Map(
           yield* Effect.forEach(
-            accounts,
-            account =>
+            mailboxes,
+            mailbox =>
               Effect.map(
-                cacheOf(account).syncedAt,
-                at => [account.address, Option.getOrUndefined(at)] as const,
+                cacheOf(mailbox).syncedAt,
+                at => [mailbox.address, Option.getOrUndefined(at)] as const,
               ),
             { concurrency: 'unbounded' },
           ),
         );
         const due = force
-          ? accounts
-          : staleAccounts(
-              accounts,
+          ? mailboxes
+          : staleMailboxes(
+              mailboxes,
               new Map(
                 [...lastStartedAt].flatMap(([address, at]) =>
                   at === undefined ? [] : [[address, at]],
@@ -182,11 +182,11 @@ export class Cache extends Context.Service<
               ),
               now,
             );
-        // A mail server's failure is that account's alone; a cache the disk refuses is everyone's.
+        // A mail server's failure is that mailbox's alone; a cache the disk refuses is everyone's.
         const results = yield* Effect.forEach(
           due,
-          account =>
-            syncNow(account).pipe(
+          mailbox =>
+            syncNow(mailbox).pipe(
               Effect.as(null),
               Effect.catchTag('MailServerError', error => Effect.succeed(error)),
             ),
@@ -196,25 +196,25 @@ export class Cache extends Context.Service<
       });
 
       return Cache.of({
-        of: account => cacheOf(account).mail,
+        of: mailbox => cacheOf(mailbox).mail,
         sync,
-        markStale: account => cacheOf(account).markStale,
-        syncSome: Effect.fn('Cache.syncSome')(function* (accounts, options) {
-          const { failed } = yield* sync(accounts, options);
+        markStale: mailbox => cacheOf(mailbox).markStale,
+        syncSome: Effect.fn('Cache.syncSome')(function* (mailboxes, options) {
+          const { failed } = yield* sync(mailboxes, options);
           const [first] = failed;
-          if (first !== undefined && failed.length === accounts.length) return yield* first;
+          if (first !== undefined && failed.length === mailboxes.length) return yield* first;
           return { failed };
         }),
 
-        syncedAt: Effect.fn('Cache.syncedAt')(function* (accounts) {
+        syncedAt: Effect.fn('Cache.syncedAt')(function* (mailboxes) {
           const entries = yield* Effect.forEach(
-            accounts,
-            account =>
+            mailboxes,
+            mailbox =>
               Effect.map(
-                cacheOf(account).syncedAt,
+                cacheOf(mailbox).syncedAt,
                 at =>
                   [
-                    account.address,
+                    mailbox.address,
                     Option.match(at, {
                       onNone: () => null,
                       onSome: ms => new Date(ms).toISOString(),
@@ -227,15 +227,15 @@ export class Cache extends Context.Service<
         }),
         threads: Effect.fn('Cache.threads')(function* (extra = {}) {
           const read = yield* Effect.forEach(
-            mail.accounts,
-            account =>
+            mail.mailboxes,
+            mailbox =>
               usingCache(async () => {
-                const cache = cacheOf(account).mail;
+                const cache = cacheOf(mailbox).mail;
                 const [summaries, previews] = await Promise.all([
                   cachedSummaries(cache),
-                  cachedPreviews(cache, account.address),
+                  cachedPreviews(cache, mailbox.address),
                 ]);
-                return { address: account.address, summaries, previews };
+                return { address: mailbox.address, summaries, previews };
               }),
             { concurrency: 'unbounded' },
           );
@@ -243,7 +243,7 @@ export class Cache extends Context.Service<
             Promise.all([listDrafts(store), listSentRecords(store)]),
           );
           return threadList({
-            byAccount: Object.fromEntries(
+            byMailbox: Object.fromEntries(
               read.map(({ address, summaries }) => [
                 address,
                 withExtra(summaries, extra[address] ?? {}),
@@ -254,12 +254,12 @@ export class Cache extends Context.Service<
             drafts,
           });
         }),
-        olderFrontier: Effect.fn('Cache.olderFrontier')(function* (accounts, folders) {
+        olderFrontier: Effect.fn('Cache.olderFrontier')(function* (mailboxes, folders) {
           const reached = yield* Effect.forEach(
-            accounts.flatMap(account => folders.map(folder => ({ account, folder }))),
-            ({ account, folder }) =>
+            mailboxes.flatMap(mailbox => folders.map(folder => ({ mailbox, folder }))),
+            ({ mailbox, folder }) =>
               usingCache(async () => {
-                const folderCache = cacheOf(account).mail.folder(folder);
+                const folderCache = cacheOf(mailbox).mail.folder(folder);
                 const [mark, summaries] = await Promise.all([
                   folderCache.getSync(),
                   folderCache.listSummaries(),
@@ -270,17 +270,17 @@ export class Cache extends Context.Service<
                 const [reachedAt] = summaries
                   .toSorted((a, b) => a.uid - b.uid)
                   .flatMap(({ internalDate }) => parseInternalDate(internalDate) ?? []);
-                return reachedAt === undefined ? [] : [{ account, folder, reachedAt }];
+                return reachedAt === undefined ? [] : [{ mailbox, folder, reachedAt }];
               }),
             { concurrency: 'unbounded' },
           );
           return reached.flat().toSorted((a, b) => b.reachedAt - a.reachedAt)[0] ?? null;
         }),
-        loadOlder: Effect.fn('Cache.loadOlder')(function* (account, folder) {
+        loadOlder: Effect.fn('Cache.loadOlder')(function* (mailbox, folder) {
           const res = yield* usingCache(() =>
-            loadOlder(mail.runOn(account), cacheOf(account).mail.folder(folder)),
+            loadOlder(mail.runOn(mailbox), cacheOf(mailbox).mail.folder(folder)),
           );
-          if (!res.ok) return yield* failed(account, res.error);
+          if (!res.ok) return yield* failed(mailbox, res.error);
         }),
       });
     }),

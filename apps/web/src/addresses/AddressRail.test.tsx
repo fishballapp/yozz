@@ -7,9 +7,9 @@ import { AddressRail } from './AddressRail';
 // @ts-expect-error React reads it off the global
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
-const route = vi.hoisted(() => ({ mailbox: 'unified' as string | undefined }));
+const route = vi.hoisted(() => ({ view: 'unified' as string | undefined }));
 const mail = vi.hoisted(() => ({
-  accounts: [{ address: 'me@example.com' }],
+  mailboxes: [{ address: 'me@example.com' }],
   threads: [],
   sync: vi.fn(),
 }));
@@ -28,7 +28,7 @@ vi.mock('@tanstack/react-router', () => ({
       {children}
     </a>
   ),
-  useParams: () => ({ mailbox: route.mailbox }),
+  useParams: () => ({ view: route.view }),
   useLocation: () => false,
 }));
 vi.mock('../store/MailProvider', () => ({ useMail: () => mail }));
@@ -49,21 +49,21 @@ afterEach(async () => {
 
 describe('AddressRail', () => {
   it('syncs every address when the open Inbox is clicked again', async () => {
-    route.mailbox = 'unified';
+    route.view = 'unified';
     await show();
     await click('Inbox');
     expect(mail.sync).toHaveBeenCalledWith(undefined);
   });
 
   it('syncs one address when its open row is clicked again', async () => {
-    route.mailbox = 'me@example.com';
+    route.view = 'me@example.com';
     await show();
     await click('me@example.com');
     expect(mail.sync).toHaveBeenCalledWith('me@example.com');
   });
 
-  it('only opens a mailbox that is not the open one', async () => {
-    route.mailbox = 'unified';
+  it('only opens a view that is not the open one', async () => {
+    route.view = 'unified';
     await show();
     await click('me@example.com');
     expect(mail.sync).not.toHaveBeenCalled();

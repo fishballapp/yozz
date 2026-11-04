@@ -3,11 +3,11 @@ import type { MailConnectionFailure, Result } from '../connection.ts';
 import type { Folder } from '../threads/thread.ts';
 
 /** RFC 6154 names the folder; servers without SPECIAL-USE mostly agree on how they spell it. */
-const SENT_MAILBOX_NAMES = new Set(['sent', 'sent items', 'sent messages', 'sent mail']);
-const ARCHIVE_MAILBOX_NAMES = new Set(['archive', 'archives']);
+const SENT_FOLDER_NAMES = new Set(['sent', 'sent items', 'sent messages', 'sent mail']);
+const ARCHIVE_FOLDER_NAMES = new Set(['archive', 'archives']);
 /** Gmail's is under its own namespace; `Draft` singular is Exchange's. */
-const DRAFTS_MAILBOX_NAMES = new Set(['drafts', '[gmail]/drafts', 'draft']);
-const TRASH_MAILBOX_NAMES = new Set([
+const DRAFTS_FOLDER_NAMES = new Set(['drafts', '[gmail]/drafts', 'draft']);
+const TRASH_FOLDER_NAMES = new Set([
   'trash',
   'deleted',
   'deleted items',
@@ -26,11 +26,11 @@ const specialUseOf = (
   attribute: string,
   names: ReadonlySet<string>,
 ) =>
-  listed.find(mailbox => mailbox.attributes.some(a => a.toLowerCase() === attribute)) ??
-  listed.find(mailbox => names.has(mailbox.name.toLowerCase()));
+  listed.find(entry => entry.attributes.some(a => a.toLowerCase() === attribute)) ??
+  listed.find(entry => names.has(entry.name.toLowerCase()));
 
 /**
- * `INBOX` is reserved by the protocol; Sent, Archive and Trash are whichever mailbox `LIST` marks
+ * `INBOX` is reserved by the protocol; Sent, Archive and Trash are whichever folder `LIST` marks
  * with the matching special-use attribute, else the usual names, else absent. A sync never creates
  * them; only a move does, and only the one it needs.
  */
@@ -39,10 +39,10 @@ export const resolveFolders = async (
 ): Promise<Result<Partial<Record<Folder, string>>, MailConnectionFailure>> => {
   const listed = await client.list('', '*');
   if (!listed.ok) return { ok: false, error: { kind: 'imap', reason: listed.reason } };
-  const sent = specialUseOf(listed.value, '\\sent', SENT_MAILBOX_NAMES);
-  const archive = specialUseOf(listed.value, '\\archive', ARCHIVE_MAILBOX_NAMES);
-  const trash = specialUseOf(listed.value, '\\trash', TRASH_MAILBOX_NAMES);
-  const drafts = specialUseOf(listed.value, '\\drafts', DRAFTS_MAILBOX_NAMES);
+  const sent = specialUseOf(listed.value, '\\sent', SENT_FOLDER_NAMES);
+  const archive = specialUseOf(listed.value, '\\archive', ARCHIVE_FOLDER_NAMES);
+  const trash = specialUseOf(listed.value, '\\trash', TRASH_FOLDER_NAMES);
+  const drafts = specialUseOf(listed.value, '\\drafts', DRAFTS_FOLDER_NAMES);
   return {
     ok: true,
     value: {
@@ -55,8 +55,8 @@ export const resolveFolders = async (
   };
 };
 
-/** Resolve a destination mailbox, creating it when LIST has none. Used by moves only. */
-export const ensureMailbox = async (
+/** Resolve a destination folder, creating it when LIST has none. Used by moves only. */
+export const ensureFolderName = async (
   client: ImapClient,
   folder: MovableFolder,
 ): Promise<Result<string, MailConnectionFailure>> => {

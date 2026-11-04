@@ -14,7 +14,7 @@ const mail = vi.hoisted(() => ({
 }));
 
 vi.mock('@tanstack/react-router', () => ({
-  useParams: () => ({ mailbox: 'unified', _splat: route.threadId }),
+  useParams: () => ({ view: 'unified', _splat: route.threadId }),
   useNavigate: () => vi.fn(),
   Link: () => null,
 }));
@@ -25,7 +25,7 @@ vi.mock('../store/MailProvider', () => ({ useMail: () => mail }));
 /** A fresh object each time, as every store render hands out. */
 const unread = (id: string, messageIds: readonly string[]): Thread => ({
   id,
-  accounts: ['me@example.com'],
+  mailboxes: ['me@example.com'],
   subject: 'Lunch',
   isUnread: true,
   isReplied: false,

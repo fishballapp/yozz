@@ -12,16 +12,16 @@ import { Mail } from './mail.ts';
 /** The shortest round of waiting, so a server that keeps saying "changed" is not asked in a loop. */
 const MIN_ROUND_MS = 1_000;
 
-/** What each account's inbox held when it last synced. */
-const inboxMarks = (accounts: readonly InboundAddress[]) =>
+/** What each mailbox's inbox held when it last synced. */
+const inboxMarks = (mailboxes: readonly InboundAddress[]) =>
   Effect.gen(function* () {
     const cache = yield* Cache;
     return new Map(
       yield* Effect.forEach(
-        accounts,
-        account =>
-          usingCache(() => cache.of(account).folder('inbox').getSync()).pipe(
-            Effect.map(mark => [account.address, mark] as const),
+        mailboxes,
+        mailbox =>
+          usingCache(() => cache.of(mailbox).folder('inbox').getSync()).pipe(
+            Effect.map(mark => [mailbox.address, mark] as const),
           ),
         { concurrency: 'unbounded' },
       ),
@@ -33,29 +33,29 @@ const arrivedSince =
   (marks: ReadonlyMap<string, FolderSync | null>) =>
   (thread: ThreadState): boolean =>
     thread.messages.some(message =>
-      (message.locations ?? []).some(({ account, folder, uidValidity, uid }) => {
+      (message.locations ?? []).some(({ mailbox, folder, uidValidity, uid }) => {
         if (folder !== 'inbox') return false;
-        const mark = marks.get(account);
+        const mark = marks.get(mailbox);
         if (mark === undefined) return false;
         return mark === null || uidValidity !== mark.uidValidity || uid > mark.lastUid;
       }),
     );
 
 /**
- * Holds each account's INBOX in IDLE until mail arrives that `rowsOf` keeps, syncing after every
+ * Holds each mailbox's INBOX in IDLE until mail arrives that `rowsOf` keeps, syncing after every
  * change the server reports, and answers those conversations. New is what an inbox gained after the
- * sync this starts with; past `deadline` with nothing, it fails `WaitTimedOut`. An account whose sync
+ * sync this starts with; past `deadline` with nothing, it fails `WaitTimedOut`. A mailbox whose sync
  * fails is answered among `failed` and the rest are watched; when every one fails, so does the wait.
  *
  * ponytail: mail that lands during that first sync counts as already there. Un-park if a wait is
  * ever seen to miss a message that arrived as it began.
  */
 export const waitForMail = Effect.fn('mail.waitForMail')(function* <E>({
-  accounts,
+  mailboxes,
   deadline,
   rowsOf,
 }: {
-  readonly accounts: readonly InboundAddress[];
+  readonly mailboxes: readonly InboundAddress[];
   readonly deadline: number;
   /** The conversations to answer, searching the servers of `watched`, and those that failed to. */
   readonly rowsOf: (
@@ -73,8 +73,8 @@ export const waitForMail = Effect.fn('mail.waitForMail')(function* <E>({
   const noteFailures = (errors: readonly MailServerError[]) => {
     for (const error of errors) failed.set(error.address, error);
   };
-  noteFailures((yield* cache.syncSome(accounts, { force: true })).failed);
-  const watched = accounts.filter(({ address }) => !failed.has(address));
+  noteFailures((yield* cache.syncSome(mailboxes, { force: true })).failed);
+  const watched = mailboxes.filter(({ address }) => !failed.has(address));
   const isNew = arrivedSince(yield* inboxMarks(watched));
 
   const round = Effect.gen(function* () {
@@ -88,7 +88,7 @@ export const waitForMail = Effect.fn('mail.waitForMail')(function* <E>({
     const marks = yield* inboxMarks(watched);
     // The first inbox to change ends the round; one that cannot be watched leaves it to the others.
     yield* Effect.raceAll(
-      watched.map(account => mail.waitForInbox(account, marks.get(account.address)?.lastUid ?? 0)),
+      watched.map(mailbox => mail.waitForInbox(mailbox, marks.get(mailbox.address)?.lastUid ?? 0)),
     ).pipe(Effect.timeoutOrElse({ duration: deadline - now, orElse: () => Effect.void }));
     // A round never comes back sooner than this, whatever a server says: the wait cannot spin.
     const spent = (yield* Clock.currentTimeMillis) - now;

@@ -6,7 +6,7 @@ import { AgentTools } from './AgentTools';
 
 vi.mock('@tanstack/react-router', () => ({
   useNavigate: () => vi.fn(async () => {}),
-  useParams: () => ({ mailbox: 'unified' }),
+  useParams: () => ({ view: 'unified' }),
 }));
 
 vi.mock('../store/MailProvider', async importOriginal => ({

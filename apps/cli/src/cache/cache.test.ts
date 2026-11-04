@@ -8,7 +8,7 @@ import { seal, writePrivateFile } from '../files.ts';
 import { makeFakeImapServer } from '../mail/fake-imap-server.ts';
 import { ADDRESS, inbound, mail, makeMailWorld } from '../mail/mail-world.ts';
 import { failureOf, runCli, USER_ID } from '../test-world.ts';
-import { accountCache } from './disk.ts';
+import { mailboxCache } from './disk.ts';
 
 const idsOf = (stdout: string): string[] =>
   JSON.parse(stdout).threads.map(({ id }: { id: string }) => id);
@@ -27,7 +27,7 @@ const filesUnder = (dir: string) =>
 
 layer(NodeServices.layer)(it => {
   describe('the mail cache on disk', () => {
-    it.effect('holds nothing readable, owner-only, under the account', () =>
+    it.effect('holds nothing readable, owner-only, under the mailbox', () =>
       Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem;
         const path = yield* Path.Path;
@@ -40,7 +40,7 @@ layer(NodeServices.layer)(it => {
 
         const dir = path.join(homes.XDG_CACHE_HOME, 'yozz', USER_ID);
         const files = yield* filesUnder(dir);
-        // A file per folder the server has, the account's sync time, and the body read.
+        // A file per folder the server has, the mailbox's sync time, and the body read.
         expect(files.map(file => path.basename(file)).toSorted()).toEqual([
           'account.bin',
           'archive.bin',
@@ -57,7 +57,7 @@ layer(NodeServices.layer)(it => {
           }
           assert.strictEqual((yield* fs.stat(path.join(dir, file))).mode & 0o777, 0o600);
         }
-        // The account's directory is named by a digest, not the address.
+        // The mailbox's directory is named by a digest, not the address.
         expect(files.every(file => !file.includes('@'))).toBe(true);
       }),
     );
@@ -160,7 +160,7 @@ layer(NodeServices.layer)(it => {
           );
           if (inboxFile === undefined) throw new Error('no inbox file');
           yield* fs.remove(path.join(dir, inboxFile));
-          const inbox = server.mailboxes.get('INBOX');
+          const inbox = server.folders.get('INBOX');
           if (inbox === undefined) throw new Error('no inbox');
           inbox.uidValidity += 1;
           inbox.messages = [];
@@ -185,7 +185,7 @@ layer(NodeServices.layer)(it => {
             'decrypt',
           ]),
         );
-        const cache = yield* accountCache({ dir, key, account: ADDRESS });
+        const cache = yield* mailboxCache({ dir, key, mailbox: ADDRESS });
         const inbox = cache.mail.folder('inbox');
         yield* Effect.promise(() =>
           inbox.putSync({ name: 'INBOX', uidValidity: 100, lastUid: 1, complete: true }),
@@ -267,7 +267,7 @@ layer(NodeServices.layer)(it => {
         });
         yield* writePrivateFile(path.join(dir, 'inbox.bin'), content);
 
-        const { mail: cache } = yield* accountCache({ dir, key, account: ADDRESS });
+        const { mail: cache } = yield* mailboxCache({ dir, key, mailbox: ADDRESS });
         const inbox = cache.folder('inbox');
         expect(yield* Effect.promise(() => inbox.getSync())).toEqual(old.sync);
         expect(yield* Effect.promise(() => inbox.listSummaries())).toMatchObject([
@@ -280,7 +280,7 @@ layer(NodeServices.layer)(it => {
           inbox.updateSummaries([1], summary => ({ ...summary, attachmentNames: ['a.pdf'] })),
         );
         yield* Effect.promise(() => inbox.putSync({ ...old.sync, hasAttachmentNames: true }));
-        const reopened = yield* accountCache({ dir, key, account: ADDRESS });
+        const reopened = yield* mailboxCache({ dir, key, mailbox: ADDRESS });
         const again = reopened.mail.folder('inbox');
         expect(yield* Effect.promise(() => again.getSync())).toMatchObject({
           hasAttachmentNames: true,
@@ -302,8 +302,8 @@ layer(NodeServices.layer)(it => {
             'decrypt',
           ]),
         );
-        const cache = yield* accountCache({ dir, key, account: ADDRESS });
-        // Where the account's sync time goes, something the rename cannot replace.
+        const cache = yield* mailboxCache({ dir, key, mailbox: ADDRESS });
+        // Where the mailbox's sync time goes, something the rename cannot replace.
         yield* fs.makeDirectory(path.join(dir, 'account.bin', 'in-the-way'), { recursive: true });
 
         const error = yield* Effect.flip(cache.setSyncedAt(0));

@@ -278,8 +278,8 @@ export const AddAddress = () => {
         if (!isLive()) return;
         if (isInbound(record)) {
           void navigate({
-            to: '/m/$mailbox',
-            params: { mailbox: record.address },
+            to: '/m/$view',
+            params: { view: record.address },
             search: previous => previous,
           });
         } else {

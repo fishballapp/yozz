@@ -361,7 +361,7 @@ describe('fetchBodyAt', () => {
     return folder;
   };
 
-  it('fetches the copy from its mailbox and caches a small body', async () => {
+  it('fetches the copy from its folder and caches a small body', async () => {
     fetched.length = 0;
     const folder = await synced();
     const res = await fetchBodyAt(

@@ -6,6 +6,7 @@ export const DRAFT_RECORD_TYPE = 'draft';
 /** Replication bookkeeping, kept apart so writing it never bumps the content's version. */
 export const DRAFT_MIRROR_RECORD_TYPE = 'draft-mirror';
 
+// Stored fields named `account` hold a mailbox's address; the name stays so saved drafts keep reading.
 /** Where a copy of something sits on a server. */
 const locatorSchema = z.object({
   account: z.string().min(1),

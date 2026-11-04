@@ -3,15 +3,15 @@ import type { FlagTarget } from './sync.ts';
 import { FOLDERS, type Folder, type Location, renumberedText } from './thread.ts';
 
 /**
- * An op leaves the list when the server refused it, or when a sync of that account that started
- * after the ack lands (`retireAtSyncSeq`); every IMAP command of an account runs on one serial
+ * An op leaves the list when the server refused it, or when a sync of that mailbox that started
+ * after the ack lands (`retireAtSyncSeq`); every IMAP command of a mailbox runs on one serial
  * queue, so such a sync observed the server after the command. See DECISIONS.md, 2026-08-27.
  */
 
 /** Sent is not one: nothing moves mail into the Sent folder. */
 export type MoveTarget = 'inbox' | 'archive' | 'trash';
 
-/** Archiving takes the inbox only; the bin takes everything. */
+/** Archiving takes the inbox only; Trash takes everything. */
 export const MOVE_SOURCES: Record<MoveTarget, readonly Folder[]> = {
   archive: ['inbox'],
   trash: ['inbox', 'sent', 'archive'],
@@ -35,7 +35,7 @@ export type PendingChange =
 
 export type PendingOp = {
   readonly id: string;
-  readonly account: string;
+  readonly mailbox: string;
   readonly threadId: string;
   readonly change: PendingChange;
   /** `null` until the server has done it; then the seq of the first sync that may retire it. */
@@ -47,25 +47,25 @@ type Reconcilable = {
   readonly isUnread: boolean;
   readonly isStarred: boolean;
   readonly folders: readonly Folder[];
-  readonly foldersByAccount: Readonly<Record<string, readonly Folder[]>>;
+  readonly foldersByMailbox: Readonly<Record<string, readonly Folder[]>>;
 };
 
 const applyChange = <T extends Reconcilable>(thread: T, op: PendingOp): T => {
   if (op.change.kind === 'flag') {
     return { ...thread, [op.change.key]: op.change.value };
   }
-  const held = thread.foldersByAccount[op.account];
-  // A sync can leave the account holding no copy any more; moving nothing must not invent one.
+  const held = thread.foldersByMailbox[op.mailbox];
+  // A sync can leave the mailbox holding no copy any more; moving nothing must not invent one.
   if (held === undefined) return thread;
-  const foldersByAccount = {
-    ...thread.foldersByAccount,
-    [op.account]: foldersAfterMove(held, op.change.to),
+  const foldersByMailbox = {
+    ...thread.foldersByMailbox,
+    [op.mailbox]: foldersAfterMove(held, op.change.to),
   };
-  // A move reaches only its own account's copies; the thread is wherever any account holds one.
+  // A move reaches only its own mailbox's copies; the thread is wherever any mailbox holds one.
   const folders = FOLDERS.filter(folder =>
-    Object.values(foldersByAccount).some(accountFolders => accountFolders.includes(folder)),
+    Object.values(foldersByMailbox).some(mailboxFolders => mailboxFolders.includes(folder)),
   );
-  return { ...thread, folders, foldersByAccount };
+  return { ...thread, folders, foldersByMailbox };
 };
 
 /** Each thread's ops in the order they were made. */
@@ -83,15 +83,15 @@ export const applyOps = <T extends Reconcilable>(
   });
 };
 
-/** What is left after a sync of `account` that started as sync number `completedSeq` has landed. */
+/** What is left after a sync of `mailbox` that started as sync number `completedSeq` has landed. */
 export const retireOps = (
   ops: readonly PendingOp[],
-  account: string,
+  mailbox: string,
   completedSeq: number,
 ): readonly PendingOp[] =>
   ops.filter(
     op =>
-      op.account !== account || op.retireAtSyncSeq === null || op.retireAtSyncSeq > completedSeq,
+      op.mailbox !== mailbox || op.retireAtSyncSeq === null || op.retireAtSyncSeq > completedSeq,
   );
 
 /**
@@ -109,11 +109,11 @@ export const assertSameUidValidity = (
 };
 
 /**
- * One account's copies as the writes address them: one target per folder, off its sync mark.
+ * One mailbox's copies as the writes address them: one target per folder, off its sync mark.
  * Throws when a folder has not synced or was renumbered since the copies were read.
  */
 export const flagTargets = (
-  locations: readonly Omit<Location, 'account'>[],
+  locations: readonly Omit<Location, 'mailbox'>[],
   marks: ReadonlyMap<Folder, FolderSync | null>,
 ): readonly FlagTarget[] =>
   [...Map.groupBy(locations, location => location.folder)].map(([folder, copies]) => {
@@ -122,7 +122,7 @@ export const flagTargets = (
     assertSameUidValidity(folder, mark.uidValidity, copies);
     return {
       folder,
-      mailbox: mark.name,
+      folderName: mark.name,
       uidValidity: mark.uidValidity,
       uids: copies.map(({ uid }) => uid),
     };

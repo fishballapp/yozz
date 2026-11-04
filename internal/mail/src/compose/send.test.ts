@@ -367,7 +367,7 @@ describe('storeSentCopy', () => {
     return { run, calls };
   };
 
-  it('appends when the mailbox has no copy, and reports where it landed', async () => {
+  it('appends when the Sent folder has no copy, and reports where it landed', async () => {
     const { run, calls } = world({});
     expect(await storeSentCopy(run, BYTES, '<m@x>')).toEqual({
       ok: true,

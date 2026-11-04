@@ -1,6 +1,6 @@
 /**
  * Pure: message ids in, groups out. JMAP's rule (RFC 8621 §3) under union-find, with Gmail's
- * `X-GM-THRID` as one extra edge scoped to its account. See docs/knowledge/email-threading.md
+ * `X-GM-THRID` as one extra edge scoped to its mailbox. See docs/knowledge/email-threading.md
  * and DECISIONS.md, "Threading is union-find over JMAP's rule".
  */
 
@@ -12,8 +12,8 @@ export type ThreadableMessage = {
   readonly references: readonly string[];
   readonly subject: string | null;
   readonly gmailThreadId: string | null;
-  /** A THRID is Gmail's number inside one mailbox, so two accounts can hand out the same one. */
-  readonly gmailAccount?: string;
+  /** A THRID is Gmail's number inside one mailbox, so two mailboxes can hand out the same one. */
+  readonly gmailMailbox?: string;
 };
 
 // ponytail: RFC 5256's leaders plus the localized Outlook set the knowledge doc lists; extend
@@ -87,9 +87,9 @@ export const groupIntoThreads = (
   };
 
   for (const message of messages) {
-    // An extra edge, never a replacement: the headers are what link the copies other accounts hold.
+    // An extra edge, never a replacement: the headers are what link the copies other mailboxes hold.
     if (message.gmailThreadId !== null) {
-      link(`gmail:${message.gmailAccount ?? ''}:${message.gmailThreadId}`, message.id);
+      link(`gmail:${message.gmailMailbox ?? ''}:${message.gmailThreadId}`, message.id);
     }
     const subject = baseSubject(message.subject);
     for (const id of msgIdsOf(message)) link(`${subject}\0${id}`, message.id);

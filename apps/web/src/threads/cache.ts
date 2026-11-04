@@ -11,10 +11,12 @@ import {
 } from '../vault/device-db';
 
 /**
- * The web app's `MailCache`: per device in IndexedDB, per vault user, account and folder; dropped
+ * The web app's `MailCache`: per device in IndexedDB, per vault user, mailbox and folder; dropped
  * whole on lock.
  */
 
+// `account` is the stored key and row field: it holds the mailbox's address, and its name stays
+// so a cache written before the rename still reads.
 type Scope = { readonly userId: string; readonly account: string; readonly folder: Folder };
 type SyncRow = Scope & FolderSync;
 type SummaryRow = Scope & { readonly uid: number; readonly summary: ImapMessageSummary };
@@ -75,8 +77,8 @@ const folderRange = ({ userId, account, folder }: Scope) =>
   );
 
 /** Arrays sort after strings, so `[]` is the ceiling. */
-const accountRange = (userId: string, account: string) =>
-  IDBKeyRange.bound([userId, account], [userId, account, []]);
+const mailboxRange = (userId: string, mailbox: string) =>
+  IDBKeyRange.bound([userId, mailbox], [userId, mailbox, []]);
 
 const createFolderCache = (scope: Scope, idbFactory?: IDBFactory): FolderCache => {
   const { userId, account, folder } = scope;
@@ -230,17 +232,17 @@ const createFolderCache = (scope: Scope, idbFactory?: IDBFactory): FolderCache =
 
 export const createMailCache = (
   userId: string,
-  account: string,
+  mailbox: string,
   idbFactory?: IDBFactory,
 ): MailCache => ({
-  folder: folder => createFolderCache({ userId, account, folder }, idbFactory),
+  folder: folder => createFolderCache({ userId, account: mailbox, folder }, idbFactory),
 
   // Every store in one transaction.
   clear: async () => {
     const db = await deviceDbOf(idbFactory);
     await runStoresTransaction(db, MAIL_STORES, tx => {
       for (const name of MAIL_STORES) {
-        tx.objectStore(name).delete(accountRange(userId, account));
+        tx.objectStore(name).delete(mailboxRange(userId, mailbox));
       }
     });
   },

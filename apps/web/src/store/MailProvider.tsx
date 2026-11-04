@@ -12,7 +12,7 @@ import {
   MAX_CACHED_BODY_BYTES,
   type Previews,
   previewKey,
-  withoutAccountPreviews,
+  withoutMailboxPreviews,
 } from '@yozz.app/mail/threads/body-state';
 import type { MailCache } from '@yozz.app/mail/threads/cache';
 import { threadList } from '@yozz.app/mail/threads/hydrate';
@@ -25,9 +25,9 @@ import {
   type PendingOp,
   retireOps,
 } from '@yozz.app/mail/threads/reconcile';
-import type { AccountSummaries } from '@yozz.app/mail/threads/summaries';
-import type { AccountSyncState, FlagTarget, MovedCopy } from '@yozz.app/mail/threads/sync';
-import { staleAccounts } from '@yozz.app/mail/threads/sync-staleness';
+import type { MailboxSummaries } from '@yozz.app/mail/threads/summaries';
+import type { FlagTarget, MailboxSyncState, MovedCopy } from '@yozz.app/mail/threads/sync';
+import { staleMailboxes } from '@yozz.app/mail/threads/sync-staleness';
 import type { Location, ThreadState } from '@yozz.app/mail/threads/thread';
 import {
   type Folder,
@@ -35,7 +35,7 @@ import {
   isServerCopy,
   senderCheckOf,
 } from '@yozz.app/mail/threads/thread';
-import { accountsShown, folderPaged, type MailboxId } from '@yozz.app/mail/threads/views';
+import { folderPaged, mailboxesShown, type ViewId } from '@yozz.app/mail/threads/views';
 import {
   createContext,
   type ReactNode,
@@ -64,11 +64,11 @@ import { type Composer, type ComposerShared, useComposerStore } from './use-comp
 
 type InboundAddress = AddressRecord & { imap: NonNullable<AddressRecord['imap']> };
 
-/** Hears why a move was refused, on the spot or once the server answers: once, however many accounts refused it. */
+/** Hears why a move was refused, on the spot or once the server answers: once, however many mailboxes refused it. */
 type OnRefused = (reason: string) => void;
 
 type MailContextValue = ComposerShared & {
-  accounts: readonly InboundAddress[];
+  mailboxes: readonly InboundAddress[];
   identities: readonly AddressRecord[];
   /** Every address you own, inbound or send-only. */
   ownedAddresses: readonly string[];
@@ -77,12 +77,12 @@ type MailContextValue = ComposerShared & {
   recordsError: string | null;
   /** What last failed (a flag write, a move, a body, an older page) and why; cleared by the next one that works. */
   mailError: string | null;
-  syncStates: Readonly<Record<string, AccountSyncState>>;
+  syncStates: Readonly<Record<string, MailboxSyncState>>;
   sync: (address?: string) => Promise<void>;
-  /** Pages one window further back, on every account this mailbox shows. Coalesced per account and folder. */
-  loadOlder: (mailbox: MailboxId) => Promise<void>;
-  /** Whether that mailbox's page is in flight. */
-  isLoadingOlder: (mailbox: MailboxId) => boolean;
+  /** Pages one window further back, on every mailbox this view shows. Coalesced per mailbox and folder. */
+  loadOlder: (view: ViewId) => Promise<void>;
+  /** Whether that view's page is in flight. */
+  isLoadingOlder: (view: ViewId) => boolean;
   /** Flag and move answer `false` when no mail server holds a copy to change. */
   markRead: (threadId: string) => boolean;
   /** Puts the whole thread back to unread; the reader closes with it. */
@@ -96,7 +96,7 @@ type MailContextValue = ComposerShared & {
   /** Brings a thread back to the inbox from Trash or Archive. */
   restoreThread: (threadId: string, onRefused?: OnRefused) => boolean;
   /**
-   * The many-thread forms the actions above are the one-id case of: one write per account and
+   * The many-thread forms the actions above are the one-id case of: one write per mailbox and
    * folder however many threads, answering the ids they took (a flag already set counts).
    */
   moveThreads: (
@@ -171,8 +171,8 @@ const afterNextPaint = () =>
 /** What a write answers when a move before it left a copy somewhere it cannot yet address. */
 const MOVE_PENDING = 'Still confirming the last move of that conversation; try again in a moment.';
 
-const locationKey = ({ account, folder, uidValidity, uid }: Location) =>
-  `${account}/${folder}/${uidValidity}/${uid}`;
+const locationKey = ({ mailbox, folder, uidValidity, uid }: Location) =>
+  `${mailbox}/${folder}/${uidValidity}/${uid}`;
 
 /** Where the server holds `location` now, following each move made since; null where one did not say. */
 const whereNow = (
@@ -191,13 +191,13 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
   const [records, setRecords] = useState<readonly AddressRecord[]>([]);
   const [recordsError, setRecordsError] = useState<string | null>(null);
   const [demoThreads, setDemoThreads] = useState<readonly ThreadState[]>([]);
-  /** What the server last said, per account. Never patched: `ops` is laid over it at render (`lib/reconcile.ts`). */
-  const [baseByAccount, setBaseByAccount] = useState<AccountSummaries>({});
+  /** What the server last said, per mailbox. Never patched: `ops` is laid over it at render (`lib/reconcile.ts`). */
+  const [baseByMailbox, setBaseByMailbox] = useState<MailboxSummaries>({});
   const [bodiesById, setBodiesById] = useState<Readonly<Record<string, BodyEntry>>>({});
   /** Cached body text by location, so a row has its excerpt before anyone opens the message. */
   const [previews, setPreviews] = useState<Previews>({});
   const [ops, setOps] = useState<readonly PendingOp[]>([]);
-  const [syncStates, setSyncStates] = useState<Readonly<Record<string, AccountSyncState>>>({});
+  const [syncStates, setSyncStates] = useState<Readonly<Record<string, MailboxSyncState>>>({});
   const [mailError, setMailError] = useState<string | null>(null);
   const inFlightBodiesRef = useRef<Map<string, Promise<BodyOutcome>>>(new Map());
   /** The DKIM key lookups of this session, kept so a sender's many messages cost one request. */
@@ -207,7 +207,7 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
   const [olderInFlight, setOlderInFlight] = useState<Readonly<Record<string, boolean>>>({});
 
   /**
-   * One entry per account with a sync running; `dirty` makes the loop go round again, so every
+   * One entry per mailbox with a sync running; `dirty` makes the loop go round again, so every
    * request is followed by a sync that started after it. `isTorn`: a move or an older page landed
    * between the pass's folders, which then disagree about where mail is, so it goes round instead
    * of landing.
@@ -222,19 +222,19 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
    * UIDVALIDITY, so an entry stays true.
    */
   const movedRef = useRef<Map<string, Location | null>>(new Map());
-  /** Per account and thread, the last write's turn: the next resolves its uids once that one has answered. */
+  /** Per mailbox and thread, the last write's turn: the next resolves its uids once that one has answered. */
   const writeTurnsRef = useRef<Map<string, Promise<void>>>(new Map());
   /** Counts sync starts; an acked op is retired by the first later one to land. */
   const syncSeqRef = useRef(0);
   /** When each address's last sync started, for the tab-return trigger (see `sync-staleness.ts`). */
   const syncStartedRef = useRef<Map<string, number>>(new Map());
-  /** Keyed by account and folder: two mailboxes over the same folder are one page. */
+  /** Keyed by mailbox and folder: two mailboxes over the same folder are one page. */
   const inFlightOlderRef = useRef<Map<string, Promise<void>>>(new Map());
   const liveManagerRef = useRef<LiveManager | null>(null);
   const syncRef = useRef<(address?: string) => Promise<void>>(async () => {});
   const userIdRef = useRef<string | null>(null);
   userIdRef.current = session?.userId ?? null;
-  /** Accounts whose cached threads have been read into memory this unlock. */
+  /** Mailboxes whose cached threads have been read into memory this unlock. */
   const hydratedRef = useRef<Set<string>>(new Set());
   const sessionGeneration = useRef(0);
 
@@ -271,13 +271,13 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
   const recordsRef = useRef(records);
   recordsRef.current = records;
   /** The inbound records as last rendered, or as an edit or a removal has just left them. */
-  const accountsRef = useRef<readonly InboundAddress[]>([]);
-  /** Whether `account` is still the record of its address: not edited, not removed. */
-  const isCurrentAccount = useCallback(
-    (account: InboundAddress) =>
-      accountsRef.current.some(
+  const mailboxesRef = useRef<readonly InboundAddress[]>([]);
+  /** Whether `mailbox` is still the record of its address: not edited, not removed. */
+  const isCurrentMailbox = useCallback(
+    (mailbox: InboundAddress) =>
+      mailboxesRef.current.some(
         candidate =>
-          candidate.address === account.address && sameImap(candidate.imap, account.imap),
+          candidate.address === mailbox.address && sameImap(candidate.imap, mailbox.imap),
       ),
     [],
   );
@@ -308,7 +308,7 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
       // Stored in the vault the call began in, whose next unlock lists it. Shown in the session
       // after it, it would sync that person's mailbox over this one's connections.
       if (generation !== sessionGeneration.current) return;
-      accountsRef.current = upsertRecord(recordsRef.current, record).filter(isInbound);
+      mailboxesRef.current = upsertRecord(recordsRef.current, record).filter(isInbound);
       setRecords(current => upsertRecord(current, record));
     },
     [storeAddress],
@@ -357,7 +357,7 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
           await manager?.close(address);
           await running;
           const { createMailCache } = await import('../threads/cache');
-          // A clear that fails is finished by the lock's, which empties every account of this user.
+          // A clear that fails is finished by the lock's, which empties every mailbox of this user.
           await createMailCache(userId, address)
             .clear()
             .catch(() => {});
@@ -370,18 +370,18 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
         })().finally(settle);
       }
       // `isStale` reads the ref, so a sync of this address stops writing now, not at the next render.
-      accountsRef.current = accountsRef.current.filter(account => account.address !== address);
+      mailboxesRef.current = mailboxesRef.current.filter(mailbox => mailbox.address !== address);
       hydratedRef.current.delete(address);
       setRecords(current => current.filter(record => record.address !== address));
-      setBaseByAccount(current => {
+      setBaseByMailbox(current => {
         const { [address]: _, ...rest } = current;
         return rest;
       });
-      setOps(current => current.filter(op => op.account !== address));
-      // All of them: a `mid/<Message-ID>` id carries no account, and a body kept under one could
+      setOps(current => current.filter(op => op.mailbox !== address));
+      // All of them: a `mid/<Message-ID>` id carries no mailbox, and a body kept under one could
       // later be shown for a different message.
       setBodiesById({});
-      setPreviews(current => withoutAccountPreviews(current, address));
+      setPreviews(current => withoutMailboxPreviews(current, address));
     },
     [session],
   );
@@ -432,7 +432,7 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
       const replacement = Promise.withResolvers<void>();
       replacementsRef.current.set(address, replacement.promise);
       // Read by `isStale`, so a sync of the old record stops writing now, not at the next render.
-      accountsRef.current = swap(recordsRef.current).filter(isInbound);
+      mailboxesRef.current = swap(recordsRef.current).filter(isInbound);
       // The next request starts a run of its own, with the new record, instead of joining that one.
       syncRunsRef.current.delete(address);
       if (isAnotherMailbox) {
@@ -440,15 +440,15 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
         for (const key of movedRef.current.keys()) {
           if (key.startsWith(`${address}/`)) movedRef.current.delete(key);
         }
-        setBaseByAccount(current => {
+        setBaseByMailbox(current => {
           const { [address]: _, ...rest } = current;
           return rest;
         });
-        setOps(current => current.filter(op => op.account !== address));
-        // All of them, as a removal does: an id carries no account.
+        setOps(current => current.filter(op => op.mailbox !== address));
+        // All of them, as a removal does: an id carries no mailbox.
         inFlightBodiesRef.current.clear();
         setBodiesById({});
-        setPreviews(current => withoutAccountPreviews(current, address));
+        setPreviews(current => withoutMailboxPreviews(current, address));
       }
       setRecords(swap);
 
@@ -457,7 +457,7 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
         await running;
         if (isAnotherMailbox && userId !== null) {
           const { createMailCache } = await import('../threads/cache');
-          // A clear that fails is finished by the lock's, which empties every account of this user.
+          // A clear that fails is finished by the lock's, which empties every mailbox of this user.
           await createMailCache(userId, address)
             .clear()
             .catch(() => {});
@@ -507,40 +507,40 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
     const generation = sessionGeneration.current;
     /**
      * A task is made for one record. Once that address has been edited or removed it is refused
-     * rather than run: `manager.run` logs in with whatever account it is handed, so old credentials
+     * rather than run: `manager.run` logs in with whatever mailbox it is handed, so old credentials
      * would go back on the connection an edit just closed, and a draft or a Sent copy would land in
      * the old mailbox. A task submitted before the edit is not interrupted: it finishes on the
      * socket it started on (`live.ts`), which is how a send already past SMTP still files its copy.
      * One submitted after waits for the edit's teardown, then runs as the new record.
      */
-    return account => async task => {
+    return mailbox => async task => {
       if (generation !== sessionGeneration.current || liveManagerRef.current === null) {
         return VAULT_LOCKED;
       }
-      if (!isCurrentAccount(account)) return ADDRESS_CHANGED;
-      const teardown = replacementsRef.current.get(account.address);
+      if (!isCurrentMailbox(mailbox)) return ADDRESS_CHANGED;
+      const teardown = replacementsRef.current.get(mailbox.address);
       if (teardown !== undefined) {
         await teardown;
         if (generation !== sessionGeneration.current) return VAULT_LOCKED;
-        if (!isCurrentAccount(account)) return ADDRESS_CHANGED;
+        if (!isCurrentMailbox(mailbox)) return ADDRESS_CHANGED;
       }
       const manager = liveManagerRef.current;
       if (manager === null) return VAULT_LOCKED;
-      return manager.run(account, task);
+      return manager.run(mailbox, task);
     };
-  }, [isCurrentAccount]);
+  }, [isCurrentMailbox]);
 
   const identities = records;
   /** The inbound record an address has now: what a send already claimed files its copy through. */
-  const currentAccount = useCallback(
-    (address: string) => accountsRef.current.find(account => account.address === address),
+  const currentMailbox = useCallback(
+    (address: string) => mailboxesRef.current.find(mailbox => mailbox.address === address),
     [],
   );
 
-  const accounts = useMemo(() => records.filter(isInbound), [records]);
+  const mailboxes = useMemo(() => records.filter(isInbound), [records]);
   const ownedAddresses = useMemo(() => records.map(record => record.address), [records]);
 
-  accountsRef.current = accounts;
+  mailboxesRef.current = mailboxes;
 
   /** A write landed between a running sync's folders; see `isTorn`. */
   const tearRunningSync = useCallback((address: string) => {
@@ -549,8 +549,8 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
   }, []);
 
   const requestSync = useCallback(
-    (account: InboundAddress): Promise<void> => {
-      const address = account.address;
+    (mailbox: InboundAddress): Promise<void> => {
+      const address = mailbox.address;
       const running = syncRunsRef.current.get(address);
       if (running !== undefined) {
         running.dirty = true;
@@ -570,7 +570,7 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
           const { createMailCache } = await import('../threads/cache');
           const cache = createMailCache(userId, address);
           const isStale = () =>
-            generation !== sessionGeneration.current || !isCurrentAccount(account);
+            generation !== sessionGeneration.current || !isCurrentMailbox(mailbox);
           // The next session's hydrated set is not this run's to mark.
           if (isStale()) return;
           // The cache is the list until the server answers.
@@ -585,7 +585,7 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
             ]);
             if (isStale()) return;
             if (Object.values(cached).some(folder => folder.summaries.length > 0)) {
-              setBaseByAccount(current => ({ ...current, [address]: cached }));
+              setBaseByMailbox(current => ({ ...current, [address]: cached }));
             }
             setPreviews(current => ({ ...current, ...cachedText }));
             // The rows above are only scheduled, and the import below starts fetching the TLS /
@@ -593,7 +593,7 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
             await afterNextPaint();
             if (isStale()) return;
           }
-          const { syncAccount, prefetchBodies } = await import('@yozz.app/mail/threads/sync');
+          const { syncMailbox, prefetchBodies } = await import('@yozz.app/mail/threads/sync');
           do {
             // The first pass fetched the TLS stack, long enough for a lock to land under it; a later
             // one may belong to a record that has since been replaced, and would log in as it.
@@ -603,7 +603,7 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
             syncSeqRef.current += 1;
             const seq = syncSeqRef.current;
             setSyncStates(current => ({ ...current, [address]: { status: 'syncing' } }));
-            const result = await syncAccount(runOn(account), cache, isStale);
+            const result = await syncMailbox(runOn(mailbox), cache, isStale);
             if (generation !== sessionGeneration.current) return;
             // Its folders were read on either side of a write; the next pass lands instead.
             if (result.state.status === 'synced' && entry.isTorn) {
@@ -612,18 +612,18 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
             }
             // A UIDVALIDITY reset dropped the cache; the threads on screen and the ops against them name invalid uids.
             if (result.state.status === 'failed' && result.state.invalidated) {
-              setBaseByAccount(current => ({ ...current, [address]: {} }));
-              setPreviews(current => withoutAccountPreviews(current, address));
-              setOps(current => current.filter(op => op.account !== address));
+              setBaseByMailbox(current => ({ ...current, [address]: {} }));
+              setPreviews(current => withoutMailboxPreviews(current, address));
+              setOps(current => current.filter(op => op.mailbox !== address));
             }
             if (result.state.status === 'synced') {
-              setBaseByAccount(current => ({ ...current, [address]: result.byFolder }));
+              setBaseByMailbox(current => ({ ...current, [address]: result.byFolder }));
               // This pass started after the acks it retires, on the same serial queue as their commands.
               setOps(current => retireOps(current, address, seq));
               // The server's flags just arrived; an earlier refused write is moot.
               setMailError(null);
               prefetchBodies(
-                runOn(account),
+                runOn(mailbox),
                 cache,
                 result.byFolder,
                 MAX_CACHED_BODY_BYTES,
@@ -634,7 +634,7 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
                   if (isStale()) return;
                   setPreviews(current => ({
                     ...current,
-                    [previewKey({ account: address, ...at })]: body.paragraphs,
+                    [previewKey({ mailbox: address, ...at })]: body.paragraphs,
                   }));
                 },
               );
@@ -663,21 +663,21 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
       syncRunsRef.current.set(address, entry);
       return entry.promise;
     },
-    [bindRunOn, isCurrentAccount, lookupTxt],
+    [bindRunOn, isCurrentMailbox, lookupTxt],
   );
 
   const sync = useCallback(
     async (address?: string): Promise<void> => {
       if (isDemo()) return;
-      const currentAccounts = accountsRef.current;
+      const currentMailboxes = mailboxesRef.current;
       if (address !== undefined) {
-        const account = currentAccounts.find(candidate => candidate.address === address);
-        if (account !== undefined) {
-          await requestSync(account);
+        const mailbox = currentMailboxes.find(candidate => candidate.address === address);
+        if (mailbox !== undefined) {
+          await requestSync(mailbox);
         }
         return;
       }
-      await Promise.all(currentAccounts.map(account => requestSync(account)));
+      await Promise.all(currentMailboxes.map(mailbox => requestSync(mailbox)));
     },
     [requestSync],
   );
@@ -688,12 +688,12 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
   const { composer, shared, load, reset, vaultSent } = useComposerStore({
     session,
     identities,
-    accounts,
+    mailboxes,
     bindRunOn,
-    currentAccount,
+    currentMailbox,
     sync,
     threadsRef,
-    baseByAccount,
+    baseByMailbox,
     demo,
     activity,
   });
@@ -714,8 +714,8 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
           THREADS.map(thread => ({
             ...thread,
             folders: ['inbox'] as const,
-            foldersByAccount: Object.fromEntries(
-              thread.accounts.map(account => [account, ['inbox'] as const]),
+            foldersByMailbox: Object.fromEntries(
+              thread.mailboxes.map(mailbox => [mailbox, ['inbox'] as const]),
             ),
           })),
         );
@@ -772,7 +772,7 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
           return [record];
         });
         // Read by the runner, which would otherwise refuse the resumed work this load starts.
-        accountsRef.current = parsed.filter(isInbound);
+        mailboxesRef.current = parsed.filter(isInbound);
         setRecords(parsed);
         await load({ store, files }, parsed, () => cancelled);
       } catch (err) {
@@ -805,7 +805,7 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
       })();
       setRecords([]);
       setRecordsError(null);
-      setBaseByAccount({});
+      setBaseByMailbox({});
       setBodiesById({});
       setPreviews({});
       setOps([]);
@@ -819,10 +819,10 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
     };
   }, [store, files, userId, load, reset, activity]);
 
-  /** One account's next window of a folder. A refused page reports like a refused flag write. */
+  /** One mailbox's next window of a folder. A refused page reports like a refused flag write. */
   const loadOlderOn = useCallback(
-    async (account: InboundAddress, folder: Folder): Promise<void> => {
-      const key = `${account.address}/${folder}`;
+    async (mailbox: InboundAddress, folder: Folder): Promise<void> => {
+      const key = `${mailbox.address}/${folder}`;
       const inFlight = inFlightOlderRef.current.get(key);
       if (inFlight !== undefined) return inFlight;
 
@@ -838,29 +838,29 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
               import('@yozz.app/mail/threads/hydrate'),
               import('../threads/cache'),
             ]);
-          const cache = createMailCache(userId, account.address);
+          const cache = createMailCache(userId, mailbox.address);
           const isStale = () =>
-            generation !== sessionGeneration.current || !isCurrentAccount(account);
-          const res = await loadOlderPage(runOn(account), cache.folder(folder), isStale);
+            generation !== sessionGeneration.current || !isCurrentMailbox(mailbox);
+          const res = await loadOlderPage(runOn(mailbox), cache.folder(folder), isStale);
           if (generation !== sessionGeneration.current) return;
           if (!res.ok) {
             setMailError(
-              `older mail not loaded · ${describeMailFailure(res.error, account.imap.host)}`,
+              `older mail not loaded · ${describeMailFailure(res.error, mailbox.imap.host)}`,
             );
             return;
           }
-          tearRunningSync(account.address);
+          tearRunningSync(mailbox.address);
           const summaries = await cachedSummaries(cache);
           if (generation !== sessionGeneration.current) return;
-          setBaseByAccount(current => ({ ...current, [account.address]: summaries }));
+          setBaseByMailbox(current => ({ ...current, [mailbox.address]: summaries }));
           setMailError(null);
           if (!res.value.complete) return;
           setSyncStates(current => {
-            const state = current[account.address];
+            const state = current[mailbox.address];
             if (state?.status !== 'synced' || state.complete.includes(folder)) return current;
             return {
               ...current,
-              [account.address]: { ...state, complete: [...state.complete, folder] },
+              [mailbox.address]: { ...state, complete: [...state.complete, folder] },
             };
           });
         } catch (error) {
@@ -868,7 +868,7 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
           setMailError(
             `older mail not loaded · ${describeMailFailure(
               { kind: 'error', detail: error instanceof Error ? error.message : String(error) },
-              account.imap.host,
+              mailbox.imap.host,
             )}`,
           );
         }
@@ -879,44 +879,44 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
       inFlightOlderRef.current.set(key, promise);
       return promise;
     },
-    [bindRunOn, isCurrentAccount, tearRunningSync],
+    [bindRunOn, isCurrentMailbox, tearRunningSync],
   );
 
   const loadOlder = useCallback(
-    async (mailbox: MailboxId): Promise<void> => {
+    async (view: ViewId): Promise<void> => {
       if (isDemo()) return;
-      const folder = folderPaged(mailbox);
-      const targets = accountsShown(accountsRef.current, mailbox);
+      const folder = folderPaged(view);
+      const targets = mailboxesShown(mailboxesRef.current, view);
       if (targets.length === 0) return;
       const generation = sessionGeneration.current;
-      setOlderInFlight(current => ({ ...current, [mailbox]: true }));
+      setOlderInFlight(current => ({ ...current, [view]: true }));
       try {
-        await Promise.all(targets.map(account => loadOlderOn(account, folder)));
+        await Promise.all(targets.map(mailbox => loadOlderOn(mailbox, folder)));
       } finally {
-        // The next session may be paging the same mailbox.
+        // The next session may be paging the same view.
         if (generation === sessionGeneration.current) {
-          setOlderInFlight(current => ({ ...current, [mailbox]: false }));
+          setOlderInFlight(current => ({ ...current, [view]: false }));
         }
       }
     },
     [loadOlderOn],
   );
 
-  // A rename or a new send-only identity must not reopen IMAP for every account; credentials are in the key.
+  // A rename or a new send-only identity must not reopen IMAP for every mailbox; credentials are in the key.
   const inboundKey = useMemo(
     () =>
-      accounts
+      mailboxes
         .map(
           a => `${a.address}|${a.imap.host}|${a.imap.port}|${a.imap.username}|${a.imap.password}`,
         )
         .sort()
         .join('\n'),
-    [accounts],
+    [mailboxes],
   );
   useEffect(() => {
     if (isDemo() || inboundKey === '') return;
     void sync();
-    // `sync` reads accounts through a ref, so the key is the only real dependency.
+    // `sync` reads mailboxes through a ref, so the key is the only real dependency.
   }, [inboundKey, sync]);
 
   useEffect(() => {
@@ -925,8 +925,8 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
     // does not resync every address each time. The other triggers are never throttled.
     const onVisibility = () => {
       if (document.hidden) return;
-      const stale = staleAccounts(accountsRef.current, syncStartedRef.current, Date.now());
-      void Promise.all(stale.map(account => requestSync(account)));
+      const stale = staleMailboxes(mailboxesRef.current, syncStartedRef.current, Date.now());
+      void Promise.all(stale.map(mailbox => requestSync(mailbox)));
     };
     const onOnline = () => {
       void sync();
@@ -943,14 +943,14 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
   const threads = useMemo(() => {
     if (demo) return demoThreads;
     return threadList({
-      byAccount: baseByAccount,
+      byMailbox: baseByMailbox,
       vaultSent,
       bodies: bodiesById,
       previews,
       overlay: threads => applyOps(threads, ops),
       drafts,
     });
-  }, [demo, demoThreads, baseByAccount, vaultSent, bodiesById, previews, ops, drafts]);
+  }, [demo, demoThreads, baseByMailbox, vaultSent, bodiesById, previews, ops, drafts]);
 
   threadsRef.current = threads;
 
@@ -970,12 +970,12 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
 
   /**
    * One optimistic write against the server's copies of many threads, answering which of them it
-   * took. One op per thread and account, all set at once; then per account, one task whose IMAP
+   * took. One op per thread and mailbox, all set at once; then per mailbox, one task whose IMAP
    * commands go one per source folder (`threads/sync.ts`), carrying every thread's uids, because a
    * uid only means something in its own mailbox and a server takes a set far better than a flood.
-   * Writes to one thread in one account take turns, so each addresses the copies where the one
+   * Writes to one thread in one mailbox take turns, so each addresses the copies where the one
    * before it left them. A refusal drops the ops it covers and lands in `mailError`, never in a sync
-   * state; `onRefused` hears it once however many threads and accounts refused.
+   * state; `onRefused` hears it once however many threads and mailboxes refused.
    */
   const runThreadOps = useCallback(
     (
@@ -991,9 +991,9 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
     ): ReadonlySet<string> => {
       const wanted = new Set(threadIds);
       const targeted = threads.filter(thread => wanted.has(thread.id));
-      const opFor = (threadId: string, account: string): PendingOp => ({
+      const opFor = (threadId: string, mailbox: string): PendingOp => ({
         id: crypto.randomUUID(),
-        account,
+        mailbox,
         threadId,
         change,
         retireAtSyncSeq: null,
@@ -1001,9 +1001,9 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
       if (isDemo()) {
         // Demo moves never touch the fixtures' locations, so the folders say who holds a copy.
         const demoOps = targeted.flatMap(thread =>
-          Object.entries(thread.foldersByAccount)
+          Object.entries(thread.foldersByMailbox)
             .filter(([, folders]) => folders.some(pick))
-            .map(([account]) => opFor(thread.id, account)),
+            .map(([mailbox]) => opFor(thread.id, mailbox)),
         );
         setDemoThreads(current => applyOps(current, demoOps));
         return new Set(demoOps.map(op => op.threadId));
@@ -1016,8 +1016,8 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
         onRefused?.(reason);
       };
       const userId = userIdRef.current;
-      // Per thread, each account holding a copy this write changes, by the folders on screen, where
-      // a pending move has already put its account's copies. One op each, retired by that account's
+      // Per thread, each mailbox holding a copy this write changes, by the folders on screen, where
+      // a pending move has already put its mailbox's copies. One op each, retired by that mailbox's
       // confirming sync.
       const work =
         userId === null
@@ -1026,16 +1026,16 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
               const serverCopies = thread.messages.flatMap(message =>
                 (message.locations ?? []).filter(isServerCopy),
               );
-              return accountsRef.current
+              return mailboxesRef.current
                 .filter(
-                  account =>
-                    serverCopies.some(location => location.account === account.address) &&
-                    (thread.foldersByAccount[account.address] ?? []).some(pick),
+                  mailbox =>
+                    serverCopies.some(location => location.mailbox === mailbox.address) &&
+                    (thread.foldersByMailbox[mailbox.address] ?? []).some(pick),
                 )
-                .map(account => ({
-                  account,
-                  op: opFor(thread.id, account.address),
-                  copies: serverCopies.filter(location => location.account === account.address),
+                .map(mailbox => ({
+                  mailbox,
+                  op: opFor(thread.id, mailbox.address),
+                  copies: serverCopies.filter(location => location.mailbox === mailbox.address),
                 }));
             });
       const taken = new Set(work.map(({ op }) => op.threadId));
@@ -1058,8 +1058,8 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
         report(reason);
       };
 
-      for (const [account, items] of Map.groupBy(work, ({ account }) => account)) {
-        const turnKeys = items.map(({ op }) => `${account.address}\n${op.threadId}`);
+      for (const [mailbox, items] of Map.groupBy(work, ({ mailbox }) => mailbox)) {
+        const turnKeys = items.map(({ op }) => `${mailbox.address}\n${op.threadId}`);
         const previous = turnKeys.map(key => writeTurnsRef.current.get(key));
         const turn = (async () => {
           await Promise.all(previous);
@@ -1067,7 +1067,7 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
           let failure: MailConnectionFailure;
           try {
             const { createMailCache } = await import('../threads/cache');
-            const cache = createMailCache(userId, account.address);
+            const cache = createMailCache(userId, mailbox.address);
             const located = items.map(({ op, copies }) => {
               const now = copies.map(location => whereNow(movedRef.current, location));
               const here = now.filter(location => location !== null);
@@ -1101,27 +1101,27 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
                 waiting.map(({ op }) => op),
                 MOVE_PENDING,
               );
-              void requestSync(account);
+              void requestSync(mailbox);
             }
             if (ready.length === 0) return;
             const targets = flagTargets(
               ready.flatMap(({ picked }) => picked),
               marks,
             );
-            const res = await command(runOn(account), targets, cache);
+            const res = await command(runOn(mailbox), targets, cache);
             // The session the command belonged to may have ended while the server answered.
             if (generation !== sessionGeneration.current) return;
             if (res.ok) {
               for (const { from, to } of res.value) {
                 movedRef.current.set(
-                  locationKey({ account: account.address, ...from }),
-                  to === null ? null : { account: account.address, ...to },
+                  locationKey({ mailbox: mailbox.address, ...from }),
+                  to === null ? null : { mailbox: mailbox.address, ...to },
                 );
               }
-              if (change.kind === 'move') tearRunningSync(account.address);
+              if (change.kind === 'move') tearRunningSync(mailbox.address);
               acknowledge(ready.map(({ op }) => op));
               // Clears an earlier write's failure, never this batch's own: a refused thread or
-              // account would otherwise vanish from the status line as the rest lands.
+              // mailbox would otherwise vanish from the status line as the rest lands.
               if (!isRefusalShown) setMailError(null);
               return;
             }
@@ -1130,18 +1130,18 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
             if (generation !== sessionGeneration.current) return;
             failure = { kind: 'error', detail: err instanceof Error ? err.message : String(err) };
           }
-          // Every op of this account still standing; one refused above as still confirming is gone.
+          // Every op of this mailbox still standing; one refused above as still confirming is gone.
           refuse(
             items.map(({ op }) => op),
-            describeMailFailure(failure, account.imap.host),
+            describeMailFailure(failure, mailbox.imap.host),
           );
           // A write over several folders or uid sets can be half done, and the refusal has just
-          // unmasked the half that landed too: the sync says which half happened, one per account
+          // unmasked the half that landed too: the sync says which half happened, one per mailbox
           // however many threads it carried. A half-done move must not land torn either. ponytail:
           // until it lands, a write queued right behind addresses the half that moved where it was,
           // which the server answers OK and does nothing. Un-park when seen.
-          if (change.kind === 'move') tearRunningSync(account.address);
-          void requestSync(account);
+          if (change.kind === 'move') tearRunningSync(mailbox.address);
+          void requestSync(mailbox);
         })();
         for (const key of turnKeys) writeTurnsRef.current.set(key, turn);
       }
@@ -1202,9 +1202,9 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
       // Any copy will do for a body.
       const [copy] = message.locations ?? [];
       if (copy === undefined || userId === null) return Promise.resolve(failed);
-      const { folder, uid, account: accountAddress } = copy;
-      const account = accountsRef.current.find(a => a.address === accountAddress);
-      if (account === undefined) return Promise.resolve(failed);
+      const { folder, uid, mailbox: mailboxAddress } = copy;
+      const mailbox = mailboxesRef.current.find(a => a.address === mailboxAddress);
+      if (mailbox === undefined) return Promise.resolve(failed);
 
       const setEntry = (entry: BodyEntry) =>
         setBodiesById(current => ({ ...current, [messageId]: entry }));
@@ -1212,8 +1212,8 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
       const loadingEntry: BodyEntry = { status: 'loading' };
       const generation = sessionGeneration.current;
       // What was fetched belongs to this record's mailbox: an edit that may name another one
-      // clears the bodies, and a late answer must not fill them again under an id that carries no account.
-      const isStale = () => generation !== sessionGeneration.current || !isCurrentAccount(account);
+      // clears the bodies, and a late answer must not fill them again under an id that carries no mailbox.
+      const isStale = () => generation !== sessionGeneration.current || !isCurrentMailbox(mailbox);
       /**
        * Retires this fetch if its record has moved on. The body goes back to `pending`, which is
        * what loads it again with the current credentials: left `loading`, a password or port edit
@@ -1238,7 +1238,7 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
             import('@yozz.app/mail/threads/bodies'),
             import('../threads/cache'),
           ]);
-          const cache = createMailCache(userId, accountAddress).folder(folder);
+          const cache = createMailCache(userId, mailboxAddress).folder(folder);
           const cached = await cache.getBody(uid);
           if (isRetired()) return failed;
           const fetchFresh = () => {
@@ -1246,14 +1246,14 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
             setEntry(loadingEntry);
             // Refused when the copy's folder was renumbered: a stale uid would fetch whatever now
             // holds that number. Caches the body when it is small enough.
-            return fetchBodyAt(runOn(account), cache, copy, message.rawSize, lookupTxt, isStale);
+            return fetchBodyAt(runOn(mailbox), cache, copy, message.rawSize, lookupTxt, isStale);
           };
           const res = cached !== null ? { ok: true as const, value: cached } : await fetchFresh();
           if (isRetired()) return failed;
           if (!res.ok) {
             setEntry(failed);
             setMailError(
-              `message not loaded · ${describeMailFailure(res.error, account.imap.host)}`,
+              `message not loaded · ${describeMailFailure(res.error, mailbox.imap.host)}`,
             );
             return failed;
           }
@@ -1275,7 +1275,7 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
           setMailError(
             `message not loaded · ${describeMailFailure(
               { kind: 'error', detail: err instanceof Error ? err.message : String(err) },
-              account.imap.host,
+              mailbox.imap.host,
             )}`,
           );
           return failed;
@@ -1290,7 +1290,7 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
       });
       return promise;
     },
-    [bindRunOn, isCurrentAccount, lookupTxt, threads],
+    [bindRunOn, isCurrentMailbox, lookupTxt, threads],
   );
 
   const markRead = useCallback(
@@ -1313,7 +1313,7 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
   );
 
   /**
-   * One optimistic folder move of many threads: `UID MOVE` per account and source folder. One MOVE
+   * One optimistic folder move of many threads: `UID MOVE` per mailbox and source folder. One MOVE
    * per mailbox cannot be atomic across them, so a refusal asks for the sync that says which half
    * happened.
    */
@@ -1323,7 +1323,7 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
       return runThreadOps(
         threadIds,
         { kind: 'move', to },
-        // Only the copies this move consumes, in every account that holds one.
+        // Only the copies this move consumes, in every mailbox that holds one.
         folder => sources.includes(folder),
         async (run, targets) => {
           const { moveMessages } = await import('@yozz.app/mail/threads/sync');
@@ -1359,7 +1359,7 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
 
   const value = useMemo<MailContextValue>(
     () => ({
-      accounts,
+      mailboxes,
       identities,
       ownedAddresses,
       threads,
@@ -1370,7 +1370,7 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
       syncStates,
       sync,
       loadOlder,
-      isLoadingOlder: mailbox => olderInFlight[mailbox] === true,
+      isLoadingOlder: view => olderInFlight[view] === true,
       putAddress,
       replaceAddress,
       removeAddress,
@@ -1387,7 +1387,7 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
       flagThreads,
     }),
     [
-      accounts,
+      mailboxes,
       identities,
       ownedAddresses,
       threads,

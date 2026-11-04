@@ -9,7 +9,7 @@ import { useMediaQuery, usePaneWidth } from './chrome';
  * size, and an invisible 9px grab zone straddles it outside the flow box. Desktop only.
  */
 
-/** Here rather than in either shell, because the mailbox and the page shell must agree on the rail. */
+/** Here rather than in either shell, because the view page and the page shell must agree on the rail. */
 export const RAIL_WIDTH = { min: 176, max: 320, base: 224 };
 
 /**

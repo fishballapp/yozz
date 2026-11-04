@@ -1,4 +1,4 @@
-import { MAX_ATTACHMENT_BYTES, ownerAccountFor } from '@yozz.app/mail/compose/draft';
+import { MAX_ATTACHMENT_BYTES, ownerMailboxFor } from '@yozz.app/mail/compose/draft';
 import type { DraftRecord, FileReference } from '@yozz.app/mail/compose/draft-record';
 import { createDraft, replaceDraft } from '@yozz.app/mail/compose/draft-vault';
 import { type SeedRequest, seedFor } from '@yozz.app/mail/compose/seed';
@@ -140,7 +140,7 @@ const upload = Effect.fnUntraced(function* (files: readonly StagedFile[]) {
 const threadsWithBody = Effect.fnUntraced(function* (messageId: string) {
   const mail = yield* Mail;
   const cache = yield* Cache;
-  const { failed } = yield* cache.syncSome(mail.accounts, { force: false });
+  const { failed } = yield* cache.syncSome(mail.mailboxes, { force: false });
   const holds = (threads: readonly ThreadState[]) =>
     threads.some(({ messages }) =>
       messages.some(message => message.id === messageId && message.isDraft !== true),
@@ -150,7 +150,7 @@ const threadsWithBody = Effect.fnUntraced(function* (messageId: string) {
     ? cached
     : yield* cache.threads(
         (yield* lookUp({
-          accounts: mail.accounts.filter(
+          mailboxes: mail.mailboxes.filter(
             ({ address }) => !failed.some(error => error.address === address),
           ),
           ids: [messageId],
@@ -165,19 +165,19 @@ const threadsWithBody = Effect.fnUntraced(function* (messageId: string) {
     });
   }
   const copy = (message.locations ?? []).find(isServerCopy);
-  const account = mail.accounts.find(({ address }) => address === copy?.account);
+  const mailbox = mail.mailboxes.find(({ address }) => address === copy?.mailbox);
   // Sent mail the vault holds: its text is already here, and it has no attachments.
-  if (copy === undefined || account === undefined) return threads;
-  const folder = cache.of(account).folder(copy.folder);
+  if (copy === undefined || mailbox === undefined) return threads;
+  const folder = cache.of(mailbox).folder(copy.folder);
   const fetched = yield* usingCache(async () => {
     const body = await folder.getBody(copy.uid);
     return body === null
-      ? fetchBodyAt(mail.runOn(account), folder, copy, message.rawSize, mail.lookupTxt)
+      ? fetchBodyAt(mail.runOn(mailbox), folder, copy, message.rawSize, mail.lookupTxt)
       : { ok: true as const, value: body };
   });
   if (!fetched.ok) {
     return yield* mailServerError(
-      { address: account.address, host: account.imap.host },
+      { address: mailbox.address, host: mailbox.imap.host },
       fetched.error,
     );
   }
@@ -234,7 +234,7 @@ const startDraft = Effect.fnUntraced(function* ({
   const threadId = isReply
     ? threads.find(({ messages }) => messages.some(({ id }) => id === request.messageId))?.id
     : undefined;
-  const ownerAccount = ownerAccountFor(threads, seed.inReplyTo, identity.address);
+  const ownerAccount = ownerMailboxFor(threads, seed.inReplyTo, identity.address);
   const content: Omit<DraftRecord, 'contentVersion'> = {
     from: identity.address,
     to: Option.getOrUndefined(to) ?? seed.to ?? '',

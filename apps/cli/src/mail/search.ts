@@ -3,7 +3,7 @@ import type { InboundAddress } from '@yozz.app/mail/addresses/record';
 import type { MailTask } from '@yozz.app/mail/connection';
 import type { SearchQuery } from '@yozz.app/mail/threads/query';
 import { assembleMatches, searchMailbox } from '@yozz.app/mail/threads/search';
-import type { AccountSummaries, FolderSummaries } from '@yozz.app/mail/threads/summaries';
+import type { FolderSummaries, MailboxSummaries } from '@yozz.app/mail/threads/summaries';
 import { FOLDERS, type Folder } from '@yozz.app/mail/threads/thread';
 import * as Effect from 'effect/Effect';
 import { Cache } from '../cache/cache.ts';
@@ -12,53 +12,53 @@ import type { MailServerError, UsageError } from '../errors.ts';
 import { Mail } from './mail.ts';
 
 /**
- * What `asking` made of each account's server: the folders it answered, or the failure that ended
- * its turn. One account's server failing leaves the others answering; only when every one fails is
+ * What `asking` made of each mailbox's server: the folders it answered, or the failure that ended
+ * its turn. One mailbox's server failing leaves the others answering; only when every one fails is
  * that failure the command's own, as `Cache.syncSome` does for a sync.
  */
-const perAccount = Effect.fnUntraced(function* <A>(
-  accounts: readonly InboundAddress[],
-  asking: (account: InboundAddress) => Effect.Effect<A, MailServerError | UsageError, Cache | Mail>,
+const perMailbox = Effect.fnUntraced(function* <A>(
+  mailboxes: readonly InboundAddress[],
+  asking: (mailbox: InboundAddress) => Effect.Effect<A, MailServerError | UsageError, Cache | Mail>,
 ) {
   const answers = yield* Effect.forEach(
-    accounts,
-    account =>
-      asking(account).pipe(
-        Effect.map(answer => ({ account, answer, failure: null })),
+    mailboxes,
+    mailbox =>
+      asking(mailbox).pipe(
+        Effect.map(answer => ({ mailbox, answer, failure: null })),
         Effect.catchTag('MailServerError', failure =>
-          Effect.succeed({ account, answer: null, failure }),
+          Effect.succeed({ mailbox, answer: null, failure }),
         ),
       ),
     { concurrency: 'unbounded' },
   );
   const failed = answers.flatMap(({ failure }) => (failure === null ? [] : [failure]));
   const [first] = failed;
-  if (first !== undefined && failed.length === accounts.length) return yield* first;
+  if (first !== undefined && failed.length === mailboxes.length) return yield* first;
   return { answers, failed };
 });
 
 /**
- * Searches `folders` on every account on its server. Answers the summaries to thread in beside the
- * cache, whether a conversation holds a match, and the accounts whose server failed.
+ * Searches `folders` on every mailbox on its server. Answers the summaries to thread in beside the
+ * cache, whether a conversation holds a match, and the mailboxes whose server failed.
  */
 export const searchMail = Effect.fn('mail.searchMail')(function* ({
-  accounts,
+  mailboxes,
   folders,
   query,
 }: {
-  readonly accounts: readonly InboundAddress[];
+  readonly mailboxes: readonly InboundAddress[];
   readonly folders: readonly Folder[];
   readonly query: SearchQuery;
 }) {
   const mail = yield* Mail;
   const cache = yield* Cache;
-  const { answers, failed } = yield* perAccount(accounts, account =>
-    mail.use(account, run => searchMailbox({ run, cache: cache.of(account), folders, query })),
+  const { answers, failed } = yield* perMailbox(mailboxes, mailbox =>
+    mail.use(mailbox, run => searchMailbox({ run, cache: cache.of(mailbox), folders, query })),
   );
   return {
     ...assembleMatches(
-      answers.flatMap(({ account, answer }) =>
-        answer === null ? [] : [{ address: account.address, matches: answer }],
+      answers.flatMap(({ mailbox, answer }) =>
+        answer === null ? [] : [{ address: mailbox.address, matches: answer }],
       ),
     ),
     failed,
@@ -70,24 +70,24 @@ type Wanted =
   | { readonly kind: 'messageId'; readonly messageId: string }
   | { readonly kind: 'uid'; readonly uid: number };
 
-/** What `id` asks of `folder` in `account`, whose mark is `uidValidity`; null when nothing. */
+/** What `id` asks of `folder` in `mailbox`, whose mark is `uidValidity`; null when nothing. */
 const wantedIn = (
   id: string,
-  { account, folder, uidValidity }: { account: string; folder: Folder; uidValidity: number },
+  { mailbox, folder, uidValidity }: { mailbox: string; folder: Folder; uidValidity: number },
 ): Wanted | null => {
   if (id.startsWith('mid/')) return { kind: 'messageId', messageId: id.slice('mid/'.length) };
   const [holder, inFolder, validity, uid] = id.split('/');
-  const isHere = holder === account && inFolder === folder && Number(validity) === uidValidity;
+  const isHere = holder === mailbox && inFolder === folder && Number(validity) === uidValidity;
   return isHere && Number.isSafeInteger(Number(uid)) ? { kind: 'uid', uid: Number(uid) } : null;
 };
 
-/** The messages `wanted` names in one mailbox, read for this answer and never stored. */
+/** The messages `wanted` names in one folder, read for this answer and never stored. */
 const lookUpTask = ({
-  mailbox,
+  folderName,
   uidValidity,
   wanted,
 }: {
-  readonly mailbox: string;
+  readonly folderName: string;
   readonly uidValidity: number;
   readonly wanted: readonly Wanted[];
 }): MailTask<readonly ImapMessageSummary[]> => ({
@@ -95,7 +95,7 @@ const lookUpTask = ({
   effect: 'read',
   retry: true,
   run: async client => {
-    const selected = await client.ensureSelected(mailbox);
+    const selected = await client.ensureSelected(folderName);
     if (!selected.ok) return { ok: false, error: { kind: 'imap', reason: selected.reason } };
     if (selected.value.uidValidity !== null && selected.value.uidValidity !== uidValidity) {
       return { ok: true, value: [] };
@@ -135,55 +135,55 @@ const lookUpTask = ({
 });
 
 /**
- * Ids the cache does not hold, found on the servers of `accounts`: a `mid/` id by its Message-ID in
+ * Ids the cache does not hold, found on the servers of `mailboxes`: a `mid/` id by its Message-ID in
  * every folder, a location id at its uid. Answered as summaries to thread in beside the cache, which
- * stays the window the syncs keep, and the accounts whose server failed.
+ * stays the window the syncs keep, and the mailboxes whose server failed.
  */
 export const lookUp = Effect.fn('mail.lookUp')(function* ({
-  accounts,
+  mailboxes,
   ids,
 }: {
-  readonly accounts: readonly InboundAddress[];
+  readonly mailboxes: readonly InboundAddress[];
   readonly ids: readonly string[];
 }) {
   const mail = yield* Mail;
   const cache = yield* Cache;
-  if (ids.length === 0) return { extra: {} satisfies AccountSummaries, failed: [] };
-  const { answers, failed } = yield* perAccount(accounts, account =>
+  if (ids.length === 0) return { extra: {} satisfies MailboxSummaries, failed: [] };
+  const { answers, failed } = yield* perMailbox(mailboxes, mailbox =>
     Effect.forEach(
       FOLDERS.filter(folder => folder !== 'drafts'),
       Effect.fnUntraced(function* (folder) {
-        const mark = yield* usingCache(() => cache.of(account).folder(folder).getSync());
+        const mark = yield* usingCache(() => cache.of(mailbox).folder(folder).getSync());
         const wanted =
           mark === null
             ? []
             : ids.flatMap(
                 id =>
                   wantedIn(id, {
-                    account: account.address,
+                    mailbox: mailbox.address,
                     folder,
                     uidValidity: mark.uidValidity,
                   }) ?? [],
               );
         if (mark === null || wanted.length === 0) return null;
-        const summaries = yield* mail.use(account, run =>
-          run(lookUpTask({ mailbox: mark.name, uidValidity: mark.uidValidity, wanted })),
+        const summaries = yield* mail.use(mailbox, run =>
+          run(lookUpTask({ folderName: mark.name, uidValidity: mark.uidValidity, wanted })),
         );
         return [folder, { uidValidity: mark.uidValidity, summaries }] as const;
       }),
       { concurrency: 1 },
     ),
   );
-  // An account that failed answers nothing; the others still do.
-  const found = answers.flatMap(({ account, answer }) =>
+  // A mailbox that failed answers nothing; the others still do.
+  const found = answers.flatMap(({ mailbox, answer }) =>
     answer === null
       ? []
       : [
           [
-            account.address,
+            mailbox.address,
             Object.fromEntries(answer.filter(entry => entry !== null)) satisfies FolderSummaries,
           ] as const,
         ],
   );
-  return { extra: Object.fromEntries(found) satisfies AccountSummaries, failed };
+  return { extra: Object.fromEntries(found) satisfies MailboxSummaries, failed };
 });

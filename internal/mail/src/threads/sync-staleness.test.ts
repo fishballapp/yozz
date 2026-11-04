@@ -1,22 +1,22 @@
 import { describe, expect, it } from 'vitest';
-import { RETURN_SYNC_FRESH_MS, staleAccounts } from './sync-staleness.ts';
+import { RETURN_SYNC_FRESH_MS, staleMailboxes } from './sync-staleness.ts';
 
 const NOW = 10_000_000;
-const accounts = [{ address: 'a@x.test' }, { address: 'b@x.test' }, { address: 'c@x.test' }];
+const mailboxes = [{ address: 'a@x.test' }, { address: 'b@x.test' }, { address: 'c@x.test' }];
 
-describe('staleAccounts', () => {
+describe('staleMailboxes', () => {
   it('syncs an address that has never synced', () => {
-    expect(staleAccounts(accounts, new Map(), NOW)).toEqual(accounts);
+    expect(staleMailboxes(mailboxes, new Map(), NOW)).toEqual(mailboxes);
   });
 
   it('skips an address whose last sync started less than two minutes ago', () => {
     const started = new Map([['a@x.test', NOW - RETURN_SYNC_FRESH_MS + 1]]);
-    expect(staleAccounts(accounts, started, NOW)).toEqual([accounts[1], accounts[2]]);
+    expect(staleMailboxes(mailboxes, started, NOW)).toEqual([mailboxes[1], mailboxes[2]]);
   });
 
   it('syncs an address whose last sync started exactly two minutes ago', () => {
     const started = new Map([['a@x.test', NOW - RETURN_SYNC_FRESH_MS]]);
-    expect(staleAccounts(accounts, started, NOW)).toEqual(accounts);
+    expect(staleMailboxes(mailboxes, started, NOW)).toEqual(mailboxes);
   });
 
   it('syncs an address whose last sync started long ago, and skips a fresh one in the same list', () => {
@@ -24,6 +24,6 @@ describe('staleAccounts', () => {
       ['a@x.test', NOW - 60 * 60 * 1000],
       ['b@x.test', NOW - 1000],
     ]);
-    expect(staleAccounts(accounts, started, NOW)).toEqual([accounts[0], accounts[2]]);
+    expect(staleMailboxes(mailboxes, started, NOW)).toEqual([mailboxes[0], mailboxes[2]]);
   });
 });

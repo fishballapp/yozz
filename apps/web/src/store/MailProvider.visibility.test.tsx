@@ -18,15 +18,15 @@ globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
 const mocks = vi.hoisted(() => ({
   session: null as { userId: string; files: FileStore; store: RecordStore } | null,
-  /** The account of every task a manager was handed. A sync's first task is its LIST, so one per sync. */
+  /** The mailbox of every task a manager was handed. A sync's first task is its LIST, so one per sync. */
   runs: [] as string[],
 }));
 
 vi.mock('../vault/session', () => ({ useVault: () => ({ session: mocks.session }) }));
 vi.mock('../relay/live', () => ({
   createLiveManager: () => ({
-    run: async (account: AddressRecord) => {
-      mocks.runs.push(account.address);
+    run: async (mailbox: AddressRecord) => {
+      mocks.runs.push(mailbox.address);
       return { ok: false, error: { kind: 'error', detail: 'offline' } };
     },
     close: async () => {},

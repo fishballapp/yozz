@@ -44,7 +44,7 @@ vi.mock('@yozz.app/mail/threads/hydrate', async importOriginal => ({
 }));
 vi.mock('@yozz.app/mail/threads/sync', async () => {
   await mocks.stack.promise;
-  return { syncAccount: () => new Promise(() => {}), prefetchBodies: () => {} };
+  return { syncMailbox: () => new Promise(() => {}), prefetchBodies: () => {} };
 });
 
 // This jsdom exposes no `localStorage`; the lock's teardown clears the device draft from it.

@@ -15,8 +15,8 @@ import {
   SECOND_HOST,
 } from './mail-world.ts';
 
-const flagsIn = (server: ReturnType<typeof makeFakeImapServer>, mailbox: string) =>
-  (server.mailboxes.get(mailbox)?.messages ?? []).map(({ uid, flags }) => [uid, [...flags]]);
+const flagsIn = (server: ReturnType<typeof makeFakeImapServer>, folderName: string) =>
+  (server.folders.get(folderName)?.messages ?? []).map(({ uid, flags }) => [uid, [...flags]]);
 
 layer(NodeServices.layer)(it => {
   describe('yozz update', () => {
@@ -107,8 +107,8 @@ layer(NodeServices.layer)(it => {
           yield* run('list');
 
           // yozz.app archives it a moment later; this machine's cache is still fresh.
-          const inbox = server.mailboxes.get('INBOX');
-          const archive = server.mailboxes.get('Archive');
+          const inbox = server.folders.get('INBOX');
+          const archive = server.folders.get('Archive');
           if (inbox === undefined || archive === undefined) throw new Error('no mailboxes');
           const [message] = inbox.messages;
           if (message === undefined) throw new Error('no message');
@@ -154,7 +154,7 @@ layer(NodeServices.layer)(it => {
       }),
     );
 
-    it.effect('prints every row and fails PartialFailure when one account refuses', () =>
+    it.effect('prints every row and fails PartialFailure when one mailbox refuses', () =>
       Effect.gen(function* () {
         const { world, homes, server, servers } = yield* makeMailWorld();
         const other = 'jason@other.test';
@@ -292,7 +292,7 @@ layer(NodeServices.layer)(it => {
             username: 'jason@fishball.ltd',
             password: 'secret',
             capabilities: ['IMAP4rev1', 'SASL-IR', 'AUTH=PLAIN', 'MOVE'],
-            mailboxes: [
+            folders: [
               { name: 'INBOX', attributes: [] },
               { name: 'Sent', attributes: ['\\Sent'] },
             ],
