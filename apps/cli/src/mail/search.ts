@@ -1,70 +1,15 @@
 import { type ImapMessageSummary, uidSets } from '@yozz.app/imap';
 import type { InboundAddress } from '@yozz.app/mail/addresses/record';
 import type { MailTask } from '@yozz.app/mail/connection';
+import type { SearchQuery } from '@yozz.app/mail/threads/query';
+import { assembleMatches, searchMailbox } from '@yozz.app/mail/threads/search';
 import type { AccountSummaries, FolderSummaries } from '@yozz.app/mail/threads/summaries';
-import {
-  FOLDERS,
-  type Folder,
-  type Location,
-  type ThreadState,
-} from '@yozz.app/mail/threads/thread';
+import { FOLDERS, type Folder } from '@yozz.app/mail/threads/thread';
 import * as Effect from 'effect/Effect';
 import { Cache } from '../cache/cache.ts';
 import { usingCache } from '../cache/disk.ts';
 import type { MailServerError, UsageError } from '../errors.ts';
 import { Mail } from './mail.ts';
-
-/** How many matches a query reads in each folder, newest first: one sync window's worth. */
-export const SEARCH_HITS = 200;
-
-const hitKey = ({ account, folder, uid }: Omit<Location, 'uidValidity'>) =>
-  `${account}/${folder}/${uid}`;
-
-/**
- * `uidSearchText` in one mailbox: the newest matches, and the summaries of those the cache does
- * not hold, which are read here and never written to it: the cache stays one contiguous window,
- * which the incremental sync and the older-mail paging rely on.
- */
-const searchTask = ({
-  mailbox,
-  uidValidity,
-  cached,
-  text,
-}: {
-  readonly mailbox: string;
-  readonly uidValidity: number;
-  readonly cached: ReadonlySet<number>;
-  readonly text: string;
-}): MailTask<{
-  readonly hits: readonly number[];
-  readonly summaries: readonly ImapMessageSummary[];
-  /** The folder matched more than `SEARCH_HITS`, so the oldest were not read. */
-  readonly hasMore: boolean;
-}> => ({
-  priority: 'user',
-  effect: 'read',
-  retry: true,
-  run: async client => {
-    const selected = await client.ensureSelected(mailbox);
-    if (!selected.ok) return { ok: false, error: { kind: 'imap', reason: selected.reason } };
-    if (selected.value.uidValidity !== null && selected.value.uidValidity !== uidValidity) {
-      return {
-        ok: false,
-        error: { kind: 'error', detail: 'a folder was renumbered; sync and search again' },
-      };
-    }
-    const found = await client.uidSearchText(text);
-    if (!found.ok) return { ok: false, error: { kind: 'imap', reason: found.reason } };
-    const hits = found.value.toSorted((a, b) => b - a).slice(0, SEARCH_HITS);
-    const summaries: ImapMessageSummary[] = [];
-    for (const set of uidSets(hits.filter(uid => !cached.has(uid)))) {
-      const fetched = await client.fetchSummaries(set);
-      if (!fetched.ok) return { ok: false, error: { kind: 'imap', reason: fetched.reason } };
-      summaries.push(...fetched.value);
-    }
-    return { ok: true, value: { hits, summaries, hasMore: found.value.length > hits.length } };
-  },
-});
 
 /**
  * What `asking` made of each account's server: the folders it answered, or the failure that ended
@@ -99,66 +44,24 @@ const perAccount = Effect.fnUntraced(function* <A>(
 export const searchMail = Effect.fn('mail.searchMail')(function* ({
   accounts,
   folders,
-  text,
+  query,
 }: {
   readonly accounts: readonly InboundAddress[];
   readonly folders: readonly Folder[];
-  readonly text: string;
+  readonly query: SearchQuery;
 }) {
   const mail = yield* Mail;
   const cache = yield* Cache;
   const { answers, failed } = yield* perAccount(accounts, account =>
-    Effect.forEach(
-      folders,
-      Effect.fnUntraced(function* (folder) {
-        const folderCache = cache.of(account).folder(folder);
-        const [mark, summaries] = yield* usingCache(() =>
-          Promise.all([folderCache.getSync(), folderCache.listSummaries()]),
-        );
-        // A folder the server does not have holds nothing to find.
-        if (mark === null) {
-          return { account, folder, uidValidity: 0, hits: [], summaries: [], hasMore: false };
-        }
-        const result = yield* mail.use(account, run =>
-          run(
-            searchTask({
-              mailbox: mark.name,
-              uidValidity: mark.uidValidity,
-              cached: new Set(summaries.map(({ uid }) => uid)),
-              text,
-            }),
-          ),
-        );
-        return { account, folder, uidValidity: mark.uidValidity, ...result };
-      }),
-      // One connection per account answers its folders in turn.
-      { concurrency: 1 },
-    ),
-  );
-  const results = answers.flatMap(({ answer }) => answer ?? []);
-  const extra: AccountSummaries = Object.fromEntries(
-    accounts.map(({ address }) => [
-      address,
-      Object.fromEntries(
-        results
-          .filter(({ account }) => account.address === address)
-          .map(({ folder, uidValidity, summaries }) => [folder, { uidValidity, summaries }]),
-      ) satisfies FolderSummaries,
-    ]),
-  );
-  const hits = new Set(
-    results.flatMap(({ account, folder, hits }) =>
-      hits.map(uid => hitKey({ account: account.address, folder, uid })),
-    ),
+    mail.use(account, run => searchMailbox({ run, cache: cache.of(account), folders, query })),
   );
   return {
-    extra,
-    failed,
-    hasMoreMatches: results.some(({ hasMore }) => hasMore),
-    isHit: (thread: ThreadState) =>
-      thread.messages.some(message =>
-        (message.locations ?? []).some(location => hits.has(hitKey(location))),
+    ...assembleMatches(
+      answers.flatMap(({ account, answer }) =>
+        answer === null ? [] : [{ address: account.address, matches: answer }],
       ),
+    ),
+    failed,
   };
 });
 
@@ -205,7 +108,11 @@ const lookUpTask = ({
         continue;
       }
       messageIds.add(want.messageId);
-      const found = await client.uidSearchHeader('Message-ID', want.messageId);
+      const found = await client.uidSearch({
+        key: 'HEADER',
+        header: 'Message-ID',
+        value: want.messageId,
+      });
       if (!found.ok) return { ok: false, error: { kind: 'imap', reason: found.reason } };
       for (const uid of found.value) uids.add(uid);
     }

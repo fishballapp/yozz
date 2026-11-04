@@ -268,8 +268,8 @@ const readConversations = Effect.fnUntraced(function* ({
       json: {
         id: thread.id,
         url: urlOf(webUrl, 'unified', thread),
-        accounts: thread.accounts,
-        mailboxes: thread.folders,
+        mailboxes: thread.accounts,
+        folders: thread.folders,
         isUnread: thread.isUnread,
         isStarred: thread.isStarred,
         messageCount: thread.messages.length,

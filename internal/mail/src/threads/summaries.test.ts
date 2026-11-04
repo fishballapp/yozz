@@ -33,6 +33,7 @@ const summaryOf = (over: Partial<ImapMessageSummary> = {}): ImapMessageSummary =
   envelope: envelope(),
   references: [],
   gmailThreadId: null,
+  attachmentNames: [],
   ...over,
 });
 
@@ -85,6 +86,31 @@ describe('parseInternalDate', () => {
 });
 
 describe('threadFromSummary', () => {
+  it('keeps each message its own flags beside the conversation’s', () => {
+    const inbox = (uid: number, flags: readonly string[], over = {}) =>
+      summaryOf({ uid, flags, envelope: envelope({ messageId: `<m${uid}@x.co>`, ...over }) });
+    const [thread] = threadsFromAccounts({
+      'user@yozz.app': {
+        inbox: {
+          uidValidity: 1,
+          summaries: [
+            inbox(1, ['\\Seen']),
+            inbox(2, ['\\Flagged'], {
+              subject: 'Re: Important update',
+              inReplyTo: '<m1@x.co>',
+            }),
+          ],
+        },
+      },
+    });
+    expect(thread?.isUnread).toBe(true);
+    expect(thread?.isStarred).toBe(true);
+    expect(thread?.messages.map(({ isUnread, isStarred }) => [isUnread, isStarred])).toEqual([
+      [undefined, undefined],
+      [true, true],
+    ]);
+  });
+
   it('maps a summary with flags correctly', () => {
     const thread = threadFromSummary(summaryOf(), 'user@yozz.app');
     // No account prefix: the same mail delivered to two of your addresses is one message.

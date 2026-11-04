@@ -53,7 +53,7 @@ describe('envelope and fetch parsing', () => {
     }
   });
 
-  it('parses Dovecot-shaped FETCH response with group address flattening and BODYSTRUCTURE parts', () => {
+  it('parses Dovecot-shaped FETCH response with group address flattening and BODYSTRUCTURE names', () => {
     const raw =
       '* 2 FETCH (FLAGS (\\Seen) INTERNALDATE "17-Jul-1996 02:44:25 -0700" RFC822.SIZE 4421 UID 1002 BODYSTRUCTURE ((("TEXT" "PLAIN" ("CHARSET" "US-ASCII") NIL NIL "7BIT" 1152 23) ("TEXT" "HTML" ("CHARSET" "UTF-8") NIL NIL "8BIT" 2048 40) "ALTERNATIVE") ("IMAGE" "JPEG" ("NAME" "photo.jpg") NIL NIL "BASE64" 30000) "MIXED") ENVELOPE ("17-Jul-1996 02:44:25 -0700" "Meeting Agenda" ((NIL NIL "Core Team" NIL) ("Charlie" NIL "charlie" "example.com") ("David" NIL "david" "example.com") (NIL NIL NIL NIL)) NIL NIL ((NIL NIL "all" "example.com")) NIL NIL NIL "<meeting-1@example.com>"))\r\n';
 
@@ -66,7 +66,7 @@ describe('envelope and fetch parsing', () => {
     const bsItem = items.find(i => i.kind === 'bodyStructure');
     expect(bsItem).toBeDefined();
     if (bsItem?.kind === 'bodyStructure') {
-      expect(bsItem.parts).toEqual(['TEXT/PLAIN', 'TEXT/HTML', 'IMAGE/JPEG']);
+      expect(bsItem.attachmentNames).toEqual(['photo.jpg']);
     }
 
     const envItem = items.find(i => i.kind === 'envelope');

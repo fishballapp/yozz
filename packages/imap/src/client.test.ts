@@ -210,16 +210,46 @@ describe('IMAP Client transcripts and state machine', () => {
   it('finds a message by a header, which is what makes an APPEND retry safe', async () => {
     const steps = parseTranscript('uid-search-header.txt');
     await runTranscriptSession(steps, async client => {
-      const res = await client.uidSearchHeader('Message-ID', '<draft-7@x.co>');
+      const res = await client.uidSearch({
+        key: 'HEADER',
+        header: 'Message-ID',
+        value: '<draft-7@x.co>',
+      });
       expect(res).toEqual({ ok: true, value: [31, 33] });
     });
   });
 
-  it('searches subject, sender, recipient and body for text, as a UTF-8 literal when it is not plain ASCII', async () => {
-    const steps = parseTranscript('uid-search-text.txt');
+  it('searches one criterion at a time, as a UTF-8 literal when it is not plain ASCII', async () => {
+    const steps = parseTranscript('uid-search.txt');
     await runTranscriptSession(steps, async client => {
-      expect(await client.uidSearchText('invoice 4821')).toEqual({ ok: true, value: [3, 7, 12] });
-      expect(await client.uidSearchText('Grüße')).toEqual({ ok: true, value: [] });
+      const reply = { key: 'HEADER', header: 'Reply-To' } as const;
+      const found = async (criterion: Parameters<typeof client.uidSearch>[0]) => {
+        const res = await client.uidSearch(criterion);
+        return res.ok ? res.value : res.reason;
+      };
+      expect(await found({ key: 'SUBJECT', value: 'invoice 4821' })).toEqual([3, 12]);
+      expect(await found({ key: 'CC', value: 'a "b"' })).toEqual([]);
+      expect(await found({ key: 'BCC', value: 'ann@example.com' })).toEqual([7]);
+      expect(await found({ key: 'TEXT', value: 'Grüße' })).toEqual([9]);
+      expect(await found({ ...reply, value: 'ann@example.com' })).toEqual([4]);
+      expect(await found({ ...reply, value: 'Grüße' })).toEqual([5]);
+      expect(await found({ key: 'UNSEEN' })).toEqual([1, 2]);
+      expect(await found({ key: 'FLAGGED' })).toEqual([2]);
+      expect(await found({ key: 'SINCE', date: { year: 2026, month: 2, day: 1 } })).toEqual([8]);
+      expect(await found({ key: 'BEFORE', date: { year: 2026, month: 10, day: 28 } })).toEqual([6]);
+    });
+  });
+
+  it('reads attachment names, and an unsolicited flags FETCH does not wipe them', async () => {
+    const steps = parseTranscript('fetch-attachment-names.txt');
+    await runTranscriptSession(steps, async client => {
+      expect(await client.fetchAttachmentNames('7:8')).toEqual({
+        ok: true,
+        value: [
+          { uid: 7, attachmentNames: ['invoice.pdf'] },
+          { uid: 8, attachmentNames: [] },
+        ],
+      });
     });
   });
 

@@ -14,6 +14,8 @@ export type FolderSync = {
   readonly lastUid: number;
   /** The folder's oldest message is cached. */
   readonly complete: boolean;
+  /** Its summaries carry their attachment names; a cache from before they did is upgraded once. */
+  readonly hasAttachmentNames?: boolean;
 };
 
 export type FolderCache = {

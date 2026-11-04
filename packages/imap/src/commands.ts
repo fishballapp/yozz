@@ -158,7 +158,7 @@ export const buildFetchSummariesCommand = (
   lines: [
     {
       text: stringToBytes(
-        `${tag} ${bySeq ? 'FETCH' : 'UID FETCH'} ${set} (FLAGS ENVELOPE INTERNALDATE RFC822.SIZE UID BODY.PEEK[HEADER.FIELDS (REFERENCES)]${gmail ? ' X-GM-THRID' : ''})\r\n`,
+        `${tag} ${bySeq ? 'FETCH' : 'UID FETCH'} ${set} (FLAGS ENVELOPE INTERNALDATE RFC822.SIZE UID BODYSTRUCTURE BODY.PEEK[HEADER.FIELDS (REFERENCES)]${gmail ? ' X-GM-THRID' : ''})\r\n`,
       ),
     },
   ],
@@ -166,6 +166,10 @@ export const buildFetchSummariesCommand = (
 
 export const buildFetchFlagsCommand = (tag: string, uidSet: string): OutgoingCommand => ({
   lines: [{ text: stringToBytes(`${tag} UID FETCH ${uidSet} (FLAGS UID)\r\n`) }],
+});
+
+export const buildFetchBodyStructureCommand = (tag: string, uidSet: string): OutgoingCommand => ({
+  lines: [{ text: stringToBytes(`${tag} UID FETCH ${uidSet} (UID BODYSTRUCTURE)\r\n`) }],
 });
 
 export const buildFetchRawCommand = (tag: string, uid: number): OutgoingCommand => ({
@@ -227,44 +231,64 @@ export const buildUidExpungeCommand = (tag: string, uidSet: string): OutgoingCom
   lines: [{ text: stringToBytes(`${tag} UID EXPUNGE ${uidSet}\r\n`) }],
 });
 
-/** A server need only index the headers IMAP names; on a private `X-` header it may answer the empty list. */
-export const buildUidSearchHeaderCommand = (
-  tag: string,
-  header: string,
-  value: string,
-): OutgoingCommand => ({
-  lines: [
-    {
-      text: stringToBytes(
-        `${tag} UID SEARCH HEADER ${quoteString(header)} ${quoteString(value)}\r\n`,
-      ),
-    },
-  ],
-});
+/** One `UID SEARCH` key. */
+export type UidSearchCriterion =
+  /** `TEXT` is the body alone on some servers, and `OR` answers less than its operands on some. */
+  | {
+      readonly key: 'SUBJECT' | 'FROM' | 'TO' | 'CC' | 'BCC' | 'TEXT';
+      readonly value: string;
+    }
+  /** A server need only index the headers IMAP names; on a private `X-` header it may answer the empty list. */
+  | { readonly key: 'HEADER'; readonly header: 'Message-ID' | 'Reply-To'; readonly value: string }
+  | { readonly key: 'UNSEEN' }
+  | { readonly key: 'FLAGGED' }
+  /** By INTERNALDATE's day: `SINCE` is on or after it, `BEFORE` strictly before it. */
+  | { readonly key: 'BEFORE'; readonly date: ImapSearchDate }
+  | { readonly key: 'SINCE'; readonly date: ImapSearchDate };
 
-/** What `buildUidSearchTextCommand` looks in. `TEXT` is the body alone on some servers. */
-export type UidSearchTextKey = 'SUBJECT' | 'FROM' | 'TO' | 'TEXT';
+/** A calendar day; `month` runs 1 to 12. */
+export type ImapSearchDate = {
+  readonly year: number;
+  readonly month: number;
+  readonly day: number;
+};
 
 /**
- * One `UID SEARCH <key> <text>`. A printable-ASCII query is a quoted string in the default charset;
+ * One `UID SEARCH <key>`. A printable-ASCII value is a quoted string in the default charset;
  * anything else is a UTF-8 literal, which every server must accept.
  */
-export const buildUidSearchTextCommand = (
+export const buildUidSearchCommand = (
   tag: string,
-  key: UidSearchTextKey,
-  text: string,
-): OutgoingCommand =>
-  isSafeQuotedString(text)
-    ? { lines: [{ text: stringToBytes(`${tag} UID SEARCH ${key} ${quoteString(text)}\r\n`) }] }
+  criterion: UidSearchCriterion,
+): OutgoingCommand => {
+  if (criterion.key === 'UNSEEN' || criterion.key === 'FLAGGED') {
+    return { lines: [{ text: stringToBytes(`${tag} UID SEARCH ${criterion.key}\r\n`) }] };
+  }
+  if (criterion.key === 'BEFORE' || criterion.key === 'SINCE') {
+    const { year, month, day } = criterion.date;
+    const date = `${day}-${MONTHS[month - 1]}-${String(year).padStart(4, '0')}`;
+    return { lines: [{ text: stringToBytes(`${tag} UID SEARCH ${criterion.key} ${date}\r\n`) }] };
+  }
+  const key =
+    criterion.key === 'HEADER' ? `HEADER ${quoteString(criterion.header)}` : criterion.key;
+  return isSafeQuotedString(criterion.value)
+    ? {
+        lines: [
+          {
+            text: stringToBytes(`${tag} UID SEARCH ${key} ${quoteString(criterion.value)}\r\n`),
+          },
+        ],
+      }
     : {
         lines: [
           {
             text: stringToBytes(`${tag} UID SEARCH CHARSET UTF-8 ${key} `),
-            literal: stringToBytes(text),
+            literal: stringToBytes(criterion.value),
           },
           { text: stringToBytes('\r\n') },
         ],
       };
+};
 
 /** RFC 6851. */
 export const buildMoveCommand = (

@@ -87,13 +87,21 @@ const syncFolder = async (
       const flagsRes = await client.fetchFlags(`${lowest}:${mark.lastUid}`);
       if (!flagsRes.ok) return failed({ kind: 'imap', reason: flagsRes.reason });
       const flagsByUid = new Map(flagsRes.value.map(({ uid, flags }) => [uid, flags]));
+      // Once, for what was cached before summaries carried names; a new uid arrives with its own.
+      const namesRes =
+        mark.hasAttachmentNames === true
+          ? ({ ok: true, value: [] } as const)
+          : await client.fetchAttachmentNames(`${lowest}:${mark.lastUid}`);
+      if (!namesRes.ok) return failed({ kind: 'imap', reason: namesRes.reason });
+      const namesByUid = new Map(namesRes.value.map(n => [n.uid, n.attachmentNames]));
       const expunged: number[] = [];
       for (const summary of known) {
         const flags = flagsByUid.get(summary.uid);
         if (flags === undefined) {
           expunged.push(summary.uid);
         } else {
-          kept.push({ ...summary, flags });
+          const attachmentNames = namesByUid.get(summary.uid) ?? summary.attachmentNames;
+          kept.push({ ...summary, flags, attachmentNames });
         }
       }
       if (expunged.length > 0) await folderCache.deleteSummaries(expunged);
@@ -124,6 +132,7 @@ const syncFolder = async (
       ...all.map(summary => summary.uid),
     ),
     complete,
+    hasAttachmentNames: true,
   });
   return { ok: true, summaries: all, complete, uidValidity };
 };

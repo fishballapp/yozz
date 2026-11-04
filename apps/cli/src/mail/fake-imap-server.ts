@@ -1,10 +1,10 @@
 import type { ByteDuplex, MailSocket } from './servers.ts';
 
 // An IMAP server in memory, for tests: the commands `@yozz.app/imap` sends on the CLI's paths
-// (AUTHENTICATE, LIST, SELECT, FETCH and UID FETCH, UID STORE, UID MOVE with COPYUID, CREATE,
-// APPEND with APPENDUID, UID SEARCH on SUBJECT, FROM, TO, HEADER and TEXT, which matches the body alone as
-// Forward Email's does, IDLE, NOOP, LOGOUT), over a byte pipe, so the real client parses real
-// responses.
+// (AUTHENTICATE, LIST, SELECT, FETCH and UID FETCH with BODYSTRUCTURE, UID STORE, UID MOVE with
+// COPYUID, CREATE, APPEND with APPENDUID, UID SEARCH on SUBJECT, FROM, TO, CC, BCC, HEADER, UNSEEN,
+// FLAGGED, SINCE, BEFORE and TEXT, which matches the body alone as Forward Email's does, IDLE, NOOP,
+// LOGOUT), over a byte pipe, so the real client parses real responses.
 
 export type FakeMessage = {
   readonly from: string;
@@ -20,6 +20,7 @@ export type FakeMessage = {
   readonly inReplyTo?: string;
   readonly references?: readonly string[];
   readonly cc?: readonly string[];
+  readonly bcc?: readonly string[];
   readonly replyTo?: string;
   readonly attachments?: readonly {
     readonly name: string;
@@ -80,6 +81,9 @@ export const rawOf = (message: FakeMessage): Uint8Array => {
     ...(message.cc === undefined
       ? []
       : [`Cc: ${message.cc.map(address => `<${address}>`).join(', ')}`]),
+    ...(message.bcc === undefined
+      ? []
+      : [`Bcc: ${message.bcc.map(address => `<${address}>`).join(', ')}`]),
     ...(message.replyTo === undefined ? [] : [`Reply-To: <${message.replyTo}>`]),
     `Subject: ${encodedWord(message.subject)}`,
     `Message-ID: ${message.messageId}`,
@@ -143,6 +147,28 @@ const internalDateOf = ({ date }: FakeMessage) => {
   const at = new Date(Date.parse(date));
   const two = (n: number) => String(n).padStart(2, '0');
   return `${two(at.getUTCDate())}-${MONTHS[at.getUTCMonth()]}-${at.getUTCFullYear()} ${two(at.getUTCHours())}:${two(at.getUTCMinutes())}:${two(at.getUTCSeconds())} +0000`;
+};
+
+const dayOf = (at: Date) => Date.UTC(at.getUTCFullYear(), at.getUTCMonth(), at.getUTCDate());
+
+/** RFC 9051's `1-Feb-2026`, as the day it names. */
+const searchDayOf = (text: string) => {
+  const [day = '', month = '', year = ''] = text.split('-');
+  return Date.UTC(Number(year), MONTHS.indexOf(month), Number(day));
+};
+
+/** What RFC 9051's `BODYSTRUCTURE` says of the message: its parts, and each attachment's name. */
+const bodyStructureOf = ({ html, attachments = [] }: FakeMessage) => {
+  const plain = '("TEXT" "PLAIN" ("CHARSET" "utf-8") NIL NIL "8BIT" 10 1 NIL NIL NIL NIL)';
+  if (html !== undefined) {
+    return `(${plain} ("TEXT" "HTML" ("CHARSET" "utf-8") NIL NIL "BASE64" 10 1 NIL NIL NIL NIL) "ALTERNATIVE")`;
+  }
+  if (attachments.length === 0) return plain;
+  const parts = attachments.map(({ name, type }) => {
+    const [media = '', subtype = ''] = type.toUpperCase().split('/');
+    return `(${quoted(media)} ${quoted(subtype)} ("NAME" ${quoted(name)}) NIL NIL "BASE64" 10 NIL ("ATTACHMENT" ("FILENAME" ${quoted(name)})) NIL NIL)`;
+  });
+  return `(${plain} ${parts.join(' ')} "MIXED")`;
 };
 
 /** A pipe whose two ends read what the other writes. */
@@ -306,21 +332,32 @@ export const makeFakeImapServer = ({
 
     const box = () => (selected === null ? undefined : boxes.get(selected));
     const summary = (message: Stored, seq: number) => {
-      const { from, fromName, to, cc, replyTo, subject, messageId, date, inReplyTo, references } =
-        message.message;
-      const ccList =
-        cc === undefined || cc.length === 0
+      const {
+        from,
+        fromName,
+        to,
+        cc,
+        bcc,
+        replyTo,
+        subject,
+        messageId,
+        date,
+        inReplyTo,
+        references,
+      } = message.message;
+      const listOf = (addresses: readonly string[] | undefined) =>
+        addresses === undefined || addresses.length === 0
           ? 'NIL'
-          : `(${cc.map(address => addressList(address).slice(1, -1)).join('')})`;
+          : `(${addresses.map(address => addressList(address).slice(1, -1)).join('')})`;
       const replyToList =
         replyTo === undefined ? addressList(from, fromName) : addressList(replyTo);
-      const envelope = `(${quoted(date)} ${quoted(encodedWord(subject))} ${addressList(from, fromName)} ${addressList(from, fromName)} ${replyToList} ${addressList(to)} ${ccList} NIL ${quoted(inReplyTo)} ${quoted(messageId)})`;
+      const envelope = `(${quoted(date)} ${quoted(encodedWord(subject))} ${addressList(from, fromName)} ${addressList(from, fromName)} ${replyToList} ${addressList(to)} ${listOf(cc)} ${listOf(bcc)} ${quoted(inReplyTo)} ${quoted(messageId)})`;
       const referencesHeader = bytes(
         references === undefined ? '\r\n' : `References: ${references.join(' ')}\r\n\r\n`,
       );
       return concat(
         bytes(
-          `* ${seq} FETCH (UID ${message.uid} FLAGS (${[...message.flags].join(' ')}) INTERNALDATE "${internalDateOf(message.message)}" RFC822.SIZE ${message.raw.length} ENVELOPE ${envelope} BODY[HEADER.FIELDS (REFERENCES)] {${referencesHeader.length}}\r\n`,
+          `* ${seq} FETCH (UID ${message.uid} FLAGS (${[...message.flags].join(' ')}) INTERNALDATE "${internalDateOf(message.message)}" RFC822.SIZE ${message.raw.length} ENVELOPE ${envelope} BODYSTRUCTURE ${bodyStructureOf(message.message)} BODY[HEADER.FIELDS (REFERENCES)] {${referencesHeader.length}}\r\n`,
         ),
         referencesHeader,
         bytes(')\r\n'),
@@ -423,6 +460,10 @@ export const makeFakeImapServer = ({
               const seq = seqOf(mailbox, message);
               if (items.includes('ENVELOPE')) {
                 await send(summary(message, seq));
+              } else if (items.includes('BODYSTRUCTURE')) {
+                await send(
+                  `* ${seq} FETCH (UID ${message.uid} BODYSTRUCTURE ${bodyStructureOf(message.message)})\r\n`,
+                );
               } else if (items.includes('BODY.PEEK[]')) {
                 await send(
                   `* ${seq} FETCH (UID ${message.uid} BODY[] {${message.raw.length}}\r\n`,
@@ -484,27 +525,31 @@ export const makeFakeImapServer = ({
             return true;
           }
           if (verb === 'SEARCH') {
-            // The messages the key named matches (no OR: nothing sends one). TEXT is the body alone,
-            // as Forward Email's server matches it, so a subject is found only by a SUBJECT key.
-            const keys = [
-              ...rest.matchAll(
-                /HEADER "((?:[^"\\]|\\.)*)" "((?:[^"\\]|\\.)*)"|(SUBJECT|FROM|TO|TEXT) "((?:[^"\\]|\\.)*)"/gu,
-              ),
-            ].map(([, headerName, headerValue, key, value]) => ({
-              name: headerName ?? key ?? '',
-              value: (headerValue ?? value ?? '').replace(/\\(.)/gu, '$1'),
-            }));
+            // The messages the one key matches. TEXT is the body alone, as Forward Email's server
+            // matches it, so a subject is found only by a SUBJECT key.
+            const key =
+              /HEADER "((?:[^"\\]|\\.)*)" "((?:[^"\\]|\\.)*)"|(SUBJECT|FROM|TO|CC|BCC|TEXT) "((?:[^"\\]|\\.)*)"|(UNSEEN|FLAGGED)|(SINCE|BEFORE) (\S+)/u.exec(
+                rest,
+              );
+            const [, headerName, headerValue, textKey, textValue, flagKey, dateKey, dateValue] =
+              key ?? [];
+            const name = headerName ?? textKey ?? '';
+            const needle = (headerValue ?? textValue ?? '').replace(/\\(.)/gu, '$1').toLowerCase();
             const hits = mailbox.messages.filter(message => {
+              if (flagKey === 'UNSEEN') return !message.flags.has('\\Seen');
+              if (flagKey === 'FLAGGED') return message.flags.has('\\Flagged');
+              if (dateKey !== undefined) {
+                const day = dayOf(new Date(Date.parse(message.message.date)));
+                const asked = searchDayOf(dateValue ?? '');
+                return dateKey === 'SINCE' ? day >= asked : day < asked;
+              }
               const raw = new TextDecoder().decode(message.raw).toLowerCase();
               const split = raw.indexOf('\r\n\r\n');
               const head = raw.slice(0, split).split('\r\n');
               const body = raw.slice(split + 4);
-              return keys.some(({ name, value }) => {
-                const needle = value.toLowerCase();
-                if (name === 'TEXT') return body.includes(needle);
-                const field = `${name.toLowerCase()}:`;
-                return head.some(line => line.startsWith(field) && line.includes(needle));
-              });
+              if (name === 'TEXT') return body.includes(needle);
+              const field = `${name.toLowerCase()}:`;
+              return head.some(line => line.startsWith(field) && line.includes(needle));
             });
             await send(`* SEARCH${hits.map(({ uid }) => ` ${uid}`).join('')}\r\n`);
             await ok('SEARCH completed');

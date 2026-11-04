@@ -1,3 +1,4 @@
+import { parseBodyStructure } from './body-structure.ts';
 import { asciiToString, stringToBytes } from './bytes.ts';
 import { decodeRfc2047 } from './rfc2047.ts';
 import type { ImapToken } from './tokenizer.ts';
@@ -29,7 +30,7 @@ export type ImapFetchItem =
   | { readonly kind: 'size'; readonly size: number }
   | { readonly kind: 'uid'; readonly uid: number }
   | { readonly kind: 'body'; readonly section: string; readonly bytes: Uint8Array | null }
-  | { readonly kind: 'bodyStructure'; readonly parts: readonly string[] }
+  | { readonly kind: 'bodyStructure'; readonly attachmentNames: readonly string[] }
   /** Gmail's `X-GM-THRID` is 64-bit, so it stays decimal digits. */
   | { readonly kind: 'gmailThreadId'; readonly id: string }
   | { readonly kind: 'other'; readonly name: string };
@@ -188,60 +189,6 @@ export const parseEnvelope = (
   };
 };
 
-/** Only the MIME types, e.g. `['TEXT/PLAIN', 'TEXT/HTML']`. */
-export const parseBodyStructureParts = (
-  tokens: readonly ImapToken[],
-  start: number,
-): { parts: readonly string[]; nextIndex: number } => {
-  if (tokens[start]?.kind !== 'lparen') {
-    return { parts: [], nextIndex: start + 1 };
-  }
-
-  let idx = start + 1;
-  const parts: string[] = [];
-
-  const first = tokens[idx];
-
-  if (first?.kind === 'lparen') {
-    while (idx < tokens.length && tokens[idx]?.kind === 'lparen') {
-      const child = parseBodyStructureParts(tokens, idx);
-      parts.push(...child.parts);
-      idx = child.nextIndex;
-    }
-
-    let depth = 1;
-    while (idx < tokens.length && depth > 0) {
-      if (tokens[idx]?.kind === 'lparen') {
-        depth++;
-      } else if (tokens[idx]?.kind === 'rparen') {
-        depth--;
-      }
-      idx++;
-    }
-
-    return { parts, nextIndex: idx };
-  }
-
-  const mediaType = tokenToString(tokens[idx]) ?? 'APPLICATION';
-  idx++;
-  const subType = tokenToString(tokens[idx]) ?? 'OCTET-STREAM';
-  idx++;
-
-  parts.push(`${mediaType.toUpperCase()}/${subType.toUpperCase()}`);
-
-  let depth = 1;
-  while (idx < tokens.length && depth > 0) {
-    if (tokens[idx]?.kind === 'lparen') {
-      depth++;
-    } else if (tokens[idx]?.kind === 'rparen') {
-      depth--;
-    }
-    idx++;
-  }
-
-  return { parts, nextIndex: idx };
-};
-
 export const parseFetchItems = (
   tokens: readonly ImapToken[],
   start: number,
@@ -302,9 +249,9 @@ export const parseFetchItems = (
         }
       } else if (itemName === 'BODYSTRUCTURE' || itemName === 'BODY' || itemName === 'BODY.PEEK') {
         if (tokens[idx]?.kind === 'lparen') {
-          const bsResult = parseBodyStructureParts(tokens, idx);
-          items.push({ kind: 'bodyStructure', parts: bsResult.parts });
-          idx = bsResult.nextIndex;
+          const { attachmentNames, nextIndex } = parseBodyStructure(tokens, idx);
+          items.push({ kind: 'bodyStructure', attachmentNames });
+          idx = nextIndex;
         } else if (tokens[idx]?.kind === 'lbracket') {
           idx++;
           const sectionParts: string[] = [];

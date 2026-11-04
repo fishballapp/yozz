@@ -82,6 +82,7 @@ const cachedSummary: ImapMessageSummary = {
   },
   references: [],
   gmailThreadId: null,
+  attachmentNames: [],
 };
 
 const Subjects = () => (

@@ -18,7 +18,7 @@ layer(NodeServices.layer)(it => {
           );
           const key = draft.id.slice('draft/'.length);
           expect(
-            JSON.parse((yield* run(['list', '--mailbox', 'drafts'])).stdout).threads,
+            JSON.parse((yield* run(['list', '--query', 'in:drafts'])).stdout).threads,
           ).toHaveLength(1);
 
           const { exit, stdout, stderr } = yield* run(['discard', draft.draftId]);
@@ -31,7 +31,7 @@ layer(NodeServices.layer)(it => {
             restorableUntil: '1970-01-31T00:00:00.000Z',
           });
           expect((yield* drafts)[key]?.deletedAt).toBe(0);
-          expect(JSON.parse((yield* run(['list', '--mailbox', 'drafts'])).stdout).threads).toEqual(
+          expect(JSON.parse((yield* run(['list', '--query', 'in:drafts'])).stdout).threads).toEqual(
             [],
           );
 

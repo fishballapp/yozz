@@ -222,7 +222,11 @@ export const storeSentCopy = async (
       if (sent === undefined) return { ok: true, value: { kind: 'no-sent-mailbox' } };
       const selected = await client.select(sent);
       if (!selected.ok) return { ok: false, error: { kind: 'imap', reason: selected.reason } };
-      const found = await client.uidSearchHeader('Message-ID', messageId);
+      const found = await client.uidSearch({
+        key: 'HEADER',
+        header: 'Message-ID',
+        value: messageId,
+      });
       // A server that refuses the search gets the copy anyway; a lost connection gets a new search.
       if (!found.ok && found.reason.kind !== 'no' && found.reason.kind !== 'bad') {
         return { ok: false, error: { kind: 'imap', reason: found.reason } };

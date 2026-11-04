@@ -64,6 +64,14 @@ export type Message = {
   cc?: readonly Recipient[];
   /** Where the sender wants replies to go, present only when it names someone other than From. */
   replyTo?: readonly Recipient[];
+  /** Only your own copy of what you sent can carry these. */
+  bcc?: readonly Recipient[];
+  /** What its parts are named, from the summary, so a search reaches it before its body is fetched. */
+  attachmentNames?: readonly string[];
+  /** Any copy of it is unseen. A search asks this; a row shows the conversation's `isUnread`. */
+  isUnread?: boolean;
+  /** Any copy of it is flagged. A search asks this; a row shows the conversation's `isStarred`. */
+  isStarred?: boolean;
   at: number;
   body: string[];
   /** The sender's HTML body, unsanitized; nothing renders it outside `HtmlBody`'s sandboxed frame. */

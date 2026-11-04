@@ -12,6 +12,7 @@ const summary = (uid: number): ImapMessageSummary => ({
   envelope: null,
   references: ['<a@x>'],
   gmailThreadId: null,
+  attachmentNames: [],
 });
 
 const body = (paragraphs: string[]) => ({

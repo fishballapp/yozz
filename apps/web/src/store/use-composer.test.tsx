@@ -275,6 +275,7 @@ const serverCopyOf = async (bytes: Uint8Array): Promise<ImapMessageSummary> => {
     },
     references: [],
     gmailThreadId: null,
+    attachmentNames: [],
   };
 };
 

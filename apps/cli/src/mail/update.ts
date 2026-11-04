@@ -271,7 +271,7 @@ export const updateCommand = Command.make(
         id,
         isUnread: after.isUnread,
         isStarred: after.isStarred,
-        mailboxes: after.folders,
+        folders: after.folders,
         ...(note === null ? {} : { note }),
         ...(error === undefined ? {} : { error }),
       };
@@ -301,7 +301,7 @@ says why.
 Output:
   {
     "threads": [
-      { "id": "mid/<01J9XYZ@stripe.com>", "isUnread": false, "isStarred": false, "mailboxes": ["archive"] }
+      { "id": "mid/<01J9XYZ@stripe.com>", "isUnread": false, "isStarred": false, "folders": ["archive"] }
     ],
     "syncedAt": { "jason@fishball.ltd": "2026-10-30T09:41:07.000Z" }
   }`),

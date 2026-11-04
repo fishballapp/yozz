@@ -66,13 +66,13 @@ layer(NodeServices.layer)(it => {
           expect((yield* drafts)[key]?.deletedAt).toBeDefined();
           expect((yield* drafts)[key]?.send).toBeUndefined();
 
-          const sentList = yield* run(['list', '--mailbox', 'sent']);
+          const sentList = yield* run(['list', '--query', 'in:sent']);
           expect(idsOf(sentList.stdout), sentList.stderr).toEqual(['mid/<m1@stripe.com>']);
           expect(JSON.parse(sentList.stdout).threads[0]).toMatchObject({
             messageCount: 2,
             hasDraft: false,
           });
-          expect(idsOf((yield* run(['list', '--mailbox', 'drafts'])).stdout)).toEqual([]);
+          expect(idsOf((yield* run(['list', '--query', 'in:drafts'])).stdout)).toEqual([]);
         }),
     );
 
@@ -347,7 +347,7 @@ layer(NodeServices.layer)(it => {
         assert.isTrue(Exit.isSuccess(sent.exit), sent.stderr);
         expect(JSON.parse(sent.stdout)).toMatchObject({ sentCopy: 'stored' });
         expect(sendOnlySmtp.delivered).toHaveLength(1);
-        const listed = yield* run(['list', '--mailbox', 'sent']);
+        const listed = yield* run(['list', '--query', 'in:sent']);
         expect(idsOf(listed.stdout), listed.stderr).toEqual([JSON.parse(sent.stdout).messageId]);
       }),
     );

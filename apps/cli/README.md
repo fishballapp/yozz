@@ -23,7 +23,7 @@ Every command prints one JSON document; `yozz <command> --help` shows its output
 | `login` | `yozz login --name "CI runner"` |
 | `logout` | `yozz logout` |
 | `whoami` | `yozz whoami` |
-| `list` | `yozz list --unread --query invoice` |
+| `list` | `yozz list --query 'is:unread invoice'` |
 | `read` | `yozz read 'mid/<01J9XYZ@stripe.com>' --save-attachments ./invoices` |
 | `update` | `yozz update 'mid/<01J9XYZ@stripe.com>' --read --move archive` |
 | `draft` | `yozz draft --reply 'mid/<01J9XYZ@stripe.com>' --text @reply.md` |
@@ -58,8 +58,7 @@ yozz logout     # revoke this key, delete its credentials, revision marks, draft
 ## Read and triage mail
 
 ```sh
-yozz list [--mailbox inbox|starred|sent|archive|trash|drafts|<address>] [--unread]
-          [--query <text>] [--limit <1..50>] [--cursor <c>] [--wait <seconds>] [--sync]
+yozz list [--query <query>] [--limit <1..50>] [--cursor <c>] [--wait <seconds>] [--sync]
 yozz read <id>… [--save-attachments <dir>] [--sync] [--serve-html [--remote-images]]
 yozz update <id>… [--read | --unread] [--star | --unstar] [--move inbox|archive|trash]
 ```
@@ -70,11 +69,25 @@ yozz update <id>… [--read | --unread] [--star | --unstar] [--move inbox|archiv
   first otherwise; `--sync` always does. Writes always sync the accounts they touch first.
 - An address whose mail server fails (an expired app password, say) answers from its cache and is
   named under `failed` beside `syncedAt`; the command fails only when every address does.
-- `list --query` searches each folder on the server, not just what is cached. `list --cursor` pages
-  back with the `nextCursor` before, reaching for older mail as yozz.app's Older mail does.
-  `list --wait 120` holds each inbox open (IMAP `IDLE`) and answers with the first new mail; it
-  watches inbox views only. A query reads the newest 200 matches per folder, and says
-  `"moreMatches": true` when there were more.
+- `list` with no query is the inbox of every mailbox. `--query` takes Gmail's syntax, and anything
+  that is not an operator with a value it can take is plain text:
+  - `invoice "exact phrase"`: several terms must all match in the same message, in its subject, sender,
+    To, Cc, Reply-To, Bcc, body or attachment names.
+  - `from:` `to:` (the To or Cc line) `subject:`, with a value that may be quoted.
+  - `in:inbox|sent|archive|trash|drafts|anywhere`; repeat it for several. With no `in:` a query looks in
+    the inbox, Sent, Archive and drafts. Only `in:trash` or `in:anywhere` reach Trash.
+  - `mailbox:you@example.com`: everything one login holds, whichever address it was sent to; repeat it
+    for several. An alias or a send-only address has no mailbox: use `to:` for mail sent to one.
+  - `is:unread` `is:starred`, and `before:2026/11/01` `after:2026-10-01` (after is on or after, before is
+    strictly before).
+- A query that only says where (`in:archive`) lists from the cache, and `list --cursor` pages back with
+  the `nextCursor` before, reaching for older mail as yozz.app's Older mail does. A query with anything
+  to look for searches each folder on the server, not just what is cached: the newest 200 matches per
+  folder, saying `"moreMatches": true` when there were more.
+- Search has limits: attachment names match only mail this machine has synced (the newest 200 per
+  folder, plus older mail already paged in), and `Bcc` matches only on Sent, only where a copy recorded it.
+- `list --wait 120` holds each inbox open (IMAP `IDLE`) and answers with the first new mail; its query
+  must cover the inbox.
 - `read` prints plain text, never HTML, and marks nothing read. `--save-attachments <dir>` writes each
   attachment under a cleaned-up name, readable by you only, never over a file that is there.
 

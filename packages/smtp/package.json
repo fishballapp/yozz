@@ -1,6 +1,6 @@
 {
   "name": "@yozz.app/smtp",
-  "version": "0.1.6",
+  "version": "0.2.0",
   "description": "Transport-agnostic SMTP client core plus an RFC 5322 message builder.",
   "license": "MIT",
   "homepage": "https://github.com/fishballapp/yozz",

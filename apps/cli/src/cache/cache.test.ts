@@ -230,6 +230,67 @@ layer(NodeServices.layer)(it => {
       }),
     );
 
+    it.effect('still opens a folder written before summaries carried names, for the upgrade', () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const dir = yield* fs.makeTempDirectoryScoped();
+        const key = yield* Effect.promise(() =>
+          crypto.subtle.generateKey({ name: 'AES-GCM', length: 256 }, false, [
+            'encrypt',
+            'decrypt',
+          ]),
+        );
+        // As the CLI wrote it: no names on the summary, nothing about them on the mark.
+        const old = {
+          sync: { name: 'INBOX', uidValidity: 100, lastUid: 1, complete: true },
+          summaries: [
+            {
+              seq: 1,
+              uid: 1,
+              flags: ['\\Seen'],
+              internalDate: null,
+              size: 10,
+              envelope: null,
+              references: [],
+              gmailThreadId: null,
+            },
+          ],
+          previews: [{ uid: 1, paragraphs: ['Kept.'] }],
+        };
+        const content = yield* seal({
+          key,
+          additionalData: new TextEncoder().encode(
+            JSON.stringify(['yozz-cli-cache', ADDRESS, 'inbox.bin']),
+          ),
+          plaintext: new TextEncoder().encode(JSON.stringify(old)),
+        });
+        yield* writePrivateFile(path.join(dir, 'inbox.bin'), content);
+
+        const { mail: cache } = yield* accountCache({ dir, key, account: ADDRESS });
+        const inbox = cache.folder('inbox');
+        expect(yield* Effect.promise(() => inbox.getSync())).toEqual(old.sync);
+        expect(yield* Effect.promise(() => inbox.listSummaries())).toMatchObject([
+          { uid: 1, attachmentNames: [] },
+        ]);
+        expect(yield* Effect.promise(() => inbox.listPreviews())).toEqual(old.previews);
+
+        // And what the upgrade writes reads back from the disk.
+        yield* Effect.promise(() =>
+          inbox.updateSummaries([1], summary => ({ ...summary, attachmentNames: ['a.pdf'] })),
+        );
+        yield* Effect.promise(() => inbox.putSync({ ...old.sync, hasAttachmentNames: true }));
+        const reopened = yield* accountCache({ dir, key, account: ADDRESS });
+        const again = reopened.mail.folder('inbox');
+        expect(yield* Effect.promise(() => again.getSync())).toMatchObject({
+          hasAttachmentNames: true,
+        });
+        expect(yield* Effect.promise(() => again.listSummaries())).toMatchObject([
+          { attachmentNames: ['a.pdf'] },
+        ]);
+      }),
+    );
+
     it.effect('fails a write the disk refuses as a UsageError, not a defect', () =>
       Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem;

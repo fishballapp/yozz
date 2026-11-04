@@ -13,6 +13,7 @@ const ensureSelected = vi.fn();
 const fetchSummaries = vi.fn();
 const fetchSummariesBySeq = vi.fn();
 const fetchFlags = vi.fn();
+const fetchAttachmentNames = vi.fn();
 const fetchRaw = vi.fn();
 const move = vi.fn();
 const storeFlags = vi.fn();
@@ -25,6 +26,7 @@ const fakeClient = {
   fetchSummaries,
   fetchSummariesBySeq,
   fetchFlags,
+  fetchAttachmentNames,
   fetchRaw,
   move,
   storeFlags,
@@ -60,6 +62,7 @@ const summary = (
   } as ImapMessageSummary['envelope'],
   references: [],
   gmailThreadId: null,
+  attachmentNames: [],
 });
 
 type Seed = { sync?: FolderSync; summaries?: ImapMessageSummary[]; bodies?: Map<number, unknown> };
@@ -146,11 +149,13 @@ beforeEach(() => {
   fetchSummaries.mockReset();
   fetchSummariesBySeq.mockReset();
   fetchFlags.mockReset();
+  fetchAttachmentNames.mockReset();
   fetchRaw.mockReset();
   move.mockReset();
   storeFlags.mockReset();
   create.mockReset();
   list.mockResolvedValue({ ok: true, value: INBOX_ONLY });
+  fetchAttachmentNames.mockResolvedValue({ ok: true, value: [] });
   ensureSelected.mockImplementation(async (name: string) => select(name));
 });
 
@@ -206,6 +211,7 @@ describe('syncAccount', () => {
       uidValidity: 5,
       lastUid: 299,
       complete: false,
+      hasAttachmentNames: true,
     });
     // No Sent folder listed.
     expect(select).toHaveBeenCalledTimes(1);
@@ -306,6 +312,7 @@ describe('syncAccount', () => {
       uidValidity: 8,
       lastUid: 2,
       complete: true,
+      hasAttachmentNames: true,
     });
     // Both folders were read whole.
     expect(state).toMatchObject({
@@ -342,6 +349,98 @@ describe('syncAccount', () => {
     const { state } = await syncAccount(run, cache, () => true);
     expect(state.status).toBe('failed');
     expect(cache.read('inbox')).toEqual({ sync: null, summaries: [], bodies: new Map() });
+  });
+});
+
+describe('the one-time attachment-name upgrade', () => {
+  const OLD_MARK = { name: 'INBOX', uidValidity: 5, lastUid: 12, complete: false };
+  const body = {
+    paragraphs: ['kept'],
+    hasTextPart: true,
+    inlineImagesTruncated: false,
+    attachments: [],
+    dkim: null,
+  };
+  const oldCache = () =>
+    fakeCache({
+      inbox: {
+        sync: OLD_MARK,
+        // Below the window's foot there is a gap on the server only: uid 11 was expunged.
+        summaries: [summary(10), summary(12)],
+        bodies: new Map([[12, body]]),
+      },
+    });
+
+  beforeEach(() => {
+    selectAnswers({ INBOX: { uidValidity: 5, uidNext: 13, exists: 5 } });
+    fetchFlags.mockResolvedValue({
+      ok: true,
+      value: [
+        { uid: 10, flags: ['\\Seen'] },
+        { uid: 12, flags: [] },
+      ],
+    });
+    fetchAttachmentNames.mockResolvedValue({
+      ok: true,
+      value: [
+        { uid: 10, attachmentNames: ['a.pdf'] },
+        { uid: 12, attachmentNames: [] },
+      ],
+    });
+  });
+
+  it('fetches the names over the cached range and merges them, keeping the window and the bodies', async () => {
+    const cache = oldCache();
+    await syncAccount(run, cache);
+
+    expect(fetchAttachmentNames).toHaveBeenCalledWith('10:12');
+    const { summaries, sync, bodies } = cache.read('inbox');
+    expect(summaries.map(({ uid, attachmentNames }) => [uid, attachmentNames])).toEqual([
+      [10, ['a.pdf']],
+      [12, []],
+    ]);
+    // Contiguous: nothing was read below the window or above the mark, and its foot has not moved.
+    expect(fetchSummaries).not.toHaveBeenCalled();
+    expect(fetchSummariesBySeq).not.toHaveBeenCalled();
+    expect(sync).toEqual({ ...OLD_MARK, hasAttachmentNames: true });
+    expect(bodies.get(12)).toEqual(body);
+    // The flags are as the server said; none was written there.
+    expect(summaries.find(({ uid }) => uid === 10)?.flags).toEqual(['\\Seen']);
+    expect(storeFlags).not.toHaveBeenCalled();
+  });
+
+  it('happens once', async () => {
+    const cache = oldCache();
+    await syncAccount(run, cache);
+    fetchAttachmentNames.mockClear();
+    await syncAccount(run, cache);
+    expect(fetchAttachmentNames).not.toHaveBeenCalled();
+    expect(cache.read('inbox').summaries.find(({ uid }) => uid === 10)?.attachmentNames).toEqual([
+      'a.pdf',
+    ]);
+  });
+
+  it('leaves the mark as it was when the server fails, so the next sync tries again', async () => {
+    fetchAttachmentNames.mockResolvedValue({ ok: false, reason: { kind: 'closed' } });
+    const cache = oldCache();
+    const { state } = await syncAccount(run, cache);
+    expect(state.status).toBe('failed');
+    expect(cache.read('inbox').sync).toEqual(OLD_MARK);
+    expect(cache.read('inbox').summaries.map(({ attachmentNames }) => attachmentNames)).toEqual([
+      [],
+      [],
+    ]);
+  });
+
+  it('is not needed by a first sync, whose summaries already carry names', async () => {
+    fetchSummariesBySeq.mockResolvedValue({
+      ok: true,
+      value: [{ ...summary(1), attachmentNames: ['b.pdf'] }],
+    });
+    const cache = fakeCache();
+    await syncAccount(run, cache);
+    expect(fetchAttachmentNames).not.toHaveBeenCalled();
+    expect(cache.read('inbox').sync?.hasAttachmentNames).toBe(true);
   });
 });
 

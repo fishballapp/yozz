@@ -8,11 +8,13 @@ export {
   type ImapEnvelope,
   type ImapIdle,
   type ImapMailbox,
+  type ImapMessageAttachmentNames,
   type ImapMessageSummary,
   type ImapResponseCode,
   type ImapSelected,
   type ImapUntagged,
 } from './client.ts';
+export type { ImapSearchDate, UidSearchCriterion } from './commands.ts';
 export type { ImapFetchItem } from './envelope.ts';
 export {
   type ImapContinuation,

@@ -52,8 +52,8 @@ layer(NodeServices.layer)(it => {
           expect(idsOf(stdout)).toEqual(['mid/<m3@stripe.com>', 'mid/<m1@stripe.com>']);
           expect(out.threads[1]).toMatchObject({
             url: 'https://yozz.test/m/unified/t/mid%2F%3Cm1%40stripe.com%3E',
-            accounts: [ADDRESS],
-            mailboxes: ['inbox'],
+            mailboxes: [ADDRESS],
+            folders: ['inbox'],
             isUnread: true,
             messageCount: 2,
             untrusted: { subject: 'Invoice #1', from: 'Stripe <billing@stripe.com>' },
@@ -112,13 +112,18 @@ layer(NodeServices.layer)(it => {
         expect(idsOf(second.stdout)).toEqual(['mid/<m203@stripe.com>', 'mid/<m202@stripe.com>']);
 
         // Only the oldest five are unread, and none is cached: the page reaches back for them.
-        const unread = yield* list('--unread', '--limit', '3');
+        const unread = yield* list('--query', 'is:unread', '--limit', '3');
         expect(idsOf(unread.stdout)).toEqual([
           'mid/<m5@stripe.com>',
           'mid/<m4@stripe.com>',
           'mid/<m3@stripe.com>',
         ]);
-        const rest = yield* list('--unread', '--cursor', JSON.parse(unread.stdout).nextCursor);
+        const rest = yield* list(
+          '--query',
+          'is:unread',
+          '--cursor',
+          JSON.parse(unread.stdout).nextCursor,
+        );
         expect(idsOf(rest.stdout)).toEqual(['mid/<m2@stripe.com>', 'mid/<m1@stripe.com>']);
         expect(JSON.parse(rest.stdout).nextCursor).toBeNull();
       }),
@@ -502,15 +507,208 @@ layer(NodeServices.layer)(it => {
       }),
     );
 
-    it.effect('refuses a mailbox that is neither a view nor an address that receives', () =>
+    it.effect('names the query that replaces a removed flag, which help does not mention', () =>
       Effect.gen(function* () {
         const { world, homes, servers } = yield* makeMailWorld();
-        const { stderr } = yield* runCli(['list', '--mailbox', 'someone@else.com'], {
+        const list = (...args: string[]) =>
+          runCli(['list', ...args], { fetch: world.fetch, homes, servers });
+        const names = (form: string) => ({
+          code: 'UsageError',
+          message: expect.stringContaining(`--query '${form}'`),
+        });
+        const failure = (...args: string[]) =>
+          list(...args).pipe(Effect.map(({ stderr }) => failureOf(stderr)));
+        expect(yield* failure('--mailbox', 'archive')).toMatchObject(names('in:archive'));
+        expect(yield* failure('--mailbox', 'inbox')).toMatchObject(names('in:inbox'));
+        expect(yield* failure('--mailbox', 'starred')).toMatchObject(names('is:starred'));
+        expect(yield* failure('--mailbox', 'a@b.co')).toMatchObject(
+          names('in:inbox mailbox:a@b.co'),
+        );
+        expect(yield* failure('--unread')).toMatchObject(names('is:unread'));
+        expect(yield* failure('--unread', '--mailbox', 'sent', '--query', 'invoice')).toMatchObject(
+          names('in:sent is:unread invoice'),
+        );
+        const { stdout } = yield* list('--help');
+        expect(stdout).toContain('--query');
+        expect(stdout).not.toContain('--mailbox');
+        expect(stdout).not.toContain('--unread');
+      }),
+    );
+
+    it.effect('refuses mailbox: on an address with no mailbox, pointing to to:', () =>
+      Effect.gen(function* () {
+        const { world, homes, servers } = yield* makeMailWorld();
+        const { stderr } = yield* runCli(['list', '--query', 'mailbox:invoice@fishball.ltd'], {
           fetch: world.fetch,
           homes,
           servers,
         });
-        expect(failureOf(stderr)).toMatchObject({ code: 'UsageError' });
+        expect(failureOf(stderr)).toMatchObject({
+          code: 'UsageError',
+          message: expect.stringContaining('use to:invoice@fishball.ltd'),
+        });
+      }),
+    );
+
+    it.effect(
+      'lists what a query only scopes from the cache, opening a row in its one folder',
+      () =>
+        Effect.gen(function* () {
+          const { world, homes, server, servers } = yield* makeMailWorld();
+          const list = (...args: string[]) =>
+            runCli(['list', ...args], { fetch: world.fetch, homes, servers });
+          server.deliver('INBOX', mail(1));
+          server.deliver('Archive', mail(2));
+          server.deliver('Trash', mail(3));
+
+          const archive = JSON.parse((yield* list('--query', 'in:archive')).stdout);
+          expect(archive.threads.map(({ id }: Row) => id)).toEqual(['mid/<m2@stripe.com>']);
+          expect(archive.threads[0].url).toContain('/m/archive/t/');
+          // Scoped alone, nothing went to a server's search.
+          expect(server.commands.filter(command => command.startsWith('UID SEARCH'))).toEqual([]);
+
+          const scoped = yield* list('--query', `mailbox:${ADDRESS.toUpperCase()}`);
+          const rows = JSON.parse(scoped.stdout).threads;
+          expect(rows.map(({ id }: Row) => id)).toEqual([
+            'mid/<m2@stripe.com>',
+            'mid/<m1@stripe.com>',
+          ]);
+          expect(rows[0].url).toContain('/m/unified/t/');
+          expect(rows[0]).toMatchObject({ mailboxes: [ADDRESS], folders: ['archive'] });
+
+          const everywhere = yield* list('--query', 'in:anywhere');
+          expect(idsOf(everywhere.stdout)).toHaveLength(3);
+        }),
+    );
+
+    it.effect('hands back a cursor when a page reaches its windows and finds nothing yet', () =>
+      Effect.gen(function* () {
+        const { world, homes, server, servers } = yield* makeMailWorld();
+        const list = (...args: string[]) =>
+          runCli(['list', ...args], { fetch: world.fetch, homes, servers });
+        // More than a page's three windows of 200 lie above the two rows left below the cursor.
+        for (let n = 1; n <= 1000; n++) {
+          server.deliver('INBOX', mail(n, { date: minuteOf2026(n), text: 'Nothing to see.' }));
+        }
+        const cursor = Buffer.from(
+          JSON.stringify({ at: Date.parse(minuteOf2026(2)), id: '' }),
+        ).toString('base64url');
+
+        const empty = JSON.parse((yield* list('--cursor', cursor)).stdout);
+        expect(empty.threads).toEqual([]);
+        expect(empty.nextCursor).toBe(cursor);
+
+        const next = yield* list('--cursor', empty.nextCursor);
+        expect(idsOf(next.stdout)).toEqual(['mid/<m2@stripe.com>', 'mid/<m1@stripe.com>']);
+      }),
+    );
+
+    it.effect('pages across folders without skipping one whose window ended sooner', () =>
+      Effect.gen(function* () {
+        const { world, homes, server, servers } = yield* makeMailWorld();
+        const list = (...args: string[]) =>
+          runCli(['list', ...args], { fetch: world.fetch, homes, servers });
+        // The inbox's window of 200 ends at minute 2006 of its 205; Archive's two reach far older.
+        for (let n = 1; n <= 205; n += 1) {
+          server.deliver('INBOX', mail(n, { date: minuteOf2026(2000 + n) }));
+        }
+        server.deliver('Archive', mail(901, { date: minuteOf2026(1) }));
+        server.deliver('Archive', mail(902, { date: minuteOf2026(2) }));
+
+        const seen: string[] = [];
+        let cursor: readonly string[] | null = [];
+        while (cursor !== null) {
+          const page: { readonly stdout: string } = yield* list(
+            '--query',
+            'in:inbox in:archive',
+            '--limit',
+            '50',
+            ...cursor,
+          );
+          seen.push(...idsOf(page.stdout));
+          const { nextCursor }: { readonly nextCursor: string | null } = JSON.parse(page.stdout);
+          cursor = nextCursor === null ? null : ['--cursor', nextCursor];
+        }
+
+        expect(seen).toHaveLength(207);
+        expect(new Set(seen).size).toBe(207);
+        expect(seen.at(-1)).toBe('mid/<m901@stripe.com>');
+      }),
+    );
+
+    it.effect('pages past a window whose newest arrival is an old message moved in', () =>
+      Effect.gen(function* () {
+        const { world, homes, server, servers } = yield* makeMailWorld();
+        const list = (...args: string[]) =>
+          runCli(['list', ...args], { fetch: world.fetch, homes, servers });
+        // Filed in arrival order, so the window of 200 holds the last ones. The last three were filed
+        // today but date from long before everything else, which must not read as how far it reaches:
+        // a page of 33 would end on the first of them, and the next start below the seven unread.
+        for (let n = 1; n <= 204; n += 1) {
+          server.deliver('Archive', mail(n, { date: minuteOf2026(2000 + n) }));
+        }
+        for (const [n, minute] of [
+          [205, 3],
+          [206, 2],
+          [207, 1],
+        ] as const) {
+          server.deliver('Archive', mail(n, { date: minuteOf2026(minute) }));
+        }
+
+        const seen: string[] = [];
+        let cursor: readonly string[] | null = [];
+        while (cursor !== null) {
+          const page: { readonly stdout: string } = yield* list(
+            '--query',
+            'in:archive',
+            '--limit',
+            '33',
+            ...cursor,
+          );
+          seen.push(...idsOf(page.stdout));
+          const { nextCursor }: { readonly nextCursor: string | null } = JSON.parse(page.stdout);
+          cursor = nextCursor === null ? null : ['--cursor', nextCursor];
+        }
+
+        expect(new Set(seen).size).toBe(207);
+        expect(seen.at(-1)).toBe('mid/<m207@stripe.com>');
+      }),
+    );
+
+    it.effect('pages past messages that share a second at the window’s edge', () =>
+      Effect.gen(function* () {
+        const { world, homes, server, servers } = yield* makeMailWorld();
+        const list = (...args: string[]) =>
+          runCli(['list', ...args], { fetch: world.fetch, homes, servers });
+        for (let n = 1; n <= 201; n += 1) {
+          server.deliver('INBOX', mail(n, { date: minuteOf2026(1) }));
+        }
+
+        const seen: string[] = [];
+        let cursor: readonly string[] | null = [];
+        while (cursor !== null) {
+          const page: { readonly stdout: string } = yield* list('--limit', '50', ...cursor);
+          seen.push(...idsOf(page.stdout));
+          const { nextCursor }: { readonly nextCursor: string | null } = JSON.parse(page.stdout);
+          cursor = nextCursor === null ? null : ['--cursor', nextCursor];
+        }
+
+        expect(new Set(seen).size).toBe(201);
+      }),
+    );
+
+    it.effect('waits only with a query that covers the inbox', () =>
+      Effect.gen(function* () {
+        const { world, homes, servers } = yield* makeMailWorld();
+        const { stderr } = yield* runCli(['list', '--query', 'in:archive', '--wait', '1'], {
+          fetch: world.fetch,
+          homes,
+          servers,
+        });
+        expect(failureOf(stderr)).toMatchObject({
+          code: 'UsageError',
+          message: expect.stringContaining('--wait watches the inbox'),
+        });
       }),
     );
   });

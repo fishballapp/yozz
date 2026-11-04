@@ -3,8 +3,9 @@ import { asciiToString } from './bytes.ts';
 import {
   buildAppendCommand,
   buildUidExpungeCommand,
-  buildUidSearchTextCommand,
+  buildUidSearchCommand,
   formatImapDateTime,
+  type UidSearchCriterion,
 } from './commands.ts';
 
 describe('formatImapDateTime', () => {
@@ -46,25 +47,50 @@ describe('buildUidExpungeCommand', () => {
   });
 });
 
-describe('buildUidSearchTextCommand', () => {
-  const sent = (query: string) =>
-    buildUidSearchTextCommand('a1', 'SUBJECT', query)
+describe('buildUidSearchCommand', () => {
+  const sent = (criterion: UidSearchCriterion) =>
+    buildUidSearchCommand('a1', criterion)
       .lines.map(({ text, literal }) =>
         literal === undefined
           ? asciiToString(text)
           : `${asciiToString(text)}{${literal.length}}<${new TextDecoder().decode(literal)}>`,
       )
       .join('');
+  const subject = (value: string) => sent({ key: 'SUBJECT', value });
 
   it('searches the one key it is given', () => {
-    expect(sent('ICO')).toBe('a1 UID SEARCH SUBJECT "ICO"\r\n');
+    expect(subject('ICO')).toBe('a1 UID SEARCH SUBJECT "ICO"\r\n');
+    expect(sent({ key: 'CC', value: 'ann' })).toBe('a1 UID SEARCH CC "ann"\r\n');
+    expect(sent({ key: 'HEADER', header: 'Reply-To', value: 'ann' })).toBe(
+      'a1 UID SEARCH HEADER "Reply-To" "ann"\r\n',
+    );
+    expect(sent({ key: 'UNSEEN' })).toBe('a1 UID SEARCH UNSEEN\r\n');
+    expect(sent({ key: 'FLAGGED' })).toBe('a1 UID SEARCH FLAGGED\r\n');
+  });
+
+  it('writes a date as RFC 9051 has it', () => {
+    expect(sent({ key: 'SINCE', date: { year: 2026, month: 2, day: 1 } })).toBe(
+      'a1 UID SEARCH SINCE 1-Feb-2026\r\n',
+    );
+    expect(sent({ key: 'BEFORE', date: { year: 2026, month: 12, day: 31 } })).toBe(
+      'a1 UID SEARCH BEFORE 31-Dec-2026\r\n',
+    );
   });
 
   it('escapes quotes and backslashes', () => {
-    expect(sent('a "b" \\c')).toBe('a1 UID SEARCH SUBJECT "a \\"b\\" \\\\c"\r\n');
+    expect(subject('a "b" \\c')).toBe('a1 UID SEARCH SUBJECT "a \\"b\\" \\\\c"\r\n');
   });
 
-  it('sends a query that is not printable ASCII as a UTF-8 literal', () => {
-    expect(sent('Grüße')).toBe('a1 UID SEARCH CHARSET UTF-8 SUBJECT {7}<Grüße>\r\n');
+  it('sends a value that is not printable ASCII as a UTF-8 literal, a header too', () => {
+    expect(subject('Grüße')).toBe('a1 UID SEARCH CHARSET UTF-8 SUBJECT {7}<Grüße>\r\n');
+    expect(sent({ key: 'HEADER', header: 'Reply-To', value: 'Grüße' })).toBe(
+      'a1 UID SEARCH CHARSET UTF-8 HEADER "Reply-To" {7}<Grüße>\r\n',
+    );
+  });
+
+  it('never lets a line break into the command line', () => {
+    expect(subject('a\r\nb DELETE')).toBe(
+      'a1 UID SEARCH CHARSET UTF-8 SUBJECT {11}<a\r\nb DELETE>\r\n',
+    );
   });
 });

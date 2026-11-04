@@ -53,6 +53,10 @@ const SummarySchema = Schema.Struct({
   ),
   references: Schema.Array(Schema.String),
   gmailThreadId: NullableString,
+  /** A file from before summaries carried names has none, until the next sync upgrades it. */
+  attachmentNames: Schema.Array(Schema.String).pipe(
+    Schema.withDecodingDefaultKey(Effect.succeed([])),
+  ),
 });
 
 const FolderFileSchema = Schema.Struct({
@@ -62,6 +66,7 @@ const FolderFileSchema = Schema.Struct({
       uidValidity: Schema.Int,
       lastUid: Schema.Int,
       complete: Schema.Boolean,
+      hasAttachmentNames: Schema.optionalKey(Schema.Boolean),
     }),
   ),
   summaries: Schema.Array(SummarySchema),

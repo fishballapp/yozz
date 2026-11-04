@@ -32,7 +32,7 @@ const eraseOthers = async (
   messageId: string,
   keep: number,
 ): Promise<boolean> => {
-  const found = await client.uidSearchHeader('Message-ID', messageId);
+  const found = await client.uidSearch({ key: 'HEADER', header: 'Message-ID', value: messageId });
   if (!found.ok) return false;
   const stale = found.value.filter(uid => uid !== keep);
   if (stale.length === 0) return true;

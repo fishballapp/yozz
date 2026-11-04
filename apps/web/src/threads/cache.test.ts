@@ -13,6 +13,7 @@ const summary = (uid: number): ImapMessageSummary => ({
   envelope: null,
   references: ['<a@x>'],
   gmailThreadId: null,
+  attachmentNames: [],
 });
 
 describe('mail cache', () => {
@@ -60,6 +61,19 @@ describe('mail cache', () => {
     expect(await inbox.getBody(3)).toBeNull();
     expect(await inbox.listPreviews()).toEqual([]);
     expect((await other.listSummaries()).map(s => s.uid)).toEqual([2]);
+  });
+
+  it('reads a row from before summaries carried names, and keeps the upgrade’s mark', async () => {
+    const inbox = createMailCache('u1', 'me@x', new IDBFactory()).folder('inbox');
+    const { attachmentNames: _, ...old } = summary(1);
+    await inbox.putSummaries([old as ImapMessageSummary]);
+    expect((await inbox.listSummaries())[0]?.attachmentNames).toEqual([]);
+
+    const mark = { name: 'INBOX', uidValidity: 7, lastUid: 3, complete: false };
+    await inbox.putSync(mark);
+    expect(await inbox.getSync()).toEqual(mark);
+    await inbox.putSync({ ...mark, hasAttachmentNames: true });
+    expect(await inbox.getSync()).toEqual({ ...mark, hasAttachmentNames: true });
   });
 
   it('a lock clears one user and leaves the other', async () => {

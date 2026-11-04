@@ -4,7 +4,11 @@ import { listSentRecords } from '@yozz.app/mail/compose/sent-vault';
 import type { MailConnectionFailure } from '@yozz.app/mail/connection';
 import type { MailCache } from '@yozz.app/mail/threads/cache';
 import { cachedPreviews, cachedSummaries, threadList } from '@yozz.app/mail/threads/hydrate';
-import type { AccountSummaries, FolderSummaries } from '@yozz.app/mail/threads/summaries';
+import {
+  type AccountSummaries,
+  type FolderSummaries,
+  parseInternalDate,
+} from '@yozz.app/mail/threads/summaries';
 import { loadOlder, syncAccount } from '@yozz.app/mail/threads/sync';
 import { staleAccounts } from '@yozz.app/mail/threads/sync-staleness';
 import { FOLDERS, type Folder, type ThreadState } from '@yozz.app/mail/threads/thread';
@@ -71,14 +75,24 @@ export class Cache extends Context.Service<
     ) => Effect.Effect<readonly ThreadState[], VaultFailure>;
     /** The account's cache may not be where its mail is now: its next read syncs first. */
     readonly markStale: (account: InboundAddress) => Effect.Effect<void, UsageError>;
-    /** Whether any account holds older mail in `folder` than its cache reaches. */
-    readonly hasOlder: (
+    /**
+     * The folder that stops short soonest of those holding older mail than the cache reaches, or
+     * null when none does. Older than `reachedAt`, a list across them may be missing mail.
+     */
+    readonly olderFrontier: (
       accounts: readonly InboundAddress[],
-      folder: Folder,
-    ) => Effect.Effect<boolean, UsageError>;
-    /** One window further back in `folder` on each account, as Older mail does. */
+      folders: readonly Folder[],
+    ) => Effect.Effect<
+      {
+        readonly account: InboundAddress;
+        readonly folder: Folder;
+        readonly reachedAt: number;
+      } | null,
+      UsageError
+    >;
+    /** One window further back in that folder, as Older mail does. */
     readonly loadOlder: (
-      accounts: readonly InboundAddress[],
+      account: InboundAddress,
       folder: Folder,
     ) => Effect.Effect<void, MailServerError | UsageError>;
   }
@@ -240,25 +254,33 @@ export class Cache extends Context.Service<
             drafts,
           });
         }),
-        hasOlder: Effect.fn('Cache.hasOlder')(function* (accounts, folder) {
-          const marks = yield* Effect.forEach(
-            accounts,
-            account => usingCache(() => cacheOf(account).mail.folder(folder).getSync()),
+        olderFrontier: Effect.fn('Cache.olderFrontier')(function* (accounts, folders) {
+          const reached = yield* Effect.forEach(
+            accounts.flatMap(account => folders.map(folder => ({ account, folder }))),
+            ({ account, folder }) =>
+              usingCache(async () => {
+                const folderCache = cacheOf(account).mail.folder(folder);
+                const [mark, summaries] = await Promise.all([
+                  folderCache.getSync(),
+                  folderCache.listSummaries(),
+                ]);
+                if (mark === null || mark.complete) return [];
+                // By uid, not the oldest date: a window is counted in arrival order, and a message
+                // moved here keeps its old date, which says nothing about what lies below the window.
+                const [reachedAt] = summaries
+                  .toSorted((a, b) => a.uid - b.uid)
+                  .flatMap(({ internalDate }) => parseInternalDate(internalDate) ?? []);
+                return reachedAt === undefined ? [] : [{ account, folder, reachedAt }];
+              }),
             { concurrency: 'unbounded' },
           );
-          return marks.some(mark => mark !== null && !mark.complete);
+          return reached.flat().toSorted((a, b) => b.reachedAt - a.reachedAt)[0] ?? null;
         }),
-        loadOlder: Effect.fn('Cache.loadOlder')(function* (accounts, folder) {
-          yield* Effect.forEach(
-            accounts,
-            Effect.fnUntraced(function* (account) {
-              const res = yield* usingCache(() =>
-                loadOlder(mail.runOn(account), cacheOf(account).mail.folder(folder)),
-              );
-              if (!res.ok) return yield* failed(account, res.error);
-            }),
-            { concurrency: 'unbounded', discard: true },
+        loadOlder: Effect.fn('Cache.loadOlder')(function* (account, folder) {
+          const res = yield* usingCache(() =>
+            loadOlder(mail.runOn(account), cacheOf(account).mail.folder(folder)),
           );
+          if (!res.ok) return yield* failed(account, res.error);
         }),
       });
     }),

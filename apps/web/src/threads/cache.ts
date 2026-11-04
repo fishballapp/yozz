@@ -98,6 +98,7 @@ const createFolderCache = (scope: Scope, idbFactory?: IDBFactory): FolderCache =
                     lastUid: row.lastUid,
                     // A row written before `complete` existed has not reached the folder's start.
                     complete: row.complete ?? false,
+                    ...(row.hasAttachmentNames === true ? { hasAttachmentNames: true } : {}),
                   },
             );
           };
@@ -122,7 +123,14 @@ const createFolderCache = (scope: Scope, idbFactory?: IDBFactory): FolderCache =
         'readonly',
         (store, done) => {
           const req = store.getAll(folderRange(scope));
-          req.onsuccess = () => done((req.result as SummaryRow[]).map(row => row.summary));
+          // A row from before summaries carried names has none until the next sync upgrades it.
+          req.onsuccess = () =>
+            done(
+              (req.result as SummaryRow[]).map(({ summary }) => ({
+                ...summary,
+                attachmentNames: summary.attachmentNames ?? [],
+              })),
+            );
         },
         idbFactory,
       ),

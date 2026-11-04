@@ -263,7 +263,7 @@ describe('storeSentCopy', () => {
   });
 
   it('finds its own earlier copy instead of appending', async () => {
-    const { run, calls } = world({ uidSearchHeader: async () => ({ ok: true, value: [3, 9] }) });
+    const { run, calls } = world({ uidSearch: async () => ({ ok: true, value: [3, 9] }) });
     expect(await storeSentCopy(run, BYTES, '<m@x>')).toEqual({
       ok: true,
       value: { uidValidity: 1, uid: 9 },
@@ -289,7 +289,7 @@ describe('storeSentCopy', () => {
   it('searches again when the search lost its connection, rather than appending blind', async () => {
     let searches = 0;
     const { run, calls } = world({
-      uidSearchHeader: async () => {
+      uidSearch: async () => {
         searches += 1;
         return searches === 1 ? closed : { ok: true, value: [4] };
       },
@@ -301,7 +301,7 @@ describe('storeSentCopy', () => {
 
   it('still stores the copy on a server that refuses the search', async () => {
     const { run, calls } = world({
-      uidSearchHeader: async () => ({ ok: false, reason: { kind: 'no', text: 'not indexed' } }),
+      uidSearch: async () => ({ ok: false, reason: { kind: 'no', text: 'not indexed' } }),
     });
     expect(await storeSentCopy(run, BYTES, '<m@x>')).toMatchObject({ ok: true });
     expect(calls.append).toBe(1);

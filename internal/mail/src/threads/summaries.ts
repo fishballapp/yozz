@@ -163,6 +163,7 @@ const messageFromCopies = (
   const repliesElsewhere = replyTo.some(
     ({ address }) => address.toLowerCase() !== fromMailboxHost?.toLowerCase(),
   );
+  const bcc = recipientsIn(summary.envelope?.bcc);
   return {
     id,
     locations,
@@ -173,6 +174,8 @@ const messageFromCopies = (
     to: recipientsIn(summary.envelope?.to),
     cc: recipientsIn(summary.envelope?.cc),
     ...(repliesElsewhere ? { replyTo } : {}),
+    ...(bcc.length > 0 ? { bcc } : {}),
+    ...(summary.attachmentNames.length > 0 ? { attachmentNames: summary.attachmentNames } : {}),
     at: parseDate(summary),
     body: [],
     bodyStatus: 'pending',
@@ -230,6 +233,7 @@ const asSyntheticCopy = (message: VaultSentMessage) => ({
     },
     references: message.references ?? [],
     gmailThreadId: null,
+    attachmentNames: [],
   } satisfies ImapMessageSummary,
   account: message.from,
   folder: 'sent' as const,
@@ -350,7 +354,11 @@ export const threadsFromAccounts = (
     });
     const messages = members
       .map(({ id, entry }) => {
-        const message = messageFromCopies(id, entry.summary, entry.locations);
+        const message = {
+          ...messageFromCopies(id, entry.summary, entry.locations),
+          ...(entry.flags.some(copy => !copy.includes('\\SEEN')) ? { isUnread: true } : {}),
+          ...(entry.flags.some(copy => copy.includes('\\FLAGGED')) ? { isStarred: true } : {}),
+        };
         // A vault-held message carries its own text; `pending` would spin for ever.
         const held = vaultHeld.get(entry.summary.envelope?.messageId ?? '');
         return held === undefined

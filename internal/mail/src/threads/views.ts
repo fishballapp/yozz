@@ -1,5 +1,7 @@
 import { z } from 'zod';
 import type { MailConnectionFailure } from '../connection.ts';
+import { threadMatches } from './match.ts';
+import { hasCriteria, parseQuery } from './query.ts';
 import type { AccountSyncState } from './sync.ts';
 import { type Folder, isArchived, isTrashed, type Thread, type ThreadState } from './thread.ts';
 
@@ -115,32 +117,19 @@ export const threadsIn = (threads: readonly ThreadState[], mailbox: MailboxId) =
 export const unreadCount = (threads: readonly ThreadState[], mailbox: MailboxId) =>
   threadsIn(threads, mailbox).filter(thread => thread.isUnread).length;
 
-const matches = (haystack: string, query: string) =>
-  haystack.toLowerCase().includes(query.toLowerCase());
-
 /**
- * Search reads subject, sender and whole body, not the snippet (drawn from the newest message and
- * cut to display length). One function because the list and the status line need the same answer.
+ * The rows a mailbox shows that the query's criteria hold for. One function because the list and
+ * the status line need the same answer. A view is its own scope here, so `in:` and `mailbox:` say
+ * nothing.
  */
 export const visibleThreads = (
   threads: readonly ThreadState[],
   mailbox: MailboxId,
   query: string | undefined,
 ) => {
-  const trimmed = query?.trim() ?? '';
+  const parsed = parseQuery(query ?? '');
   const inMailbox = threadsIn(threads, mailbox);
-  if (trimmed === '') return inMailbox;
-  return inMailbox.filter(
-    thread =>
-      matches(thread.subject, trimmed) ||
-      thread.messages.some(
-        message =>
-          matches(message.fromName, trimmed) ||
-          matches(message.fromAddress, trimmed) ||
-          matches(message.toAddress, trimmed) ||
-          matches(message.body.join(' '), trimmed),
-      ),
-  );
+  return hasCriteria(parsed) ? inMailbox.filter(threadMatches(parsed)) : inMailbox;
 };
 
 /** Where the reader goes when `threadId` is filed out of `list`: the row below, else the row above. */

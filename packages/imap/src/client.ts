@@ -7,6 +7,7 @@ import {
   buildCapabilityCommand,
   buildCreateCommand,
   buildExpungeCommand,
+  buildFetchBodyStructureCommand,
   buildFetchFlagsCommand,
   buildFetchRawCommand,
   buildFetchSummariesCommand,
@@ -20,9 +21,9 @@ import {
   buildSelectCommand,
   buildStoreFlagsCommand,
   buildUidExpungeCommand,
-  buildUidSearchHeaderCommand,
-  buildUidSearchTextCommand,
+  buildUidSearchCommand,
   type OutgoingCommand,
+  type UidSearchCriterion,
 } from './commands.ts';
 import type { ImapAddress, ImapEnvelope } from './envelope.ts';
 import {
@@ -56,11 +57,18 @@ export type ImapMessageSummary = {
   readonly references: readonly string[];
   /** Gmail's thread id (decimal digits), when the server was asked and answered. */
   readonly gmailThreadId: string | null;
+  /** The file names its parts carry, from `BODYSTRUCTURE`. */
+  readonly attachmentNames: readonly string[];
 };
 
 export type ImapMessageFlags = {
   readonly uid: number;
   readonly flags: readonly string[];
+};
+
+export type ImapMessageAttachmentNames = {
+  readonly uid: number;
+  readonly attachmentNames: readonly string[];
 };
 
 export type ImapSelected = {
@@ -111,6 +119,10 @@ export type ImapClient = {
     seqSet: string,
   ) => Promise<ImapResult<readonly ImapMessageSummary[]>>;
   readonly fetchFlags: (uidSet: string) => Promise<ImapResult<readonly ImapMessageFlags[]>>;
+  /** Just the file names of `fetchSummaries`, for summaries read without them. Marks nothing read. */
+  readonly fetchAttachmentNames: (
+    uidSet: string,
+  ) => Promise<ImapResult<readonly ImapMessageAttachmentNames[]>>;
   readonly fetchRaw: (uid: number) => Promise<ImapResult<Uint8Array>>;
   readonly storeFlags: (
     uidSet: string,
@@ -127,16 +139,8 @@ export type ImapClient = {
   readonly expunge: () => Promise<ImapResult<void>>;
   /** RFC 4315. Refuses without UIDPLUS rather than falling back to EXPUNGE, which erases more than asked. */
   readonly uidExpunge: (uidSet: string) => Promise<ImapResult<void>>;
-  readonly uidSearchHeader: (
-    header: string,
-    value: string,
-  ) => Promise<ImapResult<readonly number[]>>;
-  /**
-   * The selected mailbox's uids whose subject, sender, `To` or body contains `text`, ascending.
-   * One search per field and a union: `TEXT` alone is the body on Forward Email's server, and its
-   * `OR` answers a subset of what the operands do.
-   */
-  readonly uidSearchText: (text: string) => Promise<ImapResult<readonly number[]>>;
+  /** The selected mailbox's uids matching one criterion, ascending. */
+  readonly uidSearch: (criterion: UidSearchCriterion) => Promise<ImapResult<readonly number[]>>;
   /** RFC 6851. Answers with the RFC 4315 `COPYUID`, or null when the server gave none. Refuses without MOVE. */
   readonly move: (uidSet: string, mailbox: string) => Promise<ImapResult<CopyUid | null>>;
   readonly create: (mailbox: string) => Promise<ImapResult<void>>;
@@ -275,6 +279,7 @@ const summariesFrom = (untagged: readonly ImapUntagged[]): readonly ImapMessageS
     let envelope: ImapEnvelope | null = null;
     let references: readonly string[] = [];
     let gmailThreadId: string | null = null;
+    let attachmentNames: readonly string[] = [];
 
     for (const fItem of item.items) {
       if (fItem.kind === 'uid') {
@@ -289,12 +294,26 @@ const summariesFrom = (untagged: readonly ImapUntagged[]): readonly ImapMessageS
         envelope = fItem.envelope;
       } else if (fItem.kind === 'gmailThreadId') {
         gmailThreadId = fItem.id;
+      } else if (fItem.kind === 'bodyStructure') {
+        attachmentNames = fItem.attachmentNames;
       } else if (fItem.kind === 'body' && fItem.section.toUpperCase().startsWith('HEADER.FIELDS')) {
         references = parseReferencesHeader(fItem.bytes);
       }
     }
 
-    return [{ seq: item.seq, uid, flags, internalDate, size, envelope, references, gmailThreadId }];
+    return [
+      {
+        seq: item.seq,
+        uid,
+        flags,
+        internalDate,
+        size,
+        envelope,
+        references,
+        gmailThreadId,
+        attachmentNames,
+      },
+    ];
   });
 
 export const createImapClient = (
@@ -789,6 +808,24 @@ export const createImapClient = (
         return { ok: true, value: summariesFrom(res.value.untagged) };
       }),
 
+    fetchAttachmentNames: uidSet =>
+      enqueueCommand(async () => {
+        const res = await executeCommand(tag => buildFetchBodyStructureCommand(tag, uidSet));
+        if (!res.ok) return res;
+        return {
+          ok: true,
+          // A flag another client just changed can arrive as a FETCH too, which says nothing of names.
+          value: res.value.untagged.flatMap(item => {
+            if (item.kind !== 'fetch') return [];
+            const uid = item.items.find(({ kind }) => kind === 'uid');
+            const structure = item.items.find(({ kind }) => kind === 'bodyStructure');
+            return uid?.kind === 'uid' && structure?.kind === 'bodyStructure'
+              ? [{ uid: uid.uid, attachmentNames: structure.attachmentNames }]
+              : [];
+          }),
+        };
+      }),
+
     fetchFlags: uidSet =>
       enqueueCommand(async () => {
         const res = await executeCommand(tag => buildFetchFlagsCommand(tag, uidSet));
@@ -866,27 +903,14 @@ export const createImapClient = (
         return { ok: true, value: undefined };
       }),
 
-    uidSearchHeader: (header, value) =>
+    uidSearch: criterion =>
       enqueueCommand(async () => {
-        const res = await executeCommand(tag => buildUidSearchHeaderCommand(tag, header, value));
+        const res = await executeCommand(tag => buildUidSearchCommand(tag, criterion));
         if (!res.ok) return res;
         const found = res.value.untagged.flatMap(item =>
           item.kind === 'search' ? [...item.uids] : [],
         );
-        return { ok: true, value: found };
-      }),
-
-    uidSearchText: text =>
-      enqueueCommand(async () => {
-        const found = new Set<number>();
-        for (const key of ['SUBJECT', 'FROM', 'TO', 'TEXT'] as const) {
-          const res = await executeCommand(tag => buildUidSearchTextCommand(tag, key, text));
-          if (!res.ok) return res;
-          for (const item of res.value.untagged) {
-            if (item.kind === 'search') for (const uid of item.uids) found.add(uid);
-          }
-        }
-        return { ok: true, value: [...found].toSorted((a, b) => a - b) };
+        return { ok: true, value: found.toSorted((a, b) => a - b) };
       }),
 
     move: (uidSet, mailbox) =>
