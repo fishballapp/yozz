@@ -21,6 +21,8 @@ const mocks = vi.hoisted(() => ({
   cached: {} as object,
   /** What `cachedSummaries` answers for a mailbox, over `cached`. */
   cachedFor: {} as Record<string, object>,
+  /** Folders no sync has read on this device; every other has a mark. */
+  unread: new Set<string>(),
   syncMailbox: vi.fn(),
   loadOlder: vi.fn(),
   searchMailbox: vi.fn(),
@@ -38,7 +40,13 @@ vi.mock('../relay/live', () => ({
 vi.mock('../threads/cache', () => ({
   createMailCache: (_userId: string, address: string) => ({
     address,
-    folder: () => ({ address }),
+    folder: (folder: string) => ({
+      address,
+      getSync: async () =>
+        mocks.unread.has(folder)
+          ? null
+          : { name: folder, uidValidity: 1, lastUid: 5, complete: false },
+    }),
     clear: async () => {},
   }),
   clearMailCache: async () => {},
@@ -158,6 +166,7 @@ const searched = async (matches: Partial<FolderMatches> = {}) => {
 beforeEach(() => {
   mocks.cached = INBOX_HELD;
   mocks.cachedFor = {};
+  mocks.unread = new Set();
   mocks.loadOlder.mockReset();
   mocks.syncMailbox.mockReset().mockResolvedValue(synced([]));
   mocks.searchMailbox.mockReset();
@@ -291,5 +300,41 @@ describe('a folder renumbered under what a search found', () => {
 
     await vi.waitFor(() => expect(syncStatus()).toBe('failed'));
     expect(mail().threads.map(({ subject }) => subject)).not.toContain('Subject 9');
+  });
+});
+
+describe('a search while the mailbox syncs', () => {
+  const askedServer = () => mocks.searchMailbox.mock.calls.length > 0;
+
+  it('asks the server at once when every folder it searches has been read', async () => {
+    await mount();
+    await vi.waitFor(() => expect(syncStatus()).toBe('synced'));
+    // Coming back to the tab: a sync that takes as long as a slow server makes it.
+    mocks.syncMailbox.mockReturnValue(new Promise(() => {}));
+    await act(async () => {
+      void mail().sync(ADDRESS.address);
+    });
+    mocks.searchMailbox.mockResolvedValue({ ok: true, value: [] });
+
+    await act(async () => mail().search.now('word'));
+
+    await vi.waitFor(() => expect(askedServer()).toBe(true));
+  });
+
+  it('waits for the sync when a folder it searches has not been read on this device', async () => {
+    mocks.unread = new Set(['sent']);
+    const { promise: first, resolve } = Promise.withResolvers<unknown>();
+    mocks.syncMailbox.mockReturnValue(first);
+    await mount();
+    mocks.searchMailbox.mockResolvedValue({ ok: true, value: [] });
+
+    await act(async () => mail().search.now('word'));
+    await act(async () => {
+      await new Promise(settle => setTimeout(settle, 20));
+    });
+    expect(askedServer()).toBe(false);
+
+    await act(async () => resolve(synced([])));
+    await vi.waitFor(() => expect(askedServer()).toBe(true));
   });
 });

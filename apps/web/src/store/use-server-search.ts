@@ -76,12 +76,15 @@ export const useServerSearch = ({
           import('@yozz.app/mail/threads/search'),
           import('../threads/cache'),
         ]);
-        // A link opened on a new device: a folder no sync has read yet holds nothing to find, and
-        // answering so would read as no such mail.
-        await syncRunsRef.current.get(mailbox.address)?.promise;
+        const cache = createMailCache(userId, mailbox.address);
+        // A folder no sync has read on this device holds nothing to find, and answering so would read
+        // as no such mail (a link opened on a new device). One already read is searched now, not
+        // behind the sync that coming back to the tab starts.
+        const marks = await Promise.all(folders.map(folder => cache.folder(folder).getSync()));
+        if (marks.includes(null)) await syncRunsRef.current.get(mailbox.address)?.promise;
         return await searchMailbox({
           run: runOn(mailbox),
-          cache: createMailCache(userId, mailbox.address),
+          cache,
           folders,
           query,
           signal,

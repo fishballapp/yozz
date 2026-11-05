@@ -62,6 +62,10 @@ type Socket = {
   selected: string | null;
   /** What the last SELECT answered, so a write can check the folder has not been renumbered. */
   selectedInfo: ImapSelected | null;
+  /** The selected folder's size as the server last stated it, so an EXISTS can say it grew. */
+  exists: number;
+  /** SELECTs sent so far: only the latest one's answer says which folder the socket is in. */
+  selects: number;
 };
 
 type Connection = {
@@ -82,6 +86,11 @@ type Connection = {
   keepalive: ReturnType<typeof setTimeout> | null;
   tickMinutes: number;
   changedAt: number | null;
+  /**
+   * INBOX as the caller last read it, by a fresh SELECT (a sync), or null once told it changed, until
+   * that sync reads it again. What a SELECT for other work finds is compared with it.
+   */
+  inboxRead: ImapSelected | null;
   idleDroppedAt: number | null;
   /** When work here last moved: bytes either way, a task starting or ending, or work arriving. */
   progressAt: number;
@@ -126,7 +135,7 @@ export const createLiveManager = (deps: {
   readonly connect: ConnectFn;
   /** Each connection's state as it changes; for tests and diagnostics, nothing on screen reads it. */
   readonly onState?: (address: string, state: LiveState) => void;
-  /** The server said the selected INBOX changed while idling (EXISTS/EXPUNGE/FETCH): the caller syncs. */
+  /** INBOX changed since the caller last read it, or may have (the no-IDLE poll): the caller syncs. */
   readonly onMailboxChanged: (address: string) => void;
   /** Told of every task from the moment it is queued until it settles. */
   readonly activity?: ActivityTracker;
@@ -161,16 +170,45 @@ export const createLiveManager = (deps: {
     for (const item of pending) item.resolve({ ok: false, error });
   };
 
-  /** Only an unsolicited response while idling is "the mailbox changed": a command's own responses are the command's. */
-  const handleUntagged = (conn: Connection, untagged: ImapUntagged): void => {
-    if (conn.socket?.idle === null || conn.socket === null) return;
-    if (untagged.kind !== 'exists' && untagged.kind !== 'expunge' && untagged.kind !== 'fetch') {
-      return;
-    }
+  /** A burst of changes is one sync, and the sync it asks for reads INBOX afresh. */
+  const reportChange = (conn: Connection): void => {
+    conn.inboxRead = null;
     const at = now();
     if (conn.changedAt !== null && at - conn.changedAt < MAILBOX_CHANGE_THROTTLE_MS) return;
     conn.changedAt = at;
     deps.onMailboxChanged(conn.address);
+  };
+
+  /**
+   * Only an unsolicited response is "the mailbox changed": a SELECT's EXISTS and a FETCH's FETCH are
+   * the command's answer. While idling, any change to INBOX counts; while a command runs there, only
+   * INBOX growing does, since our own commands flag and remove its messages but never add one.
+   */
+  const handleUntagged = (conn: Connection, untagged: ImapUntagged): void => {
+    const socket = conn.socket;
+    if (socket === null) return;
+    const hasGrown = untagged.kind === 'exists' && untagged.count > socket.exists;
+    if (untagged.kind === 'exists') socket.exists = untagged.count;
+    if (untagged.kind === 'expunge') socket.exists -= 1;
+    // Mid-SELECT nothing is selected, and its EXISTS is the folder's size, not news.
+    if (socket.selected !== 'INBOX') return;
+    const isChange =
+      socket.idle === null
+        ? hasGrown
+        : untagged.kind === 'exists' || untagged.kind === 'expunge' || untagged.kind === 'fetch';
+    if (isChange) reportChange(conn);
+  };
+
+  /**
+   * A SELECT of INBOX for other work (a body, a flag, going back to IDLE) finding mail the caller has
+   * not read: it arrived while another folder was selected, and the server tells only the selected one.
+   */
+  const noticeInbox = (conn: Connection, inbox: ImapSelected): void => {
+    const read = conn.inboxRead;
+    if (read === null) return;
+    const isBehind =
+      inbox.uidValidity !== read.uidValidity || (inbox.uidNext ?? 0) > (read.uidNext ?? 0);
+    if (isBehind) reportChange(conn);
   };
 
   const wrapClient = (conn: Connection, socket: () => Socket, client: ImapClient): MailClient => {
@@ -179,15 +217,31 @@ export const createLiveManager = (deps: {
       // a task that believed the last answer would send its command after this SELECT, into this folder.
       socket().selected = null;
       socket().selectedInfo = null;
+      socket().selects += 1;
+      const sent = socket().selects;
       // Always read-write: flag writes and APPEND need it, and EXAMINE would block them.
       const res = await client.select(folderName, { readOnly: false });
+      // A SELECT sent after this one (a task queued while resting re-selected INBOX) is still
+      // running, and the untagged answers on the wire are its folder's, not this one's.
+      if (sent !== socket().selects) return res;
       socket().selected = res.ok ? folderName : null;
       socket().selectedInfo = res.ok ? res.value : null;
+      if (res.ok) socket().exists = res.value.exists;
       return res;
     };
     return {
       ...client,
-      select,
+      // A fresh SELECT is how a sync reads a folder (`MailClient.ensureSelected`), so it is the caller's read.
+      // ponytail: Older mail's page from an emptied window SELECTs afresh too; mail just before it waits (DECISIONS 2026-11-05).
+      select: async folderName => {
+        const res = await select(folderName);
+        if (res.ok && folderName === 'INBOX') {
+          conn.inboxRead = res.value;
+          // Anything after this read is news, even within a second of the change that asked for it.
+          conn.changedAt = null;
+        }
+        return res;
+      },
       append: async (folderName, message, flags, internalDate) => {
         conn.stallAfterMs = appendQuietLimitMs(message.length);
         try {
@@ -201,7 +255,9 @@ export const createLiveManager = (deps: {
       ensureSelected: async name => {
         const known = socket().selectedInfo;
         if (socket().selected === name && known !== null) return { ok: true, value: known };
-        return select(name);
+        const res = await select(name);
+        if (res.ok && name === 'INBOX') noticeInbox(conn, res.value);
+        return res;
       },
     };
   };
@@ -251,6 +307,8 @@ export const createLiveManager = (deps: {
       idle: null,
       selected: null,
       selectedInfo: null,
+      exists: 0,
+      selects: 0,
     };
     conn.socket = socket;
     conn.socketKey = conn.imapKey;
@@ -344,7 +402,7 @@ export const createLiveManager = (deps: {
             }
           }
         }
-        if (conn.tickMinutes % POLL_EVERY_MINUTES === 0) deps.onMailboxChanged(conn.address);
+        if (conn.tickMinutes % POLL_EVERY_MINUTES === 0) reportChange(conn);
         if (conn.socket === socket && canRest(conn) && conn.keepalive === null) scheduleTick(conn);
       })();
     }, TICK_MS);
@@ -509,6 +567,7 @@ export const createLiveManager = (deps: {
       keepalive: null,
       tickMinutes: 0,
       changedAt: null,
+      inboxRead: null,
       idleDroppedAt: null,
       progressAt: now(),
       stallAfterMs: STALL_MS,

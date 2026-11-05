@@ -10,6 +10,8 @@ import { createLiveManager, type LiveState } from './live';
 
 type FakeClient = ImapClient & {
   readonly selects: string[];
+  /** What a SELECT of each folder answers; a folder not named is empty. */
+  readonly folders: Record<string, { exists: number; uidNext: number }>;
   noops: number;
   logouts: number;
   readonly emitUntagged: (untagged: ImapUntagged) => void;
@@ -40,6 +42,7 @@ const createFakeClient = (capabilities: readonly string[] = ['IDLE']): FakeClien
 
   const client: FakeClient = {
     selects: [],
+    folders: {},
     noops: 0,
     logouts: 0,
     failNext: null,
@@ -56,7 +59,10 @@ const createFakeClient = (capabilities: readonly string[] = ['IDLE']): FakeClien
     list: async () => ({ ok: true, value: [] }),
     select: async name => {
       client.selects.push(name);
-      return { ok: true, value: selected(name) };
+      const folder = client.folders[name] ?? { exists: 0, uidNext: 1 };
+      // A SELECT states the folder's size as an untagged EXISTS before its tagged OK.
+      onUntagged?.({ kind: 'exists', count: folder.exists });
+      return { ok: true, value: { ...selected(name), ...folder } };
     },
     fetchSummaries: async () => ({ ok: true, value: [] }),
     fetchSummariesBySeq: async () => ({ ok: true, value: [] }),
@@ -1127,6 +1133,186 @@ describe('createLiveManager', () => {
     await vi.waitFor(() => expect(states.at(-1)).toMatchObject({ status: 'live', idling: true }));
     clients[0]?.emitUntagged({ kind: 'exists', count: 10 });
     expect(mailboxChanges).toEqual([MAILBOX.address]);
+  });
+
+  describe('mail that lands while the connection is busy', () => {
+    const task = (run: MailTask<undefined>['run']): MailTask<undefined> => ({
+      priority: 'user',
+      effect: 'read',
+      retry: true,
+      run,
+    });
+    const client = () => {
+      const first = clients[0];
+      if (first === undefined) throw new Error('no client');
+      return first;
+    };
+    /** What a sync does first: a fresh SELECT of the inbox, read from. */
+    const syncInbox = task(async mail => {
+      await mail.select('INBOX');
+      return { ok: true, value: undefined };
+    });
+
+    it('is noticed when the server announces it during a command in the inbox', async () => {
+      const manager = createManager();
+      await manager.run(
+        MAILBOX,
+        task(async mail => {
+          client().folders.INBOX = { exists: 3, uidNext: 4 };
+          await mail.select('INBOX');
+          // Our own move takes one out; unasked, mid-command, the server says one came in.
+          client().emitUntagged({ kind: 'expunge', seq: 3 });
+          client().emitUntagged({ kind: 'exists', count: 3 });
+          return { ok: true, value: undefined };
+        }),
+      );
+      expect(mailboxChanges).toEqual([MAILBOX.address]);
+    });
+
+    it("is not a command's own answers, a size restated after a removal, nor another folder growing", async () => {
+      const manager = createManager();
+      await manager.run(
+        MAILBOX,
+        task(async mail => {
+          client().folders.INBOX = { exists: 3, uidNext: 4 };
+          await mail.select('INBOX');
+          client().emitUntagged({ kind: 'fetch', seq: 3, items: [] });
+          // A move out of the inbox: the server removes the message, then may restate the size.
+          client().emitUntagged({ kind: 'expunge', seq: 3 });
+          client().emitUntagged({ kind: 'exists', count: 2 });
+          // Our own APPEND of a Sent copy grows the folder it is in.
+          await mail.select('Sent');
+          client().emitUntagged({ kind: 'exists', count: 1 });
+          return { ok: true, value: undefined };
+        }),
+      );
+      expect(mailboxChanges).toEqual([]);
+    });
+
+    it('is noticed on going back to the inbox, when it arrived while another folder was selected', async () => {
+      const manager = createManager();
+      await manager.run(
+        MAILBOX,
+        task(async mail => {
+          client().folders.INBOX = { exists: 3, uidNext: 4 };
+          await mail.select('INBOX');
+          await mail.select('Sent');
+          // The server says nothing about a folder that is not selected.
+          client().folders.INBOX = { exists: 4, uidNext: 5 };
+          return { ok: true, value: undefined };
+        }),
+      );
+      expect(mailboxChanges).toEqual([]);
+      await flush();
+      await vi.waitFor(() => expect(states.at(-1)).toMatchObject({ idling: true }));
+      expect(mailboxChanges).toEqual([MAILBOX.address]);
+    });
+
+    it('is noticed by a body opened in the inbox, and told once', async () => {
+      const manager = createManager();
+      await manager.run(
+        MAILBOX,
+        task(async mail => {
+          client().folders.INBOX = { exists: 3, uidNext: 4 };
+          await mail.select('INBOX');
+          await mail.select('Sent');
+          client().folders.INBOX = { exists: 4, uidNext: 5 };
+          return { ok: true, value: undefined };
+        }),
+      );
+      await manager.run(
+        MAILBOX,
+        task(async mail => {
+          await mail.ensureSelected('INBOX');
+          return { ok: true, value: undefined };
+        }),
+      );
+      expect(mailboxChanges).toEqual([MAILBOX.address]);
+      // A prefetch elsewhere before the sync it asked for: going back to IDLE is not news again.
+      nowMs += 5000;
+      await manager.run(
+        MAILBOX,
+        task(async mail => {
+          await mail.ensureSelected('Sent');
+          return { ok: true, value: undefined };
+        }),
+      );
+      await flush();
+      await vi.waitFor(() => expect(states.at(-1)).toMatchObject({ idling: true }));
+      expect(mailboxChanges).toEqual([MAILBOX.address]);
+    });
+
+    it('is noticed within a second of the change that asked for the sync, once the sync has read the inbox', async () => {
+      const manager = createManager();
+      await manager.run(
+        MAILBOX,
+        task(async mail => {
+          client().folders.INBOX = { exists: 3, uidNext: 4 };
+          await mail.select('INBOX');
+          client().emitUntagged({ kind: 'exists', count: 4 });
+          return { ok: true, value: undefined };
+        }),
+      );
+      // The clock does not move: the sync reads the inbox, then more mail comes in.
+      client().folders.INBOX = { exists: 4, uidNext: 5 };
+      await manager.run(
+        MAILBOX,
+        task(async mail => {
+          await mail.select('INBOX');
+          client().emitUntagged({ kind: 'exists', count: 5 });
+          return { ok: true, value: undefined };
+        }),
+      );
+      expect(mailboxChanges).toEqual([MAILBOX.address, MAILBOX.address]);
+    });
+
+    it("is not another folder's size, stated while an earlier SELECT of the inbox lands", async () => {
+      const manager = createManager();
+      await manager.run(
+        MAILBOX,
+        task(async mail => {
+          client().folders.INBOX = { exists: 20, uidNext: 21 };
+          const select = client().select;
+          let answerArchive = () => {};
+          vi.spyOn(client(), 'select').mockImplementation((name, options) =>
+            name === 'Archive'
+              ? new Promise(resolve => {
+                  answerArchive = () => resolve(select(name, options));
+                })
+              : select(name, options),
+          );
+          // Resting re-selects the inbox while a queued task selects Archive behind it.
+          const inbox = mail.select('INBOX');
+          const archive = mail.select('Archive');
+          await inbox;
+          // Archive's size arrives after the inbox's OK, before Archive's own.
+          client().emitUntagged({ kind: 'exists', count: 500 });
+          answerArchive();
+          await archive;
+          return { ok: true, value: undefined };
+        }),
+      );
+      expect(mailboxChanges).toEqual([]);
+    });
+
+    it("is not what a sync's own SELECT reads, so a sync never asks for another", async () => {
+      const manager = createManager();
+      await manager.run(MAILBOX, syncInbox);
+      await flush();
+      await vi.waitFor(() => expect(states.at(-1)).toMatchObject({ idling: true }));
+      client().folders.INBOX = { exists: 1, uidNext: 2 };
+      await manager.run(
+        MAILBOX,
+        task(async mail => {
+          await mail.select('INBOX');
+          await mail.select('Sent');
+          return { ok: true, value: undefined };
+        }),
+      );
+      await flush();
+      await vi.waitFor(() => expect(states.at(-1)).toMatchObject({ idling: true }));
+      expect(mailboxChanges).toEqual([]);
+    });
   });
 
   it('reopens and idles again when the server drops an IDLE', async () => {
