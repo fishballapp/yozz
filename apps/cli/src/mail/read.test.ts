@@ -160,6 +160,64 @@ layer(NodeServices.layer)(it => {
       }),
     );
 
+    it.effect('--full lifts the cut of every body and of the whole answer', () =>
+      Effect.gen(function* () {
+        const { world, homes, server, servers } = yield* makeMailWorld();
+        server.deliver('INBOX', mail(1, { text: 'first '.repeat(300) }));
+        for (let n = 2; n <= 8; n += 1) server.deliver('INBOX', reply(n, 1, `${n} `.repeat(400)));
+        const read = (args: readonly string[]) =>
+          runCli(['read', 'mid/<m1@stripe.com>', ...args], { fetch: world.fetch, homes, servers });
+
+        const { stdout } = yield* read(['--full']);
+
+        const out = JSON.parse(stdout);
+        const [thread] = out.threads;
+        expect(out).not.toHaveProperty('truncated');
+        expect(thread).not.toHaveProperty('truncated');
+        expect(thread.messages).toHaveLength(8);
+        expect(thread.messages[0].untrusted.text).toBe('first '.repeat(300).trim());
+        expect(thread.messages[7].untrusted.text).toBe('8 '.repeat(400).trim());
+        expect(stdout).not.toContain('…[truncated');
+        // Without it the oldest messages go to stay within the answer.
+        expect(JSON.parse((yield* read([])).stdout).truncated).toBe(true);
+      }),
+    );
+
+    describe('htmlSaysMore', () => {
+      const FUNNY_TEXT = 'Thanks, that works.';
+      const FUNNY_HTML = '<p>Thanks, that works.</p><p>The deadline moved to Friday.</p>';
+
+      it.effect(
+        'says so when the HTML has words the text lacks, and --full gives that HTML as text',
+        () =>
+          Effect.gen(function* () {
+            const { world, homes, server, servers } = yield* makeMailWorld();
+            server.deliver('INBOX', mail(1, { text: FUNNY_TEXT, html: FUNNY_HTML }));
+            server.deliver('INBOX', reply(2, 1, 'Plain.'));
+            server.deliver('INBOX', { ...reply(3, 1, 'Same.'), html: '<p>Same.</p>' });
+            const read = (args: readonly string[]) =>
+              runCli(['read', 'mid/<m1@stripe.com>', ...args], {
+                fetch: world.fetch,
+                homes,
+                servers,
+              });
+
+            const plain = JSON.parse((yield* read([])).stdout).threads[0].messages;
+            expect(plain[0].htmlSaysMore).toBe(true);
+            expect(plain[0].untrusted).not.toHaveProperty('htmlText');
+            expect(plain[1]).not.toHaveProperty('htmlSaysMore');
+            expect(plain[2]).not.toHaveProperty('htmlSaysMore');
+
+            const full = JSON.parse((yield* read(['--full'])).stdout).threads[0].messages;
+            expect(full[0].untrusted.htmlText).toBe(
+              'Thanks, that works.\n\nThe deadline moved to Friday.',
+            );
+            expect(full[1].untrusted).not.toHaveProperty('htmlText');
+            expect(full[2].untrusted).not.toHaveProperty('htmlText');
+          }),
+      );
+    });
+
     it.effect('reads what synced while another address fails, and names that one', () =>
       Effect.gen(function* () {
         const { world, homes, server, addSecond, expireSecond, servers } = yield* makeMailWorld();

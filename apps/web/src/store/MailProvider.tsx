@@ -1312,13 +1312,21 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
       const message = thread?.messages.find(m => m.id === messageId);
       if (message === undefined || thread === undefined) return Promise.resolve(failed);
       if (message.bodyStatus === undefined) {
-        const { body, html, hasTextPart, inlineImagesTruncated, attachments, senderCheck } =
-          message;
+        const {
+          body,
+          html,
+          hasTextPart,
+          htmlSaysMore,
+          inlineImagesTruncated,
+          attachments,
+          senderCheck,
+        } = message;
         return Promise.resolve({
           status: 'loaded',
           body,
           html,
           hasTextPart,
+          htmlSaysMore,
           inlineImagesTruncated,
           attachments,
           senderCheck,
@@ -1392,6 +1400,7 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
             body: res.value.paragraphs,
             html: res.value.html,
             hasTextPart: res.value.hasTextPart,
+            htmlSaysMore: res.value.htmlSaysMore,
             inlineImagesTruncated: res.value.inlineImagesTruncated,
             attachments: res.value.attachments,
             senderCheck: senderCheckOf(res.value.dkim, message.fromAddress),

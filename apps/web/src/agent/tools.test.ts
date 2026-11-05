@@ -73,10 +73,12 @@ const fakePort = (threads: ThreadState[], overrides: Partial<AgentPort> = {}) =>
     body: string[],
     senderCheck: Message['senderCheck'],
     attachments: Message['attachments'],
+    htmlSaysMore: Message['htmlSaysMore'],
   ): BodyOutcome => ({
     status: 'loaded',
     body,
     hasTextPart: true,
+    htmlSaysMore,
     inlineImagesTruncated: false,
     attachments,
     senderCheck,
@@ -110,6 +112,7 @@ const fakePort = (threads: ThreadState[], overrides: Partial<AgentPort> = {}) =>
         found.bodyStatus === undefined ? found.body : ['Loaded body.'],
         found.senderCheck,
         found.attachments,
+        found.htmlSaysMore,
       );
     }),
     setRead: vi.fn((threadIds: readonly string[]) => new Set(threadIds)),
@@ -330,6 +333,18 @@ describe('get_threads', () => {
     const [row] =
       (skim as { threads: { messages: Record<string, unknown>[] }[] }).threads[0]?.messages ?? [];
     expect(row).not.toHaveProperty('signedBy');
+  });
+
+  it('says when the HTML part holds words the text part lacks, and otherwise says nothing', async () => {
+    const mail = thread('h', ['inbox'], {
+      messages: [message('h/1', { htmlSaysMore: true }), message('h/2', { htmlSaysMore: false })],
+    });
+    const { tools } = fakePort([mail]);
+    const result = await call(tools, 'get_threads', { ids: ['h'], body: 'full' });
+    const [newest, oldest] =
+      (result as { threads: { messages: Record<string, unknown>[] }[] }).threads[0]?.messages ?? [];
+    expect(newest).not.toHaveProperty('htmlSaysMore');
+    expect(oldest).toMatchObject({ id: 'h/1', htmlSaysMore: true });
   });
 
   it('lists what a message carries beside its body, and never the bytes', async () => {

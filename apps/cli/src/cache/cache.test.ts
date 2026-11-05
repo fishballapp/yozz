@@ -218,6 +218,7 @@ layer(NodeServices.layer)(it => {
           inbox.putBody(1, {
             paragraphs: ['New.'],
             hasTextPart: true,
+            htmlSaysMore: false,
             inlineImagesTruncated: false,
             attachments: [],
             dkim: null,

@@ -3,7 +3,7 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import { signMessage } from '../testing/dkim-signer.ts';
 import { stubImapClient } from '../testing/fake-imap-client.ts';
 import { memoryMailCache } from '../testing/memory-mail-cache.ts';
-import { fetchBody, fetchBodyAt, htmlToText, parseBody } from './bodies.ts';
+import { fetchBody, fetchBodyAt, htmlHasWordsTextLacks, htmlToText, parseBody } from './bodies.ts';
 import { MAX_CACHED_BODY_BYTES } from './body-state.ts';
 import type { TxtLookup } from './dkim.ts';
 
@@ -297,6 +297,130 @@ describe('htmlToText', () => {
   it('leaves the same out past the nesting depth, where it walks the tree flat', () => {
     const deep = `${'<span>'.repeat(200)}${svg} there${'</span>'.repeat(200)}`;
     expect(htmlToText(deep).trim()).toBe('Hello there');
+  });
+});
+
+describe('htmlHasWordsTextLacks', () => {
+  it('is false for the same words laid out differently', () => {
+    expect(
+      htmlHasWordsTextLacks(
+        'Hi Jason,\n\nDon’t forget: the meeting is at 9.\nSee https://example.com/a?b=1 for more.',
+        '<p>Hi   Jason,</p><p>Don\'t forget &mdash; the <b>meeting</b> is at 9.</p><p>See <a href="https://example.com/a?b=1">https://example.com/a?b=1</a> for more.</p>',
+      ),
+    ).toBe(false);
+  });
+
+  it('is false when a link is rendered with its address, which the text part may leave out', () => {
+    expect(
+      htmlHasWordsTextLacks(
+        'Read the docs.',
+        '<p>Read the <a href="https://example.com/docs?utm=x">docs</a>.</p>',
+      ),
+    ).toBe(false);
+  });
+
+  it('keeps the words right after a link: an em dash is not part of its address', () => {
+    expect(
+      htmlHasWordsTextLacks(
+        'Meeting',
+        '<p><a href="https://example.com">Meeting</a>—cancelled</p>',
+      ),
+    ).toBe(true);
+  });
+
+  it('keeps CJK written straight after a link', () => {
+    expect(
+      htmlHasWordsTextLacks(
+        '帳單',
+        '<p><a href="https://example.com/bill">帳單</a>：截止日期已改為星期五</p>',
+      ),
+    ).toBe(true);
+    expect(
+      htmlHasWordsTextLacks(
+        '帳單：截止日期已改為星期五',
+        '<p><a href="https://example.com/bill">帳單</a>：截止日期已改為星期五</p>',
+      ),
+    ).toBe(false);
+  });
+
+  it('is false for a tel: or mailto: link whose visible text the text part has', () => {
+    expect(
+      htmlHasWordsTextLacks(
+        'Call us today',
+        '<p><a href="tel:+441234567890">Call us</a> <a href="mailto:a@b.co">today</a></p>',
+      ),
+    ).toBe(false);
+  });
+
+  it('keeps the combining marks of a word, so Devanagari words stay whole', () => {
+    expect(htmlHasWordsTextLacks('दान', '<p>दान दिन दोनों</p>')).toBe(true);
+    expect(htmlHasWordsTextLacks('दान दिन दोनों', '<p>दान दिन दोनों</p>')).toBe(false);
+  });
+
+  it('is false when the order differs', () => {
+    expect(htmlHasWordsTextLacks('one two three', '<p>three</p><p>one two</p>')).toBe(false);
+  });
+
+  it('is true when the HTML holds a sentence the text part lacks', () => {
+    expect(
+      htmlHasWordsTextLacks(
+        'Thanks, that works.',
+        '<p>Thanks, that works.</p><p>One more thing: the deadline moved to Friday.</p>',
+      ),
+    ).toBe(true);
+  });
+
+  it('is true for a footer only the HTML has: the reader cannot see it otherwise', () => {
+    expect(
+      htmlHasWordsTextLacks(
+        'Your invoice is ready.',
+        '<p>Your invoice is ready.</p><footer>You receive this because you are a customer of Acme.</footer>',
+      ),
+    ).toBe(true);
+  });
+
+  it('is false when only the text part has extra words: the HTML lost nothing', () => {
+    expect(htmlHasWordsTextLacks('Hello there. Sent from my phone', '<p>Hello there.</p>')).toBe(
+      false,
+    );
+  });
+
+  it('compares words in any script, and is not fooled by case or width', () => {
+    expect(htmlHasWordsTextLacks('ＨＥＬＬＯ 你好', '<p>hello 你好</p>')).toBe(false);
+    expect(htmlHasWordsTextLacks('hello', '<p>hello 你好</p>')).toBe(true);
+  });
+});
+
+describe('parseBody htmlSaysMore', () => {
+  const alternative = (text: string, html: string) =>
+    raw(`Content-Type: multipart/alternative; boundary="a"
+
+--a
+Content-Type: text/plain; charset=utf-8
+
+${text}
+--a
+Content-Type: text/html; charset=utf-8
+
+${html}
+--a--
+`);
+
+  it('is true when the HTML part holds what the text part lacks', async () => {
+    const body = await parse(
+      alternative('Thanks.', '<p>Thanks.</p><p>Also, the room changed to B2.</p>'),
+    );
+    expect(body.htmlSaysMore).toBe(true);
+    expect(body.paragraphs).toEqual(['Thanks.']);
+  });
+
+  it('is false when the parts agree, and for mail with only one of them', async () => {
+    expect((await parse(alternative('Thanks.', '<p>Thanks.</p>'))).htmlSaysMore).toBe(false);
+    expect(
+      (await parse(raw('Content-Type: text/html; charset=utf-8\n\n<p>Only HTML.</p>')))
+        .htmlSaysMore,
+    ).toBe(false);
+    expect((await parse(raw('Content-Type: text/plain\n\nOnly text.'))).htmlSaysMore).toBe(false);
   });
 });
 

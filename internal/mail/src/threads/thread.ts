@@ -53,6 +53,10 @@ export const signedByOf = (check: SenderCheck | undefined): string | null =>
 export const SIGNED_BY_DESCRIPTION =
   "the domain whose DKIM signature vouches for From, or null when it couldn't be verified. It says who sent the message, not that it is safe.";
 
+/** The one description of `htmlSaysMore`, so the CLI and the agent tools cannot word it differently. */
+export const HTML_SAYS_MORE_DESCRIPTION =
+  'true only when the HTML has words the text lacks, so the text may be incomplete.';
+
 export type Message = {
   id: string;
   fromName: string;
@@ -78,6 +82,8 @@ export type Message = {
   html?: string;
   /** `body` is the sender's `text/plain` part verbatim. Absent on an HTML message means `body` is our reduction. */
   hasTextPart?: boolean;
+  /** `body` is the sender's text part and their HTML part has words it lacks (`htmlHasWordsTextLacks`). */
+  htmlSaysMore?: boolean;
   /** A CID allocation ceiling left one or more inline images unavailable. */
   inlineImagesTruncated?: boolean;
   /** Whether DKIM vouches for From. Read with the body. */

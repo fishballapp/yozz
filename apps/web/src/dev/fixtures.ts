@@ -228,6 +228,7 @@ const AUTHORED: readonly Thread[] = [
         at: ago(4 * HOUR),
         // An HTML body from a sender whose DKIM signature checks out.
         hasTextPart: true,
+        htmlSaysMore: true,
         senderCheck: { status: 'verified', signedBy: 'duneanddown.example' },
         body: [
           'Our summer savings end tonight. Save up to 30% on sleep favourites, and spend over £49 for a free pack of tealights.',
@@ -272,6 +273,7 @@ const AUTHORED: readonly Thread[] = [
         at: ago(4 * HOUR + 40 * MINUTE),
         // Sent through a mailing service whose signature is not the shop's own domain.
         hasTextPart: true,
+        htmlSaysMore: true,
         senderCheck: { status: 'unverified' },
         body: [
           'Order #H-20931 is roasted and packed. 250 g Kiambu AA, whole bean, ships tomorrow by Royal Mail Tracked 48.',
@@ -612,6 +614,7 @@ const AUTHORED: readonly Thread[] = [
         to: [{ address: 'hello@stillwater.example' }],
         at: ago(14 * HOUR),
         hasTextPart: true,
+        htmlSaysMore: true,
         senderCheck: { status: 'unverified' },
         body: [
           'This week: why most visitors skip your pricing page, three founders on charging from day one, and a tool for screenshotting App Store listings.',

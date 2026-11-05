@@ -11,7 +11,7 @@ export class DeviceDbError extends Error {
 }
 
 const DB_NAME = 'yozz-device-state';
-const DB_VERSION = 10;
+const DB_VERSION = 11;
 
 type StoreSpec = { readonly name: string; readonly keyPath: string | string[] };
 
@@ -37,6 +37,8 @@ const REKEYED: readonly { readonly since: number; readonly names: readonly strin
   { since: 9, names: [STORES.mailBodies.name] },
   // A body that kept the verified From but not the domain that signed it could not name the signer; refetched, it can.
   { since: 10, names: [STORES.mailBodies.name] },
+  // A body that kept no sign of what its HTML part says beyond its text part could not tell the reader; refetched, it can.
+  { since: 11, names: [STORES.mailBodies.name] },
 ];
 
 type StoreName = (typeof STORES)[keyof typeof STORES]['name'];

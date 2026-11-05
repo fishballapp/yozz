@@ -18,6 +18,7 @@ const summary = (uid: number): ImapMessageSummary => ({
 const body = (paragraphs: string[]) => ({
   paragraphs,
   hasTextPart: true,
+  htmlSaysMore: false,
   inlineImagesTruncated: false,
   attachments: [],
   dkim: null,

@@ -94,7 +94,7 @@ export const listCommand = Command.make(
     ),
     wait: Flag.Int('wait').pipe(
       Flag.withDescription(
-        'Answer only with mail that arrives after the command starts, waiting up to this many seconds',
+        'Answer only with mail that arrives after the command starts, waiting up to this many seconds (checked between rounds, so connecting and syncing on a slow server can run past it)',
       ),
       Flag.filter(
         seconds => seconds >= 1,
@@ -295,10 +295,13 @@ text. Several terms must all match in the same message:
 
 With no in:, a query, even an empty one, looks in the inbox, Sent, Archive and drafts. Only in:trash or in:anywhere reach
 Trash. A query that only says where (in:archive, mailbox:you@example.com) lists from this machine's
-cache; --cursor pages back with the nextCursor before, reaching for older mail as yozz.app's Older
+cache, which it first syncs when it is over two minutes old (--sync always does), so it can take as
+long as a sync; --cursor pages back with the nextCursor before, reaching for older mail as yozz.app's Older
 mail does. A query with anything to look for searches each folder on the server, with vault drafts
 when they are in scope, its newest ${SEARCH_HITS} matches a folder; "moreMatches": true says some
-folder had more, so narrow the query rather than paging.
+folder had more, so narrow the query rather than paging. A plain word asks each folder 6–7 commands
+(one per field), which a slow server answers slowly (Forward Email's search is): from:, to: and
+subject: ask 1–2, in: asks fewer folders, and a date alone asks 1, so use them whenever you know one.
 
 Limits: attachment names match only mail this machine has synced (the newest 200 per folder, plus
 older mail already paged in). Bcc matches only on Sent, and only where a copy recorded it.
@@ -306,7 +309,8 @@ older mail already paged in). Bcc matches only on Sent, and only where a copy re
 Answers from this machine's cache when the mailbox's addresses synced under two minutes ago, and
 syncs them first otherwise (--sync always does). --wait needs a query that covers the inbox, and no
 --cursor: it holds each inbox open and answers with the first mail that arrives and matches, or
-fails WaitTimedOut. A page can hold fewer than --limit when the older mail it reached for held too
+fails WaitTimedOut. Its seconds are checked between rounds, not during one: connecting, the first
+sync and each round's sync and search can run past them on a slow server. A page can hold fewer than --limit when the older mail it reached for held too
 few; a nextCursor that isn't null says there is more.
 
 An address whose mail server failed answers from its cache: it is listed under "failed", and its

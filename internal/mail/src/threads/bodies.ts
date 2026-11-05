@@ -13,6 +13,8 @@ export type FetchedBody = {
   readonly paragraphs: string[];
   /** `paragraphs` is the sender's `text/plain` part, not a reduction of the HTML. */
   readonly hasTextPart: boolean;
+  /** The sender's text part is shown but the HTML part has words it lacks (`htmlHasWordsTextLacks`). */
+  readonly htmlSaysMore: boolean;
   /** `cid:` images inlined as `data:` URIs. Sanitized at render, not here. */
   readonly html?: string;
   /** A CID allocation ceiling left one or more inline images unavailable. */
@@ -90,7 +92,7 @@ const flatTextOf = (root: Element): string => {
   return parts.join('');
 };
 
-const textOf = (node: ChildNode, depth = 0): string => {
+const textOf = (node: ChildNode, shouldShowLinks: boolean, depth = 0): string => {
   if (isText(node)) return node.value.replace(/\s+/g, ' ');
   if (!isElement(node) || isDropped(node)) return '';
   const tagName = tagNameOf(node);
@@ -99,9 +101,9 @@ const textOf = (node: ChildNode, depth = 0): string => {
   const inner =
     depth >= MAX_HTML_TEXT_DEPTH
       ? flatTextOf(node).replace(/\s+/g, ' ')
-      : node.childNodes.map(child => textOf(child, depth + 1)).join('');
+      : node.childNodes.map(child => textOf(child, shouldShowLinks, depth + 1)).join('');
   // Without the destination "click here" says nothing.
-  if (tagName === 'A') {
+  if (tagName === 'A' && shouldShowLinks) {
     const href = node.attrs.find(attribute => attribute.name === 'href')?.value ?? '';
     const text = inner.trim();
     return href !== '' && text !== '' && text !== href && !href.startsWith('mailto:')
@@ -116,14 +118,39 @@ const textOf = (node: ChildNode, depth = 0): string => {
  * algorithm a browser's `DOMParser` does, scripting off as `DOMParser`'s is, so the tree is the same
  * in Node and the browser.
  */
-export const htmlToText = (markup: string): string => {
+export const htmlToText = (
+  markup: string,
+  { shouldShowLinks = true }: { readonly shouldShowLinks?: boolean } = {},
+): string => {
   const root = parse(markup, { scriptingEnabled: false }).childNodes.find(isElement);
   // `Document.body`: the root's first `<body>` or `<frameset>`, whose `<noframes>` is the fallback.
   const body = root?.childNodes.find(
     (node): node is Element =>
       isElement(node) && (node.tagName === 'body' || node.tagName === 'frameset'),
   );
-  return body === undefined ? '' : textOf(body);
+  return body === undefined ? '' : textOf(body, shouldShowLinks);
+};
+
+/** A URL as far as its ASCII characters go: it stops at CJK, a dash or a closing bracket, so the words after it stay. */
+const URL_PATTERN = /\b(?:(?:https?|ftp|mailto|tel):|www\.)[\w\-.~:/?#@!$&'*+,;=%]*/giu;
+/** Marks join a word: without `\p{M}` Devanagari and Thai words fall apart. */
+const WORD_PATTERN = /[\p{L}\p{M}\p{N}]+/gu;
+
+/** The distinct lowercase words of `text`, with URLs left out: layout, punctuation and order are not words. */
+const wordsOf = (text: string): ReadonlySet<string> =>
+  new Set(text.normalize('NFKC').replace(URL_PATTERN, ' ').toLowerCase().match(WORD_PATTERN));
+
+/**
+ * Whether the HTML part, reduced to text, holds a word the text part does not. A sender's text
+ * part is shown whenever there is one, so this is the only sign the HTML says something it
+ * leaves out. Compared as sets of words: re-wrapping, punctuation, link rendering and ordering
+ * differ between the two parts of a faithful message, a sentence missing from one does not. An
+ * HTML-only footer counts: the reader cannot see it otherwise, and a flag costs one `--full`.
+ */
+export const htmlHasWordsTextLacks = (text: string, html: string): boolean => {
+  const known = wordsOf(text);
+  // Without the destinations `htmlToText` writes beside a link, which the sender's text may omit.
+  return wordsOf(htmlToText(html, { shouldShowLinks: false })).difference(known).size > 0;
 };
 
 /** `btoa` takes a binary string; chunked so a large image cannot blow the call stack. */
@@ -214,6 +241,11 @@ export const parseBody = async (raw: Uint8Array, lookupTxt: TxtLookup): Promise<
   return {
     paragraphs: toParagraphs(text),
     hasTextPart: senderText !== null,
+    htmlSaysMore:
+      senderText !== null &&
+      inlinedHtml !== null &&
+      mail.html !== undefined &&
+      htmlHasWordsTextLacks(senderText, mail.html),
     // A blank or oversized HTML part falls through to text. CID expansion has its own post-replacement ceiling.
     ...(inlinedHtml === null ? {} : { html: inlinedHtml.html }),
     inlineImagesTruncated: inlinedHtml?.truncated ?? false,

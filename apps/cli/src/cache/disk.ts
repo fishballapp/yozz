@@ -80,6 +80,8 @@ type FolderFile = typeof FolderFileSchema.Type;
 const BodySchema = Schema.Struct({
   paragraphs: Schema.Array(Schema.String),
   hasTextPart: Schema.Boolean,
+  /** A body cached before this was kept has none, so it no longer decodes and is fetched again. */
+  htmlSaysMore: Schema.Boolean,
   html: Schema.optionalKey(Schema.String),
   inlineImagesTruncated: Schema.Boolean,
   attachments: Schema.Array(

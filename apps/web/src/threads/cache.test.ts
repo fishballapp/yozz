@@ -32,6 +32,7 @@ describe('mail cache', () => {
     await inbox.putBody(3, {
       paragraphs: ['hi'],
       hasTextPart: true,
+      htmlSaysMore: false,
       inlineImagesTruncated: false,
       attachments: [],
       dkim: null,
@@ -113,6 +114,7 @@ describe('mail cache', () => {
     const body = {
       paragraphs: ['hi'],
       hasTextPart: true,
+      htmlSaysMore: false,
       inlineImagesTruncated: false,
       attachments: [],
       dkim: null,
