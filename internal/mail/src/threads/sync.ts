@@ -4,6 +4,7 @@ import {
   type ImapClient,
   type ImapFailure,
   type ImapMessageSummary,
+  type ImapResult,
   uidSets,
 } from '@yozz.app/imap';
 import { ensureFolderName, resolveFolders } from '../addresses/folder-names.ts';
@@ -11,7 +12,7 @@ import type { MailConnectionFailure, Result, RunTask } from '../connection.ts';
 import { type FetchedBody, parseBody } from './bodies.ts';
 import type { FolderCache, FolderSync, MailCache } from './cache.ts';
 import type { TxtLookup } from './dkim.ts';
-import type { FolderSummaries } from './summaries.ts';
+import type { FolderRead, FolderSummaries } from './summaries.ts';
 import { FOLDERS, type Folder, type Location } from './thread.ts';
 
 export type MailboxSyncState =
@@ -35,23 +36,97 @@ export type MailboxSyncState =
 const WINDOW = 200;
 
 type FolderOutcome =
-  | {
+  | (FolderRead & {
       readonly ok: true;
-      readonly summaries: readonly ImapMessageSummary[];
-      /** The first sync reached the whole folder. */
+      /** The cache reaches the folder's oldest message. */
       readonly complete: boolean;
-      /** What the uids in `summaries` are meaningful under. */
-      readonly uidValidity: number;
-    }
+    })
   | { readonly ok: false; readonly failure: MailConnectionFailure; readonly invalidated: boolean };
 
-/** SELECT, then the initial window or the incremental pair. A changed `UIDVALIDITY` drops the whole mailbox's cache. */
+/**
+ * The mail above the mark, or the newest window when there is no mark or the gap may be wider
+ * than one. `startsOver` when that window does not reach back to the mark: the cache below it would
+ * be cut off from it by mail nobody read, so the folder is read as a first sync reads it.
+ */
+const readNewMail = async (
+  client: ImapClient,
+  mark: FolderSync | null,
+  { exists, uidNext }: { readonly exists: number; readonly uidNext: number | null },
+): Promise<
+  ImapResult<{ readonly fetched: readonly ImapMessageSummary[]; readonly startsOver: boolean }>
+> => {
+  const isWide = mark === null || (uidNext !== null && uidNext - 1 - mark.lastUid > WINDOW);
+  if (!isWide) {
+    if (uidNext !== null && uidNext <= mark.lastUid + 1) {
+      return { ok: true, value: { fetched: [], startsOver: false } };
+    }
+    const res = await client.fetchSummaries(`${mark.lastUid + 1}:*`);
+    if (!res.ok) return res;
+    // `n:*` with n past the newest uid returns the newest message again.
+    const fetched = res.value.filter(summary => summary.uid > mark.lastUid);
+    return { ok: true, value: { fetched, startsOver: false } };
+  }
+  if (exists === 0) return { ok: true, value: { fetched: [], startsOver: false } };
+  // A folder no bigger than the window is read whole.
+  const from = Math.max(1, exists - WINDOW + 1);
+  const res = await client.fetchSummariesBySeq(`${from}:*`);
+  if (!res.ok) return res;
+  if (mark === null) return { ok: true, value: { fetched: res.value, startsOver: false } };
+  // Every uid above the window's oldest message is in it, so one at or below the mark means the
+  // window holds the whole gap.
+  const isGapInWindow = from === 1 || res.value.some(summary => summary.uid <= mark.lastUid);
+  if (!isGapInWindow) return { ok: true, value: { fetched: res.value, startsOver: true } };
+  return {
+    ok: true,
+    value: { fetched: res.value.filter(summary => summary.uid > mark.lastUid), startsOver: false },
+  };
+};
+
+/** The cached summaries the server still has, with its flags; the rest were expunged or moved away. */
+const refreshCached = async (
+  client: ImapClient,
+  cached: readonly ImapMessageSummary[],
+  mark: FolderSync,
+): Promise<ImapResult<readonly ImapMessageSummary[]>> => {
+  const range = `${Math.min(...cached.map(summary => summary.uid))}:${mark.lastUid}`;
+  const flagsRes = await client.fetchFlags(range);
+  if (!flagsRes.ok) return flagsRes;
+  const flagsByUid = new Map(flagsRes.value.map(({ uid, flags }) => [uid, flags]));
+  // Once, for what was cached before summaries carried names; a new uid arrives with its own.
+  const namesRes =
+    mark.hasAttachmentNames === true
+      ? ({ ok: true, value: [] } as const)
+      : await client.fetchAttachmentNames(range);
+  if (!namesRes.ok) return namesRes;
+  const namesByUid = new Map(namesRes.value.map(n => [n.uid, n.attachmentNames]));
+  return {
+    ok: true,
+    value: cached.flatMap(summary => {
+      const flags = flagsByUid.get(summary.uid);
+      if (flags === undefined) return [];
+      return [
+        {
+          ...summary,
+          flags,
+          attachmentNames: namesByUid.get(summary.uid) ?? summary.attachmentNames,
+        },
+      ];
+    }),
+  };
+};
+
+/**
+ * SELECT, then the new mail, then the flags of what was cached. A changed `UIDVALIDITY` drops the
+ * whole mailbox's cache. `onRead` hears the folder once its new mail is in, when flags are still to
+ * come, and again once it is written.
+ */
 const syncFolder = async (
   client: ImapClient,
   folderCache: FolderCache,
   name: string,
   clearMailbox: () => Promise<void>,
   isStale: () => boolean,
+  onRead: (read: FolderRead) => void,
 ): Promise<FolderOutcome> => {
   let invalidated = false;
   const failed = (failure: MailConnectionFailure): FolderOutcome => ({
@@ -71,56 +146,35 @@ const syncFolder = async (
     mark = null;
     invalidated = true;
   }
+  const known = mark === null ? [] : await folderCache.listSummaries();
 
-  const kept: ImapMessageSummary[] = [];
-  let fetched: readonly ImapMessageSummary[] = [];
-  if (mark === null) {
-    // The newest WINDOW messages by sequence number; a folder no bigger than the window is read whole.
-    if (exists > 0) {
-      const res = await client.fetchSummariesBySeq(`${Math.max(1, exists - WINDOW + 1)}:*`);
-      if (!res.ok) return failed({ kind: 'imap', reason: res.reason });
-      fetched = res.value;
-    }
-  } else {
-    const known = await folderCache.listSummaries();
-    if (known.length > 0) {
-      const lowest = Math.min(...known.map(summary => summary.uid));
-      const flagsRes = await client.fetchFlags(`${lowest}:${mark.lastUid}`);
-      if (!flagsRes.ok) return failed({ kind: 'imap', reason: flagsRes.reason });
-      const flagsByUid = new Map(flagsRes.value.map(({ uid, flags }) => [uid, flags]));
-      // Once, for what was cached before summaries carried names; a new uid arrives with its own.
-      const namesRes =
-        mark.hasAttachmentNames === true
-          ? ({ ok: true, value: [] } as const)
-          : await client.fetchAttachmentNames(`${lowest}:${mark.lastUid}`);
-      if (!namesRes.ok) return failed({ kind: 'imap', reason: namesRes.reason });
-      const namesByUid = new Map(namesRes.value.map(n => [n.uid, n.attachmentNames]));
-      const expunged: number[] = [];
-      for (const summary of known) {
-        const flags = flagsByUid.get(summary.uid);
-        if (flags === undefined) {
-          expunged.push(summary.uid);
-        } else {
-          const attachmentNames = namesByUid.get(summary.uid) ?? summary.attachmentNames;
-          kept.push({ ...summary, flags, attachmentNames });
-        }
-      }
-      if (expunged.length > 0) await folderCache.deleteSummaries(expunged);
-    }
-    if (uidNext === null || uidNext > mark.lastUid + 1) {
-      const res = await client.fetchSummaries(`${mark.lastUid + 1}:*`);
-      if (!res.ok) return failed({ kind: 'imap', reason: res.reason });
-      // `n:*` with n past the newest uid returns the newest message again.
-      const last = mark.lastUid;
-      fetched = res.value.filter(summary => summary.uid > last);
-    }
+  const newMail = await readNewMail(client, mark, { exists, uidNext });
+  if (!newMail.ok) return failed({ kind: 'imap', reason: newMail.reason });
+  const { fetched, startsOver } = newMail.value;
+  // A copy `recordMoves` filed above the mark is new mail to this folder, read again with the rest
+  // of it, and outside the range whose flags are refreshed.
+  const cached =
+    mark === null || startsOver ? [] : known.filter(summary => summary.uid <= mark.lastUid);
+
+  // New mail is what a stale device is waiting for; the flags of what it already shows can follow.
+  if (cached.length > 0 && fetched.length > 0 && !isStale()) {
+    onRead({ uidValidity, summaries: [...cached, ...fetched] });
   }
+  const kept =
+    mark === null || cached.length === 0
+      ? ({ ok: true, value: [] } as const)
+      : await refreshCached(client, cached, mark);
+  if (!kept.ok) return failed({ kind: 'imap', reason: kept.reason });
 
-  const all = [...kept, ...fetched];
+  const all = [...kept.value, ...fetched];
   // Writing now would repopulate a cache another path just cleared.
   if (isStale()) return failed({ kind: 'error', detail: 'sync superseded' });
+  const keptUids = new Set(kept.value.map(summary => summary.uid));
+  const dropped = known.filter(summary => !keptUids.has(summary.uid));
+  // Before the put: a copy `recordMoves` filed above the mark is read again here, by uid.
+  if (dropped.length > 0) await folderCache.deleteSummaries(dropped.map(summary => summary.uid));
   // A later sync keeps what `loadOlder` earned; a folder with no mail has nothing older to offer.
-  const complete = mark === null ? exists <= WINDOW : mark.complete || exists === 0;
+  const complete = mark === null || startsOver ? exists <= WINDOW : mark.complete || exists === 0;
   await folderCache.putSummaries(all);
   await folderCache.putSync({
     name,
@@ -135,18 +189,22 @@ const syncFolder = async (
     complete,
     hasAttachmentNames: true,
   });
+  onRead({ uidValidity, summaries: all });
   return { ok: true, summaries: all, complete, uidValidity };
 };
 
 /**
- * LIST, then each folder in turn, inbox first. Each folder is its own task, so a click queued
- * meanwhile (a body, a flag, a move) runs before the next folder rather than after the mailbox.
+ * The inbox, then LIST, then each other folder in turn. Each folder is its own task, so a click
+ * queued meanwhile (a body, a flag, a move) runs before the next folder rather than after the
+ * mailbox, and `onFolder` hears each as it lands, so new mail shows before the rest has caught up.
  */
 export const syncMailbox = async (
   run: RunTask,
   cache: MailCache,
   /** Skips persisting when the mailbox was removed or the vault locked mid-sync. */
   isStale: () => boolean = () => false,
+  /** A folder's summaries as soon as they are read, its new mail first; see `syncFolder`. */
+  onFolder: (folder: Folder, read: FolderRead) => void = () => {},
 ): Promise<{
   readonly state: MailboxSyncState;
   readonly byFolder: FolderSummaries;
@@ -156,20 +214,10 @@ export const syncMailbox = async (
     state: { status: 'failed', failure, at: Date.now(), invalidated } as const,
   });
 
-  const folders = await run({ priority: 'user', effect: 'read', retry: true, run: resolveFolders });
-  if (!folders.ok) return failed(folders.error);
-
   let invalidated = false;
   const byFolder: FolderSummaries = {};
   const complete: Folder[] = [];
-  for (const folder of FOLDERS) {
-    if (isStale()) return failed({ kind: 'error', detail: 'sync superseded' }, invalidated);
-    const name = folders.value[folder];
-    if (name === undefined) {
-      // A folder the server does not have holds nothing older either.
-      complete.push(folder);
-      continue;
-    }
+  const syncOne = async (folder: Folder, name: string) => {
     const synced = await run({
       priority: 'user',
       effect: 'read',
@@ -184,13 +232,34 @@ export const syncMailbox = async (
             await cache.clear();
           },
           isStale,
+          read => onFolder(folder, read),
         );
         return outcome.ok ? { ok: true, value: outcome } : { ok: false, error: outcome.failure };
       },
     });
-    if (!synced.ok) return failed(synced.error, invalidated);
+    if (!synced.ok) return synced;
     byFolder[folder] = { uidValidity: synced.value.uidValidity, summaries: synced.value.summaries };
     if (synced.value.complete) complete.push(folder);
+    return synced;
+  };
+
+  // The inbox is always `INBOX`, so it needs no LIST and is the first folder on screen.
+  if (isStale()) return failed({ kind: 'error', detail: 'sync superseded' });
+  const inbox = await syncOne('inbox', 'INBOX');
+  if (!inbox.ok) return failed(inbox.error, invalidated);
+
+  const folders = await run({ priority: 'user', effect: 'read', retry: true, run: resolveFolders });
+  if (!folders.ok) return failed(folders.error, invalidated);
+  for (const folder of FOLDERS.filter(folder => folder !== 'inbox')) {
+    if (isStale()) return failed({ kind: 'error', detail: 'sync superseded' }, invalidated);
+    const name = folders.value[folder];
+    if (name === undefined) {
+      // A folder the server does not have holds nothing older either.
+      complete.push(folder);
+      continue;
+    }
+    const synced = await syncOne(folder, name);
+    if (!synced.ok) return failed(synced.error, invalidated);
   }
 
   // Summaries, not threads: grouping is one global pass only the store can run.

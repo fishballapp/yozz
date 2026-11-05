@@ -367,6 +367,218 @@ describe('syncMailbox', () => {
   });
 });
 
+describe('catching up a stale device', () => {
+  const uids = (summaries: readonly ImapMessageSummary[]) =>
+    summaries.map(s => s.uid).toSorted((a, b) => a - b);
+  const range = (from: number, to: number) =>
+    Array.from({ length: to - from + 1 }, (_, i) => summary(from + i));
+
+  it('syncs the inbox before LIST, so it needs one command less to show', async () => {
+    const order: string[] = [];
+    list.mockImplementation(async () => {
+      order.push('LIST');
+      return { ok: true, value: INBOX_ONLY };
+    });
+    select.mockImplementation(async (name: string) => {
+      order.push(name);
+      return { ok: true, value: { uidValidity: 1, uidNext: 1, exists: 0 } };
+    });
+    await syncMailbox(run, fakeCache());
+    expect(order).toEqual(['INBOX', 'LIST']);
+  });
+
+  it('hands each folder over as it lands, so a later failure keeps the inbox', async () => {
+    list.mockResolvedValue({ ok: true, value: [...INBOX_ONLY, SENT] });
+    selectAnswers({
+      INBOX: { uidValidity: 5, uidNext: 3, exists: 1 },
+      Sent: { uidValidity: 8, uidNext: 3, exists: 1 },
+    });
+    fetchSummariesBySeq
+      .mockResolvedValueOnce({ ok: true, value: [summary(2)] })
+      .mockResolvedValueOnce({ ok: false, reason: { kind: 'closed' } });
+    const landed: [Folder, number, number[]][] = [];
+    const { state } = await syncMailbox(run, fakeCache(), undefined, (folder, read) =>
+      landed.push([folder, read.uidValidity, uids(read.summaries)]),
+    );
+    expect(state.status).toBe('failed');
+    expect(landed).toEqual([['inbox', 5, [2]]]);
+  });
+
+  it('shows new mail before the flags of what was cached, then again with them', async () => {
+    selectAnswers({ INBOX: { uidValidity: 5, uidNext: 12, exists: 2 } });
+    const order: string[] = [];
+    fetchSummaries.mockImplementation(async () => {
+      order.push('new mail');
+      return { ok: true, value: [summary(11)] };
+    });
+    fetchFlags.mockImplementation(async () => {
+      order.push('flags');
+      return { ok: true, value: [{ uid: 10, flags: ['\\Seen'] }] };
+    });
+    const cache = fakeCache({
+      inbox: {
+        sync: { name: 'INBOX', uidValidity: 5, lastUid: 10, complete: true },
+        summaries: [summary(10)],
+      },
+    });
+    await syncMailbox(run, cache, undefined, (_folder, read) => {
+      order.push(
+        `landed ${read.summaries.map(s => `${s.uid}${s.flags.length > 0 ? ' seen' : ''}`).join(', ')}`,
+      );
+    });
+    expect(order).toEqual(['new mail', 'landed 10, 11', 'flags', 'landed 10 seen, 11']);
+  });
+
+  it('hands over a copy filed above the mark once, as the server just read it', async () => {
+    selectAnswers({ INBOX: { uidValidity: 5, uidNext: 12, exists: 2 } });
+    fetchSummaries.mockResolvedValue({ ok: true, value: [summary(11, ['\\Seen'])] });
+    fetchFlags.mockResolvedValue({ ok: true, value: [{ uid: 10, flags: [] }] });
+    const cache = fakeCache({
+      inbox: {
+        sync: { name: 'INBOX', uidValidity: 5, lastUid: 10, complete: true },
+        // 11 was filed here by `recordMoves` before any sync of this folder read it.
+        summaries: [summary(10), summary(11)],
+      },
+    });
+    const landed: ImapMessageSummary[][] = [];
+    await syncMailbox(run, cache, undefined, (_folder, read) => landed.push([...read.summaries]));
+    // Flags are refreshed up to the mark; the copy above it is new mail, read with the rest.
+    expect(fetchFlags).toHaveBeenCalledWith('10:10');
+    expect(landed.map(summaries => summaries.map(s => [s.uid, s.flags]))).toEqual([
+      [
+        [10, []],
+        [11, ['\\Seen']],
+      ],
+      [
+        [10, []],
+        [11, ['\\Seen']],
+      ],
+    ]);
+  });
+
+  it('reads a copy filed into a folder that was empty as new mail, asking no flags for an empty range', async () => {
+    selectAnswers({ INBOX: { uidValidity: 5, uidNext: 2, exists: 1 } });
+    fetchSummaries.mockResolvedValue({ ok: true, value: [summary(1)] });
+    const cache = fakeCache({
+      inbox: {
+        sync: { name: 'INBOX', uidValidity: 5, lastUid: 0, complete: true },
+        // 1 was filed here by `recordMoves`; the folder had nothing when it last synced.
+        summaries: [summary(1)],
+      },
+    });
+    const result = await syncMailbox(run, cache);
+    expect(fetchFlags).not.toHaveBeenCalled();
+    expect(fetchSummaries).toHaveBeenCalledWith('1:*');
+    expect(uids(result.byFolder.inbox?.summaries ?? [])).toEqual([1]);
+    expect(uids(cache.read('inbox').summaries)).toEqual([1]);
+  });
+
+  it('hands over nothing once the sync is superseded', async () => {
+    selectAnswers({ INBOX: { uidValidity: 5, uidNext: 12, exists: 2 } });
+    fetchSummaries.mockResolvedValue({ ok: true, value: [summary(11)] });
+    fetchFlags.mockResolvedValue({ ok: true, value: [{ uid: 10, flags: [] }] });
+    const cache = fakeCache({
+      inbox: {
+        sync: { name: 'INBOX', uidValidity: 5, lastUid: 10, complete: true },
+        summaries: [summary(10)],
+      },
+    });
+    const onFolder = vi.fn();
+    await syncMailbox(run, cache, () => true, onFolder);
+    expect(onFolder).not.toHaveBeenCalled();
+  });
+
+  it('reads a gap wider than a window in uids as the newest window, and keeps the cache when it reaches the mark', async () => {
+    // Uids 101..400 were handed out since the mark, but most moved away: 150 messages are new.
+    selectAnswers({ INBOX: { uidValidity: 5, uidNext: 401, exists: 230 } });
+    fetchSummariesBySeq.mockResolvedValue({
+      ok: true,
+      value: [summary(99), summary(100), ...range(251, 400)],
+    });
+    fetchFlags.mockResolvedValue({
+      ok: true,
+      value: [98, 99, 100].map(uid => ({ uid, flags: [] })),
+    });
+    const cache = fakeCache({
+      inbox: {
+        sync: { name: 'INBOX', uidValidity: 5, lastUid: 100, complete: true },
+        summaries: [summary(98), summary(99), summary(100)],
+      },
+    });
+    await syncMailbox(run, cache);
+    expect(fetchSummaries).not.toHaveBeenCalled();
+    expect(fetchSummariesBySeq).toHaveBeenCalledWith('31:*');
+    expect(fetchFlags).toHaveBeenCalledWith('98:100');
+    const { summaries, sync } = cache.read('inbox');
+    expect(uids(summaries)).toEqual([98, 99, 100, ...range(251, 400).map(s => s.uid)]);
+    expect(sync).toMatchObject({ lastUid: 400, complete: true });
+  });
+
+  it('starts a folder over when more than a window arrived, so the cache never skips mail', async () => {
+    // 300 new messages: the newest 200 by sequence number all sit above the mark.
+    selectAnswers({ INBOX: { uidValidity: 5, uidNext: 401, exists: 303 } });
+    fetchSummariesBySeq.mockResolvedValue({ ok: true, value: range(201, 400) });
+    const cache = fakeCache({
+      inbox: {
+        sync: {
+          name: 'INBOX',
+          uidValidity: 5,
+          lastUid: 100,
+          complete: true,
+          hasAttachmentNames: false,
+        },
+        summaries: [summary(98), summary(99), summary(100)],
+        bodies: new Map([[100, { paragraphs: ['kept'] }]]),
+      },
+    });
+    const landed: number[][] = [];
+    const { state } = await syncMailbox(run, cache, undefined, (_folder, read) =>
+      landed.push(uids(read.summaries)),
+    );
+    expect(fetchSummariesBySeq).toHaveBeenCalledWith('104:*');
+    // Nothing cached is shown or refreshed: it is cut off from the window by mail nobody read.
+    expect(fetchFlags).not.toHaveBeenCalled();
+    expect(fetchAttachmentNames).not.toHaveBeenCalled();
+    expect(landed).toEqual([range(201, 400).map(s => s.uid)]);
+    const { summaries, sync, bodies } = cache.read('inbox');
+    expect(uids(summaries)).toEqual(range(201, 400).map(s => s.uid));
+    expect(sync).toEqual({
+      name: 'INBOX',
+      uidValidity: 5,
+      lastUid: 400,
+      complete: false,
+      hasAttachmentNames: true,
+    });
+    // Older mail pages back to it; its body is still good under the same UIDVALIDITY.
+    expect(state).toMatchObject({
+      status: 'synced',
+      complete: ['sent', 'archive', 'trash', 'drafts'],
+    });
+    expect(bodies.has(100)).toBe(true);
+  });
+
+  it('pages back from a fresh start into the mail the gap skipped', async () => {
+    selectAnswers({ INBOX: { uidValidity: 5, uidNext: 401, exists: 303 } });
+    fetchSummariesBySeq.mockResolvedValueOnce({ ok: true, value: range(201, 400) });
+    const cache = fakeCache({
+      inbox: {
+        sync: { name: 'INBOX', uidValidity: 5, lastUid: 100, complete: true },
+        summaries: [summary(100)],
+      },
+    });
+    await syncMailbox(run, cache);
+
+    // uid 201 is sequence 104; the window below it is 1..103, the old mail and the rest of the gap.
+    ensureSelected.mockResolvedValue({ ok: true, value: { uidValidity: 5 } });
+    fetchSummaries.mockResolvedValue({ ok: true, value: [{ ...summary(201), seq: 104 }] });
+    fetchSummariesBySeq.mockResolvedValueOnce({ ok: true, value: range(98, 200) });
+    const res = await loadOlder(run, cache.folder('inbox'));
+    expect(fetchSummariesBySeq).toHaveBeenLastCalledWith('1:103');
+    expect(res).toEqual({ ok: true, value: { loaded: 103, complete: true } });
+    expect(uids(cache.read('inbox').summaries)).toEqual(range(98, 400).map(s => s.uid));
+  });
+});
+
 describe('the one-time attachment-name upgrade', () => {
   const OLD_MARK = { name: 'INBOX', uidValidity: 5, lastUid: 12, complete: false };
   const body = {

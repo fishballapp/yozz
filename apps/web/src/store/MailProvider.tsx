@@ -668,7 +668,16 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
             syncSeqRef.current += 1;
             const seq = syncSeqRef.current;
             setSyncStates(current => ({ ...current, [address]: { status: 'syncing' } }));
-            const result = await syncMailbox(runOn(mailbox), cache, isStale);
+            // Each folder shows as it lands, the inbox first; pending ops stay laid over it until
+            // the whole pass retires them below. A folder read after a write landed may disagree
+            // with one read before it, so a torn pass shows no more of itself.
+            const result = await syncMailbox(runOn(mailbox), cache, isStale, (folder, read) => {
+              if (isStale() || entry.isTorn) return;
+              setBaseByMailbox(current => ({
+                ...current,
+                [address]: { ...current[address], [folder]: read },
+              }));
+            });
             if (generation !== sessionGeneration.current) return;
             // Its folders were read on either side of a write; the next pass lands instead.
             if (result.state.status === 'synced' && entry.isTorn) {

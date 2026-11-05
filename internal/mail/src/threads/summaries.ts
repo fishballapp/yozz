@@ -16,13 +16,13 @@ import {
 } from './thread.ts';
 import { baseSubject, groupIntoThreads } from './threading.ts';
 
-/** Each folder's summaries with the UIDVALIDITY they were read under; uids mean nothing without it. */
-export type FolderSummaries = Partial<
-  Record<
-    Folder,
-    { readonly uidValidity: number; readonly summaries: readonly ImapMessageSummary[] }
-  >
->;
+/** A folder's summaries with the UIDVALIDITY they were read under; uids mean nothing without it. */
+export type FolderRead = {
+  readonly uidValidity: number;
+  readonly summaries: readonly ImapMessageSummary[];
+};
+
+export type FolderSummaries = Partial<Record<Folder, FolderRead>>;
 
 /** The folders whose messages are threaded as mail. Drafts are synced but are not mail. */
 const THREADED_FOLDERS = FOLDERS.filter(folder => folder !== 'drafts');

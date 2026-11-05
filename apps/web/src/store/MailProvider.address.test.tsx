@@ -21,8 +21,12 @@ const noFiles = fakeFileStore().store;
 // @ts-expect-error React reads it off the global
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
-/** A sync that runs until the test finishes it, with the `isStale` it was handed. */
-type HeldSync = { isStale: () => boolean; finish: () => void };
+/** A sync that runs until the test finishes it, with the `isStale` and `onFolder` it was handed. */
+type HeldSync = {
+  isStale: () => boolean;
+  land: Parameters<typeof import('@yozz.app/mail/threads/sync').syncMailbox>[3] & {};
+  finish: () => void;
+};
 
 const mocks = vi.hoisted(() => ({
   // What the mail store reads of the session.
@@ -68,6 +72,7 @@ vi.mock('../threads/cache', () => ({
     clear: async () => {
       mocks.events.push(`clear ${userId} ${address}`);
     },
+    folder: () => ({}),
   }),
   clearMailCache: async () => {},
 }));
@@ -78,10 +83,17 @@ vi.mock('@yozz.app/mail/threads/hydrate', async importOriginal => ({
 }));
 vi.mock('@yozz.app/mail/threads/sync', () => ({
   prefetchBodies: () => {},
-  syncMailbox: (_run: unknown, _cache: unknown, isStale: () => boolean) =>
+  loadOlder: async () => ({ ok: true, value: { loaded: 0, complete: false } }),
+  syncMailbox: (
+    _run: unknown,
+    _cache: unknown,
+    isStale: () => boolean,
+    land: HeldSync['land'] = () => {},
+  ) =>
     new Promise(resolve => {
       mocks.syncs.push({
         isStale,
+        land,
         finish: () =>
           resolve({
             byFolder: {},
@@ -198,6 +210,65 @@ afterEach(async () => {
   for (const unmount of unmounts.splice(0)) await unmount();
   mocks.session = null;
   vi.clearAllMocks();
+});
+
+describe('sync', () => {
+  const inboxRead = {
+    uidValidity: 1,
+    summaries: [
+      {
+        seq: 1,
+        uid: 7,
+        flags: [],
+        internalDate: '01-Nov-2026 09:00:00 +0000',
+        size: 100,
+        envelope: {
+          date: null,
+          subject: 'New since you were away',
+          subjectRaw: null,
+          from: [{ name: null, mailbox: 'carol', host: 'example.com' }],
+          sender: [],
+          replyTo: [],
+          to: [],
+          cc: [],
+          bcc: [],
+          inReplyTo: null,
+          messageId: '<new@example.com>',
+        },
+        references: [],
+        gmailThreadId: null,
+        attachmentNames: [],
+      },
+    ],
+  };
+
+  it('shows a folder as soon as it lands, before the rest of the mailbox', async () => {
+    const { mail } = await mount(await vaultWith([ALICE]));
+    await vi.waitFor(() => expect(mocks.syncs).toHaveLength(1));
+
+    act(() => mocks.syncs[0]?.land('inbox', inboxRead));
+    expect(mail().threads.map(thread => thread.subject)).toEqual(['New since you were away']);
+    expect(mail().syncStates[ALICE.address]).toEqual({ status: 'syncing' });
+  });
+
+  it('shows no more of a pass once a write lands between its folders', async () => {
+    const { mail } = await mount(await vaultWith([ALICE]));
+    await vi.waitFor(() => expect(mocks.syncs).toHaveLength(1));
+
+    // An older page landing mid-pass tears it: folders read after it may disagree with those before.
+    await act(() => mail().loadOlder(ALICE.address));
+    act(() => mocks.syncs[0]?.land('inbox', inboxRead));
+    expect(mail().threads).toEqual([]);
+  });
+
+  it('shows nothing from a sync whose address was removed meanwhile', async () => {
+    const { mail } = await mount(await vaultWith([ALICE]));
+    await vi.waitFor(() => expect(mocks.syncs).toHaveLength(1));
+
+    await act(() => mail().removeAddress(ALICE.address));
+    act(() => mocks.syncs[0]?.land('inbox', inboxRead));
+    expect(mail().threads).toEqual([]);
+  });
 });
 
 describe('setSenderName', () => {
