@@ -55,7 +55,11 @@ export const resolveFolders = async (
   };
 };
 
-/** Resolve a destination folder, creating it when LIST has none. Used by moves only. */
+/**
+ * Resolve a destination folder, creating it when LIST has none. Used by moves only. A refused
+ * CREATE asks LIST once more, since a client that keeps LIST's answer (the web app's live
+ * connection) may not know of a folder made elsewhere since.
+ */
 export const ensureFolderName = async (
   client: ImapClient,
   folder: MovableFolder,
@@ -66,6 +70,9 @@ export const ensureFolderName = async (
   if (resolved !== undefined) return { ok: true, value: resolved };
   const name = CREATED_NAME[folder];
   const created = await client.create(name);
-  if (!created.ok) return { ok: false, error: { kind: 'imap', reason: created.reason } };
-  return { ok: true, value: name };
+  if (created.ok) return { ok: true, value: name };
+  const again = await resolveFolders(client);
+  const found = again.ok ? again.value[folder] : undefined;
+  if (found !== undefined) return { ok: true, value: found };
+  return { ok: false, error: { kind: 'imap', reason: created.reason } };
 };

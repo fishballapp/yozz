@@ -104,6 +104,7 @@ const INBOX_HELD = { inbox: { uidValidity: 1, summaries: [summary(5)] } };
 const synced = (complete: readonly string[]) => ({
   state: { status: 'synced', at: 1, complete },
   byFolder: INBOX_HELD,
+  scope: 'all',
 });
 const FAILURE = { kind: 'stalled' } as const;
 
@@ -216,6 +217,7 @@ describe('older mail across two mailboxes whose windows were both emptied', () =
     mocks.syncMailbox.mockResolvedValue({
       state: { status: 'synced', at: 1, complete: ['sent', 'archive', 'trash', 'drafts'] },
       byFolder: emptied,
+      scope: 'all',
     });
     mocks.loadOlder.mockImplementation(async (_run, folderCache: { address: string }) => {
       mocks.cachedFor[folderCache.address] = INBOX_HELD;

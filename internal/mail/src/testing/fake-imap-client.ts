@@ -24,6 +24,7 @@ export const stubImapClient = (over: Partial<ImapClient> = {}): ImapClient => {
     fetchFlags: async () => ({ ok: true, value: [] }),
     fetchAttachmentNames: async () => ({ ok: true, value: [] }),
     fetchRaw: async () => ({ ok: true, value: new Uint8Array() }),
+    fetchRawMessages: async () => ({ ok: true, value: [] }),
     storeFlags: async () => ({ ok: true, value: undefined }),
     append: async () => ({ ok: true, value: null }),
     expunge: async () => ({ ok: true, value: undefined }),

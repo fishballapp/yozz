@@ -1,4 +1,11 @@
-import type { ImapClient, ImapIdle, ImapSelected, ImapUntagged } from '@yozz.app/imap';
+import type {
+  ImapClient,
+  ImapIdle,
+  ImapMailbox,
+  ImapResult,
+  ImapSelected,
+  ImapUntagged,
+} from '@yozz.app/imap';
 import type { InboundAddress } from '@yozz.app/mail/addresses/record';
 import {
   appendQuietLimitMs,
@@ -92,6 +99,12 @@ type Connection = {
    */
   inboxRead: ImapSelected | null;
   idleDroppedAt: number | null;
+  /**
+   * What `LIST` answered this session, by reference and pattern: folders are seldom made or renamed,
+   * and a LIST can take seconds. Forgotten when the login changes, when we create a folder, and
+   * when a SELECT, MOVE or APPEND is refused, as one naming a folder gone since would be.
+   */
+  listed: Map<string, readonly ImapMailbox[]>;
   /** When work here last moved: bytes either way, a task starting or ending, or work arriving. */
   progressAt: number;
   /** How long that may last before the work has stalled: `STALL_MS`, or what the running APPEND allows. */
@@ -212,6 +225,11 @@ export const createLiveManager = (deps: {
   };
 
   const wrapClient = (conn: Connection, socket: () => Socket, client: ImapClient): MailClient => {
+    /** A refused SELECT, MOVE or APPEND may name a folder renamed or deleted elsewhere since LIST. */
+    const forgetListOnRefusal = <T>(res: ImapResult<T>): ImapResult<T> => {
+      if (!res.ok && res.reason.kind === 'no') conn.listed.clear();
+      return res;
+    };
     const select: ImapClient['select'] = async folderName => {
       // Commands go out in turn, so until this lands no one knows which folder the next one runs in:
       // a task that believed the last answer would send its command after this SELECT, into this folder.
@@ -220,7 +238,7 @@ export const createLiveManager = (deps: {
       socket().selects += 1;
       const sent = socket().selects;
       // Always read-write: flag writes and APPEND need it, and EXAMINE would block them.
-      const res = await client.select(folderName, { readOnly: false });
+      const res = forgetListOnRefusal(await client.select(folderName, { readOnly: false }));
       // A SELECT sent after this one (a task queued while resting re-selected INBOX) is still
       // running, and the untagged answers on the wire are its folder's, not this one's.
       if (sent !== socket().selects) return res;
@@ -242,10 +260,25 @@ export const createLiveManager = (deps: {
         }
         return res;
       },
+      list: async (reference, pattern) => {
+        const key = `${reference}\n${pattern}`;
+        const known = conn.listed.get(key);
+        if (known !== undefined) return { ok: true, value: known };
+        const res = await client.list(reference, pattern);
+        if (res.ok) conn.listed.set(key, res.value);
+        return res;
+      },
+      move: async (uidSet, folderName) =>
+        forgetListOnRefusal(await client.move(uidSet, folderName)),
+      create: async folderName => {
+        // Refused too: a folder that already exists is one the last LIST did not name.
+        conn.listed.clear();
+        return client.create(folderName);
+      },
       append: async (folderName, message, flags, internalDate) => {
         conn.stallAfterMs = appendQuietLimitMs(message.length);
         try {
-          return await client.append(folderName, message, flags, internalDate);
+          return forgetListOnRefusal(await client.append(folderName, message, flags, internalDate));
         } finally {
           conn.stallAfterMs = STALL_MS;
           // A long wait is over, so the shorter limit does not count it.
@@ -549,6 +582,7 @@ export const createLiveManager = (deps: {
     if (existing !== undefined) {
       // Changed credentials: the running task finishes on the socket it started on, and
       // `dropStaleSocket` closes it before the next one starts. Never a LOGOUT mid-task.
+      if (existing.imapKey !== key) existing.listed.clear();
       existing.imap = mailbox.imap;
       existing.imapKey = key;
       return existing;
@@ -569,6 +603,7 @@ export const createLiveManager = (deps: {
       changedAt: null,
       inboxRead: null,
       idleDroppedAt: null,
+      listed: new Map(),
       progressAt: now(),
       stallAfterMs: STALL_MS,
       abort: null,

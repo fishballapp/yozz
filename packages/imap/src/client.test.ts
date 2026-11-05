@@ -580,6 +580,20 @@ describe('IMAP Client transcripts and state machine', () => {
     });
   });
 
+  it('fetches many messages whole in one command, by uid, skipping a FETCH with no body', async () => {
+    const steps = parseTranscript('fetch-raw-many.txt');
+    await runTranscriptSession(steps, async client => {
+      const res = await client.fetchRawMessages('42,57:58');
+      expect(res).toEqual({
+        ok: true,
+        value: [
+          { uid: 42, bytes: stringToBytes('a\n)\n*\nb') },
+          { uid: 57, bytes: stringToBytes('hello') },
+        ],
+      });
+    });
+  });
+
   it('handles LOGIN with non-ASCII password under LITERAL+ (one round trip)', async () => {
     const steps = parseTranscript('login-literal-plus.txt');
     await runTranscriptSession(steps, async client => {

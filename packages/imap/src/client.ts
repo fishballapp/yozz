@@ -66,6 +66,11 @@ export type ImapMessageFlags = {
   readonly flags: readonly string[];
 };
 
+export type ImapRawMessage = {
+  readonly uid: number;
+  readonly bytes: Uint8Array;
+};
+
 export type ImapMessageAttachmentNames = {
   readonly uid: number;
   readonly attachmentNames: readonly string[];
@@ -124,6 +129,8 @@ export type ImapClient = {
     uidSet: string,
   ) => Promise<ImapResult<readonly ImapMessageAttachmentNames[]>>;
   readonly fetchRaw: (uid: number) => Promise<ImapResult<Uint8Array>>;
+  /** Many messages whole in one command; a uid the server no longer has is simply absent. */
+  readonly fetchRawMessages: (uidSet: string) => Promise<ImapResult<readonly ImapRawMessage[]>>;
   readonly storeFlags: (
     uidSet: string,
     mode: 'add' | 'remove' | 'set',
@@ -849,7 +856,7 @@ export const createImapClient = (
 
     fetchRaw: uid =>
       enqueueCommand(async () => {
-        const res = await executeCommand(tag => buildFetchRawCommand(tag, uid));
+        const res = await executeCommand(tag => buildFetchRawCommand(tag, String(uid)));
         if (!res.ok) return res;
 
         for (const item of res.value.untagged) {
@@ -863,6 +870,24 @@ export const createImapClient = (
         }
 
         return { ok: false, reason: { kind: 'no', text: 'Raw message body not found' } };
+      }),
+
+    fetchRawMessages: uidSet =>
+      enqueueCommand(async () => {
+        const res = await executeCommand(tag => buildFetchRawCommand(tag, uidSet));
+        if (!res.ok) return res;
+        return {
+          ok: true,
+          value: res.value.untagged.flatMap(item => {
+            if (item.kind !== 'fetch') return [];
+            const uid = item.items.find(({ kind }) => kind === 'uid');
+            const body = item.items.find(({ kind }) => kind === 'body');
+            // A FETCH that carries no body (an unsolicited flag change) is not one of these.
+            return uid?.kind === 'uid' && body?.kind === 'body' && body.bytes !== null
+              ? [{ uid: uid.uid, bytes: body.bytes }]
+              : [];
+          }),
+        };
       }),
 
     storeFlags: (uidSet, mode, flags) =>

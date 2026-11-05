@@ -10,6 +10,7 @@ export {
   type ImapMailbox,
   type ImapMessageAttachmentNames,
   type ImapMessageSummary,
+  type ImapRawMessage,
   type ImapResponseCode,
   type ImapSelected,
   type ImapUntagged,

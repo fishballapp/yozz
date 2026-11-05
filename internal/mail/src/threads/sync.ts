@@ -4,6 +4,7 @@ import {
   type ImapClient,
   type ImapFailure,
   type ImapMessageSummary,
+  type ImapRawMessage,
   type ImapResult,
   uidSets,
 } from '@yozz.app/imap';
@@ -40,6 +41,8 @@ type FolderOutcome =
       readonly ok: true;
       /** The cache reaches the folder's oldest message. */
       readonly complete: boolean;
+      /** Cached mail the server no longer has here: moved or deleted, perhaps by another client. */
+      readonly hasLostMail: boolean;
     })
   | { readonly ok: false; readonly failure: MailConnectionFailure; readonly invalidated: boolean };
 
@@ -190,13 +193,20 @@ const syncFolder = async (
     hasAttachmentNames: true,
   });
   onRead({ uidValidity, summaries: all });
-  return { ok: true, summaries: all, complete, uidValidity };
+  const hasLostMail = cached.some(summary => !keptUids.has(summary.uid));
+  return { ok: true, summaries: all, complete, uidValidity, hasLostMail };
 };
+
+/** What a sync reads: every folder, or the inbox alone, which is where new mail arrives. */
+export type SyncScope = 'all' | 'inbox';
 
 /**
  * The inbox, then LIST, then each other folder in turn. Each folder is its own task, so a click
  * queued meanwhile (a body, a flag, a move) runs before the next folder rather than after the
  * mailbox, and `onFolder` hears each as it lands, so new mail shows before the rest has caught up.
+ * An `inbox` sync stops after the inbox, unless INBOX was renumbered, which cleared every folder's
+ * cache, or mail it held has gone, most likely to a folder another client filed it in: then the rest
+ * is read too. `scope` says which it was.
  */
 export const syncMailbox = async (
   run: RunTask,
@@ -205,13 +215,16 @@ export const syncMailbox = async (
   isStale: () => boolean = () => false,
   /** A folder's summaries as soon as they are read, its new mail first; see `syncFolder`. */
   onFolder: (folder: Folder, read: FolderRead) => void = () => {},
+  wanted: SyncScope = 'all',
 ): Promise<{
   readonly state: MailboxSyncState;
   readonly byFolder: FolderSummaries;
+  readonly scope: SyncScope;
 }> => {
   const failed = (failure: MailConnectionFailure, invalidated = false) => ({
     byFolder: {} as FolderSummaries,
     state: { status: 'failed', failure, at: Date.now(), invalidated } as const,
+    scope: wanted,
   });
 
   let invalidated = false;
@@ -247,6 +260,9 @@ export const syncMailbox = async (
   if (isStale()) return failed({ kind: 'error', detail: 'sync superseded' });
   const inbox = await syncOne('inbox', 'INBOX');
   if (!inbox.ok) return failed(inbox.error, invalidated);
+  if (wanted === 'inbox' && !invalidated && !inbox.value.hasLostMail) {
+    return { byFolder, state: { status: 'synced', at: Date.now(), complete }, scope: 'inbox' };
+  }
 
   const folders = await run({ priority: 'user', effect: 'read', retry: true, run: resolveFolders });
   if (!folders.ok) return failed(folders.error, invalidated);
@@ -263,7 +279,7 @@ export const syncMailbox = async (
   }
 
   // Summaries, not threads: grouping is one global pass only the store can run.
-  return { byFolder, state: { status: 'synced', at: Date.now(), complete } };
+  return { byFolder, state: { status: 'synced', at: Date.now(), complete }, scope: 'all' };
 };
 
 /**
@@ -527,11 +543,46 @@ export const recordMoves = async (
   return { isComplete: unfiled === 0 };
 };
 
+/** What a prefetch reads, the inbox first: Trash is seldom read again, and Drafts are not threaded. */
+const PREFETCH_FOLDERS = ['inbox', 'sent', 'archive'] as const satisfies readonly Folder[];
+
 /**
- * After a sync: the newest small bodies not yet cached, at background priority. Failures are
- * swallowed; each body that lands is handed to `onBody` so the list can show its excerpt.
+ * About this much raw mail per command. A command costs seconds on a slow server whatever it
+ * carries, and a click waits behind at most one of these.
  */
-export const prefetchBodies = (
+const PREFETCH_BATCH_BYTES = 1024 * 1024;
+
+/** `items` in order, cut wherever the next would take a chunk's weight past `max`; one heavier alone is a chunk. */
+const chunkByWeight = <T>(
+  items: readonly T[],
+  weightOf: (item: T) => number,
+  max: number,
+): readonly (readonly T[])[] => {
+  const chunks: { items: T[]; weight: number }[] = [];
+  for (const item of items) {
+    const weight = weightOf(item);
+    const last = chunks.at(-1);
+    if (last !== undefined && last.weight + weight <= max) {
+      last.items.push(item);
+      last.weight += weight;
+      continue;
+    }
+    chunks.push({ items: [item], weight });
+  }
+  return chunks.map(({ items }) => items);
+};
+
+/** A body a prefetch stored, where it sits. */
+export type PrefetchedBody = { readonly at: Omit<Location, 'mailbox'>; readonly body: FetchedBody };
+
+/**
+ * After a sync: the newest small bodies not yet cached, at background priority, several to a
+ * `UID FETCH` (`PREFETCH_BATCH_BYTES`), the inbox's queued first. Each batch checks the cache again
+ * when its turn comes, so a second sync's prefetch does not fetch what the first's has stored.
+ * Failures are swallowed; each batch that lands is handed to `onBodies` at once, so the list shows
+ * its excerpts with one update.
+ */
+export const prefetchBodies = async (
   run: RunTask,
   cache: MailCache,
   byFolder: FolderSummaries,
@@ -539,53 +590,67 @@ export const prefetchBodies = (
   perFolder: number,
   lookupTxt: TxtLookup,
   isStale: () => boolean = () => false,
-  onBody: (at: Omit<Location, 'mailbox'>, body: FetchedBody) => void = () => {},
-): void => {
-  for (const folder of FOLDERS) {
+  onBodies: (bodies: readonly PrefetchedBody[]) => void = () => {},
+): Promise<void> => {
+  const batches: Promise<void>[] = [];
+  for (const folder of PREFETCH_FOLDERS) {
     const read = byFolder[folder];
-    if (read === undefined) continue;
+    if (read === undefined || isStale()) continue;
     const { summaries, uidValidity } = read;
     const folderCache = cache.folder(folder);
-    void (async () => {
-      const mark = await folderCache.getSync();
-      if (mark === null) return;
-      const cachedUids = await folderCache.listBodyUids();
-      // Newest first, counting only what is eligible.
-      let queued = 0;
-      for (const summary of summaries.toSorted((a, b) => b.uid - a.uid)) {
-        if (queued >= perFolder || isStale()) return;
-        if (summary.size === null || summary.size > ceilingBytes) continue;
-        if (cachedUids.has(summary.uid)) continue;
-        queued += 1;
-        void (async () => {
-          const raw = await run({
+    // Awaited folder by folder, so every inbox batch is queued before the next folder's.
+    const mark = await folderCache.getSync();
+    if (mark === null || mark.uidValidity !== uidValidity) continue;
+    const cachedUids = await folderCache.listBodyUids();
+    // Newest first, counting only what is eligible.
+    const wanted = summaries
+      .filter(({ uid, size }) => size !== null && size <= ceilingBytes && !cachedUids.has(uid))
+      .toSorted((a, b) => b.uid - a.uid)
+      .slice(0, perFolder);
+    for (const batch of chunkByWeight(wanted, ({ size }) => size ?? 0, PREFETCH_BATCH_BYTES)) {
+      batches.push(
+        (async () => {
+          const raw = await run<readonly ImapRawMessage[]>({
             priority: 'background',
             effect: 'read',
             retry: true,
             run: async client => {
-              if (isStale()) return { ok: true, value: null };
+              const none = { ok: true, value: [] } as const;
+              if (isStale()) return none;
+              const storedNow = await folderCache.listBodyUids();
+              const uids = batch.map(({ uid }) => uid).filter(uid => !storedNow.has(uid));
+              if (uids.length === 0) return none;
               const selected = await client.ensureSelected(mark.name);
               if (!selected.ok) {
                 return { ok: false, error: { kind: 'imap', reason: selected.reason } };
               }
-              const fetched = await client.fetchRaw(summary.uid);
-              if (!fetched.ok) {
-                return { ok: false, error: { kind: 'imap', reason: fetched.reason } };
+              // Renumbered since the sync: these uids may name other mail now.
+              if ((selected.value.uidValidity ?? 0) !== uidValidity) return none;
+              const fetched: ImapRawMessage[] = [];
+              for (const set of uidSets(uids)) {
+                const res = await client.fetchRawMessages(set);
+                if (!res.ok) return { ok: false, error: { kind: 'imap', reason: res.reason } };
+                fetched.push(...res.value);
               }
-              return fetched;
+              return { ok: true, value: fetched };
             },
           });
           // After the task: the connection is not held while DNS answers.
-          if (!raw.ok || raw.value === null || isStale()) return;
-          try {
-            const body = await parseBody(raw.value, lookupTxt);
-            await folderCache.putBody(summary.uid, body);
-            onBody({ folder, uidValidity, uid: summary.uid }, body);
-          } catch {
-            // Best effort.
+          if (!raw.ok || isStale()) return;
+          const landed: PrefetchedBody[] = [];
+          for (const { uid, bytes } of raw.value) {
+            try {
+              const body = await parseBody(bytes, lookupTxt);
+              await folderCache.putBody(uid, body);
+              landed.push({ at: { folder, uidValidity, uid }, body });
+            } catch {
+              // Best effort.
+            }
           }
-        })();
-      }
-    })();
+          if (landed.length > 0 && !isStale()) onBodies(landed);
+        })(),
+      );
+    }
   }
+  await Promise.all(batches);
 };

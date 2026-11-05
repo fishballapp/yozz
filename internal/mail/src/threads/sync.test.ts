@@ -14,7 +14,7 @@ const fetchSummaries = vi.fn();
 const fetchSummariesBySeq = vi.fn();
 const fetchFlags = vi.fn();
 const fetchAttachmentNames = vi.fn();
-const fetchRaw = vi.fn();
+const fetchRawMessages = vi.fn();
 const move = vi.fn();
 const storeFlags = vi.fn();
 const create = vi.fn();
@@ -27,7 +27,7 @@ const fakeClient = {
   fetchSummariesBySeq,
   fetchFlags,
   fetchAttachmentNames,
-  fetchRaw,
+  fetchRawMessages,
   move,
   storeFlags,
   create,
@@ -150,7 +150,7 @@ beforeEach(() => {
   fetchSummariesBySeq.mockReset();
   fetchFlags.mockReset();
   fetchAttachmentNames.mockReset();
-  fetchRaw.mockReset();
+  fetchRawMessages.mockReset();
   move.mockReset();
   storeFlags.mockReset();
   create.mockReset();
@@ -191,6 +191,80 @@ describe('syncMailbox', () => {
     const { state } = await syncMailbox(serial, fakeCache());
     expect(state.status).toBe('synced');
     expect(order).toEqual(['INBOX', 'open a message', 'Sent']);
+  });
+
+  it('an inbox sync reads INBOX alone: no LIST, no other folder', async () => {
+    list.mockResolvedValue({ ok: true, value: [...INBOX_ONLY, SENT, ARCHIVE] });
+    selectAnswers({
+      INBOX: { uidValidity: 1, uidNext: 3, exists: 2 },
+      Sent: { uidValidity: 1, uidNext: 1, exists: 0 },
+    });
+    fetchSummaries.mockResolvedValue({ ok: true, value: [summary(2)] });
+    fetchFlags.mockResolvedValue({ ok: true, value: [{ uid: 1, flags: [] }] });
+    const cache = fakeCache({
+      inbox: {
+        sync: { name: 'INBOX', uidValidity: 1, lastUid: 1, complete: true },
+        summaries: [summary(1)],
+      },
+    });
+    const onFolder = vi.fn();
+    const res = await syncMailbox(run, cache, () => false, onFolder, 'inbox');
+    expect(res.scope).toBe('inbox');
+    expect(res.state.status).toBe('synced');
+    expect(Object.keys(res.byFolder)).toEqual(['inbox']);
+    expect(list).not.toHaveBeenCalled();
+    expect(select.mock.calls.map(([name]) => name)).toEqual(['INBOX']);
+    expect(
+      onFolder.mock.calls.at(-1)?.[1].summaries.map(({ uid }: { uid: number }) => uid),
+    ).toEqual([1, 2]);
+  });
+
+  it('an inbox sync that finds cached mail gone from INBOX reads every folder, where it went', async () => {
+    list.mockResolvedValue({ ok: true, value: [...INBOX_ONLY, ARCHIVE] });
+    selectAnswers({
+      INBOX: { uidValidity: 1, uidNext: 3, exists: 1 },
+      Archive: { uidValidity: 1, uidNext: 1, exists: 0 },
+    });
+    // Another client archived uid 1: the flags fetch no longer answers for it.
+    fetchFlags.mockResolvedValue({ ok: true, value: [{ uid: 2, flags: [] }] });
+    const cache = fakeCache({
+      inbox: {
+        sync: { name: 'INBOX', uidValidity: 1, lastUid: 2, complete: true },
+        summaries: [summary(1), summary(2)],
+      },
+    });
+    const res = await syncMailbox(
+      run,
+      cache,
+      () => false,
+      () => {},
+      'inbox',
+    );
+    expect(res.scope).toBe('all');
+    expect(select.mock.calls.map(([name]) => name)).toEqual(['INBOX', 'Archive']);
+  });
+
+  it('an inbox sync that finds INBOX renumbered reads every folder, whose cache that cleared', async () => {
+    list.mockResolvedValue({ ok: true, value: [...INBOX_ONLY, SENT] });
+    selectAnswers({
+      INBOX: { uidValidity: 2, uidNext: 1, exists: 0 },
+      Sent: { uidValidity: 1, uidNext: 1, exists: 0 },
+    });
+    const cache = fakeCache({
+      inbox: {
+        sync: { name: 'INBOX', uidValidity: 1, lastUid: 1, complete: true },
+        summaries: [summary(1)],
+      },
+    });
+    const res = await syncMailbox(
+      run,
+      cache,
+      () => false,
+      () => {},
+      'inbox',
+    );
+    expect(res.scope).toBe('all');
+    expect(select.mock.calls.map(([name]) => name)).toEqual(['INBOX', 'Sent']);
   });
 
   it('first sync fetches a window and records the sync mark', async () => {
@@ -923,20 +997,32 @@ describe('loadOlder', () => {
 });
 
 describe('prefetchBodies', () => {
-  it('fetches only newest under-ceiling uncached bodies', async () => {
-    selectAnswers({ INBOX: { uidValidity: 1, uidNext: 10, exists: 3 } });
+  const rawOf = (text: string) => new TextEncoder().encode(`Subject: hi\r\n\r\n${text}\r\n`);
+  /** Answers every uid asked for, as the uid set names them. */
+  const answerEvery = () =>
+    fetchRawMessages.mockImplementation(async (set: string) => ({
+      ok: true,
+      value: set.split(',').flatMap(part => {
+        const [first, last = first] = part.split(':').map(Number);
+        return Array.from({ length: (last ?? 0) - (first ?? 0) + 1 }, (_, i) => ({
+          uid: (first ?? 0) + i,
+          bytes: rawOf(`body ${(first ?? 0) + i}`),
+        }));
+      }),
+    }));
+
+  it('fetches the newest under-ceiling uncached bodies in one command', async () => {
     ensureSelected.mockResolvedValue({ ok: true, value: { uidValidity: 1 } });
-    const raw = new TextEncoder().encode('Subject: hi\r\n\r\nhello\r\n');
-    fetchRaw.mockResolvedValue({ ok: true, value: raw });
+    answerEvery();
     const cache = fakeCache({
       inbox: {
-        sync: { name: 'INBOX', uidValidity: 1, lastUid: 3, complete: true },
-        summaries: [summary(1, [], 100), summary(2, [], 100), summary(3, [], 9_999_999)],
+        sync: { name: 'INBOX', uidValidity: 1, lastUid: 4, complete: true },
+        summaries: [summary(1), summary(2), summary(3, [], 9_999_999), summary(4)],
         bodies: new Map([[2, { paragraphs: ['cached'] }]]),
       },
     });
-    // uid 3 oversized, uid 2 already cached, so only uid 1 is fetched.
-    prefetchBodies(
+    // uid 3 oversized, uid 2 already cached.
+    await prefetchBodies(
       run,
       cache,
       { inbox: { uidValidity: 1, summaries: cache.read('inbox').summaries } },
@@ -944,17 +1030,13 @@ describe('prefetchBodies', () => {
       30,
       noKeys,
     );
-    await vi.waitFor(() => expect(fetchRaw).toHaveBeenCalledTimes(1));
-    expect(fetchRaw).toHaveBeenCalledWith(1);
+    expect(fetchRawMessages.mock.calls).toEqual([['1,4']]);
     expect(ensureSelected).toHaveBeenCalledWith('INBOX');
   });
 
   it('counts the per-folder budget over eligible bodies, not over the newest uids', async () => {
     ensureSelected.mockResolvedValue({ ok: true, value: { uidValidity: 1 } });
-    fetchRaw.mockResolvedValue({
-      ok: true,
-      value: new TextEncoder().encode('Subject: hi\r\n\r\nhello\r\n'),
-    });
+    answerEvery();
     // uids 3 and 4 are already cached; a budget of two must still reach 2 and 1.
     const cache = fakeCache({
       inbox: {
@@ -966,7 +1048,7 @@ describe('prefetchBodies', () => {
         ]),
       },
     });
-    prefetchBodies(
+    await prefetchBodies(
       run,
       cache,
       { inbox: { uidValidity: 1, summaries: cache.read('inbox').summaries } },
@@ -974,24 +1056,121 @@ describe('prefetchBodies', () => {
       2,
       noKeys,
     );
-    await vi.waitFor(() => expect(fetchRaw).toHaveBeenCalledTimes(2));
-    expect(fetchRaw.mock.calls.map(([uid]) => uid)).toEqual([2, 1]);
+    expect(fetchRawMessages.mock.calls).toEqual([['1:2']]);
   });
 
-  it('hands each body that lands to onBody, and cachedPreviews reads it back by location', async () => {
+  it('cuts a command at about a mebibyte of mail', async () => {
     ensureSelected.mockResolvedValue({ ok: true, value: { uidValidity: 1 } });
-    fetchRaw.mockResolvedValue({
-      ok: true,
-      value: new TextEncoder().encode('Subject: hi\r\n\r\nhello there\r\n'),
+    answerEvery();
+    const half = 600 * 1024;
+    const cache = fakeCache({
+      inbox: {
+        sync: { name: 'INBOX', uidValidity: 1, lastUid: 4, complete: true },
+        summaries: [summary(1, [], half), summary(2, [], 100), summary(3, [], half), summary(4)],
+      },
     });
+    await prefetchBodies(
+      run,
+      cache,
+      { inbox: { uidValidity: 1, summaries: cache.read('inbox').summaries } },
+      1024 * 1024,
+      30,
+      noKeys,
+    );
+    // Newest first: 4, 3 and 2 fit in one; 1 would take it past a mebibyte.
+    expect(fetchRawMessages.mock.calls).toEqual([['2:4'], ['1']]);
+  });
+
+  it('queues the inbox first and leaves Trash and Drafts alone', async () => {
+    ensureSelected.mockImplementation(async (name: string) => ({
+      ok: true,
+      value: { name, uidValidity: 1 },
+    }));
+    answerEvery();
+    const folder = (name: string) => ({
+      sync: { name, uidValidity: 1, lastUid: 1, complete: true },
+      summaries: [summary(1)],
+    });
+    const cache = fakeCache({
+      inbox: folder('INBOX'),
+      sent: folder('Sent'),
+      archive: folder('Archive'),
+      trash: folder('Trash'),
+      drafts: folder('Drafts'),
+    });
+    const order: string[] = [];
+    await prefetchBodies(
+      async task => {
+        order.push('queued');
+        return task.run(fakeClient);
+      },
+      cache,
+      Object.fromEntries(
+        FOLDERS.map(name => [name, { uidValidity: 1, summaries: cache.read(name).summaries }]),
+      ),
+      1024 * 1024,
+      30,
+      noKeys,
+    );
+    expect(ensureSelected.mock.calls.map(([name]) => name)).toEqual(['INBOX', 'Sent', 'Archive']);
+    expect(order).toHaveLength(3);
+  });
+
+  it('skips what another prefetch stored while the batch waited its turn', async () => {
+    ensureSelected.mockResolvedValue({ ok: true, value: { uidValidity: 1 } });
+    answerEvery();
+    const cache = fakeCache({
+      inbox: {
+        sync: { name: 'INBOX', uidValidity: 1, lastUid: 2, complete: true },
+        summaries: [summary(1), summary(2)],
+      },
+    });
+    await prefetchBodies(
+      async task => {
+        // Stored by an earlier prefetch's batch while this one sat in the queue.
+        await cache.folder('inbox').putBody(2, { paragraphs: ['stored'] } as FetchedBody);
+        return task.run(fakeClient);
+      },
+      cache,
+      { inbox: { uidValidity: 1, summaries: cache.read('inbox').summaries } },
+      1024 * 1024,
+      30,
+      noKeys,
+    );
+    expect(fetchRawMessages.mock.calls).toEqual([['1']]);
+  });
+
+  it('fetches nothing from a folder renumbered since the sync', async () => {
+    ensureSelected.mockResolvedValue({ ok: true, value: { uidValidity: 2 } });
+    answerEvery();
     const cache = fakeCache({
       inbox: {
         sync: { name: 'INBOX', uidValidity: 1, lastUid: 1, complete: true },
         summaries: [summary(1)],
       },
     });
-    const onBody = vi.fn();
-    prefetchBodies(
+    await prefetchBodies(
+      run,
+      cache,
+      { inbox: { uidValidity: 1, summaries: cache.read('inbox').summaries } },
+      1024 * 1024,
+      30,
+      noKeys,
+    );
+    expect(fetchRawMessages).not.toHaveBeenCalled();
+  });
+
+  it('hands each batch that lands to onBodies at once, and cachedPreviews reads it back', async () => {
+    ensureSelected.mockResolvedValue({ ok: true, value: { uidValidity: 1 } });
+    answerEvery();
+    const cache = fakeCache({
+      inbox: {
+        sync: { name: 'INBOX', uidValidity: 1, lastUid: 2, complete: true },
+        summaries: [summary(1), summary(2)],
+      },
+    });
+    const onBodies = vi.fn();
+    await prefetchBodies(
       run,
       cache,
       { inbox: { uidValidity: 1, summaries: cache.read('inbox').summaries } },
@@ -999,11 +1178,17 @@ describe('prefetchBodies', () => {
       30,
       noKeys,
       () => false,
-      onBody,
+      onBodies,
     );
-    await vi.waitFor(() => expect(onBody).toHaveBeenCalledTimes(1));
-    expect(onBody.mock.calls[0]?.[0]).toEqual({ folder: 'inbox', uidValidity: 1, uid: 1 });
-    expect(await cachedPreviews(cache, 'me@x')).toEqual({ 'me@x/inbox/1/1': ['hello there'] });
+    expect(onBodies).toHaveBeenCalledTimes(1);
+    expect(onBodies.mock.calls[0]?.[0].map(({ at }: { at: unknown }) => at)).toEqual([
+      { folder: 'inbox', uidValidity: 1, uid: 1 },
+      { folder: 'inbox', uidValidity: 1, uid: 2 },
+    ]);
+    expect(await cachedPreviews(cache, 'me@x')).toEqual({
+      'me@x/inbox/1/1': ['body 1'],
+      'me@x/inbox/1/2': ['body 2'],
+    });
   });
 });
 
@@ -1126,6 +1311,24 @@ describe('moveMessages', () => {
       ok: false,
       error: { kind: 'imap', reason: { kind: 'no', text: 'denied' } },
     });
+  });
+
+  it('asks LIST again when CREATE is refused, for a folder made since LIST was last read', async () => {
+    // The first answer is a remembered one, from before another client made Archive.
+    list
+      .mockResolvedValueOnce({ ok: true, value: INBOX_ONLY })
+      .mockResolvedValueOnce({ ok: true, value: [...INBOX_ONLY, ARCHIVE] });
+    ensureSelected.mockResolvedValue({ ok: true, value: { uidValidity: 1 } });
+    create.mockResolvedValue({ ok: false, reason: { kind: 'no', text: '[ALREADYEXISTS]' } });
+    move.mockResolvedValue({ ok: true, value: null });
+    const res = await moveMessages(
+      run,
+      [{ folder: 'inbox', folderName: 'INBOX', uidValidity: 1, uids: [3] }],
+      'archive',
+    );
+    expect(res).toEqual({ ok: true, value: unplaced('inbox', [3]) });
+    expect(list).toHaveBeenCalledTimes(2);
+    expect(move).toHaveBeenCalledWith('3', 'Archive');
   });
 
   it('moves every source folder to Trash in one task, into the Trash folder LIST already names', async () => {

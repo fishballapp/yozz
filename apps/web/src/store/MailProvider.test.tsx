@@ -9,8 +9,8 @@ import { createMailCache } from '../threads/cache';
 import { toast } from '../ui/Toast';
 import { MailProvider, useMail } from './MailProvider';
 
-const { session, moveMessages, prefetchBodies, setFlag, syncMailbox, thread, shown } = vi.hoisted(
-  () => {
+const { session, live, moveMessages, prefetchBodies, setFlag, syncMailbox, thread, shown } =
+  vi.hoisted(() => {
     const addresses = ['a@example.com', 'b@example.com'];
     const records = addresses.map(address => {
       const host = { host: `imap.${address}`, port: 993, username: address, password: 'secret' };
@@ -25,6 +25,8 @@ const { session, moveMessages, prefetchBodies, setFlag, syncMailbox, thread, sho
         files: {},
         store: { list: async (type: string) => (type === 'address' ? records : []) },
       },
+      /** What the store told the live manager to call when INBOX changes. */
+      live: { onMailboxChanged: (_address: string) => {} },
       moveMessages: vi.fn(),
       prefetchBodies: vi.fn(),
       setFlag: vi.fn(),
@@ -59,14 +61,16 @@ const { session, moveMessages, prefetchBodies, setFlag, syncMailbox, thread, sho
       /** What the base threads into: `thread` unless a test names another. */
       shown: { threads: [] as ThreadState[] },
     };
-  },
-);
+  });
 
 vi.mock('../vault/session', () => ({ useVault: () => ({ session }) }));
 vi.mock('../ui/chrome', () => ({ isDemo: () => false }));
 vi.mock('../relay/connection', () => ({ connectImap: vi.fn() }));
 vi.mock('../relay/live', () => ({
-  createLiveManager: () => ({ run: vi.fn(), close: vi.fn(), closeAll: async () => {} }),
+  createLiveManager: (deps: { onMailboxChanged: (address: string) => void }) => {
+    live.onMailboxChanged = deps.onMailboxChanged;
+    return { run: vi.fn(), close: vi.fn(), closeAll: async () => {} };
+  },
 }));
 vi.mock('@yozz.app/mail/threads/sync', () => ({
   syncMailbox,
@@ -192,22 +196,27 @@ const showOneMailbox = () => {
   ];
 };
 
-const SYNCED = { state: { status: 'synced', at: 0, complete: [] }, byFolder: {} };
+const SYNCED = {
+  state: { status: 'synced', at: 0, complete: [] },
+  byFolder: {},
+  scope: 'all',
+};
 
 /** A sync of every mailbox that lands only when the test says. */
 const heldSyncs = () => {
-  const landings: Array<() => void> = [];
+  const landings: Array<(result?: object) => void> = [];
   syncMailbox.mockImplementation(
-    () =>
+    (_run, _cache, _isStale, _onFolder, scope = 'all') =>
       new Promise(resolve => {
-        landings.push(() => resolve(SYNCED));
+        landings.push(result => resolve(result ?? { ...SYNCED, scope }));
       }),
   );
   return {
     count: () => landings.length,
-    landAll: () =>
+    /** Each held sync lands as `result`, or as a synced pass of the scope it was asked for. */
+    landAll: (result?: object) =>
       act(async () => {
-        for (const land of landings.splice(0)) land();
+        for (const land of landings.splice(0)) land(result);
       }),
   };
 };
@@ -328,6 +337,109 @@ describe('MailProvider confirmed writes', () => {
       expect(mail().threads[0]?.folders).toEqual(['inbox']);
     },
   );
+});
+
+describe('MailProvider new mail', () => {
+  /** The scope each sync was asked for, in order. */
+  const scopes = () => syncMailbox.mock.calls.map(call => call[4] ?? 'all');
+
+  it('reads the inbox alone on a notice, and every folder while a write waits for a whole pass', async () => {
+    const syncs = heldSyncs();
+    setFlag.mockResolvedValue({ ok: true, value: undefined });
+    showOneMailbox();
+    await mount();
+    await vi.waitFor(() => expect(syncs.count()).toBe(2));
+    await syncs.landAll();
+
+    await act(async () => live.onMailboxChanged('a@example.com'));
+    await vi.waitFor(() => expect(syncs.count()).toBe(1));
+    expect(scopes()).toEqual(['all', 'all', 'inbox']);
+    await syncs.landAll();
+    expect(mail().syncStates['a@example.com']?.status).toBe('synced');
+
+    await act(async () => {
+      expect(mail().toggleStar('t1')).toBe(true);
+    });
+    await vi.waitFor(() => expect(setFlag).toHaveBeenCalledTimes(1));
+    await act(async () => live.onMailboxChanged('a@example.com'));
+    await vi.waitFor(() => expect(syncs.count()).toBe(1));
+    expect(scopes().at(-1)).toBe('all');
+    // That pass retires the write, so the next notice reads the inbox alone again.
+    await syncs.landAll();
+    await act(async () => live.onMailboxChanged('a@example.com'));
+    await vi.waitFor(() => expect(syncs.count()).toBe(1));
+    expect(scopes().at(-1)).toBe('inbox');
+  });
+
+  it('reads every folder after a pass that failed, before React has rendered its failure', async () => {
+    const syncs = heldSyncs();
+    showOneMailbox();
+    await mount();
+    await vi.waitFor(() => expect(syncs.count()).toBe(2));
+    await syncs.landAll();
+
+    await act(async () => live.onMailboxChanged('a@example.com'));
+    await vi.waitFor(() => expect(syncs.count()).toBe(1));
+    // A second notice while the inbox pass runs asks for one more; that pass then fails.
+    await act(async () => live.onMailboxChanged('a@example.com'));
+    await syncs.landAll({
+      state: { status: 'failed', failure: { kind: 'stalled' }, at: 0 },
+      byFolder: {},
+      scope: 'inbox',
+    });
+    await vi.waitFor(() => expect(scopes()).toHaveLength(4));
+    expect(scopes().at(-1)).toBe('all');
+  });
+
+  it('reads every folder on a notice while the last whole pass has not landed', async () => {
+    syncMailbox.mockResolvedValue({
+      state: { status: 'failed', failure: { kind: 'stalled' }, at: 0 },
+      byFolder: {},
+      scope: 'all',
+    });
+    showOneMailbox();
+    await mount();
+    await vi.waitFor(() => expect(mail().syncStates['a@example.com']?.status).toBe('failed'));
+
+    await act(async () => live.onMailboxChanged('a@example.com'));
+    await vi.waitFor(() => expect(scopes()).toHaveLength(3));
+    expect(scopes().at(-1)).toBe('all');
+  });
+
+  it('shows every excerpt a prefetched batch brings', async () => {
+    const syncs = heldSyncs();
+    const mailbox = 'a@example.com';
+    shown.threads = [
+      {
+        ...thread,
+        mailboxes: [mailbox],
+        foldersByMailbox: { [mailbox]: ['inbox'] },
+        messages: [7, 8].map(uid => ({
+          ...thread.messages[0]!,
+          id: `m${uid}`,
+          bodyStatus: 'pending' as const,
+          locations: [{ mailbox, folder: 'inbox' as const, uidValidity: 1, uid }],
+        })),
+      },
+    ];
+    await mount();
+    await vi.waitFor(() => expect(syncs.count()).toBe(2));
+    await syncs.landAll();
+    await vi.waitFor(() => expect(prefetchBodies).toHaveBeenCalled());
+    const onBodies = prefetchBodies.mock.calls[0]?.[7];
+    await act(async () =>
+      onBodies(
+        [7, 8].map(uid => ({
+          at: { folder: 'inbox', uidValidity: 1, uid },
+          body: { paragraphs: [`excerpt ${uid}`] },
+        })),
+      ),
+    );
+    expect(mail().threads[0]?.messages.map(({ body }) => body)).toEqual([
+      ['excerpt 7'],
+      ['excerpt 8'],
+    ]);
+  });
 });
 
 describe('MailProvider stacked writes', () => {

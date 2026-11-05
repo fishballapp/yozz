@@ -35,27 +35,35 @@ export const previewKey = ({ mailbox, folder, uidValidity, uid }: Location) =>
 export const withoutMailboxPreviews = (previews: Previews, mailbox: string): Previews =>
   Object.fromEntries(Object.entries(previews).filter(([key]) => !key.startsWith(`${mailbox}/`)));
 
+/** A message with its fetched body or cached text laid over it; the same object when neither changes it. */
+const withBody = (
+  message: Message,
+  bodies: Readonly<Record<string, BodyEntry>>,
+  previews: Previews,
+): Message => {
+  const entry = bodies[message.id];
+  if (entry?.status === 'loaded') {
+    const { status: _, ...fields } = entry;
+    return { ...message, ...fields, bodyStatus: undefined };
+  }
+  if (message.bodyStatus === undefined) return message;
+  const preview = message.locations
+    ?.map(location => previews[previewKey(location)])
+    .find(text => text !== undefined);
+  const bodyStatus = entry?.status ?? message.bodyStatus;
+  if (preview === undefined && bodyStatus === message.bodyStatus) return message;
+  return { ...message, ...(preview === undefined ? {} : { body: [...preview] }), bodyStatus };
+};
+
+/** A thread nothing changed stays the same object, so a body landing re-renders its row alone. */
 export const withBodies = (
   threads: readonly ThreadState[],
   bodies: Readonly<Record<string, BodyEntry>>,
   previews: Previews = {},
 ): readonly ThreadState[] =>
-  threads.map(thread => ({
-    ...thread,
-    messages: thread.messages.map(message => {
-      const entry = bodies[message.id];
-      if (entry?.status === 'loaded') {
-        const { status: _, ...fields } = entry;
-        return { ...message, ...fields, bodyStatus: undefined };
-      }
-      if (message.bodyStatus === undefined) return message;
-      const preview = message.locations
-        ?.map(location => previews[previewKey(location)])
-        .find(text => text !== undefined);
-      return {
-        ...message,
-        ...(preview === undefined ? {} : { body: [...preview] }),
-        bodyStatus: entry?.status ?? message.bodyStatus,
-      };
-    }),
-  }));
+  threads.map(thread => {
+    const messages = thread.messages.map(message => withBody(message, bodies, previews));
+    return messages.every((message, index) => message === thread.messages[index])
+      ? thread
+      : { ...thread, messages };
+  });

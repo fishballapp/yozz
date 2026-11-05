@@ -15,7 +15,7 @@ import {
   withoutMailboxPreviews,
 } from '@yozz.app/mail/threads/body-state';
 import type { MailCache } from '@yozz.app/mail/threads/cache';
-import { threadList } from '@yozz.app/mail/threads/hydrate';
+import { groupThreads, layThreads } from '@yozz.app/mail/threads/hydrate';
 import {
   type FolderWindow,
   OLDER_WINDOWS_PER_PAGE,
@@ -37,7 +37,12 @@ import {
   type ServerSearchFailure,
 } from '@yozz.app/mail/threads/server-search';
 import type { MailboxSummaries } from '@yozz.app/mail/threads/summaries';
-import type { FlagTarget, MailboxSyncState, MovedCopy } from '@yozz.app/mail/threads/sync';
+import type {
+  FlagTarget,
+  MailboxSyncState,
+  MovedCopy,
+  SyncScope,
+} from '@yozz.app/mail/threads/sync';
 import { staleMailboxes } from '@yozz.app/mail/threads/sync-staleness';
 import type { Location, ThreadState } from '@yozz.app/mail/threads/thread';
 import {
@@ -240,7 +245,12 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
   /** Cached body text by location, so a row has its excerpt before anyone opens the message. */
   const [previews, setPreviews] = useState<Previews>({});
   const [ops, setOps] = useState<readonly PendingOp[]>([]);
+  /** Read by a sync deciding how much to read. */
+  const opsRef = useRef(ops);
+  opsRef.current = ops;
   const [syncStates, setSyncStates] = useState<Readonly<Record<string, MailboxSyncState>>>({});
+  const syncStatesRef = useRef(syncStates);
+  syncStatesRef.current = syncStates;
   const [mailError, setMailError] = useState<string | null>(null);
   const inFlightBodiesRef = useRef<Map<string, Promise<BodyOutcome>>>(new Map());
   /** The DKIM key lookups of this session, kept so a sender's many messages cost one request. */
@@ -251,13 +261,13 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
   const [isLoadingOlderInList, setIsLoadingOlderInList] = useState(false);
 
   /**
-   * One entry per mailbox with a sync running; `dirty` makes the loop go round again, so every
-   * request is followed by a sync that started after it. `isTorn`: a move or an older page landed
-   * between the pass's folders, which then disagree about where mail is, so it goes round instead
-   * of landing.
+   * One entry per mailbox with a sync running; `dirty` makes the loop go round again, as wide as
+   * the widest request since the pass began, so every request is followed by a sync that started
+   * after it. `isTorn`: a move or an older page landed between the pass's folders, which then
+   * disagree about where mail is, so it goes round instead of landing.
    */
   const syncRunsRef = useRef<
-    Map<string, { promise: Promise<void>; dirty: boolean; isTorn: boolean }>
+    Map<string, { promise: Promise<void>; dirty: SyncScope | null; isTorn: boolean }>
   >(new Map());
   /**
    * Where this session's moves put each copy, keyed by the location it left, as the server said
@@ -275,7 +285,6 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
   /** Keyed by mailbox and folder: two mailboxes over the same folder are one page. */
   const inFlightOlderRef = useRef<Map<string, Promise<void>>>(new Map());
   const liveManagerRef = useRef<LiveManager | null>(null);
-  const syncRef = useRef<(address?: string) => Promise<void>>(async () => {});
   const userIdRef = useRef<string | null>(null);
   userIdRef.current = session?.userId ?? null;
   /** Mailboxes whose cached threads have been read into memory this unlock. */
@@ -614,11 +623,11 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
   }, []);
 
   const requestSync = useCallback(
-    (mailbox: InboundAddress): Promise<void> => {
+    (mailbox: InboundAddress, scope: SyncScope = 'all'): Promise<void> => {
       const address = mailbox.address;
       const running = syncRunsRef.current.get(address);
       if (running !== undefined) {
-        running.dirty = true;
+        running.dirty = running.dirty === 'all' ? 'all' : scope;
         return running.promise;
       }
 
@@ -626,8 +635,11 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
       const runOn = bindRunOn();
       const userId = userIdRef.current;
       if (userId === null) return Promise.resolve();
-      syncStartedRef.current.set(address, Date.now());
-      const entry = { dirty: false, isTorn: false, promise: Promise.resolve() };
+      const entry: { dirty: SyncScope | null; isTorn: boolean; promise: Promise<void> } = {
+        dirty: scope,
+        isTorn: false,
+        promise: Promise.resolve(),
+      };
       entry.promise = (async () => {
         try {
           // A replaced record's old connection and cache are gone before this address syncs again.
@@ -659,29 +671,59 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
             if (isStale()) return;
           }
           const { syncMailbox, prefetchBodies } = await import('@yozz.app/mail/threads/sync');
+          /**
+           * How the pass before this one in the loop ended. The next starts before React renders
+           * what it set, so the refs still hold the state from before it.
+           */
+          let lastPass: {
+            readonly status: MailboxSyncState['status'];
+            readonly scope: SyncScope;
+            readonly seq: number;
+          } | null = null;
           do {
             // The first pass fetched the TLS stack, long enough for a lock to land under it; a later
             // one may belong to a record that has since been replaced, and would log in as it.
             if (isStale()) return;
-            entry.dirty = false;
+            // Only a whole pass retires a write or mends a failed sync, so either asks for one.
+            const lastStatus = lastPass?.status ?? syncStatesRef.current[address]?.status;
+            const opsLeft =
+              lastPass?.scope === 'all' && lastPass.status === 'synced'
+                ? retireOps(opsRef.current, address, lastPass.seq)
+                : opsRef.current;
+            const passScope =
+              entry.dirty === 'inbox' &&
+              lastStatus === 'synced' &&
+              !opsLeft.some(op => op.mailbox === address)
+                ? 'inbox'
+                : 'all';
+            entry.dirty = null;
             entry.isTorn = false;
             syncSeqRef.current += 1;
             const seq = syncSeqRef.current;
-            setSyncStates(current => ({ ...current, [address]: { status: 'syncing' } }));
+            if (passScope === 'all') {
+              syncStartedRef.current.set(address, Date.now());
+              setSyncStates(current => ({ ...current, [address]: { status: 'syncing' } }));
+            }
             // Each folder shows as it lands, the inbox first; pending ops stay laid over it until
             // the whole pass retires them below. A folder read after a write landed may disagree
             // with one read before it, so a torn pass shows no more of itself.
-            const result = await syncMailbox(runOn(mailbox), cache, isStale, (folder, read) => {
-              if (isStale() || entry.isTorn) return;
-              setBaseByMailbox(current => ({
-                ...current,
-                [address]: { ...current[address], [folder]: read },
-              }));
-            });
+            const result = await syncMailbox(
+              runOn(mailbox),
+              cache,
+              isStale,
+              (folder, read) => {
+                if (isStale() || entry.isTorn) return;
+                setBaseByMailbox(current => ({
+                  ...current,
+                  [address]: { ...current[address], [folder]: read },
+                }));
+              },
+              passScope,
+            );
             if (generation !== sessionGeneration.current) return;
             // Its folders were read on either side of a write; the next pass lands instead.
             if (result.state.status === 'synced' && entry.isTorn) {
-              entry.dirty = true;
+              entry.dirty = 'all';
               continue;
             }
             // A UIDVALIDITY reset dropped the cache; the threads on screen and the ops against them name invalid uids.
@@ -691,13 +733,19 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
               setPreviews(current => withoutMailboxPreviews(current, address));
               setOps(current => current.filter(op => op.mailbox !== address));
             }
-            if (result.state.status === 'synced') {
-              setBaseByMailbox(current => ({ ...current, [address]: result.byFolder }));
-              // This pass started after the acks it retires, on the same serial queue as their commands.
-              setOps(current => retireOps(current, address, seq));
-              // The server's flags just arrived; an earlier refused write is moot.
-              setMailError(null);
-              prefetchBodies(
+            const { state } = result;
+            lastPass = { status: state.status, scope: result.scope, seq };
+            if (state.status === 'synced') {
+              // The new mail an inbox pass read has landed through `onFolder`, and every other folder
+              // stays as the last whole pass left it.
+              if (result.scope === 'all') {
+                setBaseByMailbox(current => ({ ...current, [address]: result.byFolder }));
+                // This pass started after the acks it retires, on the same serial queue as their commands.
+                setOps(current => retireOps(current, address, seq));
+                // The server's flags just arrived; an earlier refused write is moot.
+                setMailError(null);
+              }
+              void prefetchBodies(
                 runOn(mailbox),
                 cache,
                 result.byFolder,
@@ -705,17 +753,37 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
                 30,
                 lookupTxt,
                 isStale,
-                (at, body) => {
+                bodies => {
                   if (isStale()) return;
                   setPreviews(current => ({
                     ...current,
-                    [previewKey({ mailbox: address, ...at })]: body.paragraphs,
+                    ...Object.fromEntries(
+                      bodies.map(({ at, body }) => [
+                        previewKey({ mailbox: address, ...at }),
+                        body.paragraphs,
+                      ]),
+                    ),
                   }));
                 },
               );
             }
-            setSyncStates(current => ({ ...current, [address]: result.state }));
-          } while (entry.dirty);
+            setSyncStates(current => {
+              const before = current[address];
+              if (
+                result.scope === 'all' ||
+                state.status !== 'synced' ||
+                before?.status !== 'synced'
+              ) {
+                return { ...current, [address]: state };
+              }
+              // Every other folder is as complete as the last whole pass found it.
+              const complete = [
+                ...before.complete.filter(folder => folder !== 'inbox'),
+                ...state.complete.filter(folder => folder === 'inbox'),
+              ];
+              return { ...current, [address]: { ...state, complete } };
+            });
+          } while (entry.dirty !== null);
         } catch (error) {
           if (generation !== sessionGeneration.current) return;
           setSyncStates(current => ({
@@ -741,6 +809,18 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
     [bindRunOn, forgetFound, isCurrentMailbox, lookupTxt],
   );
 
+  /** New mail is in the inbox, so a notice of it reads that folder alone. */
+  const syncInbox = useCallback(
+    (address: string) => {
+      if (isDemo()) return;
+      const mailbox = mailboxesRef.current.find(candidate => candidate.address === address);
+      if (mailbox !== undefined) void requestSync(mailbox, 'inbox');
+    },
+    [requestSync],
+  );
+  const syncInboxRef = useRef(syncInbox);
+  syncInboxRef.current = syncInbox;
+
   const sync = useCallback(
     async (address?: string): Promise<void> => {
       if (isDemo()) return;
@@ -756,7 +836,6 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
     },
     [requestSync],
   );
-  syncRef.current = sync;
 
   /** Read by the draft writes, which run outside a render. */
   const threadsRef = useRef<readonly ThreadState[]>([]);
@@ -825,7 +904,7 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
             return connection.connectImap(imap, options);
           },
           onMailboxChanged: address => {
-            if (!cancelled) void syncRef.current(address);
+            if (!cancelled) syncInboxRef.current(address);
           },
           activity,
         });
@@ -1065,19 +1144,27 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
     };
   }, [sync, requestSync]);
 
-  // The server's last word, with bodies merged in and pending ops laid over it on every render.
-  const threads = useMemo(() => {
-    if (demo) return [...demoThreads, ...threadList({ byMailbox: {}, found })];
-    return threadList({
-      byMailbox: baseByMailbox,
-      found,
-      vaultSent,
-      bodies: bodiesById,
-      previews,
-      overlay: threads => applyOps(threads, ops),
-      drafts,
-    });
-  }, [demo, demoThreads, baseByMailbox, found, vaultSent, bodiesById, previews, ops, drafts]);
+  // The server's last word, grouped only when a sync, a page or a search changes it: a body, a
+  // write or a draft is laid over the same grouping.
+  const grouped = useMemo(
+    () =>
+      demo
+        ? [...demoThreads, ...groupThreads({ byMailbox: {}, found })]
+        : groupThreads({ byMailbox: baseByMailbox, found, vaultSent }),
+    [demo, demoThreads, baseByMailbox, found, vaultSent],
+  );
+  const threads = useMemo(
+    () =>
+      demo
+        ? grouped
+        : layThreads(grouped, {
+            bodies: bodiesById,
+            previews,
+            overlay: threads => applyOps(threads, ops),
+            drafts,
+          }),
+    [demo, grouped, bodiesById, previews, ops, drafts],
+  );
 
   threadsRef.current = threads;
 

@@ -453,7 +453,8 @@ export const withDrafts = (
       });
       continue;
     }
-    const carrying = own.get(parent.id) ?? parent;
+    // A conversation carrying your draft is listed, even one only a search found.
+    const { isFoundOnly: _, ...carrying } = own.get(parent.id) ?? parent;
     own.set(parent.id, {
       ...carrying,
       messages: [...carrying.messages, message],

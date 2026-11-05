@@ -172,8 +172,9 @@ export const buildFetchBodyStructureCommand = (tag: string, uidSet: string): Out
   lines: [{ text: stringToBytes(`${tag} UID FETCH ${uidSet} (UID BODYSTRUCTURE)\r\n`) }],
 });
 
-export const buildFetchRawCommand = (tag: string, uid: number): OutgoingCommand => ({
-  lines: [{ text: stringToBytes(`${tag} UID FETCH ${uid} (BODY.PEEK[])\r\n`) }],
+/** `uidSet` is one uid or a uid set: each message comes back whole, unmarked. */
+export const buildFetchRawCommand = (tag: string, uidSet: string): OutgoingCommand => ({
+  lines: [{ text: stringToBytes(`${tag} UID FETCH ${uidSet} (BODY.PEEK[])\r\n`) }],
 });
 
 const STORE_OPS = { add: '+FLAGS', remove: '-FLAGS', set: 'FLAGS' } as const;

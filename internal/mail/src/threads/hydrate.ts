@@ -98,27 +98,19 @@ const markFoundOnly = (
 };
 
 /**
- * The conversations a client shows: one grouping pass over every mailbox, or a conversation two
- * addresses are copied on splits in two; then the bodies on hand, the client's own overlay (the web
- * app's pending writes) and the vault's drafts. `found` is what searches read beyond those windows,
- * threaded in and marked, never stored.
+ * The one grouping pass over every mailbox, or a conversation two addresses are copied on splits in
+ * two. `found` is what searches read beyond those windows, threaded in and marked, never stored. It
+ * reads only what a sync, a page or a search changes, so a client keeps it while bodies, writes and
+ * drafts change over it (`layThreads`).
  */
-export const threadList = ({
+export const groupThreads = ({
   byMailbox,
   found = {},
   vaultSent = [],
-  bodies = {},
-  previews = {},
-  overlay = threads => threads,
-  drafts = [],
 }: {
   readonly byMailbox: MailboxSummaries;
   readonly found?: MailboxSummaries;
   readonly vaultSent?: readonly VaultSentMessage[];
-  readonly bodies?: Readonly<Record<string, BodyEntry>>;
-  readonly previews?: Previews;
-  readonly overlay?: (threads: readonly ThreadState[]) => readonly ThreadState[];
-  readonly drafts?: readonly DraftHandle[];
 }): readonly ThreadState[] => {
   const merged = Object.fromEntries(
     [...new Set([...Object.keys(byMailbox), ...Object.keys(found)])].map(mailbox => [
@@ -126,12 +118,30 @@ export const threadList = ({
       withExtra(byMailbox[mailbox] ?? {}, found[mailbox] ?? {}),
     ]),
   );
-  return markFoundOnly(
-    withDrafts(
-      overlay(withBodies(threadsFromMailboxes(merged, vaultSent), bodies, previews)),
-      drafts,
-    ),
-    byMailbox,
-    found,
-  );
+  return markFoundOnly(threadsFromMailboxes(merged, vaultSent), byMailbox, found);
 };
+
+/** The bodies on hand, the client's own overlay (the web app's pending writes) and the vault's drafts. */
+export const layThreads = (
+  grouped: readonly ThreadState[],
+  {
+    bodies = {},
+    previews = {},
+    overlay = threads => threads,
+    drafts = [],
+  }: {
+    readonly bodies?: Readonly<Record<string, BodyEntry>>;
+    readonly previews?: Previews;
+    readonly overlay?: (threads: readonly ThreadState[]) => readonly ThreadState[];
+    readonly drafts?: readonly DraftHandle[];
+  },
+): readonly ThreadState[] => withDrafts(overlay(withBodies(grouped, bodies, previews)), drafts);
+
+/** The conversations a client shows: `groupThreads` with `layThreads` over it. */
+export const threadList = ({
+  byMailbox,
+  found,
+  vaultSent,
+  ...layers
+}: Parameters<typeof groupThreads>[0] & Parameters<typeof layThreads>[1]): readonly ThreadState[] =>
+  layThreads(groupThreads({ byMailbox, found, vaultSent }), layers);

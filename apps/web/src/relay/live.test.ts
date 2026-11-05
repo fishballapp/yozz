@@ -14,6 +14,7 @@ type FakeClient = ImapClient & {
   readonly folders: Record<string, { exists: number; uidNext: number }>;
   noops: number;
   logouts: number;
+  lists: number;
   readonly emitUntagged: (untagged: ImapUntagged) => void;
   readonly endIdle: (result: ImapResult<void>) => void;
   failNext: MailConnectionFailure | null;
@@ -45,6 +46,7 @@ const createFakeClient = (capabilities: readonly string[] = ['IDLE']): FakeClien
     folders: {},
     noops: 0,
     logouts: 0,
+    lists: 0,
     failNext: null,
     emitUntagged: untagged => onUntagged?.(untagged),
     endIdle: result => {
@@ -56,7 +58,10 @@ const createFakeClient = (capabilities: readonly string[] = ['IDLE']): FakeClien
     capabilities: () => [...capabilities],
     hasCapability: name => capabilities.some(c => c.toUpperCase() === name.toUpperCase()),
     authenticate: async () => ({ ok: true, value: undefined }),
-    list: async () => ({ ok: true, value: [] }),
+    list: async () => {
+      client.lists += 1;
+      return { ok: true, value: [] };
+    },
     select: async name => {
       client.selects.push(name);
       const folder = client.folders[name] ?? { exists: 0, uidNext: 1 };
@@ -68,6 +73,7 @@ const createFakeClient = (capabilities: readonly string[] = ['IDLE']): FakeClien
     fetchSummariesBySeq: async () => ({ ok: true, value: [] }),
     fetchFlags: async () => ({ ok: true, value: [] }),
     fetchRaw: async () => ({ ok: true, value: new Uint8Array() }),
+    fetchRawMessages: async () => ({ ok: true, value: [] }),
     storeFlags: async () => ({ ok: true, value: undefined }),
     append: async () => ({ ok: true, value: null }),
     expunge: async () => ({ ok: true, value: undefined }),
@@ -235,6 +241,80 @@ describe('createLiveManager', () => {
     retry: true,
     run: async () => ({ ok: true, value: 2 }),
   };
+
+  it('answers LIST from what the session last heard, until a folder is made or the login changes', async () => {
+    const manager = createManager();
+    const listing: MailTask<number> = {
+      priority: 'user',
+      effect: 'read',
+      retry: false,
+      run: async client => {
+        const res = await client.list('', '*');
+        return res.ok
+          ? { ok: true, value: res.value.length }
+          : { ok: false, error: { kind: 'imap', reason: res.reason } };
+      },
+    };
+    await manager.run(MAILBOX, listing);
+    await manager.run(MAILBOX, listing);
+    expect(clients[0]?.lists).toBe(1);
+
+    await manager.run(MAILBOX, {
+      ...listing,
+      run: async client => {
+        await client.create('Archive');
+        return { ok: true, value: 0 };
+      },
+    });
+    await manager.run(MAILBOX, listing);
+    expect(clients[0]?.lists).toBe(2);
+
+    // Another login may be another mailbox, with other folders.
+    await manager.run({ ...MAILBOX, imap: { ...MAILBOX.imap, username: 'other' } }, listing);
+    expect(clients).toHaveLength(2);
+    expect(clients[1]?.lists).toBe(1);
+  });
+
+  it.each([
+    ['SELECT', (client: ImapClient) => client.select('Gone')],
+    ['MOVE', (client: ImapClient) => client.move('1', 'Gone')],
+    ['APPEND', (client: ImapClient) => client.append('Gone', new Uint8Array(1), [])],
+  ])(
+    'asks LIST afresh after a refused %s, which may name a folder gone since',
+    async (_, refused) => {
+      const manager = createManager();
+      const listing: MailTask<number> = {
+        priority: 'user',
+        effect: 'read',
+        retry: false,
+        run: async client => {
+          await client.list('', '*');
+          return { ok: true, value: 0 };
+        },
+      };
+      await manager.run(MAILBOX, listing);
+      const client = clients[0];
+      if (client === undefined) throw new Error('no connection opened');
+      const no = {
+        ok: false,
+        reason: { kind: 'no', text: '[TRYCREATE] no such mailbox' },
+      } as const;
+      Object.assign(client, {
+        select: async () => no,
+        move: async () => no,
+        append: async () => no,
+      });
+      await manager.run(MAILBOX, {
+        ...listing,
+        run: async mailClient => {
+          await refused(mailClient);
+          return { ok: true, value: 0 };
+        },
+      });
+      await manager.run(MAILBOX, listing);
+      expect(client.lists).toBe(2);
+    },
+  );
 
   it('tells the tracker of every task from the moment it is queued until it settles', async () => {
     const activity = createActivityTracker();
