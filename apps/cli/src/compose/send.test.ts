@@ -97,8 +97,10 @@ layer(NodeServices.layer)(it => {
         // The envelope reaches them; what follows `DATA` names no one.
         const [delivered] = smtp.delivered;
         expect(delivered?.to).toEqual(['kate@example.com', 'legal@example.com', 'sam@example.com']);
-        expect(delivered?.data.toLowerCase()).not.toContain('bcc');
+        // Not `not.toContain('bcc')`: the MIME boundary is random hex, which can spell it.
+        expect(delivered?.data).not.toMatch(/^bcc:/im);
         expect(delivered?.data).not.toContain('legal@example.com');
+        expect(delivered?.data).not.toContain('sam@example.com');
         // The copy is that message with the one header in front.
         const copy = server.folders.get('Sent')?.messages[0]?.raw;
         expect(new TextDecoder().decode(copy)).toBe(

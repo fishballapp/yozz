@@ -544,7 +544,7 @@ describe("an ended session's answers", () => {
   it("an older page that lands after the session ended leaves the next session's page loading", async () => {
     const { mail, replaceSession } = await mount((await vault()).store);
     const theirPage = gate();
-    mocks.markRead = theirPage;
+    mocks.task = theirPage;
     act(() => {
       void mail().loadOlder(ALICE.address);
     });
@@ -552,7 +552,7 @@ describe("an ended session's answers", () => {
 
     await replaceSession(await nextAccount());
     const ourPage = gate();
-    mocks.markRead = ourPage;
+    mocks.task = ourPage;
     act(() => {
       void mail().loadOlder(ALICE.address);
     });

@@ -2,6 +2,7 @@ import {
   type CopyUid,
   copiedUid,
   type ImapClient,
+  type ImapFailure,
   type ImapMessageSummary,
   uidSets,
 } from '@yozz.app/imap';
@@ -118,8 +119,8 @@ const syncFolder = async (
   const all = [...kept, ...fetched];
   // Writing now would repopulate a cache another path just cleared.
   if (isStale()) return failed({ kind: 'error', detail: 'sync superseded' });
-  // A later sync keeps what `loadOlder` earned.
-  const complete = mark === null ? exists <= WINDOW : mark.complete;
+  // A later sync keeps what `loadOlder` earned; a folder with no mail has nothing older to offer.
+  const complete = mark === null ? exists <= WINDOW : mark.complete || exists === 0;
   await folderCache.putSummaries(all);
   await folderCache.putSync({
     name,
@@ -197,8 +198,10 @@ export const syncMailbox = async (
 };
 
 /**
- * The WINDOW messages just below the oldest cached uid, measured from that message's `seq`. A uid
- * that answers nothing was expunged; nothing is loaded and nothing claimed complete.
+ * The WINDOW messages just below the oldest cached uid that still answers, measured from that
+ * message's `seq`. A cached row whose message was moved or expunged since the last sync stays until
+ * a sync drops it, so the anchor is the lowest one the server still has. With none, as when triage
+ * emptied the window, the folder's own count says where the newest page starts.
  */
 export const loadOlder = async (
   run: RunTask,
@@ -207,26 +210,24 @@ export const loadOlder = async (
   isStale: () => boolean = () => false,
 ): Promise<
   Result<{ readonly loaded: number; readonly complete: boolean }, MailConnectionFailure>
-> => {
-  const mark = await folderCache.getSync();
-  if (mark === null) return { ok: true, value: { loaded: 0, complete: false } };
-  const known = await folderCache.listSummaries();
-  if (known.length === 0) return { ok: true, value: { loaded: 0, complete: false } };
-  const lowest = Math.min(...known.map(summary => summary.uid));
-
-  return run({
+> =>
+  run({
     priority: 'user',
     effect: 'read',
-    // Idempotent: a repeated window re-reads envelopes the cache already holds by uid.
+    // Idempotent: a repeated window re-reads envelopes the cache already holds by uid, and the
+    // cache is read again inside, so a retry sees what the attempt before it wrote.
     retry: true,
     run: async client => {
-      const selectRes = await client.ensureSelected(mark.name);
-      if (!selectRes.ok) return { ok: false, error: { kind: 'imap', reason: selectRes.reason } };
-
-      const anchorRes = await client.fetchSummaries(String(lowest));
-      if (!anchorRes.ok) return { ok: false, error: { kind: 'imap', reason: anchorRes.reason } };
-      const anchor = anchorRes.value[0];
-      if (anchor === undefined) return { ok: true, value: { loaded: 0, complete: false } };
+      // Read here, not before queueing: a sync that ran first may have changed both.
+      const mark = await folderCache.getSync();
+      if (mark === null) return { ok: true, value: { loaded: 0, complete: false } };
+      const known = await folderCache.listSummaries();
+      const imapFailure = (reason: ImapFailure) =>
+        ({ ok: false, error: { kind: 'imap', reason } }) as const;
+      const superseded = {
+        ok: false,
+        error: { kind: 'error', detail: 'load superseded' },
+      } as const;
 
       // Re-read: a sync may have landed new mail meanwhile, and its `lastUid` keeps the next sync incremental.
       const markComplete = async () => {
@@ -235,6 +236,58 @@ export const loadOlder = async (
         if (current === null) return;
         await folderCache.putSync({ ...current, complete: true });
       };
+
+      /** Nothing to measure from, so the folder's own count does it. */
+      const readNewest = async () => {
+        // Fresh, not `ensureSelected`'s: a stale EXISTS would start the page past the newest mail.
+        const selectRes = await client.select(mark.name);
+        if (!selectRes.ok) return imapFailure(selectRes.reason);
+        if ((selectRes.value.uidValidity ?? 0) !== mark.uidValidity) {
+          return { ok: false, error: RENUMBERED } as const;
+        }
+        const { exists } = selectRes.value;
+        if (exists === 0) {
+          await markComplete();
+          return { ok: true, value: { loaded: 0, complete: true } } as const;
+        }
+        const from = Math.max(1, exists - WINDOW + 1);
+        const res = await client.fetchSummariesBySeq(`${from}:*`);
+        if (!res.ok) return imapFailure(res.reason);
+        if (isStale()) return superseded;
+        // Mail past `lastUid` is the next sync's to read; the cache stays one window up to it.
+        const read = res.value.filter(summary => summary.uid <= mark.lastUid);
+        await folderCache.putSummaries(read);
+        const complete = from === 1;
+        if (complete) await markComplete();
+        return { ok: true, value: { loaded: read.length, complete } } as const;
+      };
+
+      if (known.length === 0) return readNewest();
+
+      const selectRes = await client.ensureSelected(mark.name);
+      if (!selectRes.ok) return imapFailure(selectRes.reason);
+
+      const lowest = Math.min(...known.map(summary => summary.uid));
+      const lowestRes = await client.fetchSummaries(String(lowest));
+      if (!lowestRes.ok) return imapFailure(lowestRes.reason);
+      let anchor = lowestRes.value[0];
+      if (anchor === undefined) {
+        // Ascending sets, so the first to answer holds the lowest uid still here.
+        let alive: number | null = null;
+        for (const set of uidSets(known.map(summary => summary.uid))) {
+          const flagsRes = await client.fetchFlags(set);
+          if (!flagsRes.ok) return imapFailure(flagsRes.reason);
+          if (flagsRes.value.length === 0) continue;
+          alive = Math.min(...flagsRes.value.map(({ uid }) => uid));
+          break;
+        }
+        if (alive === null) return readNewest();
+        const aliveRes = await client.fetchSummaries(String(alive));
+        if (!aliveRes.ok) return imapFailure(aliveRes.reason);
+        anchor = aliveRes.value[0];
+        if (anchor === undefined) return { ok: true, value: { loaded: 0, complete: false } };
+      }
+
       if (anchor.seq <= 1) {
         await markComplete();
         return { ok: true, value: { loaded: 0, complete: true } };
@@ -242,16 +295,15 @@ export const loadOlder = async (
 
       const from = Math.max(1, anchor.seq - WINDOW);
       const res = await client.fetchSummariesBySeq(`${from}:${anchor.seq - 1}`);
-      if (!res.ok) return { ok: false, error: { kind: 'imap', reason: res.reason } };
+      if (!res.ok) return imapFailure(res.reason);
       // The mailbox may have been removed, or the vault locked, while IMAP was answering.
-      if (isStale()) return { ok: false, error: { kind: 'error', detail: 'load superseded' } };
+      if (isStale()) return superseded;
       await folderCache.putSummaries(res.value);
       const complete = from === 1;
       if (complete) await markComplete();
       return { ok: true, value: { loaded: res.value.length, complete } };
     },
   });
-};
 
 /** One folder's worth of a flag write or a move, off the sync mark: one command per uid set. */
 export type FlagTarget = {

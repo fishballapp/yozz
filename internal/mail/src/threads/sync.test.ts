@@ -281,6 +281,21 @@ describe('syncMailbox', () => {
     expect(sync?.complete).toBe(true);
   });
 
+  it('an incremental sync of a folder that is empty now marks it complete', async () => {
+    selectAnswers({ INBOX: { uidValidity: 5, uidNext: 11, exists: 0 } });
+    fetchFlags.mockResolvedValue({ ok: true, value: [] });
+    const cache = fakeCache({
+      inbox: {
+        sync: { name: 'INBOX', uidValidity: 5, lastUid: 10, complete: false },
+        summaries: [summary(9), summary(10)],
+      },
+    });
+    const { state } = await syncMailbox(run, cache);
+    expect(cache.read('inbox').summaries).toEqual([]);
+    expect(cache.read('inbox').sync?.complete).toBe(true);
+    expect(state).toMatchObject({ status: 'synced', complete: expect.arrayContaining(['inbox']) });
+  });
+
   it('syncs the Sent folder LIST names after the inbox, under its own mark and uid space', async () => {
     list.mockResolvedValue({ ok: true, value: [...INBOX_ONLY, SENT] });
     selectAnswers({
@@ -494,16 +509,7 @@ describe('loadOlder', () => {
     expect(atStart.read('inbox').sync?.complete).toBe(true);
   });
 
-  it('loads nothing when the anchor was expunged, or when the folder never synced', async () => {
-    const cache = paged(300);
-    fetchSummaries.mockResolvedValue({ ok: true, value: [] });
-    expect(await loadOlder(run, cache.folder('inbox'))).toEqual({
-      ok: true,
-      value: { loaded: 0, complete: false },
-    });
-    expect(fetchSummariesBySeq).not.toHaveBeenCalled();
-
-    ensureSelected.mockClear();
+  it('loads nothing when the folder never synced', async () => {
     expect(await loadOlder(run, fakeCache().folder('inbox'))).toEqual({
       ok: true,
       value: { loaded: 0, complete: false },
@@ -517,6 +523,190 @@ describe('loadOlder', () => {
     const res = await loadOlder(run, cache.folder('inbox'), () => true);
     expect(res.ok).toBe(false);
     expect(cache.read('inbox').summaries.map(s => s.uid)).toEqual([40, 60]);
+  });
+
+  describe('a window whose lowest rows moved away before any sync', () => {
+    /** Uids 40, 50, 60 cached; the server answers for the ones in `alive` only. */
+    const moved = (alive: readonly number[], atSeq: Record<number, number> = {}) => {
+      ensureSelected.mockResolvedValue({ ok: true, value: { uidValidity: 1 } });
+      select.mockResolvedValue({ ok: true, value: { uidValidity: 1, uidNext: 61, exists: 700 } });
+      fetchSummaries.mockImplementation(async (set: string) => ({
+        ok: true,
+        value: alive.includes(Number(set))
+          ? [{ ...summary(Number(set)), seq: atSeq[Number(set)] }]
+          : [],
+      }));
+      fetchFlags.mockResolvedValue({
+        ok: true,
+        value: alive.map(uid => ({ uid, flags: [] })),
+      });
+      return fakeCache({
+        inbox: {
+          sync: {
+            name: 'INBOX',
+            uidValidity: 1,
+            lastUid: 60,
+            complete: false,
+            hasAttachmentNames: true,
+          },
+          summaries: [summary(40), summary(50), summary(60)],
+        },
+      });
+    };
+
+    it('pages below the lowest cached uid that still answers', async () => {
+      const cache = moved([50, 60], { 50: 300 });
+      fetchSummariesBySeq.mockResolvedValue({ ok: true, value: [summary(7), summary(9)] });
+      const res = await loadOlder(run, cache.folder('inbox'));
+      expect(fetchFlags).toHaveBeenCalledWith('40,50,60');
+      expect(fetchSummaries).toHaveBeenLastCalledWith('50');
+      expect(fetchSummariesBySeq).toHaveBeenCalledWith('100:299');
+      expect(res).toEqual({ ok: true, value: { loaded: 2, complete: false } });
+    });
+
+    it('reads the newest page by count when none of them answers', async () => {
+      const cache = moved([]);
+      fetchSummariesBySeq.mockResolvedValue({ ok: true, value: [summary(31), summary(32)] });
+      const res = await loadOlder(run, cache.folder('inbox'));
+      expect(fetchSummariesBySeq).toHaveBeenCalledWith('501:*');
+      expect(res).toEqual({ ok: true, value: { loaded: 2, complete: false } });
+    });
+
+    it('leaves the rows that moved to the next sync, which drops them and keeps the page', async () => {
+      const cache = moved([60], { 60: 300 });
+      fetchSummariesBySeq.mockResolvedValue({ ok: true, value: [summary(7), summary(9)] });
+      await loadOlder(run, cache.folder('inbox'));
+      expect(
+        cache
+          .read('inbox')
+          .summaries.map(s => s.uid)
+          .toSorted((a, b) => a - b),
+      ).toEqual([7, 9, 40, 50, 60]);
+
+      list.mockResolvedValue({ ok: true, value: INBOX_ONLY });
+      selectAnswers({ INBOX: { uidValidity: 1, uidNext: 61, exists: 3 } });
+      fetchFlags.mockResolvedValue({
+        ok: true,
+        value: [7, 9, 60].map(uid => ({ uid, flags: [] })),
+      });
+      await syncMailbox(run, cache);
+      // The flags pass starts at the page's own lowest uid, so nothing under it is left unchecked.
+      expect(fetchFlags).toHaveBeenLastCalledWith('7:60');
+      expect(
+        cache
+          .read('inbox')
+          .summaries.map(s => s.uid)
+          .toSorted((a, b) => a - b),
+      ).toEqual([7, 9, 60]);
+    });
+  });
+
+  describe('a sync that landed before the task ran', () => {
+    it('is read, not the state from before it was queued: no false renumbering', async () => {
+      const cache = fakeCache({
+        inbox: { sync: { name: 'INBOX', uidValidity: 1, lastUid: 1000, complete: false } },
+      });
+      select.mockResolvedValue({ ok: true, value: { uidValidity: 2, uidNext: 5, exists: 3 } });
+      fetchSummariesBySeq.mockResolvedValue({ ok: true, value: [summary(3)] });
+      const afterSync = <T>(task: MailTask<T>) => {
+        void cache
+          .folder('inbox')
+          .putSync({ name: 'INBOX', uidValidity: 2, lastUid: 4, complete: false });
+        return run(task);
+      };
+      const res = await loadOlder(afterSync, cache.folder('inbox'));
+      expect(res).toEqual({ ok: true, value: { loaded: 1, complete: true } });
+    });
+
+    it('is read, not the folder as it was when it had never synced', async () => {
+      const cache = fakeCache();
+      ensureSelected.mockResolvedValue({ ok: true, value: { uidValidity: 1 } });
+      fetchSummaries.mockResolvedValue({ ok: true, value: [{ ...summary(40), seq: 300 }] });
+      fetchSummariesBySeq.mockResolvedValue({ ok: true, value: [summary(7)] });
+      const afterSync = <T>(task: MailTask<T>) => {
+        void cache
+          .folder('inbox')
+          .putSync({ name: 'INBOX', uidValidity: 1, lastUid: 40, complete: false });
+        void cache.folder('inbox').putSummaries([summary(40)]);
+        return run(task);
+      };
+      const res = await loadOlder(afterSync, cache.folder('inbox'));
+      expect(res).toEqual({ ok: true, value: { loaded: 1, complete: false } });
+    });
+  });
+
+  describe('a window emptied by triage', () => {
+    /** An incomplete folder whose every cached message was filed away; uids 1..lastUid were seen. */
+    const emptied = () =>
+      fakeCache({
+        inbox: { sync: { name: 'INBOX', uidValidity: 1, lastUid: 1000, complete: false } },
+      });
+    const folderNow = (exists: number, uidValidity = 1) =>
+      select.mockResolvedValue({ ok: true, value: { uidValidity, uidNext: 1001, exists } });
+
+    it('reads the newest page the folder still has, by its own count', async () => {
+      const cache = emptied();
+      folderNow(700);
+      // Uids have gaps: what is left of a thousand is 700 messages, not uids 301..1000.
+      fetchSummariesBySeq.mockResolvedValue({ ok: true, value: [summary(310), summary(1000)] });
+      const res = await loadOlder(run, cache.folder('inbox'));
+      expect(select).toHaveBeenCalledWith('INBOX');
+      expect(fetchSummariesBySeq).toHaveBeenCalledWith('501:*');
+      expect(fetchSummaries).not.toHaveBeenCalled();
+      expect(res).toEqual({ ok: true, value: { loaded: 2, complete: false } });
+      expect(cache.read('inbox').summaries.map(s => s.uid)).toEqual([310, 1000]);
+      expect(cache.read('inbox').sync?.complete).toBe(false);
+    });
+
+    it('leaves mail that arrived while it read to the next sync', async () => {
+      const cache = emptied();
+      folderNow(300);
+      fetchSummariesBySeq.mockResolvedValue({
+        ok: true,
+        value: [summary(900), summary(1000), summary(1001), summary(1002)],
+      });
+      const res = await loadOlder(run, cache.folder('inbox'));
+      expect(res).toEqual({ ok: true, value: { loaded: 2, complete: false } });
+      expect(cache.read('inbox').summaries.map(s => s.uid)).toEqual([900, 1000]);
+      expect(cache.read('inbox').sync?.lastUid).toBe(1000);
+    });
+
+    it('is complete when the page reaches the start of the folder', async () => {
+      const cache = emptied();
+      folderNow(40);
+      fetchSummariesBySeq.mockResolvedValue({ ok: true, value: [summary(5), summary(6)] });
+      const res = await loadOlder(run, cache.folder('inbox'));
+      expect(fetchSummariesBySeq).toHaveBeenCalledWith('1:*');
+      expect(res).toEqual({ ok: true, value: { loaded: 2, complete: true } });
+      expect(cache.read('inbox').sync?.complete).toBe(true);
+    });
+
+    it('is complete when the folder is empty now', async () => {
+      const cache = emptied();
+      folderNow(0);
+      const res = await loadOlder(run, cache.folder('inbox'));
+      expect(fetchSummariesBySeq).not.toHaveBeenCalled();
+      expect(res).toEqual({ ok: true, value: { loaded: 0, complete: true } });
+      expect(cache.read('inbox').sync?.complete).toBe(true);
+    });
+
+    it('writes nothing under a renumbered folder', async () => {
+      const cache = emptied();
+      folderNow(40, 2);
+      const res = await loadOlder(run, cache.folder('inbox'));
+      expect(res.ok).toBe(false);
+      expect(fetchSummariesBySeq).not.toHaveBeenCalled();
+      expect(cache.read('inbox').summaries).toEqual([]);
+    });
+
+    it('writes nothing when isStale reports the load was superseded', async () => {
+      const cache = emptied();
+      folderNow(700);
+      fetchSummariesBySeq.mockResolvedValue({ ok: true, value: [summary(310)] });
+      const res = await loadOlder(run, cache.folder('inbox'), () => true);
+      expect(res.ok).toBe(false);
+      expect(cache.read('inbox').summaries).toEqual([]);
+    });
   });
 });
 

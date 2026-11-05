@@ -157,8 +157,9 @@ describe('a blind copy in the frozen message', () => {
     const claim = claimOf(IDENTITY, 'key', blind, 7);
     if (!claim.ok || claim.value.message === undefined) throw new Error('refused');
     expect(claim.value.message.bcc).toEqual(BLIND);
-    const head = text(Uint8Array.fromBase64(claim.value.message.head)).toLowerCase();
-    expect(head).not.toContain('bcc');
+    const head = text(Uint8Array.fromBase64(claim.value.message.head));
+    // A header, not the letters: the MIME boundary is random hex, which can spell them.
+    expect(head).not.toMatch(/^bcc:/im);
     for (const address of BLIND) expect(head).not.toContain(address);
   });
 
@@ -177,8 +178,8 @@ describe('a blind copy in the frozen message', () => {
       () => 'receipt.pdf',
     );
     if (!assembled.ok) throw new Error('not assembled');
-    const submitted = text(assembled.value).toLowerCase();
-    expect(submitted).not.toContain('bcc');
+    const submitted = text(assembled.value);
+    expect(submitted).not.toMatch(/^bcc:/im);
     for (const address of BLIND) expect(submitted).not.toContain(address);
   });
 

@@ -1004,7 +1004,11 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
           // A row gained, or nothing moved: a failure said so under the box, and asking again
           // this moment would only fail again.
           if (after.threads.length > rowsBefore) return;
-          if (after.older?.folder === older.folder && after.older.reachedAt === older.reachedAt) {
+          if (
+            after.older?.mailbox === older.mailbox &&
+            after.older.folder === older.folder &&
+            after.older.reachedAt === older.reachedAt
+          ) {
             return;
           }
         }

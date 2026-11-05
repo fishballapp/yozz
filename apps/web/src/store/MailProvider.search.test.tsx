@@ -19,7 +19,10 @@ globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 const mocks = vi.hoisted(() => ({
   session: null as { userId: string; files: FileStore; store: RecordStore } | null,
   cached: {} as object,
+  /** What `cachedSummaries` answers for a mailbox, over `cached`. */
+  cachedFor: {} as Record<string, object>,
   syncMailbox: vi.fn(),
+  loadOlder: vi.fn(),
   searchMailbox: vi.fn(),
   readMoreMatches: vi.fn(),
 }));
@@ -33,16 +36,22 @@ vi.mock('../relay/live', () => ({
   }),
 }));
 vi.mock('../threads/cache', () => ({
-  createMailCache: () => ({ clear: async () => {} }),
+  createMailCache: (_userId: string, address: string) => ({
+    address,
+    folder: () => ({ address }),
+    clear: async () => {},
+  }),
   clearMailCache: async () => {},
 }));
 vi.mock('@yozz.app/mail/threads/hydrate', async importOriginal => ({
   ...(await importOriginal<typeof import('@yozz.app/mail/threads/hydrate')>()),
-  cachedSummaries: async () => mocks.cached,
+  cachedSummaries: async (cache: { address: string }) =>
+    mocks.cachedFor[cache.address] ?? mocks.cached,
   cachedPreviews: async () => ({}),
 }));
 vi.mock('@yozz.app/mail/threads/sync', () => ({
   syncMailbox: mocks.syncMailbox,
+  loadOlder: mocks.loadOlder,
   prefetchBodies: () => {},
 }));
 vi.mock('@yozz.app/mail/threads/search', () => ({
@@ -101,13 +110,15 @@ const Probe = () => {
 };
 
 const unmounts: (() => Promise<void>)[] = [];
-const mount = async () => {
+const mount = async (addresses: readonly AddressRecord[] = [ADDRESS]) => {
   const { store } = fakeRecordStore();
-  await store.put({
-    type: ADDRESS_RECORD_TYPE,
-    naturalKey: ADDRESS.address,
-    plaintext: JSON.stringify(ADDRESS),
-  });
+  for (const address of addresses) {
+    await store.put({
+      type: ADDRESS_RECORD_TYPE,
+      naturalKey: address.address,
+      plaintext: JSON.stringify(address),
+    });
+  }
   mocks.session = { userId: 'user', files: fakeFileStore().store, store };
   const root = createRoot(document.createElement('div'));
   unmounts.push(() => act(async () => root.unmount()));
@@ -118,7 +129,7 @@ const mount = async () => {
       </MailProvider>,
     ),
   );
-  await vi.waitFor(() => expect(mail().mailboxes).toHaveLength(1));
+  await vi.waitFor(() => expect(mail().mailboxes).toHaveLength(addresses.length));
 };
 
 const syncStatus = () => mail().syncStates[ADDRESS.address]?.status;
@@ -146,6 +157,8 @@ const searched = async (matches: Partial<FolderMatches> = {}) => {
 
 beforeEach(() => {
   mocks.cached = INBOX_HELD;
+  mocks.cachedFor = {};
+  mocks.loadOlder.mockReset();
   mocks.syncMailbox.mockReset().mockResolvedValue(synced([]));
   mocks.searchMailbox.mockReset();
   mocks.readMoreMatches.mockReset();
@@ -182,6 +195,31 @@ describe('how far a list across folders can reach', () => {
     await vi.waitFor(() => expect(syncStatus()).toBe('failed'));
     await vi.waitFor(() => expect(mail().windows).not.toEqual([]));
     expect(olderFrontier(mail().windows)).toBeNull();
+  });
+});
+
+describe('older mail across two mailboxes whose windows were both emptied', () => {
+  const OTHER: AddressRecord = { ...ADDRESS, address: 'you@x.co' };
+
+  it('reads the second after the first, though both reach as far as nothing', async () => {
+    const emptied = { inbox: { uidValidity: 1, summaries: [] } };
+    mocks.cached = emptied;
+    mocks.syncMailbox.mockResolvedValue({
+      state: { status: 'synced', at: 1, complete: ['sent', 'archive', 'trash', 'drafts'] },
+      byFolder: emptied,
+    });
+    mocks.loadOlder.mockImplementation(async (_run, folderCache: { address: string }) => {
+      mocks.cachedFor[folderCache.address] = INBOX_HELD;
+      return { ok: true, value: { loaded: 1, complete: false } };
+    });
+    await mount([ADDRESS, OTHER]);
+    await vi.waitFor(() => expect(mail().syncStates[OTHER.address]?.status).toBe('synced'));
+    await vi.waitFor(() => expect(mail().syncStates[ADDRESS.address]?.status).toBe('synced'));
+
+    await act(async () => mail().loadOlderInList('in:anywhere'));
+
+    const loaded = mocks.loadOlder.mock.calls.map(([, folderCache]) => folderCache.address);
+    expect(new Set(loaded)).toEqual(new Set([ADDRESS.address, OTHER.address]));
   });
 });
 

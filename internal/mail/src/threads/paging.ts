@@ -24,12 +24,15 @@ export type OlderFrontier = {
 /**
  * The folder that stops short soonest of those holding older mail than the cache reaches, or null
  * when none does. By uid, not the oldest date: a window is counted in arrival order, and a message
- * moved in keeps its old date, which says nothing about what lies below the window.
+ * moved in keeps its old date, which says nothing about what lies below the window. An incomplete
+ * folder with nothing cached (all of it filed away) reaches nowhere: its mail is unread, so any row
+ * could hide some above it.
  */
 export const olderFrontier = (windows: readonly FolderWindow[]): OlderFrontier | null =>
   windows
     .filter(({ isComplete }) => !isComplete)
     .flatMap(({ mailbox, folder, summaries }) => {
+      if (summaries.length === 0) return [{ mailbox, folder, reachedAt: Number.POSITIVE_INFINITY }];
       const [reachedAt] = summaries
         .toSorted((a, b) => a.uid - b.uid)
         .flatMap(({ internalDate }) => parseInternalDate(internalDate) ?? []);
@@ -37,13 +40,16 @@ export const olderFrontier = (windows: readonly FolderWindow[]): OlderFrontier |
     })
     .toSorted((a, b) => b.reachedAt - a.reachedAt)[0] ?? null;
 
-/** What a client holds in memory, as windows. */
+/**
+ * What a client holds in memory, as windows. Not the server's Drafts: the drafts shown are the
+ * vault's, and server drafts are not threaded, so that window would clip a list to mail nobody sees.
+ */
 export const windowsOf = (
   byMailbox: MailboxSummaries,
   isComplete: (mailbox: string, folder: Folder) => boolean,
 ): readonly FolderWindow[] =>
   Object.entries(byMailbox).flatMap(([mailbox, byFolder]) =>
-    FOLDERS.flatMap(folder => {
+    FOLDERS.filter(folder => folder !== 'drafts').flatMap(folder => {
       const read = byFolder[folder];
       return read === undefined
         ? []

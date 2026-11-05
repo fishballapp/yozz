@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { windowsOf } from './paging.ts';
 import type { MailboxSyncState } from './sync.ts';
 import type { Folder, Message, ThreadState } from './thread.ts';
 import {
@@ -346,6 +347,27 @@ describe('the query behind a list', () => {
         windows,
       }).older,
     ).toMatchObject({ folder: 'archive' });
+  });
+
+  it("does not clip the empty box to the server's Drafts, which the list never shows", () => {
+    const windows = windowsOf(
+      {
+        'me@x': {
+          inbox: { uidValidity: 1, summaries: [] },
+          drafts: { uidValidity: 1, summaries: [] },
+        },
+      },
+      (_mailbox, folder) => folder !== 'drafts',
+    );
+    const listing = listingOf({
+      threads: [thread('inbox', ['inbox'])],
+      view: 'unified',
+      q: '',
+      mailboxes,
+      windows,
+    });
+    expect(listing.threads.map(({ id }) => id)).toEqual(['inbox']);
+    expect(listing.older).toBeNull();
   });
 
   it('lists a query that only says where, with nothing a server could be asked', () => {
