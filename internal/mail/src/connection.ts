@@ -50,5 +50,12 @@ export type MailTask<T> = {
  */
 export const appendQuietLimitMs = (bytes: number): number => 60_000 + (bytes / 2 ** 20) * 15_000;
 
+/**
+ * How long a UID SEARCH may go with nothing crossing the connection. A server says nothing until it
+ * has searched the whole folder, which takes Forward Email 25–178 s, so the minute other work gets
+ * would cut a slow search off, and its retry too.
+ */
+export const SEARCH_QUIET_LIMIT_MS = 10 * 60_000;
+
 /** Runs a task on one mailbox's session. */
 export type RunTask = <T>(task: MailTask<T>) => Promise<Result<T, MailConnectionFailure>>;

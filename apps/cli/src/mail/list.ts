@@ -12,7 +12,7 @@ import {
   viewOfFolders,
 } from '@yozz.app/mail/threads/query';
 import { SEARCH_HITS } from '@yozz.app/mail/threads/search';
-import type { Folder, ThreadState } from '@yozz.app/mail/threads/thread';
+import type { ThreadState } from '@yozz.app/mail/threads/thread';
 import { latestOf, withinReach } from '@yozz.app/mail/threads/views';
 import * as Clock from 'effect/Clock';
 import * as Command from 'effect/cli/Command';
@@ -94,7 +94,7 @@ export const listCommand = Command.make(
     ),
     wait: Flag.Int('wait').pipe(
       Flag.withDescription(
-        'Answer only with mail that arrives after the command starts, waiting up to this many seconds (checked between rounds, so connecting and syncing on a slow server can run past it)',
+        'Answer only with mail that arrives after the command starts, waiting up to this many seconds; whatever is still running then is dropped',
       ),
       Flag.filter(
         seconds => seconds >= 1,
@@ -139,37 +139,30 @@ export const listCommand = Command.make(
 
     /**
      * The rows in scope from what the cache holds or, with something to look for, the matches from
-     * the servers of `searched` in `inFolders`, what the vault holds that no server can search, and
-     * the cached matches of an address that could not answer. Also whether any folder had more
-     * matches than were read, and the addresses whose server failed to search.
+     * the servers of `searched`, what the vault holds that no server can search, and the cached
+     * matches of an address that could not answer. Also whether any folder had more matches than
+     * were read, and the addresses whose server failed to search.
      */
-    const candidates = Effect.fnUntraced(function* (
-      searched: readonly InboundAddress[],
-      isWanted: (thread: ThreadState) => boolean,
-      inFolders: readonly Folder[] = folders,
-    ) {
+    const candidates = Effect.fnUntraced(function* (searched: readonly InboundAddress[]) {
       if (!isSearch) {
         const threads = yield* cache.threads();
         return {
-          found: page(threads.filter(isThreadInScope(scope.value)).filter(isWanted)),
+          found: page(threads.filter(isThreadInScope(scope.value))),
           hasMoreMatches: false,
           failed: [],
         };
       }
       const { extra, isHit, hasMoreMatches, failed } = yield* searchMail({
         mailboxes: searched,
-        folders: inFolders,
+        folders,
         query: parsed,
       });
       const answered = searched.filter(
         ({ address }) => !failed.some(error => error.address === address),
       );
-      const isHeldHere = isMessageInScope({
-        ...scope.value,
-        folders: inFolders,
-      });
+      const isHeldHere = isMessageInScope(scope.value);
       const isUnanswered = isMessageInScope({
-        folders: inFolders,
+        folders,
         mailboxes: shown.filter(({ address }) => !answered.some(a => a.address === address)),
         isEveryMailbox: false,
       });
@@ -180,13 +173,10 @@ export const listCommand = Command.make(
             messageMatches(parsed, message, thread.subject),
         );
       const threads = yield* cache.threads(extra);
-      const isScoped = isThreadInScope({ ...scope.value, folders: inFolders });
+      const isScoped = isThreadInScope(scope.value);
       return {
         found: page(
-          threads.filter(
-            thread =>
-              isScoped(thread) && (isHit(thread) || isCachedHit(thread)) && isWanted(thread),
-          ),
+          threads.filter(thread => isScoped(thread) && (isHit(thread) || isCachedHit(thread))),
         ),
         hasMoreMatches,
         failed,
@@ -205,17 +195,16 @@ export const listCommand = Command.make(
             '--wait watches the inbox, so the query must cover it: add in:inbox, or drop --wait',
         });
       }
-      const { arrived, failed } = yield* waitForMail({
+      const { arrived, failed, syncedAt } = yield* waitForMail({
         mailboxes: shown,
         deadline: startedAt + wait.value * 1000,
-        // New mail lands in the inbox, so nothing else is worth asking a server about each round.
-        rowsOf: (watched, isWanted) => candidates(watched, isWanted, ['inbox']),
+        query: parsed,
       });
       return yield* printJson({
         notice: NOTICE,
         threads: arrived.slice(0, limit).map(thread => rowOf(thread, { webUrl, view })),
         nextCursor: null,
-        syncedAt: yield* cache.syncedAt(shown),
+        syncedAt,
         ...failedOf(failed),
       });
     }
@@ -239,7 +228,7 @@ export const listCommand = Command.make(
       Cache | Mail
     > =>
       Effect.gen(function* () {
-        const { found, hasMoreMatches, failed } = yield* candidates(live, () => true);
+        const { found, hasMoreMatches, failed } = yield* candidates(live);
         const frontier = yield* cache.olderFrontier(live, paged);
         // At or below the frontier a folder has not been read yet: a row there could hide mail above
         // it for good, as the next page would start past it. Dates tie to the second.
@@ -309,9 +298,16 @@ older mail already paged in). Bcc matches only on Sent, and only where a copy re
 Answers from this machine's cache when the mailbox's addresses synced under two minutes ago, and
 syncs them first otherwise (--sync always does). --wait needs a query that covers the inbox, and no
 --cursor: it holds each inbox open and answers with the first mail that arrives and matches, or
-fails WaitTimedOut. Its seconds are checked between rounds, not during one: connecting, the first
-sync and each round's sync and search can run past them on a slow server. A page can hold fewer than --limit when the older mail it reached for held too
-few; a nextCursor that isn't null says there is more.
+fails WaitTimedOut. It reads only what arrives: from:, to:, subject:, is: and dates are matched
+here, and only a plain word that isn't in a new mail's subject, sender or recipients is asked of
+the server (its body), one command a word. Its seconds bound everything it does, counted from
+the start: when they run out, whatever is running (a slow search, say) is dropped and it fails
+WaitTimedOut. A message counts only when every copy of it arrived during the wait, so old mail
+moved back into the inbox is not new. A connection that drops while idling is opened again.
+
+A page can hold fewer than --limit when the older mail it reached for held too few; a nextCursor
+that isn't null says there is more. Every match found beyond the cache is remembered, so a read,
+update or draft --reply of it fetches it from where it was found rather than searching again.
 
 An address whose mail server failed answers from its cache: it is listed under "failed", and its
 syncedAt says how old what it shows is. Only when every address fails is it MailServerError.

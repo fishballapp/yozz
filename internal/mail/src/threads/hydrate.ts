@@ -58,8 +58,12 @@ export const withExtra = (cached: FolderSummaries, extra: FolderSummaries): Fold
     FOLDERS.flatMap(folder => {
       const read = cached[folder];
       const added = extra[folder];
-      if (read === undefined) return added === undefined ? [] : [[folder, added]];
-      if (added === undefined || added.uidValidity !== read.uidValidity) return [[folder, read]];
+      if (added === undefined) return read === undefined ? [] : [[folder, read]];
+      if (read === undefined) return [[folder, added]];
+      // A folder never read (`cachedSummaries`' stand-in, UIDVALIDITY 0 and nothing held) has no uid
+      // the added ones could be confused with; an empty folder read under another UIDVALIDITY does.
+      if (read.uidValidity === 0 && read.summaries.length === 0) return [[folder, added]];
+      if (added.uidValidity !== read.uidValidity) return [[folder, read]];
       const byUid = new Map(
         [...read.summaries, ...added.summaries].map(summary => [summary.uid, summary]),
       );

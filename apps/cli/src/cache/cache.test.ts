@@ -292,6 +292,39 @@ layer(NodeServices.layer)(it => {
       }),
     );
 
+    it.effect('files a found copy where a move took it, and forgets one sent nowhere known', () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const dir = yield* fs.makeTempDirectoryScoped();
+        const key = yield* Effect.promise(() =>
+          crypto.subtle.generateKey({ name: 'AES-GCM', length: 256 }, false, [
+            'encrypt',
+            'decrypt',
+          ]),
+        );
+        const { found } = yield* mailboxCache({ dir, key, mailbox: ADDRESS });
+        const at = (folder: 'inbox' | 'archive', uid: number) => ({ folder, uidValidity: 7, uid });
+        yield* found.remember([
+          { messageId: '<a@x>', ...at('inbox', 1) },
+          { messageId: '<b@x>', ...at('inbox', 2) },
+          { messageId: '<c@x>', ...at('inbox', 3) },
+        ]);
+
+        expect(yield* found.refile([{ from: at('inbox', 9), to: at('archive', 1) }])).toBe(false);
+        expect(
+          yield* found.refile([
+            { from: at('inbox', 1), to: at('archive', 40) },
+            { from: at('inbox', 2), to: null },
+          ]),
+        ).toBe(true);
+        const reopened = yield* mailboxCache({ dir, key, mailbox: ADDRESS });
+        expect(yield* reopened.found.of(new Set(['<a@x>', '<b@x>', '<c@x>']))).toEqual([
+          { messageId: '<a@x>', ...at('archive', 40) },
+          { messageId: '<c@x>', ...at('inbox', 3) },
+        ]);
+      }),
+    );
+
     it.effect('fails a write the disk refuses as a UsageError, not a defect', () =>
       Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem;

@@ -6,7 +6,7 @@ import * as Exit from 'effect/Exit';
 import * as FileSystem from 'effect/FileSystem';
 import * as Path from 'effect/Path';
 import * as TestClock from 'effect/testing/TestClock';
-import { ADDRESS, mail, minuteOf2026 } from '../mail/mail-world.ts';
+import { ADDRESS, mail, minuteOf2026, SECOND } from '../mail/mail-world.ts';
 import { failureOf } from '../test-world.ts';
 import { makeComposeWorld } from './compose-world.ts';
 
@@ -60,6 +60,38 @@ layer(NodeServices.layer)(it => {
           contentVersion: 1,
         });
         expect(record?.body).toBe(`Thanks, **paid**.${draft.untrusted.quote}`);
+      }),
+    );
+
+    it.effect('says how old the mail it replied to is, and which mailbox it could not sync', () =>
+      Effect.gen(function* () {
+        const { server, run, addSecond, expireSecond } = yield* makeComposeWorld();
+        yield* addSecond();
+        yield* expireSecond();
+        server.deliver('INBOX', mail(1));
+
+        const { exit, stdout, stderr } = yield* run([
+          'draft',
+          '--reply-all',
+          'mid/<m1@stripe.com>',
+          '--text',
+          'Thanks.',
+        ]);
+
+        assert.isTrue(Exit.isSuccess(exit), stderr);
+        const out = JSON.parse(stdout);
+        expect(Object.keys(out.syncedAt).toSorted()).toEqual([ADDRESS, SECOND].toSorted());
+        expect(out.syncedAt[SECOND]).toBeNull();
+        expect(out.failed).toEqual([
+          expect.objectContaining({ address: SECOND, code: 'MailServerError' }),
+        ]);
+
+        // A new message reads no mail, so it says nothing of it.
+        const fresh = JSON.parse(
+          (yield* run(['draft', '--from', ADDRESS, '--to', 'kate@example.com'])).stdout,
+        );
+        expect(fresh).not.toHaveProperty('syncedAt');
+        expect(fresh).not.toHaveProperty('failed');
       }),
     );
 

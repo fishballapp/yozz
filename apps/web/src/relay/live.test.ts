@@ -539,6 +539,53 @@ describe('createLiveManager', () => {
     });
   });
 
+  describe('a UID SEARCH waiting for its answer', () => {
+    /** A connection whose search is answered only when the test says. */
+    const searching = () => {
+      const answer = Promise.withResolvers<ImapResult<readonly number[]>>();
+      const manager = managerOver(async () => ({
+        ok: true,
+        value: {
+          client: { ...createFakeClient(), uidSearch: () => answer.promise },
+          close: async () => {},
+          resumed: false,
+        },
+      }));
+      const search = manager.run(MAILBOX, {
+        priority: 'user',
+        effect: 'read',
+        retry: true,
+        run: async client => {
+          const found = await client.uidSearch({ key: 'TEXT', value: 'invoice' });
+          return found.ok
+            ? { ok: true, value: found.value }
+            : { ok: false, error: { kind: 'imap', reason: found.reason } };
+        },
+      });
+      return { search, answer };
+    };
+
+    it('survives the minutes a slow server searches in silence', async () => {
+      const { search, answer } = searching();
+      await flush();
+
+      await advance(3 * 60_000);
+      expect(states.some(state => state.status === 'failed')).toBe(false);
+
+      answer.resolve({ ok: true, value: [4, 2] });
+      expect(await search).toEqual({ ok: true, value: [4, 2] });
+    });
+
+    it('fails as stalled when the server never answers', async () => {
+      const { search } = searching();
+      await flush();
+
+      await advance(11 * 60_000);
+      expect(states.at(-1)).toMatchObject({ status: 'failed', failure: { kind: 'stalled' } });
+      void search;
+    });
+  });
+
   it('runs a task queued at any moment after the one before it finishes', async () => {
     const task: MailTask<number> = {
       priority: 'user',

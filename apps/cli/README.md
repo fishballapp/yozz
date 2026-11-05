@@ -66,9 +66,12 @@ yozz update <id>… [--read | --unread] [--star | --unstar] [--move inbox|archiv
 - Conversations are threaded exactly as yozz.app threads them, so an id (`mid/<Message-ID>`) means
   the same conversation in both, and every row carries the yozz.app `url` that shows it.
 - Reads answer from this machine's cache when the addresses synced under two minutes ago, and sync
-  first otherwise; `--sync` always does. Writes always sync the accounts they touch first.
+  first otherwise; `--sync` always does. Writes always sync the accounts they touch first. `read`,
+  `update` and `draft` sync only the accounts holding the conversation, and every account only when
+  it isn't cached.
 - An address whose mail server fails (an expired app password, say) answers from its cache and is
-  named under `failed` beside `syncedAt`; the command fails only when every address does.
+  named under `failed` beside `syncedAt`; the command fails only when every address does (`read` and
+  `draft` still answer from the cache then, when it holds the id).
 - `list` with no query is the inbox of every mailbox. `--query` takes Gmail's syntax, and anything
   that is not an operator with a value it can take is plain text:
   - `invoice "exact phrase"`: several terms must all match in the same message, in its subject, sender,
@@ -87,7 +90,11 @@ yozz update <id>… [--read | --unread] [--star | --unstar] [--move inbox|archiv
 - Search has limits: attachment names match only mail this machine has synced (the newest 200 per
   folder, plus older mail already paged in), and `Bcc` matches only on Sent, only where a copy recorded it.
 - `list --wait 120` holds each inbox open (IMAP `IDLE`) and answers with the first new mail; its query
-  must cover the inbox.
+  must cover the inbox. It reads only what arrives, and asks the server only about a plain word the
+  new mail's subject, sender and recipients don't hold. When the seconds run out it stops, whatever
+  it is in the middle of.
+- A mail `list --query` finds outside the cache is remembered where it was found, so `read`, `update`
+  and `draft --reply` fetch it from there instead of searching again.
 - `read` prints plain text, never HTML, and marks nothing read. `--save-attachments <dir>` writes each
   attachment under a cleaned-up name, readable by you only, never over a file that is there.
 
@@ -131,7 +138,9 @@ yozz discard <draftId>
 - `--reply`, `--reply-all` and `--forward` start from a message as yozz.app's buttons do: the
   recipients, the address it came to as From, the quote, the reply headers, a forward's attachments.
   `--text` is what you write above the quote, in markdown; the message carries it rendered as HTML
-  beside it, as yozz.app's composer does. `--edit` changes only the fields you give.
+  beside it, as yozz.app's composer does. `--edit` changes only the fields you give. Started from a
+  message, the output also carries `syncedAt`, and `failed` when a mailbox's server failed, as `read`
+  does, since the seed then came from that mailbox's cache.
 - Files you `--attach` (25 MiB in all) are encrypted here and uploaded, so yozz.app and your other
   machines show and send the draft with them, and they count against your 1 GB of file storage.
 - `send` never sends a draft twice. Repeating it answers `"replayed": true`, or finishes a send that

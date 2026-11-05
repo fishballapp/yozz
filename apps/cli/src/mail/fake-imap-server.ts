@@ -243,6 +243,8 @@ export type FakeImapServer = {
   readonly open: () => MailSocket;
   /** How many connections were opened. */
   readonly connections: () => number;
+  /** How many of them are not closed yet, by either side. */
+  readonly openConnections: () => number;
   /** Every quiet limit a connection was given, in order. */
   readonly quietLimits: number[];
 };
@@ -266,6 +268,10 @@ export const makeFakeImapServer = ({
   /** Misbehaviour to stage: a SELECT held this long, a connection dropped on a command. */
   readonly quirks?: {
     readonly selectDelayMs?: (folderName: string, nth: number) => number;
+    /** How long a UID SEARCH takes before it answers, as Forward Email's can. */
+    readonly searchDelayMs?: number;
+    /** Where the network goes dead: nothing more reaches the client, from the greeting or once idling. */
+    readonly goesSilent?: 'greeting' | 'idle';
     /** True for a command (as `commands` lists it) that closes the connection, unanswered. */
     readonly dropsOn?: (command: string) => boolean;
   };
@@ -280,6 +286,7 @@ export const makeFakeImapServer = ({
   const idlers = new Set<(folderName: string) => void>();
   const selects = new Map<string, number>();
   let opened = 0;
+  let closed = 0;
 
   const deliver: FakeImapServer['deliver'] = (name, message, flags = []) => {
     const box = boxes.get(name);
@@ -294,7 +301,12 @@ export const makeFakeImapServer = ({
   const session = (io: ByteDuplex, close: () => void) => {
     let selected: string | null = null;
     let buffer = new Uint8Array();
-    const send = (...lines: (string | Uint8Array)[]) =>
+    let isSilent = quirks.goesSilent === 'greeting';
+    const send = async (...lines: (string | Uint8Array)[]) => {
+      if (isSilent) return;
+      await sendNow(...lines);
+    };
+    const sendNow = (...lines: (string | Uint8Array)[]) =>
       io.write(concat(...lines.map(line => (typeof line === 'string' ? bytes(line) : line))));
 
     /** One line, or null at the end; a `{n}` literal is asked for and read in. */
@@ -525,6 +537,9 @@ export const makeFakeImapServer = ({
             return true;
           }
           if (verb === 'SEARCH') {
+            if (quirks.searchDelayMs !== undefined) {
+              await new Promise(resolve => setTimeout(resolve, quirks.searchDelayMs));
+            }
             // The messages the one key matches. TEXT is the body alone, as Forward Email's server
             // matches it, so a subject is found only by a SUBJECT key.
             const key =
@@ -560,6 +575,7 @@ export const makeFakeImapServer = ({
         }
         case 'IDLE': {
           await send('+ idling\r\n');
+          if (quirks.goesSilent === 'idle') isSilent = true;
           const notify = (name: string) => {
             if (name === selected && folder !== undefined) {
               void send(`* ${folder.messages.length} EXISTS\r\n`);
@@ -608,7 +624,13 @@ export const makeFakeImapServer = ({
     deliver,
     open: () => {
       opened += 1;
-      const { client, server, close } = pipe();
+      const { client, server, close: end } = pipe();
+      let isClosed = false;
+      const close = () => {
+        if (!isClosed) closed += 1;
+        isClosed = true;
+        end();
+      };
       session(server, close);
       return {
         duplex: client,
@@ -619,6 +641,7 @@ export const makeFakeImapServer = ({
       };
     },
     connections: () => opened,
+    openConnections: () => opened - closed,
     quietLimits,
   };
 };

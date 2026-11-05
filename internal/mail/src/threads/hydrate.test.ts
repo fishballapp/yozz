@@ -1,7 +1,7 @@
 import type { ImapMessageSummary } from '@yozz.app/imap';
 import { describe, expect, it } from 'vitest';
 import { memoryMailCache } from '../testing/memory-mail-cache.ts';
-import { cachedPreviews, cachedSummaries } from './hydrate.ts';
+import { cachedPreviews, cachedSummaries, withExtra } from './hydrate.ts';
 
 const summary = (uid: number): ImapMessageSummary => ({
   seq: uid,
@@ -56,6 +56,39 @@ describe('hydration from the mail cache', () => {
     expect(await cachedPreviews(mailbox, 'me@x')).toEqual({
       'me@x/inbox/12/3': ['Preview snippet one', 'Paragraph two'],
       'me@x/sent/34/7': ['Sent message snippet'],
+    });
+  });
+
+  describe('withExtra', () => {
+    const uids = (folders: ReturnType<typeof withExtra>) =>
+      folders.inbox?.summaries.map(s => s.uid);
+
+    it('lays added summaries over the cached ones read under the same UIDVALIDITY', () => {
+      const cached = { inbox: { uidValidity: 7, summaries: [summary(1), summary(2)] } };
+      expect(
+        uids(withExtra(cached, { inbox: { uidValidity: 7, summaries: [summary(9)] } })),
+      ).toEqual([1, 2, 9]);
+    });
+
+    it('keeps the cached ones when the folder was renumbered since', () => {
+      const cached = { inbox: { uidValidity: 7, summaries: [summary(1)] } };
+      expect(
+        uids(withExtra(cached, { inbox: { uidValidity: 8, summaries: [summary(9)] } })),
+      ).toEqual([1]);
+    });
+
+    it('keeps an empty folder read since under a new UIDVALIDITY clear of older found ones', () => {
+      const cached = { inbox: { uidValidity: 8, summaries: [] } };
+      expect(withExtra(cached, { inbox: { uidValidity: 7, summaries: [summary(9)] } })).toEqual(
+        cached,
+      );
+    });
+
+    it('takes the added ones into a folder never read, whatever stood in for it', () => {
+      const cached = { inbox: { uidValidity: 0, summaries: [] } };
+      expect(withExtra(cached, { inbox: { uidValidity: 8, summaries: [summary(9)] } })).toEqual({
+        inbox: { uidValidity: 8, summaries: [summary(9)] },
+      });
     });
   });
 });

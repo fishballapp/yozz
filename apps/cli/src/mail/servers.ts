@@ -52,8 +52,11 @@ const lookupTxtOnDns: TxtLookup = async name => {
 export class MailServers extends Context.Service<
   MailServers,
   {
-    /** A TLS connection to `host`, its certificate validated. */
-    readonly open: (host: Host) => Promise<Result<MailSocket, MailConnectionFailure>>;
+    /** A TLS connection to `host`, its certificate validated; `signal` ends it, opening or open. */
+    readonly open: (
+      host: Host,
+      signal?: AbortSignal,
+    ) => Promise<Result<MailSocket, MailConnectionFailure>>;
     /** The DKIM keys a sender check reads. */
     readonly lookupTxt: TxtLookup;
   }
@@ -110,9 +113,13 @@ const socketDuplex = (socket: TLSSocket): ByteDuplex => {
   };
 };
 
-function openTls({ host, port }: Host): Promise<Result<MailSocket, MailConnectionFailure>> {
+function openTls(
+  { host, port }: Host,
+  signal?: AbortSignal,
+): Promise<Result<MailSocket, MailConnectionFailure>> {
   return new Promise(resolve => {
     const socket = tlsConnect({ host, port, servername: host });
+    signal?.addEventListener('abort', () => socket.destroy(new Error('cancelled')), { once: true });
     socket.setTimeout(QUIET_LIMIT_MS, () => socket.destroy(new Error(`${host} stopped answering`)));
     socket.once('secureConnect', () =>
       resolve({
@@ -151,17 +158,27 @@ export type ImapConnection = {
   readonly close: () => Promise<void>;
 };
 
-/** Opened, greeted and signed in; `onUntagged` hears every untagged response. */
+/**
+ * Opened, greeted and signed in; `onUntagged` hears every untagged response. `signal` ends the
+ * socket at once, while it opens, greets or signs in as well as after: a LOGOUT would queue behind
+ * whatever runs.
+ */
 export const connectImap = async (
   { open }: MailServers['Service'],
   imap: Host,
-  { onUntagged }: { readonly onUntagged: (response: ImapUntagged) => void },
+  {
+    onUntagged,
+    signal,
+  }: { readonly onUntagged: (response: ImapUntagged) => void; readonly signal: AbortSignal },
 ): Promise<Result<ImapConnection, MailConnectionFailure>> => {
   const refused = wrongPort(imap, 993, 'IMAPS');
   if (refused !== null) return refused;
-  const opened = await open(imap);
+  if (signal.aborted) return { ok: false, error: { kind: 'cancelled' } };
+  const opened = await open(imap, signal);
   if (!opened.ok) return opened;
   const { duplex, setQuietLimit, destroy } = opened.value;
+  if (signal.aborted) destroy();
+  signal.addEventListener('abort', destroy, { once: true });
   const client = createImapClient(duplex, { onUntagged });
 
   const greeting = await client.greeting();

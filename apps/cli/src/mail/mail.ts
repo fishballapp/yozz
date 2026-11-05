@@ -13,6 +13,7 @@ import {
   type MailTask,
   type Result,
   type RunTask,
+  SEARCH_QUIET_LIMIT_MS,
 } from '@yozz.app/mail/connection';
 import { describeMailFailure } from '@yozz.app/mail/describe-failure';
 import type { TxtLookup } from '@yozz.app/mail/threads/dkim';
@@ -59,8 +60,11 @@ export class Mail extends Context.Service<
     readonly identities: readonly AddressRecord[];
     /** The addresses mail is read for. */
     readonly mailboxes: readonly InboundAddress[];
-    /** `@yozz.app/mail`'s port: the mailbox's one connection, opened by its first task. */
-    readonly runOn: (mailbox: InboundAddress) => RunTask;
+    /**
+     * `@yozz.app/mail`'s port: the mailbox's one connection, opened by its first task. Once
+     * `signal` aborts, a task neither opens a connection nor runs again on a fresh one.
+     */
+    readonly runOn: (mailbox: InboundAddress, signal?: AbortSignal) => RunTask;
     /** The DNS side of a sender check. */
     readonly lookupTxt: TxtLookup;
     /** Runs `f` on the mailbox's connection; a failure names the address. */
@@ -69,13 +73,12 @@ export class Mail extends Context.Service<
       f: (run: RunTask) => Promise<Result<A, MailConnectionFailure>>,
     ) => Effect.Effect<A, MailServerError | UsageError>;
     /**
-     * Holds the mailbox's INBOX in IDLE until the server says it changed. Returns at once when its
-     * next uid is past `lastUid`, and after a while on a server without IDLE.
+     * Holds the mailbox's INBOX in IDLE until the server says it changed, and waits a while on a
+     * server without IDLE. INBOX stays selected from the look before, so this sends no SELECT.
      */
-    readonly waitForInbox: (
-      mailbox: InboundAddress,
-      lastUid: number,
-    ) => Effect.Effect<void, MailServerError>;
+    readonly idleInbox: (mailbox: InboundAddress) => Effect.Effect<void, MailServerError>;
+    /** Ends the mailbox's connection now, opening or open, with no LOGOUT: nobody waits for it. */
+    readonly abandon: (mailbox: InboundAddress) => Effect.Effect<void>;
     /**
      * One SMTP connection, one submission of exactly these bytes, as the web app's `submitBytes`. A
      * failure says which side of the end of `DATA` it fell on (`isUnconfirmedSubmission`), which the
@@ -113,7 +116,11 @@ export class Mail extends Context.Service<
           });
 
         const sessions = new Map<string, Promise<Result<Session, MailConnectionFailure>>>();
+        /** What ends each mailbox's current connection, however far it has got. */
+        const enders = new Map<string, AbortController>();
         const open = async (mailbox: InboundAddress) => {
+          const ender = new AbortController();
+          enders.set(mailbox.address, ender);
           const session: { current: Session | null } = { current: null };
           const selected: { name: string | null; info: ImapSelected | null } = {
             name: null,
@@ -123,6 +130,7 @@ export class Mail extends Context.Service<
             onUntagged: untagged => {
               if (CHANGES.has(untagged.kind)) session.current?.onChange?.();
             },
+            signal: ender.signal,
           });
           if (!connected.ok) return connected;
           const { client, setQuietLimit, close } = connected.value;
@@ -133,18 +141,25 @@ export class Mail extends Context.Service<
             selected.info = res.ok ? res.value : null;
             return res;
           };
+          /** A command whose server may go quiet for longer than `QUIET_LIMIT_MS`, given `ms` instead. */
+          const quietFor = async <T>(ms: number, command: () => Promise<T>): Promise<T> => {
+            setQuietLimit(ms);
+            try {
+              return await command();
+            } finally {
+              setQuietLimit(QUIET_LIMIT_MS);
+            }
+          };
           session.current = {
             client: {
               ...client,
               select,
-              append: async (folderName, message, flags, internalDate) => {
-                setQuietLimit(appendQuietLimitMs(message.length));
-                try {
-                  return await client.append(folderName, message, flags, internalDate);
-                } finally {
-                  setQuietLimit(QUIET_LIMIT_MS);
-                }
-              },
+              append: (folderName, message, flags, internalDate) =>
+                quietFor(appendQuietLimitMs(message.length), () =>
+                  client.append(folderName, message, flags, internalDate),
+                ),
+              uidSearch: criterion =>
+                quietFor(SEARCH_QUIET_LIMIT_MS, () => client.uidSearch(criterion)),
               ensureSelected: async name =>
                 selected.name === name && selected.info !== null
                   ? { ok: true, value: selected.info }
@@ -168,6 +183,13 @@ export class Mail extends Context.Service<
           sessions.delete(mailbox.address);
           if (session?.ok) await session.value.close();
         };
+        /** Ends the mailbox's connection at once: whatever it is running, nobody waits for now. */
+        const abandon = (mailbox: InboundAddress) => {
+          // Forgotten first, so neither the next task nor the finalizer waits on it.
+          sessions.delete(mailbox.address);
+          enders.get(mailbox.address)?.abort();
+          enders.delete(mailbox.address);
+        };
         yield* Effect.addFinalizer(() =>
           Effect.promise(() =>
             Promise.all(
@@ -185,13 +207,16 @@ export class Mail extends Context.Service<
           identities.filter(isInbound).map(({ address }) => [address, Semaphore.makeUnsafe(1)]),
         );
         const runOn =
-          (mailbox: InboundAddress): RunTask =>
+          (mailbox: InboundAddress, signal?: AbortSignal): RunTask =>
           <T>(task: MailTask<T>) => {
             const lock = locks.get(mailbox.address);
             if (lock === undefined) throw new Error(`${mailbox.address} is not an inbound address`);
+            const cancelled = AbortSignal.any(
+              [task.signal, signal].filter(candidate => candidate !== undefined),
+            );
             const attempt = async (): Promise<Result<T, MailConnectionFailure>> => {
-              // It waited its turn for nothing: nobody wants the answer, and no command goes out.
-              if (task.signal?.aborted === true) return { ok: false, error: { kind: 'cancelled' } };
+              // Nobody wants the answer: no connection is opened, and no command goes out.
+              if (cancelled.aborted) return { ok: false, error: { kind: 'cancelled' } };
               const session = await sessionOf(mailbox);
               if (!session.ok) {
                 sessions.delete(mailbox.address);
@@ -216,7 +241,12 @@ export class Mail extends Context.Service<
           mailbox: InboundAddress,
           f: (run: RunTask) => Promise<Result<A, MailConnectionFailure>>,
         ) =>
-          usingCache(() => f(runOn(mailbox))).pipe(
+          usingCache(signal => {
+            // Interrupted (a wait's deadline, Ctrl-C), the command on the wire may run for minutes,
+            // and a LOGOUT would queue behind it; nor is it run again on a fresh connection.
+            signal.addEventListener('abort', () => abandon(mailbox), { once: true });
+            return f(runOn(mailbox, signal));
+          }).pipe(
             Effect.flatMap(res =>
               res.ok
                 ? Effect.succeed(res.value)
@@ -225,11 +255,7 @@ export class Mail extends Context.Service<
           );
 
         /** IDLE until the inbox changes or `signal` aborts; `false` from a server without IDLE. */
-        const idleTask = (
-          mailbox: InboundAddress,
-          lastUid: number,
-          signal: AbortSignal,
-        ): MailTask<boolean> => ({
+        const idleTask = (mailbox: InboundAddress, signal: AbortSignal): MailTask<boolean> => ({
           priority: 'user',
           effect: 'read',
           retry: false,
@@ -238,9 +264,6 @@ export class Mail extends Context.Service<
             if (!inbox.ok) return { ok: false, error: { kind: 'imap', reason: inbox.reason } };
             // The wait ended while the inbox was being selected: there is nothing to idle for.
             if (signal.aborted) return { ok: true, value: true };
-            if (inbox.value.uidNext !== null && inbox.value.uidNext > lastUid + 1) {
-              return { ok: true, value: true };
-            }
             if (!client.hasCapability('IDLE')) return { ok: true, value: false };
             const session = await sessionOf(mailbox);
             if (!session.ok) return session;
@@ -267,9 +290,10 @@ export class Mail extends Context.Service<
           runOn,
           lookupTxt: servers.lookupTxt,
           use,
-          waitForInbox: Effect.fn('Mail.waitForInbox')(function* (mailbox, lastUid) {
+          abandon: mailbox => Effect.sync(() => abandon(mailbox)),
+          idleInbox: Effect.fn('Mail.idleInbox')(function* (mailbox) {
             const hasIdle = yield* Effect.tryPromise(signal =>
-              runOn(mailbox)(idleTask(mailbox, lastUid, signal)),
+              runOn(mailbox, signal)(idleTask(mailbox, signal)),
             ).pipe(
               Effect.orDie,
               Effect.flatMap(res =>

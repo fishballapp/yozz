@@ -1,7 +1,7 @@
 import * as NodeServices from '@effect/platform-node/NodeServices';
 import { assert, describe, expect, layer } from '@effect/vitest';
 import { SEND_LEASE_MS } from '@yozz.app/mail/compose/draft-record';
-import { appendQuietLimitMs } from '@yozz.app/mail/connection';
+import { appendQuietLimitMs, SEARCH_QUIET_LIMIT_MS } from '@yozz.app/mail/connection';
 import { DATA_END_TIMEOUT_MS } from '@yozz.app/smtp';
 import * as Clock from 'effect/Clock';
 import * as Effect from 'effect/Effect';
@@ -119,7 +119,13 @@ layer(NodeServices.layer)(it => {
 
         expect(smtp.quietLimits).toEqual([DATA_END_TIMEOUT_MS]);
         const copy = server.folders.get('Sent')?.messages[0]?.raw;
-        expect(server.quietLimits).toEqual([appendQuietLimitMs(copy?.length ?? 0), QUIET_LIMIT_MS]);
+        // The Sent copy first searches for itself, then is appended: each waits out its own silence.
+        expect(server.quietLimits).toEqual([
+          SEARCH_QUIET_LIMIT_MS,
+          QUIET_LIMIT_MS,
+          appendQuietLimitMs(copy?.length ?? 0),
+          QUIET_LIMIT_MS,
+        ]);
       }),
     );
 

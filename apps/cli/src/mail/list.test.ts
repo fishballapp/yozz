@@ -276,8 +276,10 @@ layer(NodeServices.layer)(it => {
           assert.isTrue(Exit.isFailure(exit));
           assert.strictEqual(stdout, '');
           expect(failureOf(stderr)).toMatchObject({ code: 'WaitTimedOut' });
-          // The IDLE was ended and the connection signed out.
-          expect(server.commands).toEqual(expect.arrayContaining(['IDLE', 'LOGOUT']));
+          // It idled, and at the deadline the connection was ended rather than signed out behind
+          // a DONE a silent server might never answer.
+          expect(server.commands).toContain('IDLE');
+          expect(server.commands).not.toContain('LOGOUT');
         }),
       ),
     );
@@ -300,10 +302,10 @@ layer(NodeServices.layer)(it => {
               servers,
             });
             expect(failureOf(stderr)).toMatchObject({ code: 'WaitTimedOut' });
-            // The first sync, the IDLE's own SELECT and the last sync: no more.
+            // The look before the IDLE and the one after it ends: no more.
             expect(
               server.commands.filter(command => command === 'SELECT "INBOX"').length,
-            ).toBeLessThanOrEqual(4);
+            ).toBeLessThanOrEqual(2);
           }),
         ),
       15_000,
@@ -319,7 +321,7 @@ layer(NodeServices.layer)(it => {
               username: ADDRESS,
               password: 'secret',
               // The SELECT before IDLE answers after the wait is over.
-              quirks: { selectDelayMs: (name, nth) => (name === 'INBOX' && nth === 2 ? 1_500 : 0) },
+              quirks: { selectDelayMs: (name, nth) => (name === 'INBOX' && nth === 1 ? 1_500 : 0) },
             });
             const { exit, stderr } = yield* runCli(['list', '--wait', '1'], {
               fetch: world.fetch,

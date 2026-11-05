@@ -10,7 +10,7 @@ import {
   type PendingChange,
   type PendingOp,
 } from '@yozz.app/mail/threads/reconcile';
-import { moveMessages, recordMoves, setFlag } from '@yozz.app/mail/threads/sync';
+import { type MovedCopy, moveMessages, recordMoves, setFlag } from '@yozz.app/mail/threads/sync';
 import {
   type Folder,
   isArchived,
@@ -18,7 +18,6 @@ import {
   isTrashed,
   type Location,
   renumberedText,
-  resolveHandles,
   type ThreadState,
 } from '@yozz.app/mail/threads/thread';
 import * as Argument from 'effect/cli/Argument';
@@ -32,7 +31,7 @@ import { PartialFailure, reportFailure, UsageError } from '../errors.ts';
 import { printJson } from '../output.ts';
 import { Mail, mailServerError } from './mail.ts';
 import { NOTICE } from './rows.ts';
-import { lookUp } from './search.ts';
+import { locate } from './search.ts';
 
 const NOT_ON_SERVER =
   'No copy of this conversation is on a mail server to change; a message just sent has one once its Sent copy syncs.';
@@ -118,34 +117,15 @@ export const updateCommand = Command.make(
     const mail = yield* Mail;
     const cache = yield* Cache;
 
-    // Named against the cache, then every mailbox they touch syncs first, so no write acts on a
-    // location yozz.app changed a minute ago; then named again against what the sync found. An id
-    // the cache does not hold (a search hit outside the window) is looked up on the servers.
-    yield* cache.sync(mail.mailboxes, { force: false });
-    const named = resolveHandles(yield* cache.threads(), ids);
-    const touched = new Set(
-      named
-        .flatMap(({ thread }) => (thread === null ? [] : serverCopies(thread)))
-        .map(({ mailbox }) => mailbox),
-    );
+    // Every mailbox holding them syncs first, however fresh, so no write acts on a location
+    // yozz.app changed a minute ago; the rest only when an id is cached nowhere. A search hit
+    // outside the cached window is read from where the search found it.
+    const located = yield* locate({ ids, force: true });
+    const { entries } = located;
     // A mailbox that cannot sync is not written: its rows carry the failure.
-    const unsynced = new Map(
-      (yield* cache.sync(
-        mail.mailboxes.filter(({ address }) => touched.has(address)),
-        { force: true },
-      )).failed.map(error => [error.address, error] as const),
-    );
-    const live = mail.mailboxes.filter(({ address }) => !unsynced.has(address));
-    const synced = resolveHandles(yield* cache.threads(), ids);
-    const remote = synced.flatMap(({ id, thread }) => (thread === null ? [id] : []));
-    const entries =
-      remote.length === 0
-        ? synced
-        : resolveHandles(
-            yield* cache.threads((yield* lookUp({ mailboxes: live, ids: remote })).extra),
-            ids,
-          );
+    const unsynced = new Map(located.unsynced.map(error => [error.address, error] as const));
     const found = entries.flatMap(({ thread }) => (thread === null ? [] : [thread]));
+    const touched = new Set(found.flatMap(serverCopies).map(({ mailbox }) => mailbox));
 
     const ops: PendingOp[] = [];
     /** A conversation a write refused, with why; the writes after it leave it out. */
@@ -192,7 +172,10 @@ export const updateCommand = Command.make(
             }
             return;
           }
-          // No COPYUID, or a destination no sync has read (just created): the next read syncs first.
+          // A copy a search found moves with it, or the next read would look where it was.
+          yield* cache.found(mailbox).refile(res.value.moved);
+          // No COPYUID, a destination no sync has read (just created), or a copy the cache never
+          // held (a search hit): the next read syncs first, so a list shows where it went.
           if (!res.value.isRecorded) yield* cache.markStale(mailbox);
           ops.push(
             ...work.map(({ thread }) => ({
@@ -213,8 +196,16 @@ export const updateCommand = Command.make(
       mailbox: InboundAddress,
       write: Write,
       copies: readonly Location[],
-      /** Whether the cache now holds where every copy went. */
-    ): Promise<Result<{ readonly isRecorded: boolean }, MailConnectionFailure>> => {
+    ): Promise<
+      Result<
+        {
+          /** Whether the cache now holds where every copy went. */
+          readonly isRecorded: boolean;
+          readonly moved: readonly MovedCopy[];
+        },
+        MailConnectionFailure
+      >
+    > => {
       const mailboxCache = cache.of(mailbox);
       const folders = new Set(copies.map(({ folder }) => folder));
       const marks = new Map<Folder, FolderSync | null>(
@@ -241,12 +232,24 @@ export const updateCommand = Command.make(
         const flag = change.key === 'isUnread' ? '\\Seen' : '\\Flagged';
         const on = change.key === 'isUnread' ? !change.value : change.value;
         const flagged = await setFlag(run, mailboxCache, targets, flag, on);
-        return flagged.ok ? { ok: true, value: { isRecorded: true } } : flagged;
+        return flagged.ok ? { ok: true, value: { isRecorded: true, moved: [] } } : flagged;
       }
       const moved = await moveMessages(run, targets, change.to);
       if (!moved.ok) return moved;
+      const cached = new Map(
+        await Promise.all(
+          [...folders].map(
+            async folder =>
+              [
+                folder,
+                new Set((await mailboxCache.folder(folder).listSummaries()).map(({ uid }) => uid)),
+              ] as const,
+          ),
+        ),
+      );
+      const isEveryCached = moved.value.every(({ from }) => cached.get(from.folder)?.has(from.uid));
       const { isComplete } = await recordMoves(mailboxCache, moved.value);
-      return { ok: true, value: { isRecorded: isComplete } };
+      return { ok: true, value: { isRecorded: isComplete && isEveryCached, moved: moved.value } };
     };
 
     for (const write of writes) yield* apply(write);
@@ -292,8 +295,9 @@ export const updateCommand = Command.make(
   }, reportFailure),
 ).pipe(
   Command.withShortDescription('Mark read or unread, star, or move conversations'),
-  Command.withDescription(`Mark conversations read or unread, star or unstar them, or move them; only what is given changes, on every copy of the conversation in every account. Syncs the accounts it touches
-first, then writes one command per account and folder. Each row says the state the conversation ends
+  Command.withDescription(`Mark conversations read or unread, star or unstar them, or move them; only what is given changes, on every copy of the conversation in every account. Syncs the accounts holding them
+first, every account only when an id isn't cached, then writes one command per account and folder;
+a mail list --query found outside the cache is changed where it was found, with no search. Each row says the state the conversation ends
 in. When some fail, the error is PartialFailure and the rows still print on stdout, each failed one
 with its own error: a conversation on an address whose mail server failed is not written, and its row
 says why.

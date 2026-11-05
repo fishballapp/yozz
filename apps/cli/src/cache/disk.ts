@@ -13,7 +13,8 @@ import { UsageError } from '../errors.ts';
 import { seal, unseal, writePrivateFile } from '../files.ts';
 
 // One mailbox's mail cache on disk: a file per folder (its sync mark, summaries and previews), a
-// file per cached body named for its folder's UIDVALIDITY, and when the mailbox last synced. Each is `iv ‖ AES-GCM(key, JSON)` with the mailbox and the file's name as
+// file per cached body named for its folder's UIDVALIDITY, when the mailbox last synced, and where
+// searches found mail outside the window. Each is `iv ‖ AES-GCM(key, JSON)` with the mailbox and the file's name as
 // additional data, so a file moved to another slot does not open. One that does not open, or no
 // longer decodes, is deleted and read as absent, and the next sync rebuilds it. A file the disk
 // will not read or write is the person's to fix: a `UsageError`, never a defect.
@@ -102,12 +103,28 @@ const MailboxFileSchema = Schema.Struct({
   syncedAt: Schema.Int,
 });
 
+/** Where a search found a message the cached window does not hold. */
+const FoundCopySchema = Schema.Struct({
+  messageId: Schema.String,
+  folder: Schema.Literals(FOLDERS),
+  uidValidity: Schema.Int,
+  uid: Schema.Int,
+});
+export type FoundCopy = typeof FoundCopySchema.Type;
+
+const FoundFileSchema = Schema.Struct({ found: Schema.Array(FoundCopySchema) });
+
 const FolderJson = Schema.fromJsonString(FolderFileSchema);
 const BodyJson = Schema.fromJsonString(BodySchema);
 const MailboxJson = Schema.fromJsonString(MailboxFileSchema);
+const FoundJson = Schema.fromJsonString(FoundFileSchema);
 
 // The file keeps its old name, so a cache written before the rename still reads.
 const SYNCED_AT_FILE = 'account.bin';
+const FOUND_FILE = 'found.bin';
+
+/** How many found copies a mailbox remembers, the newest found kept: a few searches' worth. */
+const FOUND_KEPT = 2_000;
 
 const EMPTY_FOLDER: FolderFile = { sync: null, summaries: [], previews: [] };
 
@@ -122,7 +139,9 @@ const asFetchedBody = (body: typeof BodySchema.Type): FetchedBody => ({
 });
 
 /** The mail-cache promises reject with the CLI's own `UsageError`; anything else is a fault. */
-export const usingCache = <A>(thunk: () => Promise<A>): Effect.Effect<A, UsageError> =>
+export const usingCache = <A>(
+  thunk: (signal: AbortSignal) => Promise<A>,
+): Effect.Effect<A, UsageError> =>
   Effect.tryPromise(thunk).pipe(
     Effect.catchTag('UnknownError', ({ cause }) =>
       cause instanceof UsageError ? Effect.fail(cause) : Effect.die(cause),
@@ -175,8 +194,8 @@ export const mailboxCache = Effect.fn('cache.mailboxCache')(function* ({
         ),
       );
       if (Option.isNone(opened)) {
-        // A body is only fetched again; a folder's file held what the sync read.
-        if (!name.startsWith('bodies')) isDamaged = true;
+        // A body is only fetched again, and a found copy searched for; a folder's file held what the sync read.
+        if (!name.startsWith('bodies') && name !== FOUND_FILE) isDamaged = true;
         yield* fs.remove(file, { force: true }).pipe(Effect.mapError(unusable('written')));
       }
       return opened;
@@ -327,6 +346,59 @@ export const mailboxCache = Effect.fn('cache.mailboxCache')(function* ({
     markStale: fs
       .remove(path.join(dir, SYNCED_AT_FILE), { force: true })
       .pipe(Effect.mapError(unusable('written'))),
+    /**
+     * Where searches found mail outside the cached window, so following one up fetches it by uid
+     * instead of searching for it again. A copy found again replaces the one before it.
+     */
+    found: {
+      remember: (copies: readonly FoundCopy[]) =>
+        Effect.gen(function* () {
+          if (copies.length === 0) return;
+          const known = Option.match(yield* read(FOUND_FILE, FoundJson), {
+            onNone: () => [],
+            onSome: ({ found }) => found,
+          });
+          const keyOf = ({ messageId, folder }: FoundCopy) => `${folder}\n${messageId}`;
+          const replaced = new Set(copies.map(keyOf));
+          const found = [...known.filter(copy => !replaced.has(keyOf(copy))), ...copies];
+          yield* write(FOUND_FILE, FoundJson, { found: found.slice(-FOUND_KEPT) });
+        }).pipe(Effect.provideContext(context)),
+      /**
+       * Copies a move took from where a search found them: filed where it says they went, or
+       * forgotten when it does not say. Answers whether any was found here.
+       */
+      refile: (
+        moves: readonly {
+          readonly from: Omit<FoundCopy, 'messageId'>;
+          readonly to: Omit<FoundCopy, 'messageId'> | null;
+        }[],
+      ) =>
+        Effect.gen(function* () {
+          const file = yield* read(FOUND_FILE, FoundJson);
+          if (Option.isNone(file)) return false;
+          const isAt = (copy: FoundCopy, at: Omit<FoundCopy, 'messageId'>) =>
+            copy.folder === at.folder && copy.uidValidity === at.uidValidity && copy.uid === at.uid;
+          const isMoved = (copy: FoundCopy) => moves.some(({ from }) => isAt(copy, from));
+          if (!file.value.found.some(isMoved)) return false;
+          const found = file.value.found.flatMap(copy => {
+            const to = moves.find(({ from }) => isAt(copy, from))?.to;
+            if (to === undefined) return [copy];
+            return to === null ? [] : [{ ...to, messageId: copy.messageId }];
+          });
+          yield* write(FOUND_FILE, FoundJson, { found });
+          return true;
+        }).pipe(Effect.provideContext(context)),
+      of: (messageIds: ReadonlySet<string>) =>
+        read(FOUND_FILE, FoundJson).pipe(
+          Effect.map(file =>
+            Option.match(file, {
+              onNone: () => [],
+              onSome: ({ found }) => found.filter(({ messageId }) => messageIds.has(messageId)),
+            }),
+          ),
+          Effect.provideContext(context),
+        ),
+    },
   };
 });
 

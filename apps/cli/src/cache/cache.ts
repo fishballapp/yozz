@@ -77,6 +77,8 @@ export class Cache extends Context.Service<
     ) => Effect.Effect<readonly ThreadState[], VaultFailure>;
     /** The mailbox's cache may not be where its mail is now: its next read syncs first. */
     readonly markStale: (mailbox: InboundAddress) => Effect.Effect<void, UsageError>;
+    /** Where searches found the mailbox's mail outside the cached window. */
+    readonly found: (mailbox: InboundAddress) => MailboxCache['found'];
     /**
      * The folder that stops short soonest of those holding older mail than the cache reaches, or
      * null when none does. Older than `reachedAt`, a list across them may be missing mail.
@@ -201,6 +203,7 @@ export class Cache extends Context.Service<
         of: mailbox => cacheOf(mailbox).mail,
         sync,
         markStale: mailbox => cacheOf(mailbox).markStale,
+        found: mailbox => cacheOf(mailbox).found,
         syncSome: Effect.fn('Cache.syncSome')(function* (mailboxes, options) {
           const { failed } = yield* sync(mailboxes, options);
           const [first] = failed;
