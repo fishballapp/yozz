@@ -126,9 +126,14 @@ describe('resolveScope', () => {
     return scope.value;
   };
 
-  it('resolves only an empty query to the inbox, of every mailbox', () => {
-    expect(scopeOf('')).toEqual({ folders: ['inbox'], mailboxes: inbound, isEveryMailbox: true });
-    expect(scopeOf('   ').folders).toEqual(['inbox']);
+  it('resolves an empty query to every folder but Trash, of every mailbox', () => {
+    const everythingButTrash = ['inbox', 'sent', 'archive', 'drafts'];
+    expect(scopeOf('')).toEqual({
+      folders: everythingButTrash,
+      mailboxes: inbound,
+      isEveryMailbox: true,
+    });
+    expect(scopeOf('   ').folders).toEqual(everythingButTrash);
   });
 
   it('covers every folder but Trash for bare words with no in:, Archive included', () => {
@@ -201,7 +206,18 @@ describe('isThreadInScope', () => {
   const inScope = (text: string, message: Partial<Message>) => {
     const scope = resolveScope(parseQuery(text), [{ address: 'me@x.co' }, { address: 'us@y.co' }]);
     if (!scope.ok) throw new Error(scope.error.message);
-    return isThreadInScope(scope.value)(threadOf(message));
+    const copies = (message.locations ?? []).filter(({ uidValidity }) => uidValidity !== 0);
+    const held = [...new Set((message.locations ?? []).map(({ folder }) => folder))];
+    return isThreadInScope(scope.value)({
+      ...threadOf(message),
+      folders: message.isDraft === true ? ['drafts'] : held,
+      foldersByMailbox: Object.fromEntries(
+        copies.map(({ mailbox }) => [
+          mailbox,
+          copies.filter(copy => copy.mailbox === mailbox).map(({ folder }) => folder),
+        ]),
+      ),
+    });
   };
 
   it('asks of a copy’s folder and whose login holds it', () => {
@@ -217,6 +233,13 @@ describe('isThreadInScope', () => {
     const locations = [copy('alias@x.co', 'sent', 0)];
     expect(inScope('in:sent', { locations })).toBe(true);
     expect(inScope('in:sent mailbox:me@x.co', { locations })).toBe(false);
+  });
+
+  it('takes Archive to mean filed away: a conversation with inbox mail too is in the inbox', () => {
+    const both = [copy('me@x.co', 'archive'), copy('me@x.co', 'inbox')];
+    expect(inScope('in:archive', { locations: both })).toBe(false);
+    expect(inScope('in:inbox', { locations: both })).toBe(true);
+    expect(inScope('in:anywhere', { locations: both })).toBe(true);
   });
 
   it('finds a draft by the address it would go from', () => {

@@ -9,20 +9,20 @@ import {
   CodeIcon,
   EnvelopeSimpleIcon,
   type Icon,
+  MailboxIcon,
   NotePencilIcon,
   StarIcon,
   TextAlignLeftIcon,
   TrashIcon,
   XIcon,
 } from '@phosphor-icons/react';
-import { Link, useParams } from '@tanstack/react-router';
+import { Link } from '@tanstack/react-router';
 import { replyAllCc } from '@yozz.app/mail/compose/seed';
-import { canMoveTo } from '@yozz.app/mail/threads/reconcile';
+import { movesOffered } from '@yozz.app/mail/threads/reconcile';
 import type { ThreadState } from '@yozz.app/mail/threads/thread';
 import {
   addresseesOf,
   inboxesOf,
-  isArchived,
   isOnServer,
   type Message,
   newestInbound,
@@ -423,7 +423,7 @@ export const ThreadReader = ({
   const inbound = newestInbound(thread, ownedAddresses) ?? newest;
   // Read from the same place `seedFor` reads, or a button would appear that seeds nothing.
   const canReplyAll = replyAllCc(inbound, ownedAddresses).length > 0;
-  const { view } = useParams({ strict: false });
+  const moves = movesOffered(thread.folders);
   const [pane, setPane] = useState<HTMLDivElement | null>(null);
   // A move the store refused leaves the reader where it is and says why, now or when the server answers.
   const file =
@@ -443,10 +443,9 @@ export const ThreadReader = ({
             replaces the list; a pane closes from its far corner. Filing a thread moves the reader
             on to the next in the list — the one you just filed is not the one you are reading —
             while marking unread closes it, since it would be read again the moment it stayed
-            open. Opened from Trash, a thread offers the one move that gets it out — the row it
-            came from offered the same, and a conversation only half in Trash must not lose it.
-            A move with nothing in its source folders is not offered at all, nor is any mark on a
-            conversation no server holds a copy of. */}
+            open. Which moves are offered goes by what the thread holds, wherever it was opened
+            from, so a conversation only half in Trash can still be restored. No mark is offered
+            on a conversation no server holds a copy of. */}
         <div className="flex h-11 items-center border-b border-rule-soft px-5">
           <Button
             variant="ghost"
@@ -461,46 +460,41 @@ export const ThreadReader = ({
             <>
               <span aria-hidden className="mx-1.5 h-5 w-px bg-rule lg:hidden" />
               <div className="flex items-center gap-0.5 lg:-ml-1.5">
-                {view === 'trash' ? (
-                  canMoveTo(thread.folders, 'inbox') && (
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="size-11 lg:size-7"
-                      onClick={file(restoreThread, 'Thread not restored')}
-                      aria-label="Restore thread"
-                    >
-                      <ArrowCounterClockwiseIcon size={15} />
-                    </Button>
-                  )
-                ) : (
-                  <>
-                    {canMoveTo(thread.folders, isArchived(thread) ? 'inbox' : 'archive') && (
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="size-11 lg:size-7"
-                        onClick={file(
-                          toggleArchive,
-                          isArchived(thread) ? 'Thread not moved to inbox' : 'Thread not archived',
-                        )}
-                        aria-label={isArchived(thread) ? 'Move to inbox' : 'Archive thread'}
-                      >
-                        <ArchiveIcon size={15} />
-                      </Button>
+                {moves.canRestore && (
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="size-11 lg:size-7"
+                    onClick={file(restoreThread, 'Thread not restored')}
+                    aria-label="Restore thread"
+                  >
+                    <ArrowCounterClockwiseIcon size={15} />
+                  </Button>
+                )}
+                {(moves.canArchive || moves.canMoveToInbox) && (
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="size-11 lg:size-7"
+                    onClick={file(
+                      toggleArchive,
+                      moves.canArchive ? 'Thread not archived' : 'Thread not moved to inbox',
                     )}
-                    {canMoveTo(thread.folders, 'trash') && (
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="size-11 lg:size-7"
-                        onClick={file(trashThread, 'Thread not deleted')}
-                        aria-label="Delete thread"
-                      >
-                        <TrashIcon size={15} />
-                      </Button>
-                    )}
-                  </>
+                    aria-label={moves.canArchive ? 'Archive thread' : 'Move to inbox'}
+                  >
+                    {moves.canArchive ? <ArchiveIcon size={15} /> : <MailboxIcon size={15} />}
+                  </Button>
+                )}
+                {moves.canDelete && (
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="size-11 lg:size-7"
+                    onClick={file(trashThread, 'Thread not deleted')}
+                    aria-label="Delete thread"
+                  >
+                    <TrashIcon size={15} />
+                  </Button>
                 )}
                 <Button
                   variant="ghost"

@@ -16,9 +16,10 @@ export const Route = createFileRoute('/_app/m/$view')({
     },
     stringify: ({ view }) => ({ view }),
   },
-  // `?q=` is in the URL so a filtered list is linkable and a query cannot follow you to the next view.
+  // `?q=` is in the URL so a filtered list is linkable and a query cannot follow you to the next
+  // view. Empty is a query too, and no `?q=` is the view's own.
   validateSearch: z.object({
-    q: z.string().min(1).optional().catch(undefined),
+    q: z.string().optional().catch(undefined),
   }),
   component: ViewPage,
 });

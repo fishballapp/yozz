@@ -35,8 +35,8 @@ export const nextShowIn = (activities: readonly TrackedActivity[], now: number):
 /**
  * A 2px bar along the very top while YOZZ is talking to a mail server: `--paper-dim` while it only
  * reads, `--signal` while a write someone asked for is on its way, the same rule as the reload
- * warning. Laid over the page, so it never moves anything; decorative, because the status line is
- * what says when something went wrong.
+ * warning. Laid over the page, so it never moves anything; decorative, because the line under the
+ * search box is what says when something went wrong.
  */
 export const ActivityBar = () => {
   const { activity } = useMail();

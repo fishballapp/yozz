@@ -1,4 +1,5 @@
-import type { ThreadState } from '@yozz.app/mail/threads/thread';
+import { isOnServer, type ThreadState } from '@yozz.app/mail/threads/thread';
+import type { ViewId } from '@yozz.app/mail/threads/views';
 import type { useMail } from '../store/MailProvider';
 import { reportProblem } from '../ui/Toast';
 
@@ -26,6 +27,10 @@ export const draftIdsOf = (threads: readonly ThreadState[]): string[] =>
       isDraft === true && draftId !== undefined ? [draftId] : [],
     ),
   );
+
+/** The drafts these conversations offer to discard: in Drafts, all of them; elsewhere, those of a conversation that is nothing but drafts. */
+export const discardableDraftIds = (threads: readonly ThreadState[], view: ViewId): string[] =>
+  draftIdsOf(view === 'drafts' ? threads : threads.filter(thread => !isOnServer(thread)));
 
 /** The confirm counts what it throws away. */
 export const discardTitle = (count: number): string =>

@@ -1,10 +1,22 @@
-import { type ImapMessageSummary, type UidSearchCriterion, uidSets } from '@yozz.app/imap';
-import type { MailConnectionFailure, MailTask, Result, RunTask } from '../connection.ts';
+import {
+  type ImapMessageSummary,
+  type ImapResult,
+  type UidSearchCriterion,
+  uidSets,
+} from '@yozz.app/imap';
+import type {
+  MailClient,
+  MailConnectionFailure,
+  MailTask,
+  Result,
+  RunTask,
+} from '../connection.ts';
 import type { MailCache } from './cache.ts';
+import type { FolderMatches } from './found.ts';
 import { includesText } from './match.ts';
 import { hasCriteria, type SearchQuery, type TermField } from './query.ts';
-import type { FolderSummaries, MailboxSummaries } from './summaries.ts';
-import type { Folder, Location, ThreadState } from './thread.ts';
+import { parseInternalDate } from './summaries.ts';
+import type { Folder } from './thread.ts';
 
 /** How many matches a query reads in each folder, newest first: one sync window's worth. */
 export const SEARCH_HITS = 200;
@@ -62,37 +74,22 @@ const conditionsOf = (
   return [...single, ...termed].toSorted((a, b) => a.criteria.length - b.criteria.length);
 };
 
-type FolderMatches = {
-  readonly folder: Folder;
-  readonly uidValidity: number;
-  readonly hits: readonly number[];
-  /** Of the hits the cache does not hold, read here and never written to it. */
-  readonly summaries: readonly ImapMessageSummary[];
-  /** The folder matched more than `SEARCH_HITS`, so the oldest were not read. */
-  readonly hasMore: boolean;
-};
+const CANCELLED = { ok: false, error: { kind: 'cancelled' } } as const;
 
 /**
- * One folder: the newest messages meeting every condition, and the summaries the cache lacks of them.
- * Those are read and never stored, as the cache stays one contiguous window, which the incremental
- * sync and the older-mail paging rely on.
+ * One command, as a task of its own: the connection is one per mailbox, so other work someone asked
+ * for waits behind this command rather than behind the rest of the search. Whatever ran in between
+ * may have selected another folder, so each selects its own (no command when it still is) and checks
+ * it has not been renumbered.
  */
-const searchFolderTask = ({
-  folder,
-  folderName,
-  uidValidity,
-  cached,
-  query,
-}: {
-  readonly folder: Folder;
-  readonly folderName: string;
-  readonly uidValidity: number;
-  readonly cached: readonly ImapMessageSummary[];
-  readonly query: SearchQuery;
-}): MailTask<FolderMatches> => ({
+const commandTask = <T>(
+  { folderName, uidValidity, signal }: FolderInScope,
+  command: (client: MailClient) => Promise<ImapResult<T>>,
+): MailTask<T> => ({
   priority: 'user',
   effect: 'read',
   retry: true,
+  ...(signal === undefined ? {} : { signal }),
   run: async client => {
     const selected = await client.ensureSelected(folderName);
     if (!selected.ok) return { ok: false, error: { kind: 'imap', reason: selected.reason } };
@@ -102,103 +99,159 @@ const searchFolderTask = ({
         error: { kind: 'error', detail: 'a folder was renumbered; sync and search again' },
       };
     }
-    let matched: ReadonlySet<number> | null = null;
-    for (const { criteria, known } of conditionsOf(query, folder, cached)) {
-      const meeting = new Set(known);
-      for (const criterion of criteria) {
-        const found = await client.uidSearch(criterion);
-        if (!found.ok) return { ok: false, error: { kind: 'imap', reason: found.reason } };
-        for (const uid of found.value) meeting.add(uid);
-      }
-      matched = matched === null ? meeting : matched.intersection(meeting);
-      // Nothing can come back from here on, so a throttling server is asked no more.
-      if (matched.size === 0) break;
-    }
-    const all = [...(matched ?? [])].toSorted((a, b) => b - a);
-    const hits = all.slice(0, SEARCH_HITS);
-    const held = new Set(cached.map(({ uid }) => uid));
-    const summaries: ImapMessageSummary[] = [];
-    for (const set of uidSets(hits.filter(uid => !held.has(uid)))) {
-      const fetched = await client.fetchSummaries(set);
-      if (!fetched.ok) return { ok: false, error: { kind: 'imap', reason: fetched.reason } };
-      summaries.push(...fetched.value);
-    }
-    return {
-      ok: true,
-      value: { folder, uidValidity, hits, summaries, hasMore: all.length > hits.length },
-    };
+    const done = await command(client);
+    return done.ok
+      ? { ok: true, value: done.value }
+      : { ok: false, error: { kind: 'imap', reason: done.reason } };
   },
 });
 
+type FolderInScope = {
+  readonly folder: Folder;
+  readonly folderName: string;
+  readonly uidValidity: number;
+  readonly cached: readonly ImapMessageSummary[];
+  readonly signal: AbortSignal | undefined;
+};
+
+/** One folder: every message meeting every condition, and the newest of them read. */
+const searchFolder = async (
+  run: RunTask,
+  query: SearchQuery,
+  inScope: FolderInScope,
+): Promise<Result<FolderMatches, MailConnectionFailure>> => {
+  const { folder, cached, signal } = inScope;
+  let matched: ReadonlySet<number> | null = null;
+  for (const { criteria, known } of conditionsOf(query, folder, cached)) {
+    const meeting = new Set(known);
+    for (const criterion of criteria) {
+      if (signal?.aborted === true) return CANCELLED;
+      const found = await run(commandTask(inScope, client => client.uidSearch(criterion)));
+      if (!found.ok) return found;
+      for (const uid of found.value) meeting.add(uid);
+    }
+    matched = matched === null ? meeting : matched.intersection(meeting);
+    // Nothing can come back from here on, so a throttling server is asked no more.
+    if (matched.size === 0) break;
+  }
+  return readHits(
+    run,
+    inScope,
+    [...(matched ?? [])].toSorted((a, b) => b - a),
+  );
+};
+
+/**
+ * The newest `SEARCH_HITS` of `matches`, and the summaries of them the cache lacks: read here and
+ * never stored, as the cache stays one contiguous window, which the incremental sync and the
+ * older-mail paging rely on. The rest wait, named, for someone to ask.
+ */
+const readHits = async (
+  run: RunTask,
+  inScope: FolderInScope,
+  matches: readonly number[],
+): Promise<Result<FolderMatches, MailConnectionFailure>> => {
+  const { folder, folderName, uidValidity, cached, signal } = inScope;
+  const hits = matches.slice(0, SEARCH_HITS);
+  const rest = matches.slice(SEARCH_HITS);
+  const held = new Set(cached.map(({ uid }) => uid));
+  const summaries: ImapMessageSummary[] = [];
+  for (const set of uidSets(hits.filter(uid => !held.has(uid)))) {
+    if (signal?.aborted === true) return CANCELLED;
+    const fetched = await run(commandTask(inScope, client => client.fetchSummaries(set)));
+    if (!fetched.ok) return fetched;
+    summaries.push(...fetched.value);
+  }
+  // Lowest first: that one may have been expunged since the search, or carry a date that doesn't parse.
+  const dateOf = new Map(
+    [...summaries, ...cached].map(({ uid, internalDate }) => [uid, internalDate]),
+  );
+  const [reachedAt = null] = hits
+    .toReversed()
+    .flatMap(uid => parseInternalDate(dateOf.get(uid)) ?? []);
+  return {
+    ok: true,
+    value: {
+      folder,
+      folderName,
+      uidValidity,
+      hits,
+      summaries,
+      rest,
+      reachedAt: rest.length === 0 ? null : reachedAt,
+    },
+  };
+};
+
+/** The next page of a folder's matches: the server has already named them, so nothing is searched again. */
+export const readMoreMatches = async ({
+  run,
+  cache,
+  previous: { folder, folderName, uidValidity, rest },
+  signal,
+}: {
+  readonly run: RunTask;
+  readonly cache: MailCache;
+  readonly previous: FolderMatches;
+  readonly signal?: AbortSignal;
+}): Promise<Result<FolderMatches, MailConnectionFailure>> =>
+  readHits(
+    run,
+    {
+      folder,
+      folderName,
+      uidValidity,
+      cached: await cache.folder(folder).listSummaries(),
+      signal,
+    },
+    rest,
+  );
+
 /**
  * `folders` of one mailbox on its server, in turn, over its one connection. A folder this mailbox
- * has no mark for holds nothing to find, and the vault's drafts are no server's to search.
+ * has no mark for holds nothing to find, and the vault's drafts are no server's to search. `signal`
+ * stops it between commands and drops what it has queued; a command on the wire finishes, unheard.
+ * The cache is read first, so nothing but a command's answer stands between one command and the next.
  */
 export const searchMailbox = async ({
   run,
   cache,
   folders,
   query,
+  signal,
+  onMatches,
 }: {
   readonly run: RunTask;
   readonly cache: MailCache;
   readonly folders: readonly Folder[];
   readonly query: SearchQuery;
+  readonly signal?: AbortSignal;
+  /** Hears each folder as it answers, so a slow one holds nothing back. */
+  readonly onMatches?: (matches: FolderMatches) => void;
 }): Promise<Result<readonly FolderMatches[], MailConnectionFailure>> => {
   if (!hasCriteria(query)) return { ok: true, value: [] };
-  const matches: FolderMatches[] = [];
-  for (const folder of folders.filter(candidate => candidate !== 'drafts')) {
-    const folderCache = cache.folder(folder);
-    const [mark, cached] = await Promise.all([folderCache.getSync(), folderCache.listSummaries()]);
-    if (mark === null) continue;
-    const answered = await run(
-      searchFolderTask({
-        folder,
-        folderName: mark.name,
-        uidValidity: mark.uidValidity,
-        cached,
-        query,
+  const inScope = await Promise.all(
+    folders
+      .filter(candidate => candidate !== 'drafts')
+      .map(async folder => {
+        const folderCache = cache.folder(folder);
+        const [mark, cached] = await Promise.all([
+          folderCache.getSync(),
+          folderCache.listSummaries(),
+        ]);
+        return mark === null
+          ? []
+          : [{ folder, folderName: mark.name, uidValidity: mark.uidValidity, cached, signal }];
       }),
-    );
+  );
+  const matches: FolderMatches[] = [];
+  for (const folder of inScope.flat()) {
+    if (signal?.aborted === true) return CANCELLED;
+    const answered = await searchFolder(run, query, folder);
     if (!answered.ok) return answered;
     matches.push(answered.value);
+    onMatches?.(answered.value);
   }
+  if (signal?.aborted === true) return CANCELLED;
   return { ok: true, value: matches };
-};
-
-const hitKey = ({ mailbox, folder, uid }: Omit<Location, 'uidValidity'>) =>
-  `${mailbox}/${folder}/${uid}`;
-
-/**
- * What the mailboxes that answered add up to: the summaries to thread in beside the cache, whether
- * a conversation holds a match, and whether any folder had more than were read.
- */
-export const assembleMatches = (
-  answers: readonly {
-    readonly address: string;
-    readonly matches: readonly FolderMatches[];
-  }[],
-) => {
-  const hits = new Set(
-    answers.flatMap(({ address, matches }) =>
-      matches.flatMap(({ folder, hits }) =>
-        hits.map(uid => hitKey({ mailbox: address, folder, uid })),
-      ),
-    ),
-  );
-  return {
-    extra: Object.fromEntries(
-      answers.map(({ address, matches }) => [
-        address,
-        Object.fromEntries(
-          matches.map(({ folder, uidValidity, summaries }) => [folder, { uidValidity, summaries }]),
-        ) satisfies FolderSummaries,
-      ]),
-    ) satisfies MailboxSummaries,
-    hasMoreMatches: answers.some(({ matches }) => matches.some(({ hasMore }) => hasMore)),
-    isHit: (thread: ThreadState) =>
-      thread.messages.some(message =>
-        (message.locations ?? []).some(location => hits.has(hitKey(location))),
-      ),
-  };
 };

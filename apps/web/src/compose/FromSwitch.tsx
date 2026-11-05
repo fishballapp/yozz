@@ -90,7 +90,7 @@ export const FromSwitch = ({
             <Select.Popup className="max-h-80 w-[var(--anchor-width)] min-w-72 overflow-y-auto bg-ink-raised py-1 border border-rule outline-none">
               <Select.Group>
                 <Select.GroupLabel className="label-rule block px-2.5 pt-2 pb-1">
-                  Your accounts
+                  Mailboxes
                 </Select.GroupLabel>
                 {withInbox.map(identity => (
                   <Select.Item

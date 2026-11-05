@@ -1,6 +1,8 @@
 // @vitest-environment jsdom
 
+import type { ServerSearch } from '@yozz.app/mail/threads/server-search';
 import type { ThreadState } from '@yozz.app/mail/threads/thread';
+import type { Listing } from '@yozz.app/mail/threads/views';
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
@@ -13,7 +15,7 @@ const mail = vi.hoisted(() => ({
   mailboxes: [{ address: 'me@example.com', imap: { host: 'imap.example.com' } }],
   ownedAddresses: ['me@example.com'],
   recordsError: null,
-  syncStates: {},
+  syncStates: {} as Record<string, unknown>,
   sync: vi.fn(),
   loadOlder: vi.fn(),
   isLoadingOlder: () => false,
@@ -29,6 +31,12 @@ const mail = vi.hoisted(() => ({
     (threadIds: readonly string[], _key: string, _value: boolean) => new Set(threadIds),
   ),
   removeDraft: vi.fn(async (_draftId: string) => ({ outcome: 'deleted' as const })),
+  serverSearch: null as ServerSearch | null,
+  search: { type: vi.fn(), now: vi.fn(), retry: vi.fn() },
+  loadOlderInList: vi.fn(),
+  isLoadingOlderInList: false,
+  mailError: null as string | null,
+  sentCopyError: null as string | null,
 }));
 
 const route = vi.hoisted(() => ({ splat: undefined as string | undefined, navigate: vi.fn() }));
@@ -49,6 +57,7 @@ vi.mock('@tanstack/react-router', () => ({
   ),
   useParams: () => ({ _splat: route.splat }),
   useNavigate: () => route.navigate,
+  useSearch: () => ({}),
 }));
 vi.mock('../store/MailProvider', () => ({ useMail: () => mail }));
 vi.mock('./use-advance', () => ({ useAdvancePast: () => vi.fn() }));
@@ -102,11 +111,17 @@ const layout: [object, string, PropertyDescriptor][] = [
 ];
 const jsdom = layout.map(([target, key]) => Object.getOwnPropertyDescriptor(target, key));
 beforeAll(() => {
+  vi.stubGlobal('matchMedia', () => ({
+    matches: true,
+    addEventListener: () => {},
+    removeEventListener: () => {},
+  }));
   for (const [target, key, stub] of layout) {
     Object.defineProperty(target, key, { ...stub, configurable: true });
   }
 });
 afterAll(() => {
+  vi.unstubAllGlobals();
   for (const [index, [target, key]] of layout.entries()) {
     const original = jsdom[index];
     if (original === undefined) {
@@ -119,11 +134,15 @@ afterAll(() => {
 
 const host = document.body.appendChild(document.createElement('div'));
 const root = createRoot(host);
-const show = (threads: readonly ThreadState[], query = '', view = 'unified') =>
+const show = (
+  threads: readonly ThreadState[],
+  query = 'in:inbox',
+  view = 'unified',
+  isSearch = false,
+  older: Listing['older'] = null,
+) =>
   act(async () =>
-    root.render(
-      <ThreadList threads={threads} view={view} query={query} onQueryChange={() => {}} />,
-    ),
+    root.render(<ThreadList listing={{ threads, view, query, isSearch, error: null, older }} />),
   );
 const scroller = () => {
   const list = host.querySelector('ul')?.parentElement;
@@ -209,12 +228,10 @@ describe('ThreadList', () => {
     expect(document.activeElement).toBe(link);
   });
 
-  it('turns the search bar into actions for the ticked rows, with a mixed box over them', async () => {
+  it('offers actions for the ticked rows under a box that stays, with a mixed box over them', async () => {
     await show(FEW);
-    expect(host.querySelector('input[type="search"]')).not.toBeNull();
-
     await click(boxOf('Subject 1'));
-    expect(host.querySelector('input[type="search"]')).toBeNull();
+    expect(host.querySelector('[role="searchbox"]')).not.toBeNull();
     const all = host.querySelector<HTMLInputElement>('input[aria-label="Clear the selection"]');
     expect(all?.indeterminate).toBe(true);
     expect(button('Archive')).toBeDefined();
@@ -235,7 +252,6 @@ describe('ThreadList', () => {
     if (all === null) throw new Error('No box over the list');
     await click(all);
     expect(tickedSubjects()).toEqual([]);
-    expect(host.querySelector('input[type="search"]')).not.toBeNull();
   });
 
   it('archives every ticked row, then clears the selection', async () => {
@@ -251,8 +267,8 @@ describe('ThreadList', () => {
   });
 
   it('moves ticked rows back to the inbox from Archive, whatever else they hold', async () => {
-    const archived = FEW.map(thread => ({ ...thread, folders: ['archive', 'inbox'] as const }));
-    await show(archived, '', 'archive');
+    const archived = FEW.map(thread => ({ ...thread, folders: ['archive', 'sent'] as const }));
+    await show(archived, 'in:archive', 'archive');
     await click(boxOf('Subject 1'));
     await click(button('Move to inbox'));
     expect(mail.moveThreads.mock.calls.map(([ids, to]) => [ids, to])).toEqual([
@@ -297,7 +313,7 @@ describe('ThreadList', () => {
       draftId,
     });
     const twoDrafts = { ...first, messages: [draft('d-1'), draft('d-2')] } as ThreadState;
-    await show([twoDrafts], '', 'drafts');
+    await show([twoDrafts], 'in:drafts', 'drafts');
     await click(boxOf('Subject 0'));
     await click(button('Discard drafts'));
     const confirm = [...document.querySelectorAll('button')].find(
@@ -309,6 +325,115 @@ describe('ThreadList', () => {
       await new Promise(resolve => setTimeout(resolve, 0));
     });
     expect(mail.removeDraft.mock.calls.map(([id]) => id)).toEqual(['d-1', 'd-2']);
+  });
+
+  describe('what is offered goes by what the conversations hold, wherever they are listed', () => {
+    const [plain] = FEW;
+    if (plain === undefined) throw new Error('No thread');
+    const holding = (
+      folders: readonly ThreadState['folders'][number][],
+      index = 0,
+    ): ThreadState => {
+      const thread = FEW[index];
+      if (thread === undefined) throw new Error(`No thread at ${index}`);
+      return { ...thread, folders };
+    };
+    const withDraft = (thread: ThreadState, hasServerCopy: boolean): ThreadState => {
+      const [message] = thread.messages;
+      if (message === undefined) throw new Error('No message');
+      return {
+        ...thread,
+        folders: hasServerCopy ? [...thread.folders, 'drafts'] : ['drafts'],
+        messages: [
+          ...(hasServerCopy ? [message] : []),
+          { ...message, id: 'draft', isDraft: true, draftId: 'd-1', locations: [] },
+        ],
+      };
+    };
+    const offered = () =>
+      [...host.querySelectorAll('button')].flatMap(({ ariaLabel }) =>
+        ariaLabel === null ? [] : [ariaLabel],
+      );
+    const movedTo = () => mail.moveThreads.mock.calls.map(([ids, to]) => [ids, to]);
+
+    it('moves ticked archived hits back to the inbox under a search', async () => {
+      await show([holding(['archive'])], 'stripe', 'unified', true);
+      await click(boxOf('Subject 0'));
+      await click(button('Move to inbox'));
+      expect(movedTo()).toEqual([[['thread-0'], 'inbox']]);
+    });
+
+    it('offers each action to the ticked threads it applies to, in a mixed set', async () => {
+      await show([holding(['inbox']), holding(['archive'], 1)], 'stripe', 'unified', true);
+      await click(boxOf('Subject 0'));
+      await click(boxOf('Subject 1'));
+      await click(button('Archive'));
+      expect(movedTo()).toEqual([[['thread-0'], 'archive']]);
+
+      mail.moveThreads.mockClear();
+      await click(boxOf('Subject 0'));
+      await click(boxOf('Subject 1'));
+      await click(button('Move to inbox'));
+      expect(movedTo()).toEqual([[['thread-1'], 'inbox']]);
+    });
+
+    it('keeps Archive beside Restore for a half-trashed thread, as its row does', async () => {
+      await show([holding(['inbox', 'trash'])], 'stripe', 'unified', true);
+      expect(offered()).toEqual(
+        expect.arrayContaining(['Restore Subject 0', 'Archive Subject 0', 'Delete Subject 0']),
+      );
+      await click(boxOf('Subject 0'));
+      expect(offered()).toEqual(expect.arrayContaining(['Restore', 'Archive', 'Delete']));
+      expect(offered()).not.toContain('Move to inbox');
+    });
+
+    it('offers only Restore for a thread all in Trash', async () => {
+      await show([holding(['trash'])], 'stripe', 'unified', true);
+      await click(boxOf('Subject 0'));
+      expect(offered()).toContain('Restore');
+      expect(offered()).not.toContain('Archive');
+      expect(offered()).not.toContain('Delete');
+    });
+
+    it('offers Discard for a draft-only hit, on its row and in the bar', async () => {
+      await show([withDraft(plain, false)], 'stripe', 'unified', true);
+      expect(offered()).toContain('Discard Subject 0');
+      await click(boxOf('Subject 0'));
+      expect(offered()).toContain('Discard drafts');
+    });
+
+    it('keeps a draft with a server copy to its moves outside Drafts, on its row and in the bar', async () => {
+      await show([withDraft(plain, true)], 'stripe', 'unified', true);
+      expect(offered()).toContain('Archive Subject 0');
+      expect(offered()).not.toContain('Discard Subject 0');
+      await click(boxOf('Subject 0'));
+      expect(offered()).toContain('Archive');
+      expect(offered()).not.toContain('Discard drafts');
+    });
+
+    it('offers Discard to the draft-only thread beside the moves of the rest', async () => {
+      const onServer = holding(['inbox'], 1);
+      await show([withDraft(plain, false), onServer], 'stripe', 'unified', true);
+      await click(boxOf('Subject 0'));
+      await click(boxOf('Subject 1'));
+      expect(offered()).toEqual(expect.arrayContaining(['Archive', 'Discard drafts']));
+    });
+
+    it('leaves Drafts as it was: only Discard, even for a conversation on a server', async () => {
+      await show([withDraft(plain, true)], 'in:drafts', 'drafts');
+      expect(offered()).toContain('Discard Subject 0');
+      expect(offered()).not.toContain('Archive Subject 0');
+      await click(boxOf('Subject 0'));
+      expect(offered()).toContain('Discard drafts');
+      expect(offered()).not.toContain('Archive');
+    });
+
+    it('leaves Archive as it was: Move to inbox, not Archive', async () => {
+      await show([holding(['archive'])], 'in:archive', 'archive');
+      await click(boxOf('Subject 0'));
+      expect(offered()).toContain('Move to inbox');
+      expect(offered()).not.toContain('Archive');
+    });
   });
 
   it('keeps the open row current while its bar gives way to a tick, and clears ticks on opening another', async () => {
@@ -336,8 +461,196 @@ describe('ThreadList', () => {
     expect(host.querySelector('li button[aria-hidden="true"]')).toBeNull();
   });
 
-  it('says a search matched nothing', async () => {
-    await show([], 'nonexistent');
-    expect(host.textContent).toContain('No mail matches “nonexistent”.');
+  describe('saying what a search has reached', () => {
+    const asking = (
+      phase: ServerSearch['phase'],
+      over: Partial<ServerSearch> = {},
+    ): ServerSearch => ({
+      query: 'nonexistent',
+      phase,
+      asking: phase === 'asking' ? ['me@example.com'] : [],
+      answers: [],
+      failed: [],
+      ...over,
+    });
+    afterEach(() => {
+      mail.serverSearch = null;
+    });
+
+    it.each(['waiting', 'asking'] as const)(
+      'says it is fetching while the servers are %s, not that nothing matched',
+      async phase => {
+        mail.serverSearch = asking(phase);
+        await show([], 'nonexistent', 'unified', true);
+        expect(host.textContent).toContain('Fetching more mail…');
+        expect(host.textContent).toContain('Fetching…');
+        expect(host.textContent).not.toContain('Nothing matches');
+      },
+    );
+
+    it('says nothing under the box once every server has answered', async () => {
+      mail.serverSearch = asking('settled');
+      await show(FEW, 'nonexistent', 'unified', true);
+      expect(host.textContent).not.toContain('Fetching');
+      expect(host.querySelector('p[title]')).toBeNull();
+    });
+
+    it('says nothing matches once every server has answered', async () => {
+      mail.serverSearch = asking('settled');
+      await show([], 'nonexistent', 'unified', true);
+      expect(host.textContent).toContain('Nothing matches "nonexistent".');
+      expect(host.textContent).not.toContain('Fetching');
+    });
+
+    it('never says fetching when no search is under way, as nothing would arrive', async () => {
+      await show([], 'nonexistent', 'unified', true);
+      expect(host.textContent).toContain('Nothing matches "nonexistent".');
+      expect(host.textContent).not.toContain('Fetching');
+
+      // What an older search is doing says nothing about this one.
+      mail.serverSearch = { ...asking('asking'), query: 'older' };
+      await show([], 'nonexistent', 'unified', true);
+      expect(host.textContent).not.toContain('Fetching');
+    });
+
+    it('names an address that failed, offers Retry, and keeps what the others found', async () => {
+      mail.serverSearch = asking('settled', {
+        failed: [{ address: 'me@example.com', failure: { kind: 'stalled' } }],
+      });
+      await show(FEW, 'nonexistent', 'unified', true);
+      expect(host.textContent).toContain(
+        "1 of 1 mailbox couldn't be searched. me@example.com may be missing results.",
+      );
+      expect(rowOf('Subject 1')).not.toBeNull();
+      await click(button('Retry'));
+      expect(mail.search.retry).toHaveBeenCalled();
+
+      await show([], 'nonexistent', 'unified', true);
+      expect(host.textContent).toContain('Nothing matches "nonexistent".');
+    });
+  });
+
+  describe('the line under the box', () => {
+    afterEach(() => {
+      Object.assign(mail, {
+        syncStates: {},
+        mailError: null,
+        sentCopyError: null,
+        serverSearch: null,
+      });
+      mail.sync.mockClear();
+    });
+
+    it('says nothing while all is well', async () => {
+      mail.syncStates = { 'me@example.com': { status: 'synced', at: 1000, complete: [] } };
+      await show(FEW);
+      expect(host.querySelector('p[title]')).toBeNull();
+    });
+
+    it('names a failed sync on any list, and retries that address', async () => {
+      mail.syncStates = {
+        'me@example.com': { status: 'failed', failure: { kind: 'stalled' }, at: 1000 },
+      };
+      await show(FEW);
+      expect(host.textContent).toContain('imap.example.com stopped responding');
+      await click(button('Retry'));
+      expect(mail.sync).toHaveBeenCalledWith('me@example.com');
+    });
+
+    it('says what a move refused, with nothing to retry', async () => {
+      mail.mailError = 'thread not moved · imap.example.com: Archive is read-only';
+      await show(FEW);
+      expect(host.textContent).toContain('thread not moved · imap.example.com');
+      expect(() => button('Retry')).toThrow();
+    });
+
+    it('says why a Sent copy failed', async () => {
+      mail.sentCopyError = 'Sent copy not saved';
+      await show(FEW);
+      expect(host.textContent).toContain('Sent copy not saved');
+    });
+
+    it('puts what went wrong ahead of what a search is doing', async () => {
+      mail.mailError = 'flag not saved · imap.example.com: refused';
+      mail.serverSearch = {
+        query: 'word',
+        phase: 'asking',
+        asking: ['me@example.com'],
+        answers: [],
+        failed: [],
+      };
+      await show(FEW, 'word', 'unified', true);
+      expect(host.textContent).toContain('flag not saved');
+      expect(host.textContent).not.toContain('Fetching more mail…');
+    });
+  });
+
+  describe('the counts', () => {
+    const unread = (thread: ThreadState): ThreadState => ({ ...thread, isUnread: true });
+
+    it('stand beside the box while nothing is ticked, and give way to the actions', async () => {
+      await show([unread(MAILBOX[0] as ThreadState), ...FEW.slice(1)]);
+      expect(host.textContent).toContain('1 unread · 5 conversations');
+      await click(boxOf('Subject 1'));
+      expect(host.textContent).not.toContain('unread ·');
+      expect(button('Archive')).toBeDefined();
+    });
+
+    it('say one conversation, not one conversations, and nothing of an unread of zero', async () => {
+      await show(FEW.slice(0, 1));
+      expect(host.textContent).toContain('1 conversation');
+      expect(host.textContent).not.toContain('1 conversations');
+      expect(host.textContent).not.toContain('unread');
+    });
+
+    it('go with the box and Select when the list is empty', async () => {
+      await show([], 'word', 'unified', true);
+      expect(host.textContent).not.toContain('conversations');
+      expect(host.querySelector('input[aria-label="Select every message"]')).toBeNull();
+      expect(() => button('Select')).toThrow();
+    });
+  });
+
+  it('offers Older mail under a query that only says where, while a folder has more', async () => {
+    await show(FEW, '', 'unified', true, {
+      mailbox: 'me@example.com',
+      folder: 'inbox',
+      reachedAt: 1,
+    });
+    await click(button('Older mail'));
+    expect(mail.loadOlderInList).toHaveBeenCalledWith('');
+    await show(FEW, '', 'unified', true);
+    expect(host.textContent).not.toContain('Older mail');
+  });
+
+  it('offers Restore on a trashed row whatever list it is in', async () => {
+    const trashed = FEW.map(thread => ({
+      ...thread,
+      folders: ['trash'] as const,
+      foldersByMailbox: { 'me@example.com': ['trash'] as const },
+    }));
+    await show(trashed, 'in:anywhere stripe', 'unified', true);
+    expect(
+      rowOf('Subject 1')?.querySelector('button[aria-label="Restore Subject 1"]'),
+    ).not.toBeNull();
+    expect(rowOf('Subject 1')?.querySelector('button[aria-label="Archive Subject 1"]')).toBeNull();
+    await click(boxOf('Subject 1'));
+    await click(button('Restore'));
+    expect(mail.moveThreads.mock.calls.map(([ids, to]) => [ids, to])).toEqual([
+      [['thread-1'], 'inbox'],
+    ]);
+  });
+
+  it('offers archive and delete beside Restore on a conversation only half in Trash', async () => {
+    const half = FEW.map(thread => ({
+      ...thread,
+      folders: ['inbox', 'trash'] as const,
+      foldersByMailbox: { 'me@example.com': ['inbox', 'trash'] as const },
+    }));
+    await show(half, 'in:anywhere stripe', 'unified', true);
+    const row = rowOf('Subject 1');
+    for (const label of ['Restore Subject 1', 'Archive Subject 1', 'Delete Subject 1']) {
+      expect(row?.querySelector(`button[aria-label="${label}"]`)).not.toBeNull();
+    }
   });
 });

@@ -8,8 +8,8 @@ import {
   StarIcon,
   TrashIcon,
 } from '@phosphor-icons/react';
-import { Link, useLocation, useParams } from '@tanstack/react-router';
-import { isNamedView, unreadCount, type ViewId } from '@yozz.app/mail/threads/views';
+import { Link, useLocation, useParams, useSearch } from '@tanstack/react-router';
+import { isNamedView, unreadCount, type ViewId, viewShown } from '@yozz.app/mail/threads/views';
 import { cn } from 'cn';
 import type { ReactNode } from 'react';
 import { keepCompose, withCompose } from '../compose/intent';
@@ -28,8 +28,10 @@ import { Wordmark } from '../ui/Wordmark';
  */
 const useRowClick = (view: ViewId, onNavigate: (() => void) | undefined) => {
   const params = useParams({ strict: false });
-  const { sync } = useMail();
-  const isActive = params.view === view;
+  const { q } = useSearch({ strict: false });
+  const { sync, mailboxes } = useMail();
+  // A search is no row's list, so none lights up over it.
+  const isActive = params.view !== undefined && viewShown(params.view, q, mailboxes) === view;
   return {
     isActive,
     onClick: () => {
@@ -50,6 +52,8 @@ const UnifiedRow = ({ onNavigate }: { onNavigate?: () => void }) => {
       params={{ view: 'unified' }}
       search={keepCompose}
       onClick={onClick}
+      // The router marks any link to this path current, which a search on it is not.
+      activeOptions={{ exact: true }}
       aria-current={isActive ? 'page' : undefined}
       className={cn(
         'relative mx-2 mb-1 flex h-11 items-center gap-2.5 px-2.5 transition-colors',
@@ -93,7 +97,8 @@ const RailRow = ({
       params={{ view }}
       search={keepCompose}
       onClick={onClick}
-      // Explicit rather than inherited from TanStack Router's own `aria-current`.
+      // The router marks any link to this path current, which a search on it is not.
+      activeOptions={{ exact: true }}
       aria-current={isActive ? 'page' : undefined}
       className={cn(
         'relative flex items-center gap-2.5 py-1.5 pr-2.5 pl-3 text-base transition-colors',
@@ -132,17 +137,19 @@ const SectionLabel = ({ children }: { children: ReactNode }) => (
 );
 
 export const AddressRail = ({ onNavigate }: { onNavigate?: () => void }) => {
-  const { mailboxes, threads } = useMail();
+  const { mailboxes, threads, isDemo } = useMail();
   const isSettings = useLocation({ select: location => location.pathname.startsWith('/settings') });
 
   return (
-    <nav className="flex h-full flex-col bg-ink-raised" aria-label="Mailboxes">
+    <nav className="flex h-full flex-col bg-ink-raised" aria-label="Navigation">
       <div className="px-3 pt-4 pb-3">
         <Link
           to="/m/$view"
           params={{ view: 'unified' }}
           search={keepCompose}
           onClick={onNavigate}
+          // The router marks any link to this path current, which a search on it is not.
+          activeOptions={{ exact: true }}
           className="inline-flex text-paper"
         >
           <Wordmark className="h-3.5 w-auto" />
@@ -208,6 +215,7 @@ export const AddressRail = ({ onNavigate }: { onNavigate?: () => void }) => {
         />
       </div>
 
+      {isDemo && <p className="label-rule px-3 pb-2">Demo data · dev only</p>}
       <div className="border-t border-rule-soft">
         <Link
           to="/settings"

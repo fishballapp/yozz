@@ -188,6 +188,10 @@ type Foldered = { readonly folders: readonly Folder[] };
 export const isArchived = ({ folders }: Foldered) =>
   folders.includes('archive') && !folders.includes('inbox');
 
+/** What `in:<folder>` asks of a conversation holding `folders`: Archive means filed away, not merely a copy there. */
+export const holdsFolder = (folders: readonly Folder[], folder: Folder) =>
+  folder === 'archive' ? isArchived({ folders }) : folders.includes(folder);
+
 /** The whole conversation is in Trash. */
 export const isTrashed = ({ folders }: Foldered) =>
   folders.length > 0 && folders.every(folder => folder === 'trash');
@@ -257,4 +261,6 @@ export type ThreadState = Thread & {
   readonly folders: readonly Folder[];
   /** Per mailbox: an address's view is a predicate over one mailbox's copies. */
   readonly foldersByMailbox: Readonly<Record<string, readonly Folder[]>>;
+  /** Only a search has read it: no copy is in a synced window, so no view lists it. */
+  readonly isFoundOnly?: true;
 };

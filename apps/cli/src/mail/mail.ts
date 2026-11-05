@@ -190,6 +190,8 @@ export class Mail extends Context.Service<
             const lock = locks.get(mailbox.address);
             if (lock === undefined) throw new Error(`${mailbox.address} is not an inbound address`);
             const attempt = async (): Promise<Result<T, MailConnectionFailure>> => {
+              // It waited its turn for nothing: nobody wants the answer, and no command goes out.
+              if (task.signal?.aborted === true) return { ok: false, error: { kind: 'cancelled' } };
               const session = await sessionOf(mailbox);
               if (!session.ok) {
                 sessions.delete(mailbox.address);

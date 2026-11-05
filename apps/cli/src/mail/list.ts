@@ -1,6 +1,7 @@
 import type { InboundAddress } from '@yozz.app/mail/addresses/record';
 import { LIST_LIMIT_DEFAULT, LIST_LIMIT_MAX } from '@yozz.app/mail/agent-budgets';
 import { messageMatches } from '@yozz.app/mail/threads/match';
+import { OLDER_WINDOWS_PER_PAGE } from '@yozz.app/mail/threads/paging';
 import {
   hasCriteria,
   isHeldInVault,
@@ -12,7 +13,7 @@ import {
 } from '@yozz.app/mail/threads/query';
 import { SEARCH_HITS } from '@yozz.app/mail/threads/search';
 import type { Folder, ThreadState } from '@yozz.app/mail/threads/thread';
-import { latestOf } from '@yozz.app/mail/threads/views';
+import { latestOf, withinReach } from '@yozz.app/mail/threads/views';
 import * as Clock from 'effect/Clock';
 import * as Command from 'effect/cli/Command';
 import * as Flag from 'effect/cli/Flag';
@@ -28,9 +29,6 @@ import { Mail } from './mail.ts';
 import { failedOf, NOTICE, rowOf } from './rows.ts';
 import { searchMail } from './search.ts';
 import { waitForMail } from './wait.ts';
-
-/** How many windows of older mail one page may load before it answers short. */
-const OLDER_WINDOWS_PER_PAGE = 3;
 
 /** Where the page before ended, in the list's order: newest first, then by id. */
 const CursorSchema = Schema.fromJsonString(Schema.Struct({ at: Schema.Finite, id: Schema.String }));
@@ -58,6 +56,9 @@ const isAfter = (cursor: Cursor) => (thread: ThreadState) => {
   return at < cursor.at || (at === cursor.at && thread.id.localeCompare(cursor.id) > 0);
 };
 
+/** What `list` shows with no `--query` at all. An explicit empty one is everything but Trash. */
+const LANDING_QUERY = 'in:inbox';
+
 /** `--mailbox <value>` as a query says it. */
 const queryForMailbox = (mailbox: string) => {
   if (mailbox === 'starred') return 'is:starred';
@@ -73,7 +74,7 @@ export const listCommand = Command.make(
     unread: Flag.Boolean('unread').pipe(Flag.withHidden, Flag.withDefault(false)),
     query: Flag.String('query').pipe(
       Flag.withDescription(
-        `What to list, in Gmail's syntax; the inbox without one. Words and "a phrase", all in one message, from: to: (To or Cc) subject: in:inbox|sent|archive|trash|drafts|anywhere mailbox:<address> is:unread is:starred before:YYYY/MM/DD after:YYYY/MM/DD`,
+        `What to list, in Gmail's syntax; the inbox without one, and everything but Trash when empty. Words and "a phrase", all in one message, from: to: (To or Cc) subject: in:inbox|sent|archive|trash|drafts|anywhere mailbox:<address> is:unread is:starred before:YYYY/MM/DD after:YYYY/MM/DD`,
       ),
       Flag.optional,
     ),
@@ -122,7 +123,7 @@ export const listCommand = Command.make(
     const mail = yield* Mail;
     const cache = yield* Cache;
     const { webUrl } = yield* Settings;
-    const parsed = parseQuery(text);
+    const parsed = parseQuery(Option.getOrElse(query, () => LANDING_QUERY));
     const scope = resolveScope(parsed, mail.mailboxes);
     if (!scope.ok) return yield* new UsageError({ message: scope.error.message });
     const { folders, mailboxes: shown } = scope.value;
@@ -179,9 +180,13 @@ export const listCommand = Command.make(
             messageMatches(parsed, message, thread.subject),
         );
       const threads = yield* cache.threads(extra);
+      const isScoped = isThreadInScope({ ...scope.value, folders: inFolders });
       return {
         found: page(
-          threads.filter(thread => (isHit(thread) || isCachedHit(thread)) && isWanted(thread)),
+          threads.filter(
+            thread =>
+              isScoped(thread) && (isHit(thread) || isCachedHit(thread)) && isWanted(thread),
+          ),
         ),
         hasMoreMatches,
         failed,
@@ -238,10 +243,7 @@ export const listCommand = Command.make(
         const frontier = yield* cache.olderFrontier(live, paged);
         // At or below the frontier a folder has not been read yet: a row there could hide mail above
         // it for good, as the next page would start past it. Dates tie to the second.
-        const reached =
-          frontier === null
-            ? found
-            : found.filter(thread => latestOf(thread).at > frontier.reachedAt);
+        const reached = withinReach(found, frontier);
         const hasOlder = frontier !== null;
         if (frontier === null || reached.length >= limit || windows === 0) {
           return { found: reached, hasOlder, hasMoreMatches, failed };
@@ -275,7 +277,8 @@ export const listCommand = Command.make(
   }, reportFailure),
 ).pipe(
   Command.withShortDescription('The conversations a query finds, newest first'),
-  Command.withDescription(`The conversations a query finds, newest first; the inbox without one.
+  Command.withDescription(`The conversations a query finds, newest first; the inbox without one, and
+everything but Trash with an empty one (--query '').
 
 --query is Gmail's syntax, and anything that isn't an operator with a value it can take is plain
 text. Several terms must all match in the same message:
@@ -290,7 +293,7 @@ text. Several terms must all match in the same message:
   before:2026/11/01 after:2026-10-01   the day it arrived; after is on or after, before is strictly
                            before
 
-With no in:, a query looks in the inbox, Sent, Archive and drafts. Only in:trash or in:anywhere reach
+With no in:, a query, even an empty one, looks in the inbox, Sent, Archive and drafts. Only in:trash or in:anywhere reach
 Trash. A query that only says where (in:archive, mailbox:you@example.com) lists from this machine's
 cache; --cursor pages back with the nextCursor before, reaching for older mail as yozz.app's Older
 mail does. A query with anything to look for searches each folder on the server, with vault drafts

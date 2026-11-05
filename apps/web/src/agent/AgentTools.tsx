@@ -1,5 +1,6 @@
 import { useNavigate, useParams } from '@tanstack/react-router';
 import { isInbound } from '@yozz.app/mail/addresses/record';
+import { describeMailFailure } from '@yozz.app/mail/describe-failure';
 import { useEffect, useRef } from 'react';
 import { flushSync } from 'react-dom';
 import { withCompose } from '../compose/intent';
@@ -25,7 +26,25 @@ export const AgentTools = () => {
     })),
     identities: mail.identities,
     ownedAddresses: mail.ownedAddresses,
+    mailboxes: mail.mailboxes,
     threads: mail.threads,
+    windows: mail.windows,
+    syncStates: mail.syncStates,
+    askServers: async query => {
+      const { answers, failed } = await mailRef.current.askServersAndWait(query);
+      return {
+        answers,
+        failed: failed.map(({ address, failure }) => ({
+          address,
+          failure,
+          reason: describeMailFailure(
+            failure,
+            mailRef.current.mailboxes.find(mailbox => mailbox.address === address)?.imap.host ??
+              address,
+          ),
+        })),
+      };
+    },
     drafts: mail.drafts,
     loadBody: mail.loadBody,
     // Flushed, so a tool's result describes the state after the write.

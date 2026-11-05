@@ -1,19 +1,19 @@
 import { Dialog } from '@base-ui/react/dialog';
 import { ListIcon, PlusIcon, XIcon } from '@phosphor-icons/react';
-import { Link, Navigate, Outlet, useMatches, useParams, useSearch } from '@tanstack/react-router';
-import { viewLabel, visibleThreads } from '@yozz.app/mail/threads/views';
+import { Link, Navigate, Outlet, useMatches } from '@tanstack/react-router';
+import { cn } from 'cn';
 import { useEffect, useState } from 'react';
 import { AddressRail } from '../addresses/AddressRail';
 import { AgentTools } from '../agent/AgentTools';
 import { withCompose } from '../compose/intent';
-import { useMail } from '../store/MailProvider';
+import { SearchRow } from '../threads/SearchRow';
+import { useListing, useSearchFollowsUrl } from '../threads/use-listing';
 import { Button, buttonClass } from '../ui/Button';
-import { isDemo } from '../ui/chrome';
+import { isDemo, useMediaQuery } from '../ui/chrome';
 import { RAIL_WIDTH, Resizer, useListWidth, useRailWidth } from '../ui/Resizer';
 import { Wordmark } from '../ui/Wordmark';
 import { useVault } from '../vault/session';
 import { ActivityBar } from './ActivityBar';
-import { StatusBar } from './StatusBar';
 
 /**
  * A pathless layout route (`routes/_app.tsx`), so the rail mounts once; anything that renders
@@ -55,15 +55,36 @@ const AppShellSkeleton = () => {
         <div className="hidden w-px shrink-0 bg-rule-soft lg:block" />
         <div className="hidden min-w-0 flex-1 bg-ink-sunken lg:block lg:min-w-80" />
       </div>
-      <div className="h-7 shrink-0 border-t border-rule-soft bg-ink-raised" />
     </div>
   );
 };
 
 const AppShellBody = () => {
-  const { threads } = useMail();
   const [isRailOpen, setIsRailOpen] = useState(false);
   const [railWidth, setRailWidth, resetRailWidth] = useRailWidth();
+  const isWide = useMediaQuery('(min-width: 64rem)');
+  const openRail = (
+    <Button
+      variant="ghost"
+      size="icon"
+      // Over the rows' star column, so what follows it starts on their sender column.
+      className="mr-2 ml-1 size-11 shrink-0"
+      onClick={() => setIsRailOpen(true)}
+      aria-label="Open navigation"
+    >
+      <ListIcon size={16} />
+    </Button>
+  );
+  const compose = (
+    <Link
+      to="."
+      search={withCompose('new')}
+      aria-label="Compose"
+      className={cn(buttonClass({ variant: 'primary', size: 'icon' }), 'm-2 shrink-0')}
+    >
+      <PlusIcon size={12} weight="bold" />
+    </Link>
+  );
 
   // Base UI's modal aria-hides the rest of the app while open; crossing `lg` with the sheet open
   // left the whole app hidden behind a display:none popup.
@@ -77,51 +98,35 @@ const AppShellBody = () => {
     return () => wide.removeEventListener('change', close);
   }, []);
 
-  // `strict: false`: this sits above every page and reads whichever is matched.
-  const { view } = useParams({ strict: false });
-  const { q } = useSearch({ strict: false });
+  useSearchFollowsUrl();
+
   const pageTitle = useMatches({
     select: matches => matches.findLast(match => match.staticData.title !== undefined)?.staticData,
   })?.title;
 
-  // The same derivation the list runs, from one function.
-  const visible = view === undefined ? undefined : visibleThreads(threads, view, q);
-  const counts =
-    visible === undefined
-      ? undefined
-      : { unread: visible.filter(thread => thread.isUnread).length, total: visible.length };
-
-  // Lowercased at this seam: view labels already are.
-  const title = view === undefined ? (pageTitle?.toLowerCase() ?? '') : viewLabel(view);
+  const listing = useListing();
+  // Lowercased at this seam, as the bar sets it in tracked-out capitals.
+  const title = pageTitle?.toLowerCase() ?? '';
 
   return (
     <div className="flex h-dvh flex-col bg-ink">
       <ActivityBar />
-      {/* One bar for every screen. Compose belongs on it everywhere, not only over the mail: on a
-          wide screen the rail carries it on every route, and a phone that loses it the moment you
-          open Settings is the desktop app minus a button for no reason. */}
-      <div className="flex h-11 shrink-0 items-center gap-1 border-b border-rule-soft bg-ink-raised pr-2 pl-1 lg:hidden">
-        <Button
-          variant="ghost"
-          size="icon"
-          className="size-11 lg:size-7"
-          onClick={() => setIsRailOpen(true)}
-          aria-label="Open mailboxes"
-        >
-          <ListIcon size={16} />
-        </Button>
-        <span className="min-w-0 flex-1 truncate font-mono text-2xs tracking-[0.08em] text-paper-dim uppercase">
-          {title}
-        </span>
-        <Link
-          to="."
-          search={withCompose('new')}
-          className={buttonClass({ variant: 'primary', size: 'sm' })}
-        >
-          <PlusIcon size={12} weight="bold" />
-          Compose
-        </Link>
-      </div>
+      {/* One bar for every screen below `lg`. Compose belongs on it everywhere, not only over the
+          mail: on a wide screen the rail carries it on every route, and a phone that loses it the
+          moment you open Settings is the desktop app minus a button for no reason. Over the mail it
+          holds the search row, since the box already says where you are. */}
+      {!isWide &&
+        (listing === undefined ? (
+          <div className="flex shrink-0 items-start border-b border-rule-soft bg-ink-raised">
+            {openRail}
+            <span className="min-w-0 flex-1 self-center truncate font-mono text-2xs tracking-[0.08em] text-paper-dim uppercase">
+              {title}
+            </span>
+            {compose}
+          </div>
+        ) : (
+          <SearchRow listing={listing} leading={openRail} trailing={compose} />
+        ))}
 
       {/* `relative`: below `lg` an open message lies over the list (`ViewPage`). */}
       <div className="relative flex min-h-0 flex-1">
@@ -130,7 +135,7 @@ const AppShellBody = () => {
         </aside>
 
         <Resizer
-          label="Mailbox rail width"
+          label="Navigation width"
           width={railWidth}
           min={RAIL_WIDTH.min}
           max={RAIL_WIDTH.max}
@@ -141,7 +146,6 @@ const AppShellBody = () => {
         <Outlet />
       </div>
 
-      <StatusBar title={title} counts={counts} />
       <AgentTools />
 
       <Dialog.Root open={isRailOpen} onOpenChange={setIsRailOpen}>
@@ -149,7 +153,7 @@ const AppShellBody = () => {
           <Dialog.Backdrop className="fixed inset-0 z-40 bg-ink/70 transition-opacity duration-150 data-[ending-style]:opacity-0 data-[starting-style]:opacity-0 lg:hidden" />
           <Dialog.Popup
             className="fixed inset-y-0 left-0 z-50 flex w-60 flex-col outline-none transition-transform duration-150 data-[ending-style]:-translate-x-full data-[starting-style]:-translate-x-full lg:hidden"
-            aria-label="Mailboxes"
+            aria-label="Navigation"
           >
             <Dialog.Close
               render={
@@ -157,7 +161,7 @@ const AppShellBody = () => {
                   variant="ghost"
                   size="icon"
                   className="absolute top-3 right-2 z-10 size-11 lg:size-7"
-                  aria-label="Close mailboxes"
+                  aria-label="Close navigation"
                 >
                   <XIcon size={15} />
                 </Button>

@@ -20,7 +20,11 @@ const ago = (ms: number) => NOW - ms;
 
 const DEMO_PASSWORD = 'demo-app-password';
 
-import type { Attachment, Thread } from '@yozz.app/mail/threads/thread';
+import type { ImapMessageSummary } from '@yozz.app/imap';
+import type { MailConnectionFailure, Result } from '@yozz.app/mail/connection';
+import type { FolderMatches } from '@yozz.app/mail/threads/found';
+import type { FolderWindow } from '@yozz.app/mail/threads/paging';
+import type { Attachment, Folder, Thread, ThreadState } from '@yozz.app/mail/threads/thread';
 
 /** Vite inlines a binary sample file as a data URL. */
 const bytesOf = (dataUrl: string) =>
@@ -163,6 +167,47 @@ const AUTHORED: readonly Thread[] = [
           'Questions about this charge? Just reply to this email.',
         ],
         attachments: [sample('receipt-AC-9382.pdf', 'application/pdf', 'pdf', bytesOf(receipt))],
+      },
+    ],
+  },
+  {
+    id: 't-stripe-september',
+    mailboxes: ['jason@northlane.example'],
+    subject: 'Your receipt from Acme — September',
+    isUnread: false,
+    isReplied: false,
+    isStarred: false,
+    messages: [
+      {
+        id: 'm-stripe-september-1',
+        fromName: 'Stripe',
+        fromAddress: 'billing@stripe.com',
+        toAddress: 'jason@northlane.example',
+        to: [{ address: 'billing@northlane.example' }],
+        at: ago(34 * DAY),
+        body: [
+          'Your receipt for Acme Workspace (Monthly) is attached.',
+          'Amount charged: $9.00 to the card ending 4242. Invoice AC-9127.',
+        ],
+      },
+    ],
+  },
+  {
+    id: 't-stripe-trial',
+    mailboxes: ['jason@jyu.example'],
+    subject: 'Your Stripe test receipt',
+    isUnread: false,
+    isReplied: false,
+    isStarred: false,
+    messages: [
+      {
+        id: 'm-stripe-trial-1',
+        fromName: 'Stripe',
+        fromAddress: 'receipts@stripe.com',
+        toAddress: 'jason@jyu.example',
+        to: [{ address: 'jason@jyu.example' }],
+        at: ago(6 * DAY),
+        body: ['A test receipt from your Stripe dashboard. No card was charged.'],
       },
     ],
   },
@@ -663,26 +708,159 @@ const AUTHORED: readonly Thread[] = [
   },
 ];
 
-/** One copy per message: in the sending mailbox's Sent when it is yours, else in the inbox it landed in. */
-const filed = (thread: Thread): Thread => ({
-  ...thread,
-  messages: thread.messages.map((message, index) => {
+/** Conversations already filed away, so Archive, Trash and a search across them have something to show. */
+const FILED_AWAY: Readonly<Record<string, Folder>> = {
+  't-fastmail': 'archive',
+  't-cloudflare': 'archive',
+  't-hn': 'archive',
+  't-stripe-september': 'archive',
+  't-dune': 'trash',
+  't-stripe-trial': 'trash',
+};
+
+/**
+ * One copy per message: in the sending mailbox's Sent when it is yours, else in the inbox it landed
+ * in, or wherever `FILED_AWAY` moved the conversation. Trash takes the Sent copies too.
+ */
+const filed = (thread: Thread): ThreadState => {
+  const away = FILED_AWAY[thread.id];
+  const messages = thread.messages.map((message, index) => {
     const isOwn = thread.mailboxes.includes(message.fromAddress);
-    return {
-      ...message,
-      locations: [
-        {
-          mailbox: isOwn ? message.fromAddress : message.toAddress,
-          folder: isOwn ? 'sent' : 'inbox',
-          uidValidity: 1,
-          uid: index + 1,
-        },
-      ],
+    const folder: Folder = (() => {
+      if (isOwn) return away === 'trash' ? 'trash' : 'sent';
+      return away ?? 'inbox';
+    })();
+    const location = {
+      mailbox: isOwn ? message.fromAddress : message.toAddress,
+      folder,
+      uidValidity: 1,
+      uid: index + 1,
     };
-  }),
+    return { ...message, locations: [location] };
+  });
+  const locations = messages.flatMap(message => message.locations);
+  return {
+    ...thread,
+    messages,
+    folders: [...new Set(locations.map(({ folder }) => folder))],
+    foldersByMailbox: Object.fromEntries(
+      thread.mailboxes.map(mailbox => [
+        mailbox,
+        [
+          ...new Set(
+            locations.filter(copy => copy.mailbox === mailbox).map(({ folder }) => folder),
+          ),
+        ],
+      ]),
+    ),
+  };
+};
+
+export const THREADS: readonly ThreadState[] = AUTHORED.map(filed);
+
+/** Older mail than the demo's windows reach, so a list across folders offers Older mail. */
+export const DEMO_WINDOWS: readonly FolderWindow[] = [
+  {
+    mailbox: 'jason@northlane.example',
+    folder: 'archive',
+    isComplete: false,
+    summaries: [
+      {
+        seq: 1,
+        uid: 1,
+        flags: ['\\Seen'],
+        internalDate: '01-Jan-2020 00:00:00 +0000',
+        size: 1000,
+        envelope: null,
+        references: [],
+        gmailThreadId: null,
+        attachmentNames: [],
+      },
+    ],
+  },
+];
+
+const foundReceipt = (uid: number, month: string, daysAgo: number): ImapMessageSummary => ({
+  seq: uid,
+  uid,
+  flags: ['\\Seen'],
+  internalDate: new Date(ago(daysAgo * DAY)).toUTCString(),
+  size: 4000,
+  envelope: {
+    date: new Date(ago(daysAgo * DAY)).toUTCString(),
+    subject: `Your receipt from Acme — ${month}`,
+    subjectRaw: null,
+    from: [{ name: 'Stripe', mailbox: 'billing', host: 'stripe.com' }],
+    sender: [],
+    replyTo: [],
+    to: [{ name: null, mailbox: 'jason', host: 'northlane.example' }],
+    cc: [],
+    bcc: [],
+    inReplyTo: null,
+    messageId: `<found-${uid}@stripe.com>`,
+  },
+  references: [],
+  gmailThreadId: null,
+  attachmentNames: [],
 });
 
-export const THREADS: readonly Thread[] = AUTHORED.map(filed);
+/**
+ * Stands in for the servers, so a search's states can be seen. `yozz:demo-search` picks one:
+ * `hang` never answers, `fail` fails one address, `more` names older matches than it reads.
+ */
+export const demoServerSearch = async (
+  address: string,
+  words: readonly string[],
+  signal: AbortSignal,
+  onMatches: (matches: FolderMatches) => void,
+): Promise<Result<null, MailConnectionFailure>> => {
+  const mode = localStorage.getItem('yozz:demo-search');
+  const cancelled = { ok: false, error: { kind: 'cancelled' } } as const;
+  if (mode === 'hang') {
+    await new Promise(resolve => signal.addEventListener('abort', resolve, { once: true }));
+    return cancelled;
+  }
+  await new Promise(resolve => setTimeout(resolve, 800));
+  if (signal.aborted) return cancelled;
+  if (mode === 'fail' && address === 'hello@stillwater.example') {
+    return { ok: false, error: { kind: 'stalled' } };
+  }
+  const isReceipt = words.some(word => /receipt|stripe/iu.test(word));
+  if (address === 'jason@northlane.example' && isReceipt) {
+    const summaries = [
+      foundReceipt(9001, 'March', 240),
+      foundReceipt(9002, 'February', 270),
+      foundReceipt(9003, 'January', 300),
+    ];
+    onMatches({
+      folder: 'archive',
+      uidValidity: 1,
+      hits: summaries.map(({ uid }) => uid),
+      summaries,
+      folderName: 'Archive',
+      rest: mode === 'more' ? [8999, 8998] : [],
+      reachedAt: mode === 'more' ? ago(300 * DAY) : null,
+    });
+  }
+  return { ok: true, value: null };
+};
+
+/** The next page a `more` search named. */
+export const demoMoreMatches = async (
+  previous: FolderMatches,
+): Promise<Result<FolderMatches, MailConnectionFailure>> => {
+  await new Promise(resolve => setTimeout(resolve, 800));
+  return {
+    ok: true,
+    value: {
+      ...previous,
+      hits: previous.rest,
+      summaries: [foundReceipt(8999, 'December', 330), foundReceipt(8998, 'November', 360)],
+      rest: [],
+      reachedAt: null,
+    },
+  };
+};
 
 /**
  * Demo mode's server lookup. A `.example` domain with a Fastmail fixture address answers with that

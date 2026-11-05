@@ -13,6 +13,8 @@ export const describeMailFailure = (failure: MailConnectionFailure, host: string
       return `${host} rejected the username or password`;
     case 'stalled':
       return `${host} stopped responding`;
+    case 'cancelled':
+      return 'Cancelled';
     case 'smtp': {
       const { reason } = failure;
       // Rounded down, so the limit named is never one the server would still refuse.

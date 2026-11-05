@@ -1,6 +1,6 @@
-import { useNavigate, useParams, useSearch } from '@tanstack/react-router';
-import { neighbourOf, visibleThreads } from '@yozz.app/mail/threads/views';
-import { useMail } from '../store/MailProvider';
+import { useNavigate, useParams } from '@tanstack/react-router';
+import { neighbourOf } from '@yozz.app/mail/threads/views';
+import { useListing } from './use-listing';
 
 /**
  * Filing the open thread away moves the reader on to its neighbour, or back to the list when it was
@@ -10,12 +10,11 @@ import { useMail } from '../store/MailProvider';
  */
 export const useAdvancePast = () => {
   const { view } = useParams({ from: '/_app/m/$view' });
-  const { q } = useSearch({ from: '/_app/m/$view' });
   const navigate = useNavigate();
-  const { threads } = useMail();
+  const listing = useListing();
 
   return (threadId: string, alsoFiled: ReadonlySet<string> = new Set()) => {
-    const staying = visibleThreads(threads, view, q).filter(
+    const staying = (listing?.threads ?? []).filter(
       thread => thread.id === threadId || !alsoFiled.has(thread.id),
     );
     const next = neighbourOf(staying, threadId);

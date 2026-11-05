@@ -3,15 +3,17 @@ import { listDrafts } from '@yozz.app/mail/compose/draft-vault';
 import { listSentRecords } from '@yozz.app/mail/compose/sent-vault';
 import type { MailConnectionFailure } from '@yozz.app/mail/connection';
 import type { MailCache } from '@yozz.app/mail/threads/cache';
-import { cachedPreviews, cachedSummaries, threadList } from '@yozz.app/mail/threads/hydrate';
 import {
-  type FolderSummaries,
-  type MailboxSummaries,
-  parseInternalDate,
-} from '@yozz.app/mail/threads/summaries';
+  cachedPreviews,
+  cachedSummaries,
+  threadList,
+  withExtra,
+} from '@yozz.app/mail/threads/hydrate';
+import { olderFrontier } from '@yozz.app/mail/threads/paging';
+import type { MailboxSummaries } from '@yozz.app/mail/threads/summaries';
 import { loadOlder, syncMailbox } from '@yozz.app/mail/threads/sync';
 import { staleMailboxes } from '@yozz.app/mail/threads/sync-staleness';
-import { FOLDERS, type Folder, type ThreadState } from '@yozz.app/mail/threads/thread';
+import type { Folder, ThreadState } from '@yozz.app/mail/threads/thread';
 import * as Clock from 'effect/Clock';
 import * as Context from 'effect/Context';
 import * as Effect from 'effect/Effect';
@@ -255,7 +257,7 @@ export class Cache extends Context.Service<
           });
         }),
         olderFrontier: Effect.fn('Cache.olderFrontier')(function* (mailboxes, folders) {
-          const reached = yield* Effect.forEach(
+          const windows = yield* Effect.forEach(
             mailboxes.flatMap(mailbox => folders.map(folder => ({ mailbox, folder }))),
             ({ mailbox, folder }) =>
               usingCache(async () => {
@@ -264,17 +266,15 @@ export class Cache extends Context.Service<
                   folderCache.getSync(),
                   folderCache.listSummaries(),
                 ]);
-                if (mark === null || mark.complete) return [];
-                // By uid, not the oldest date: a window is counted in arrival order, and a message
-                // moved here keeps its old date, which says nothing about what lies below the window.
-                const [reachedAt] = summaries
-                  .toSorted((a, b) => a.uid - b.uid)
-                  .flatMap(({ internalDate }) => parseInternalDate(internalDate) ?? []);
-                return reachedAt === undefined ? [] : [{ mailbox, folder, reachedAt }];
+                return mark === null
+                  ? []
+                  : [{ mailbox: mailbox.address, folder, summaries, isComplete: mark.complete }];
               }),
             { concurrency: 'unbounded' },
           );
-          return reached.flat().toSorted((a, b) => b.reachedAt - a.reachedAt)[0] ?? null;
+          const frontier = olderFrontier(windows.flat());
+          const mailbox = mailboxes.find(({ address }) => address === frontier?.mailbox);
+          return frontier === null || mailbox === undefined ? null : { ...frontier, mailbox };
         }),
         loadOlder: Effect.fn('Cache.loadOlder')(function* (mailbox, folder) {
           const res = yield* usingCache(() =>
@@ -286,21 +286,6 @@ export class Cache extends Context.Service<
     }),
   );
 }
-
-/** The cached summaries with `extra`'s laid over them by uid, in folders read under the same UIDVALIDITY. */
-const withExtra = (cached: FolderSummaries, extra: FolderSummaries): FolderSummaries =>
-  Object.fromEntries(
-    FOLDERS.flatMap(folder => {
-      const read = cached[folder];
-      if (read === undefined) return [];
-      const added = extra[folder];
-      if (added === undefined || added.uidValidity !== read.uidValidity) return [[folder, read]];
-      const byUid = new Map(
-        [...read.summaries, ...added.summaries].map(summary => [summary.uid, summary]),
-      );
-      return [[folder, { ...read, summaries: [...byUid.values()] }]];
-    }),
-  );
 
 /** Every service the mail commands use, over the vault. */
 export const MailboxLayer = Cache.layer.pipe(

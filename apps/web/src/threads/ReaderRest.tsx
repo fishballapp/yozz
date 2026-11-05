@@ -48,7 +48,8 @@ export const ReaderRest = () => {
         )}
 
         <p className="mt-6 font-mono text-2xs leading-relaxed text-paper-faint">
-          Envelopes are fetched from each address's inbox when you unlock. Bodies are not yet.
+          Mail stays on your servers and in this device’s cache. Recent message bodies are fetched
+          ahead so they’re ready to read.
         </p>
       </div>
     </div>

@@ -1,5 +1,12 @@
 import type { Result } from '../connection.ts';
-import { FOLDERS, type Folder, isServerCopy, type Message, type ThreadState } from './thread.ts';
+import {
+  FOLDERS,
+  type Folder,
+  holdsFolder,
+  isServerCopy,
+  type Message,
+  type ThreadState,
+} from './thread.ts';
 
 /** What one bare word, phrase or operator looks in. */
 export type TermField = 'any' | 'from' | 'to' | 'subject';
@@ -118,10 +125,10 @@ export type SearchScope<T> = {
 };
 
 /**
- * Where a query looks. An empty one is the inbox of every mailbox; any other with no `in:` is every
- * folder but Trash, which only `in:trash` or `in:anywhere` reach. `mailbox:` names one login's
- * mailbox by the address it connects under; anything else is an error rather than an empty answer,
- * since an empty answer would read as having no such mail.
+ * Where a query looks. With no `in:`, empty or not, it is every folder but Trash, which only
+ * `in:trash` or `in:anywhere` reach. `mailbox:` names one login's mailbox by the address it connects
+ * under; anything else is an error rather than an empty answer, since an empty answer would read as
+ * having no such mail.
  */
 export const resolveScope = <T extends { readonly address: string }>(
   query: SearchQuery,
@@ -139,9 +146,7 @@ export const resolveScope = <T extends { readonly address: string }>(
       },
     };
   }
-  const isEmpty = !hasCriteria(query) && query.in.length === 0 && named.size === 0;
   const wanted = (folder: Folder) => {
-    if (isEmpty) return folder === 'inbox';
     if (query.in.length === 0) return folder !== 'trash';
     return query.in.includes(folder) || query.in.includes('anywhere');
   };
@@ -191,10 +196,31 @@ export const isMessageInScope =
     );
   };
 
+/**
+ * Asked of the folders a conversation occupies, where a client's pending move has already put them.
+ * Across every mailbox, or in the named ones alone: a thread can be archived in one and live in
+ * another. A draft has no mailbox, so it goes by the address it would be sent from.
+ */
 export const isThreadInScope =
-  <T extends { readonly address: string }>(scope: SearchScope<T>) =>
-  ({ messages }: ThreadState): boolean =>
-    messages.some(isMessageInScope(scope));
+  <T extends { readonly address: string }>({
+    folders,
+    mailboxes,
+    isEveryMailbox,
+  }: SearchScope<T>) =>
+  ({ folders: held, foldersByMailbox, messages }: ThreadState): boolean => {
+    const holds = (candidates: readonly Folder[]) =>
+      folders.some(folder => holdsFolder(candidates, folder));
+    if (isEveryMailbox) return holds(held);
+    return (
+      mailboxes.some(({ address }) => holds(foldersByMailbox[address] ?? [])) ||
+      (folders.includes('drafts') &&
+        messages.some(
+          message =>
+            message.isDraft === true &&
+            isMessageInScope({ folders, mailboxes, isEveryMailbox })(message),
+        ))
+    );
+  };
 
 /** What no server can answer for: a draft, or sent mail the vault holds because no mailbox does. */
 export const isHeldInVault = (message: Message): boolean =>

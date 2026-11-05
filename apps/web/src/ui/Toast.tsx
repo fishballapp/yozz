@@ -17,10 +17,10 @@ export const reportProblem = (title: string, description: string) => {
 export const Toasts = () => (
   <Toast.Provider toastManager={toast}>
     <Toast.Portal>
-      {/* Above the status line, and above the composer's own layer: a send reports as the dialog
-          that started it is still animating out. Right-aligned on the status line's own gutter,
-          so the stack hangs off the same edge the app is already ruled to. */}
-      <Toast.Viewport className="fixed right-3 bottom-10 z-[60] flex w-[min(100vw-1.5rem,21rem)] flex-col items-end gap-1.5">
+      {/* Above the composer's own layer: a send reports as the dialog that started it is still
+          animating out. Right-aligned on the app's own gutter, so the stack hangs off the same edge
+          the app is already ruled to. */}
+      <Toast.Viewport className="fixed right-3 bottom-3 z-[60] flex w-[min(100vw-1.5rem,21rem)] flex-col items-end gap-1.5">
         <ToastList />
       </Toast.Viewport>
     </Toast.Portal>

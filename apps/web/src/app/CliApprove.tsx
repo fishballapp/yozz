@@ -35,7 +35,6 @@ const COPY = {
   deny: 'Deny',
   approved: 'Approved. Your terminal takes it from here.',
   denied: 'Denied. Your terminal has been told.',
-  status: 'Command-line approval',
   freshSignIn:
     'You signed in more than a day ago. Approving a CLI needs a fresh sign-in, so a session someone else got hold of cannot do it. Your approval goes through right after.',
 } as const;
@@ -52,7 +51,7 @@ export const CliApprove = ({ search }: { search: string }) => {
 
   if (query === null) {
     return (
-      <AuthColumn title={COPY.invalidTitle} status={COPY.status}>
+      <AuthColumn title={COPY.invalidTitle}>
         <p className="text-base leading-relaxed text-paper-dim">{COPY.invalidBody(COMMAND)}</p>
       </AuthColumn>
     );
@@ -76,7 +75,7 @@ const Approval = ({ query }: { query: CliApproveQuery }) => {
   const isSettled = busy !== null || answer !== null;
 
   return (
-    <AuthColumn title={COPY.title} description={COPY.description(COMMAND)} status={COPY.status}>
+    <AuthColumn title={COPY.title} description={COPY.description(COMMAND)}>
       <section>
         <h2 className="label-rule">{COPY.codeLabel}</h2>
         <p className="mt-3 font-mono text-[1.5rem] leading-none tracking-[0.12em] text-paper">

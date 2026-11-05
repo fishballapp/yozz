@@ -522,7 +522,7 @@ export const useComposerStore = ({
         }
         // `copy-pending` is the only outcome that knows the message went out.
         if (progress.reason === 'copy-pending') {
-          // The status line has no title above it; the toast is already headed "Sent".
+          // The line under the box has no title above it; the toast is already headed "Sent".
           const { error } = progress;
           const detail = (() => {
             // The server went quiet or the connection dropped: it may well go on to store what it has.

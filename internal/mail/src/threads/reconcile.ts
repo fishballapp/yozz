@@ -22,6 +22,22 @@ export const MOVE_SOURCES: Record<MoveTarget, readonly Folder[]> = {
 export const canMoveTo = (folders: readonly Folder[], to: MoveTarget): boolean =>
   MOVE_SOURCES[to].some(source => folders.includes(source));
 
+/**
+ * The moves a conversation offers, by what it holds, not by where it is seen from: any copy in Trash
+ * offers Restore, which also brings Archive's back, so it replaces Move to inbox. All in Trash, that
+ * is all it offers.
+ */
+export const movesOffered = (folders: readonly Folder[]) => {
+  const canRestore = folders.includes('trash');
+  const isFiled = folders.includes('archive') && !folders.includes('inbox');
+  return {
+    canRestore,
+    canArchive: folders.includes('inbox'),
+    canMoveToInbox: isFiled && !canRestore,
+    canDelete: canMoveTo(folders, 'trash'),
+  };
+};
+
 /** The destination in, the sources out, the rest as they were. */
 export const foldersAfterMove = (folders: readonly Folder[], to: MoveTarget): readonly Folder[] =>
   FOLDERS.filter(

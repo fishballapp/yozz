@@ -4,13 +4,14 @@ import {
   EnvelopeOpenIcon,
   EnvelopeSimpleIcon,
   type Icon,
+  MailboxIcon,
   StarIcon,
   TrashIcon,
 } from '@phosphor-icons/react';
 import { useNavigate } from '@tanstack/react-router';
-import { canMoveTo, type MoveTarget } from '@yozz.app/mail/threads/reconcile';
+import { type MoveTarget, movesOffered } from '@yozz.app/mail/threads/reconcile';
 import type { ThreadState } from '@yozz.app/mail/threads/thread';
-import { isOnServer } from '@yozz.app/mail/threads/thread';
+import { isOnServer, isTrashed } from '@yozz.app/mail/threads/thread';
 import type { ViewId } from '@yozz.app/mail/threads/views';
 import { Fragment } from 'react';
 import { DISCARD_WARNING } from '../compose/intent';
@@ -18,7 +19,7 @@ import { useMail } from '../store/MailProvider';
 import { Button } from '../ui/Button';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
 import { reportProblem } from '../ui/Toast';
-import { discardDrafts, discardTitle, draftIdsOf } from './discard-drafts';
+import { discardableDraftIds, discardDrafts, discardTitle } from './discard-drafts';
 import { useAdvancePast } from './use-advance';
 
 /** What the bar over the list does to every ticked thread; a group is set off by a rule. */
@@ -58,55 +59,56 @@ const useBulkActions = (
     onDone();
   };
 
-  if (view === 'drafts') {
-    const draftIds = draftIdsOf(threads);
-    if (draftIds.length === 0) return [];
-    return [
-      {
-        key: 'discard',
-        actions: [
+  const draftIds = discardableDraftIds(threads, view);
+  const discard =
+    draftIds.length === 0
+      ? []
+      : [
           {
-            icon: TrashIcon,
-            label: 'Discard drafts',
-            confirm: {
-              title: discardTitle(draftIds.length),
-              description: DISCARD_WARNING,
-            },
-            act: async () => {
-              await discardDrafts(removeDraft, draftIds);
-              onDone();
-            },
+            key: 'discard',
+            actions: [
+              {
+                icon: TrashIcon,
+                label: 'Discard drafts',
+                confirm: {
+                  title: discardTitle(draftIds.length),
+                  description: DISCARD_WARNING,
+                },
+                act: async () => {
+                  await discardDrafts(removeDraft, draftIds);
+                  onDone();
+                },
+              },
+            ],
           },
-        ],
-      },
-    ];
-  }
+        ];
+  if (view === 'drafts') return discard;
 
   // A just-sent message or vault-held sent mail alone: no server holds a copy to change.
   const onServer = threads.filter(isOnServer);
-  const movable = (to: MoveTarget) => onServer.filter(({ folders }) => canMoveTo(folders, to));
+  // By what each thread holds, wherever the list is: a search can tick mail in Trash beside mail not.
+  const offering = (move: keyof ReturnType<typeof movesOffered>) =>
+    onServer.filter(({ folders }) => movesOffered(folders)[move]);
 
-  if (view === 'trash') {
-    const restorable = movable('inbox');
-    if (restorable.length === 0) return [];
-    return [
-      {
-        key: 'restore',
-        actions: [
+  const restorable = offering('canRestore');
+  const restore: BulkAction[] =
+    restorable.length > 0
+      ? [
           {
             icon: ArrowCounterClockwiseIcon,
             label: 'Restore',
             act: file(restorable, 'inbox', 'Not every thread restored'),
           },
-        ],
-      },
-    ];
+        ]
+      : [];
+  // All in Trash, there is nothing else to do with them until they are out of it.
+  if (onServer.length > 0 && onServer.every(isTrashed)) {
+    return [{ key: 'restore', actions: restore }, ...discard];
   }
 
-  // In Archive the move goes back to the inbox, and says so.
-  const isArchive = view === 'archive';
-  const archivable = movable(isArchive ? 'inbox' : 'archive');
-  const trashable = movable('trash');
+  const archivable = offering('canArchive');
+  const filed = offering('canMoveToInbox');
+  const trashable = offering('canDelete');
   const unread = onServer.filter(thread => thread.isUnread);
   const unstarred = onServer.filter(thread => !thread.isStarred);
   const flag =
@@ -120,14 +122,22 @@ const useBulkActions = (
     };
 
   const moves: BulkAction[] = [
+    ...restore,
     ...(archivable.length > 0
       ? [
           {
             icon: ArchiveIcon,
-            label: isArchive ? 'Move to inbox' : 'Archive',
-            act: isArchive
-              ? file(archivable, 'inbox', 'Not every thread moved to inbox')
-              : file(archivable, 'archive', 'Not every thread archived'),
+            label: 'Archive',
+            act: file(archivable, 'archive', 'Not every thread archived'),
+          },
+        ]
+      : []),
+    ...(filed.length > 0
+      ? [
+          {
+            icon: MailboxIcon,
+            label: 'Move to inbox',
+            act: file(filed, 'inbox', 'Not every thread moved to inbox'),
           },
         ]
       : []),
@@ -175,10 +185,9 @@ const useBulkActions = (
                 act: flag(onServer, 'isStarred', false),
               },
         ];
-  return [
-    { key: 'moves', actions: moves },
-    { key: 'marks', actions: marks },
-  ].filter(({ actions }) => actions.length > 0);
+  return [{ key: 'moves', actions: moves }, { key: 'marks', actions: marks }, ...discard].filter(
+    ({ actions }) => actions.length > 0,
+  );
 };
 
 export const BulkActions = ({

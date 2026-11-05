@@ -29,7 +29,7 @@ export const SwitchToPasskey = () => {
             search={previous => previous}
             className={buttonClass({ variant: 'secondary' })}
           >
-            Back to Account
+            Back to sign-in
           </Link>
         </PageSection>
       </SettingsPane>

@@ -2,19 +2,15 @@ import {
   ArchiveIcon,
   ArrowCounterClockwiseIcon,
   type Icon,
+  MailboxIcon,
   PaperclipIcon,
   StarIcon,
   TrashIcon,
 } from '@phosphor-icons/react';
 import { Link } from '@tanstack/react-router';
-import { canMoveTo } from '@yozz.app/mail/threads/reconcile';
+import { movesOffered } from '@yozz.app/mail/threads/reconcile';
 import type { ThreadState } from '@yozz.app/mail/threads/thread';
-import {
-  attachmentsOf,
-  isArchived,
-  isOnServer,
-  newestInbound,
-} from '@yozz.app/mail/threads/thread';
+import { attachmentsOf, isOnServer, newestInbound } from '@yozz.app/mail/threads/thread';
 import { latestOf, previewOf, type ViewId } from '@yozz.app/mail/threads/views';
 import { cn } from 'cn';
 import { DISCARD_WARNING } from '../compose/intent';
@@ -23,7 +19,7 @@ import { Checkbox } from '../ui/Checkbox';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
 import { reportProblem } from '../ui/Toast';
 import { listTime } from '../ui/time';
-import { discardDrafts, discardTitle, draftIdsOf } from './discard-drafts';
+import { discardableDraftIds, discardDrafts, discardTitle } from './discard-drafts';
 import { useAdvancePast } from './use-advance';
 
 /** One record in columns: a 34px line above `lg`, two lines below. Contrast figures and rationale are in DESIGN.md. */
@@ -141,7 +137,7 @@ type RowAction = {
   };
 };
 
-/** Archive and delete for server messages; undo in Trash; discard in Drafts; nothing otherwise. */
+/** Archive and delete for server messages; undo in Trash; discard in Drafts or for drafts alone; nothing otherwise. */
 const useRowActions = ({ thread, view, isSelected }: RowProps): readonly RowAction[] => {
   const { toggleArchive, trashThread, restoreThread, removeDraft } = useMail();
   const advancePast = useAdvancePast();
@@ -155,9 +151,9 @@ const useRowActions = ({ thread, view, isSelected }: RowProps): readonly RowActi
       }
     };
   // A draft has no IMAP copy, so archive and delete can do nothing to it.
-  const draftIds = draftIdsOf([thread]);
+  const draftIds = discardableDraftIds([thread], view);
   return (() => {
-    if (view === 'drafts' && draftIds.length > 0) {
+    if (draftIds.length > 0) {
       return [
         {
           icon: TrashIcon,
@@ -175,33 +171,36 @@ const useRowActions = ({ thread, view, isSelected }: RowProps): readonly RowActi
     }
     // A just-sent message or vault-held sent mail alone: no server holds a copy to file.
     if (!isOnServer(thread)) return [];
-    if (view === 'trash') {
-      if (!canMoveTo(thread.folders, 'inbox')) return [];
-      return [
-        {
-          icon: ArrowCounterClockwiseIcon,
-          label: `Restore ${thread.subject}`,
-          act: file(restoreThread, 'Thread not restored'),
-        },
-      ];
-    }
-    const archiveTarget = isArchived(thread) ? 'inbox' : 'archive';
+    const { canRestore, canArchive, canMoveToInbox, canDelete } = movesOffered(thread.folders);
     return [
-      ...(canMoveTo(thread.folders, archiveTarget)
+      ...(canRestore
         ? [
             {
-              icon: ArchiveIcon,
-              label: isArchived(thread)
-                ? `Move ${thread.subject} to inbox`
-                : `Archive ${thread.subject}`,
-              act: file(
-                toggleArchive,
-                isArchived(thread) ? 'Thread not moved to inbox' : 'Thread not archived',
-              ),
+              icon: ArrowCounterClockwiseIcon,
+              label: `Restore ${thread.subject}`,
+              act: file(restoreThread, 'Thread not restored'),
             },
           ]
         : []),
-      ...(canMoveTo(thread.folders, 'trash')
+      ...(canArchive
+        ? [
+            {
+              icon: ArchiveIcon,
+              label: `Archive ${thread.subject}`,
+              act: file(toggleArchive, 'Thread not archived'),
+            },
+          ]
+        : []),
+      ...(canMoveToInbox
+        ? [
+            {
+              icon: MailboxIcon,
+              label: `Move ${thread.subject} to inbox`,
+              act: file(toggleArchive, 'Thread not moved to inbox'),
+            },
+          ]
+        : []),
+      ...(canDelete
         ? [
             {
               icon: TrashIcon,

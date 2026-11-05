@@ -1,10 +1,10 @@
-import { MagnifyingGlassIcon } from '@phosphor-icons/react';
 import { Link, useParams } from '@tanstack/react-router';
 import { defaultRangeExtractor, useVirtualizer } from '@tanstack/react-virtual';
 import { describeMailFailure } from '@yozz.app/mail/describe-failure';
 import { type ThreadState, threadByHandle } from '@yozz.app/mail/threads/thread';
 import {
   isNamedView,
+  type Listing,
   olderAvailable,
   syncProgressIn,
   type ViewId,
@@ -14,7 +14,9 @@ import { type ReactNode, useEffect, useEffectEvent, useRef, useState } from 'rea
 import { useMail } from '../store/MailProvider';
 import { buttonClass } from '../ui/Button';
 import { Checkbox } from '../ui/Checkbox';
+import { useMediaQuery } from '../ui/chrome';
 import { BulkActions } from './BulkActions';
+import { SearchRow } from './SearchRow';
 import { useSelection } from './selection';
 import { ThreadRow } from './ThreadRow';
 
@@ -34,6 +36,43 @@ const EmptyState = ({
     <p className="max-w-xs text-center text-base leading-relaxed text-paper-dim">{body}</p>
     {action}
   </div>
+);
+
+/**
+ * How much is in the list: above `lg` over the time column, as a mail client's range is, and below
+ * it on the sender column, where a phone has no time column to spare beside Select. No unread says
+ * nothing rather than zero.
+ */
+const ListCounts = ({
+  threads,
+  isSelecting,
+}: {
+  threads: readonly ThreadState[];
+  isSelecting: boolean;
+}) => {
+  const unread = threads.filter(thread => thread.isUnread).length;
+  return (
+    <p
+      className={cn(
+        'min-w-0 flex-1 truncate font-mono text-2xs text-paper-faint lg:pr-2 lg:pl-0 lg:text-right',
+        isSelecting ? 'pl-2' : 'pl-13',
+      )}
+    >
+      {unread > 0 && <span className="text-signal">{unread} unread · </span>}
+      {`${threads.length} ${threads.length === 1 ? 'conversation' : 'conversations'}`}
+    </p>
+  );
+};
+
+const OlderMail = ({ isLoading, onLoad }: { isLoading: boolean; onLoad: () => void }) => (
+  <button
+    type="button"
+    onClick={onLoad}
+    disabled={isLoading}
+    className="label-rule h-9 shrink-0 border-t border-rule-soft text-center -outline-offset-2 hover:bg-ink-hover disabled:hover:bg-transparent"
+  >
+    {isLoading ? 'Loading…' : 'Older mail'}
+  </button>
 );
 
 /**
@@ -124,35 +163,48 @@ const ThreadRows = ({
 };
 
 export const ThreadList = ({
-  threads,
-  view,
-  query,
-  onQueryChange,
+  listing,
+  listing: { threads, view, query, isSearch, error, older },
 }: {
-  threads: readonly ThreadState[];
-  view: ViewId;
-  query: string;
-  onQueryChange: (query: string) => void;
+  listing: Listing;
 }) => {
   // Which row is open is a fact about the URL, so the row link and its inversion cannot disagree.
   // Resolved the way `ThreadPage` resolves it: a message id in the URL names its conversation.
   const { _splat: handle } = useParams({ strict: false });
   const openId = handle === undefined ? undefined : threadByHandle(threads, handle)?.id;
-  const { mailboxes, recordsError, syncStates, sync, loadOlder, isLoadingOlder, isDemo } =
-    useMail();
+  const {
+    mailboxes,
+    recordsError,
+    syncStates,
+    sync,
+    loadOlder,
+    isLoadingOlder,
+    loadOlderInList,
+    isLoadingOlderInList,
+    isDemo,
+    serverSearch,
+  } = useMail();
   // Opening a message, another view or another search each start a new selection.
   const selection = useSelection(
     threads.map(({ id }) => id),
     [view, query, handle ?? ''].join('\n'),
   );
   const checked = threads.filter(({ id }) => selection.isChecked(id));
+  const isWide = useMediaQuery('(min-width: 64rem)');
+  // Only a search under way says fetching: nothing else is on its way, and it would hang for ever.
+  const running = serverSearch?.query === query.trim() ? serverSearch : null;
+  const emptyAnswer =
+    running !== null && running.phase !== 'settled' ? 'Fetching…' : `Nothing matches "${query}".`;
 
   const empty = (() => {
-    if (query.trim() !== '') {
+    if (error !== null || (isSearch && query !== '')) {
       return (
         <div className="flex flex-1 items-center justify-center px-6">
-          <p className="max-w-xs text-center text-base leading-relaxed text-paper-dim">
-            {`No mail matches “${query}”.`}
+          <p
+            role="status"
+            className="max-w-xs text-center text-base leading-relaxed text-paper-dim"
+          >
+            {error ?? emptyAnswer}
           </p>
         </div>
       );
@@ -214,7 +266,7 @@ export const ThreadList = ({
             body={
               pending.length === 1
                 ? `Fetching the newest mail from ${waitingOn.imap.host}.`
-                : `Fetching the newest mail from ${pending.length} accounts.`
+                : `Fetching the newest mail from ${pending.length} mailboxes.`
             }
           />
         );
@@ -239,55 +291,44 @@ export const ThreadList = ({
         );
       }
     }
-    return <EmptyState title="Nothing here yet" body="No messages in this mailbox." />;
+    return <EmptyState title="Nothing here yet" body="Mail appears here." />;
   })();
 
   return (
     <div className="flex h-full flex-col">
-      {/* One bar, two jobs: search, or what to do with the ticked rows. Above `lg` its box sits
-          over the rows' boxes and its magnifier over their stars; below `lg` the box appears only
-          while selecting, and Select stands apart from the search behind a rule. */}
-      <div className="flex h-11 shrink-0 items-center border-b border-rule-soft pl-1">
-        <Checkbox
-          checked={selection.isAllChecked}
-          indeterminate={checked.length > 0 && !selection.isAllChecked}
-          onCheckedChange={() => selection.toggleAll()}
-          label={checked.length > 0 ? 'Clear the selection' : 'Select every message'}
-          className={cn('h-full w-11 lg:flex lg:w-7.5', !selection.isSelecting && 'hidden')}
-        />
-        {selection.isSelecting ? (
-          <div className="flex min-w-0 flex-1 items-center lg:pl-1">
-            <BulkActions threads={checked} view={view} openId={openId} onDone={selection.clear} />
-          </div>
-        ) : (
-          <>
-            <span className="flex h-full w-11 shrink-0 items-center justify-center lg:w-7.5">
-              <MagnifyingGlassIcon size={14} className="text-paper-faint" />
-            </span>
-            <input
-              type="search"
-              // Named: an unnamed field trips Chrome's autofill advisory, and here remembering is wanted.
-              name="search"
-              value={query}
-              onChange={event => onQueryChange(event.target.value)}
-              placeholder="Search sender, subject or address"
-              aria-label="Search mail"
-              className="h-full w-full min-w-0 bg-transparent pr-3 pl-2 text-base text-paper outline-none placeholder:text-paper-faint lg:pl-0"
-            />
-          </>
-        )}
-        {/* Cancel stays while selecting, ticked or not, and even once a sync has emptied the list:
-            it clears the ticks and leaves. */}
-        {(threads.length > 0 || selection.isSelecting) && (
+      {/* Below `lg` the search row is the shell's top bar. */}
+      {isWide && <SearchRow listing={listing} />}
+
+      {/* The box over the rows' boxes, then what to do with the ticked ones, the first over the
+          stars. Below `lg` a row has no box until you ask, and Select stands at this bar's far end
+          behind a rule, as wide as Cancel so the rule holds. An empty list has nothing to select or
+          count, so no row, but Cancel stays even once a sync has emptied it: it clears the ticks and
+          leaves. */}
+      {(threads.length > 0 || selection.isSelecting) && (
+        <div className="flex h-11 shrink-0 items-center border-b border-rule-soft pl-1 lg:h-8.5">
+          <Checkbox
+            checked={selection.isAllChecked}
+            indeterminate={checked.length > 0 && !selection.isAllChecked}
+            onCheckedChange={() => selection.toggleAll()}
+            label={checked.length > 0 ? 'Clear the selection' : 'Select every message'}
+            className={cn('h-full w-11 lg:flex lg:w-7.5', !selection.isSelecting && 'hidden')}
+          />
+          {checked.length > 0 ? (
+            <div className="flex min-w-0 flex-1 items-center lg:pl-px">
+              <BulkActions threads={checked} view={view} openId={openId} onDone={selection.clear} />
+            </div>
+          ) : (
+            <ListCounts threads={threads} isSelecting={selection.isSelecting} />
+          )}
           <button
             type="button"
             onClick={() => selection.setSelecting(!selection.isSelecting)}
-            className="ml-auto h-full shrink-0 border-l border-rule-soft px-4 text-base text-paper-dim -outline-offset-2 hover:bg-ink-hover hover:text-paper lg:hidden"
+            className="ml-auto h-full w-16 shrink-0 border-l border-rule-soft pr-2 text-right text-base text-paper-dim -outline-offset-2 hover:bg-ink-hover hover:text-paper lg:hidden"
           >
             {selection.isSelecting ? 'Cancel' : 'Select'}
           </button>
-        )}
-      </div>
+        </div>
+      )}
 
       {threads.length === 0 ? (
         empty
@@ -295,19 +336,15 @@ export const ThreadList = ({
         <ThreadRows threads={threads} view={view} openId={openId} selection={selection} />
       )}
       {/* Hidden, not disabled, once every mailbox shown has its folder's start cached: a
-          control that stays on screen implies there is more mail behind it. Search reads what
-          is cached, so paging under a query would answer a different question than it asks. It
-          stands under an empty list too: a Starred view with nothing in the newest window is
-          exactly where older mail is wanted. */}
-      {query.trim() === '' && olderAvailable(syncStates, mailboxes, view) && (
-        <button
-          type="button"
-          onClick={() => void loadOlder(view)}
-          disabled={isLoadingOlder(view)}
-          className="label-rule h-9 shrink-0 border-t border-rule-soft text-center -outline-offset-2 hover:bg-ink-hover disabled:hover:bg-transparent"
-        >
-          {isLoadingOlder(view) ? 'Loading…' : 'Older mail'}
-        </button>
+          control that stays on screen implies there is more mail behind it. A query with something
+          to look for searches the whole folder, so it has nothing to page. It stands under an empty
+          list too: a Starred view with nothing in the newest window is exactly where older mail is
+          wanted. */}
+      {!isSearch && olderAvailable(syncStates, mailboxes, view) && (
+        <OlderMail isLoading={isLoadingOlder(view)} onLoad={() => void loadOlder(view)} />
+      )}
+      {older !== null && (
+        <OlderMail isLoading={isLoadingOlderInList} onLoad={() => void loadOlderInList(query)} />
       )}
     </div>
   );

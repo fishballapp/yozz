@@ -1,24 +1,18 @@
-import { Outlet, useNavigate, useParams, useSearch } from '@tanstack/react-router';
-import { visibleThreads } from '@yozz.app/mail/threads/views';
+import { Outlet, useParams } from '@tanstack/react-router';
 import { cn } from 'cn';
-import { useMail } from '../store/MailProvider';
 import { LIST_WIDTH, Resizer, useListWidth } from '../ui/Resizer';
 import { ThreadList } from './ThreadList';
+import { useListing } from './use-listing';
 
 /**
- * The rail and status line are `AppShell`'s. The list never tracks the viewport; the reader keeps a
+ * The rail is `AppShell`'s. The list never tracks the viewport; the reader keeps a
  * `20rem` floor and CSS arbitrates. Below `lg` an open message lies over the list, which stays laid
  * out underneath, invisible: hidden with `display: none`, its rows would measure 0 and come back
  * one by one, and the virtualizer would scroll the list down for each of them.
  */
 
 export const ViewPage = () => {
-  const { view } = useParams({ from: '/_app/m/$view' });
-  const { q } = useSearch({ from: '/_app/m/$view' });
-  // `to: '.'` with no `from`: `from: '/m/$view'` resolved without `/t/$` and typing in the
-  // search box closed the open message.
-  const navigate = useNavigate();
-  const { threads } = useMail();
+  const listing = useListing();
 
   // Whether a message is open is a question about the URL: the thread route puts a `threadId` in scope.
   const { _splat: threadId } = useParams({ strict: false });
@@ -39,19 +33,7 @@ export const ViewPage = () => {
         )}
         aria-label="Messages"
       >
-        <ThreadList
-          threads={visibleThreads(threads, view, q)}
-          view={view}
-          query={q ?? ''}
-          // `replace`: a search box is one thought, not one history entry per keystroke.
-          onQueryChange={query =>
-            navigate({
-              to: '.',
-              search: previous => ({ ...previous, q: query.trim() === '' ? undefined : query }),
-              replace: true,
-            })
-          }
-        />
+        {listing !== undefined && <ThreadList listing={listing} />}
       </section>
 
       <Resizer

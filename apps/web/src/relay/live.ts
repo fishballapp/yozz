@@ -103,6 +103,7 @@ const isTransportFailure = (error: MailConnectionFailure): boolean =>
 const CLOSED: LiveState = { status: 'closed' };
 const CONNECTION_CLOSED: MailConnectionFailure = { kind: 'error', detail: 'connection closed' };
 const STALLED: MailConnectionFailure = { kind: 'stalled' };
+const CANCELLED: MailConnectionFailure = { kind: 'cancelled' };
 
 /** RFC 2177 §3: a server may drop an IDLE after 30 minutes; re-issue well inside that. */
 const IDLE_REFRESH_MS = 25 * 60 * 1000;
@@ -174,6 +175,10 @@ export const createLiveManager = (deps: {
 
   const wrapClient = (conn: Connection, socket: () => Socket, client: ImapClient): MailClient => {
     const select: ImapClient['select'] = async folderName => {
+      // Commands go out in turn, so until this lands no one knows which folder the next one runs in:
+      // a task that believed the last answer would send its command after this SELECT, into this folder.
+      socket().selected = null;
+      socket().selectedInfo = null;
       // Always read-write: flag writes and APPEND need it, and EXAMINE would block them.
       const res = await client.select(folderName, { readOnly: false });
       socket().selected = res.ok ? folderName : null;
@@ -431,7 +436,10 @@ export const createLiveManager = (deps: {
       if (conn.userQueue.length > 0 || conn.backgroundQueue.length > 0) {
         pump(conn);
       } else {
-        rest(conn);
+        // Not this turn: work that goes task by task, as a search and a sync do, queues its next as
+        // the last one's answer lands, and resting between them is a SELECT INBOX, an IDLE and a
+        // DONE each time, to a server that may be throttling. `rest` finds out if one arrived.
+        setTimer(() => rest(conn), 0);
       }
     });
   };
@@ -533,6 +541,22 @@ export const createLiveManager = (deps: {
             resolve(result as Result<never, MailConnectionFailure>);
           },
         };
+        if (task.signal?.aborted === true) {
+          queued.resolve({ ok: false, error: CANCELLED });
+          return;
+        }
+        // Still queued when it aborts, it leaves the queue unsent; running, it stops itself.
+        task.signal?.addEventListener(
+          'abort',
+          () => {
+            const queue = conn.userQueue.includes(queued) ? conn.userQueue : conn.backgroundQueue;
+            const index = queue.indexOf(queued);
+            if (index === -1) return;
+            queue.splice(index, 1);
+            queued.resolve({ ok: false, error: CANCELLED });
+          },
+          { once: true },
+        );
         if (task.priority === 'user') {
           conn.userQueue.push(queued);
         } else {

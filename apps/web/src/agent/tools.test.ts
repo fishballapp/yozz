@@ -90,6 +90,10 @@ const fakePort = (threads: ThreadState[], overrides: Partial<AgentPort> = {}) =>
       { address: 'me@yozz.app', smtp: { host: 's', port: 465, username: 'u', password: 'p' } },
     ],
     ownedAddresses: ['me@yozz.app', 'alias@yozz.app'],
+    mailboxes: [{ address: 'me@yozz.app' }],
+    windows: [],
+    syncStates: {},
+    askServers: vi.fn(async () => ({ answers: [], failed: [] })),
     get threads() {
       return state.threads;
     },
@@ -195,8 +199,8 @@ describe('get_threads', () => {
         {
           id: 'a',
           subject: 'Subject a',
-          accounts: ['me@yozz.app'],
-          mailboxes: ['inbox'],
+          mailboxes: ['me@yozz.app'],
+          folders: ['inbox'],
           isUnread: true,
           hasDraft: false,
           snippet: 'Hello there.',
@@ -220,7 +224,7 @@ describe('get_threads', () => {
     await expect(result).resolves.toEqual({ error: expect.stringContaining('signed out') });
   });
 
-  it('says which mailboxes hold each message, so a mixed thread is legible', async () => {
+  it('says which folders hold each message, so a mixed thread is legible', async () => {
     const location = (folder: Folder) => ({
       mailbox: 'me@yozz.app',
       folder,
@@ -240,19 +244,19 @@ describe('get_threads', () => {
     expect(result).toMatchObject({
       threads: [
         {
-          mailboxes: ['inbox', 'sent', 'drafts'],
+          folders: ['inbox', 'sent', 'drafts'],
           messages: [
-            { id: 'm/3', mailboxes: ['drafts'] },
-            { id: 'm/2', mailboxes: ['sent'] },
-            { id: 'm/1', mailboxes: ['inbox'] },
+            { id: 'm/3', folders: ['drafts'] },
+            { id: 'm/2', folders: ['sent'] },
+            { id: 'm/1', folders: ['inbox'] },
           ],
         },
       ],
     });
-    // A message with no locations, like this file's own `message()`, names no mailbox.
+    // A message with no locations, like this file's own `message()`, names no folder.
     const fixture = await call(tools, 'get_threads', { ids: ['a'], body: 'latest' });
     const [only] = (fixture as { threads: { messages: Record<string, unknown>[] }[] }).threads;
-    expect(only?.messages[0]).not.toHaveProperty('mailboxes');
+    expect(only?.messages[0]).not.toHaveProperty('folders');
   });
 
   it('gives the recipients and the inbox it landed in, which need not agree', async () => {
@@ -432,21 +436,143 @@ describe('get_threads', () => {
     ).resolves.toMatchObject({ threads: [{ id: 'b' }], nextOffset: 2 });
   });
 
-  it('searches, filters by mailbox and account, and pages', async () => {
-    const { tools } = fakePort([inbox, archived]);
-    await expect(call(tools, 'get_threads', { mailbox: 'archive' })).resolves.toMatchObject({
-      threads: [{ id: 'b' }],
+  it('lists the inbox with no query, and everything but Trash with an empty one', async () => {
+    const trashed = thread('t', ['trash']);
+    const { tools, port } = fakePort([inbox, archived, trashed]);
+    await expect(call(tools, 'get_threads', {})).resolves.toMatchObject({
+      threads: [{ id: 'a' }],
+      total: 1,
+    });
+    const everything = await call(tools, 'get_threads', { query: '' });
+    expect(everything).toMatchObject({ total: 2 });
+    expect(JSON.stringify(everything)).not.toContain('"id":"t"');
+    await expect(call(tools, 'get_threads', { query: 'in:trash' })).resolves.toMatchObject({
+      threads: [{ id: 't' }],
+    });
+    expect(port.askServers).toHaveBeenCalledWith('in:inbox');
+  });
+
+  it('runs the query through the servers, and shows what they found beside this device’s', async () => {
+    const onServer = thread('s', ['archive'], {
+      subject: 'nothing the word appears in',
+      messages: [
+        message('s/1', {
+          body: [],
+          locations: [{ mailbox: 'me@yozz.app', folder: 'archive', uidValidity: 1, uid: 9 }],
+        }),
+      ],
+    });
+    const askServers = vi.fn(async () => ({
+      answers: [
+        {
+          address: 'me@yozz.app',
+          matches: [
+            {
+              folder: 'archive' as const,
+              folderName: 'Archive',
+              uidValidity: 1,
+              hits: [9],
+              summaries: [],
+              rest: [1],
+              reachedAt: 1,
+            },
+          ],
+        },
+      ],
+      failed: [
+        {
+          address: 'other@yozz.app',
+          failure: { kind: 'stalled' as const },
+          reason: 'imap.example.com stopped responding',
+        },
+      ],
+    }));
+    const { tools } = fakePort([inbox, archived, onServer], { askServers });
+    const result = await call(tools, 'get_threads', { query: 'invoice' });
+    expect(askServers).toHaveBeenCalledWith('invoice');
+    expect(result).toMatchObject({
+      moreMatches: true,
+      failed: [{ address: 'other@yozz.app', reason: 'imap.example.com stopped responding' }],
+    });
+    const ids = (result as { threads: { id: string }[] }).threads.map(({ id }) => id);
+    expect(ids).toContain('s');
+    expect(ids).toContain('b');
+  });
+
+  describe('hasOlderMail, for a query that is a view of one folder', () => {
+    const synced = (complete: readonly Folder[]) => ({
+      'me@yozz.app': { status: 'synced', at: 1, complete } as const,
+    });
+
+    it('says the inbox has more, for no query and for in:inbox alike', async () => {
+      const { tools } = fakePort([inbox], { syncStates: synced([]) });
+      expect(await call(tools, 'get_threads', {})).toMatchObject({ hasOlderMail: true });
+      expect(await call(tools, 'get_threads', { query: 'in:inbox' })).toMatchObject({
+        hasOlderMail: true,
+      });
+    });
+
+    it('goes by the folder the query names', async () => {
+      const { tools } = fakePort([archived], { syncStates: synced(['inbox']) });
+      expect(await call(tools, 'get_threads', { query: 'in:inbox' })).not.toHaveProperty(
+        'hasOlderMail',
+      );
+      expect(await call(tools, 'get_threads', { query: 'in:archive' })).toMatchObject({
+        hasOlderMail: true,
+      });
+    });
+
+    it('says nothing of a mailbox that has not synced', async () => {
+      const { tools } = fakePort([inbox], {
+        syncStates: {
+          'me@yozz.app': { status: 'failed', failure: { kind: 'stalled' }, at: 1 },
+        },
+      });
+      expect(await call(tools, 'get_threads', {})).not.toHaveProperty('hasOlderMail');
+    });
+
+    it('says nothing when ids name the conversations', async () => {
+      const { tools } = fakePort([inbox], { syncStates: synced([]) });
+      expect(await call(tools, 'get_threads', { ids: [inbox.id] })).not.toHaveProperty(
+        'hasOlderMail',
+      );
+    });
+  });
+
+  it('asks the servers once for a search paged through', async () => {
+    const askServers = vi.fn(async () => ({ answers: [], failed: [] }));
+    const { tools } = fakePort([archived], { askServers });
+    await call(tools, 'get_threads', { query: 'invoice' });
+    await call(tools, 'get_threads', { query: 'invoice', offset: 1 });
+    expect(askServers).toHaveBeenCalledTimes(1);
+  });
+
+  it('refuses a parameter that has gone, naming the new form, rather than ignoring it', async () => {
+    const { tools, port } = fakePort([inbox]);
+    await expect(call(tools, 'get_threads', { mailbox: 'archive' })).resolves.toEqual({
+      error: expect.stringContaining('in:<folder>'),
+    });
+    await expect(call(tools, 'get_threads', { account: 'me@yozz.app' })).resolves.toEqual({
+      error: expect.stringContaining('mailbox:<address>'),
+    });
+    await expect(call(tools, 'get_threads', { unread: true })).resolves.toEqual({
+      error: expect.stringContaining('is:unread'),
+    });
+    await expect(call(tools, 'get_threads', { starred: true })).resolves.toEqual({
+      error: expect.stringContaining('is:starred'),
     });
     await expect(
-      call(tools, 'get_threads', { mailbox: 'archive', query: 'invoice' }),
-    ).resolves.toMatchObject({ threads: [{ id: 'b' }] });
-    await expect(
-      call(tools, 'get_threads', { mailbox: 'archive', query: 'nothing here' }),
-    ).resolves.toMatchObject({ threads: [], total: 0 });
-    // An address's own view is the inbox filtered to that mailbox.
-    await expect(
-      call(tools, 'get_threads', { account: 'someone@else.com' }),
-    ).resolves.toMatchObject({ total: 0 });
+      call(tools, 'update_threads', { ids: ['a'], mailbox: 'archive' }),
+    ).resolves.toEqual({ error: expect.stringContaining('folder') });
+    expect(port.askServers).not.toHaveBeenCalled();
+    expect(port.move).not.toHaveBeenCalled();
+  });
+
+  it('says an address with no mailbox has none, instead of finding nothing', async () => {
+    const { tools } = fakePort([inbox]);
+    await expect(call(tools, 'get_threads', { query: 'mailbox:alias@yozz.app' })).resolves.toEqual({
+      error: expect.stringContaining('has no mailbox'),
+    });
   });
 
   it('answers any message id as the conversation, and names ids it has never seen', async () => {
@@ -524,13 +650,13 @@ describe('update_threads', () => {
     const result = await call(tools, 'update_threads', {
       ids: ['a', 'b', 'c'],
       read: true,
-      mailbox: 'archive',
+      folder: 'archive',
     });
     expect(result).toEqual({
       results: [
-        { id: 'a', status: 'ok', isRead: true, mailbox: 'archive' },
+        { id: 'a', status: 'ok', isRead: true, folder: 'archive' },
         { id: 'b', status: 'pending', note: expect.stringContaining('mail server') },
-        { id: 'c', status: 'ok', isRead: true, mailbox: 'archive', note: 'already archived' },
+        { id: 'c', status: 'ok', isRead: true, folder: 'archive', note: 'already archived' },
       ],
     });
     // The refused conversation is not moved, and the archived one needs no move.
@@ -546,10 +672,10 @@ describe('update_threads', () => {
       ids: ['a'],
       read: true,
       starred: true,
-      mailbox: 'archive',
+      folder: 'archive',
     });
     expect(result).toMatchObject({
-      results: [{ id: 'a', status: 'ok', mailbox: 'archive', note: 'already archived' }],
+      results: [{ id: 'a', status: 'ok', folder: 'archive', note: 'already archived' }],
     });
     expect(port.setRead).not.toHaveBeenCalled();
     expect(port.setStar).not.toHaveBeenCalled();
@@ -558,7 +684,7 @@ describe('update_threads', () => {
 
   it('moves nothing that is not in the inbox, and names an unknown id', async () => {
     const { tools, port } = fakePort([thread('a', ['sent'])]);
-    const result = await call(tools, 'update_threads', { ids: ['a', 'ghost'], mailbox: 'archive' });
+    const result = await call(tools, 'update_threads', { ids: ['a', 'ghost'], folder: 'archive' });
     expect(result).toMatchObject({
       results: [
         { id: 'a', status: 'ok', note: 'nothing in the inbox to archive' },
@@ -590,7 +716,7 @@ describe('update_threads', () => {
     });
     const { tools } = fakePort([justSent], { move: () => new Set() });
     await expect(
-      call(tools, 'update_threads', { ids: ['a'], mailbox: 'trash' }),
+      call(tools, 'update_threads', { ids: ['a'], folder: 'trash' }),
     ).resolves.toMatchObject({
       results: [{ id: 'a', status: 'pending', note: expect.stringContaining('mail server') }],
     });

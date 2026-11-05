@@ -17,6 +17,11 @@ import {
 import type { MailCache } from '@yozz.app/mail/threads/cache';
 import { threadList } from '@yozz.app/mail/threads/hydrate';
 import {
+  type FolderWindow,
+  OLDER_WINDOWS_PER_PAGE,
+  windowsOf,
+} from '@yozz.app/mail/threads/paging';
+import {
   applyOps,
   flagTargets,
   MOVE_SOURCES,
@@ -25,6 +30,12 @@ import {
   type PendingOp,
   retireOps,
 } from '@yozz.app/mail/threads/reconcile';
+import {
+  planOf,
+  type ServerSearch,
+  type ServerSearchAnswer,
+  type ServerSearchFailure,
+} from '@yozz.app/mail/threads/server-search';
 import type { MailboxSummaries } from '@yozz.app/mail/threads/summaries';
 import type { FlagTarget, MailboxSyncState, MovedCopy } from '@yozz.app/mail/threads/sync';
 import { staleMailboxes } from '@yozz.app/mail/threads/sync-staleness';
@@ -35,7 +46,13 @@ import {
   isServerCopy,
   senderCheckOf,
 } from '@yozz.app/mail/threads/thread';
-import { folderPaged, mailboxesShown, type ViewId } from '@yozz.app/mail/threads/views';
+import {
+  folderPaged,
+  hasOlderMail,
+  listingOf,
+  mailboxesShown,
+  type ViewId,
+} from '@yozz.app/mail/threads/views';
 import {
   createContext,
   type ReactNode,
@@ -47,6 +64,7 @@ import {
   useState,
   useSyncExternalStore,
 } from 'react';
+import { flushSync } from 'react-dom';
 import { type ActivityTracker, createActivityTracker, isUnsavedWork } from '../relay/activity';
 import type { LiveManager, RunOn } from '../relay/live';
 import { createTxtLookup } from '../threads/dns-over-https';
@@ -56,6 +74,7 @@ import { toast } from '../ui/Toast';
 import { vaultErrorMessage } from '../vault/screen-policy';
 import { useVault } from '../vault/session';
 import { type Composer, type ComposerShared, useComposerStore } from './use-composer';
+import { useServerSearch } from './use-server-search';
 
 /**
  * Threads are held in memory only: a lock drops them. The contexts' IO modules are reached through
@@ -83,6 +102,26 @@ type MailContextValue = ComposerShared & {
   loadOlder: (view: ViewId) => Promise<void>;
   /** Whether that view's page is in flight. */
   isLoadingOlder: (view: ViewId) => boolean;
+  /** What each folder has synced, for a list across folders to say how far it reaches. */
+  windows: readonly FolderWindow[];
+  /** Reads further back in the folder that stops soonest: what is synced, or what a search named. */
+  loadOlderInList: (query: string) => Promise<void>;
+  isLoadingOlderInList: boolean;
+  /** What the box has asked the servers, and how far they have got. */
+  serverSearch: ServerSearch | null;
+  /** The box's own search: `type` on a keystroke, `now` on Enter, `retry` what failed. */
+  search: {
+    readonly type: (text: string) => void;
+    readonly now: (text: string) => void;
+    readonly retry: () => void;
+  };
+  /** Keeps the search in step with the URL: a `?q=` nobody typed here runs at once. */
+  followSearch: (q: string | undefined) => void;
+  /** Asks the servers once and waits, with the list holding what they found by the time it answers. */
+  askServersAndWait: (text: string) => Promise<{
+    readonly answers: readonly ServerSearchAnswer[];
+    readonly failed: readonly ServerSearchFailure[];
+  }>;
   /** Flag and move answer `false` when no mail server holds a copy to change. */
   markRead: (threadId: string) => boolean;
   /** Puts the whole thread back to unread; the reader closes with it. */
@@ -184,6 +223,9 @@ const whereNow = (
   return next === null ? null : whereNow(moved, next);
 };
 
+const olderNotLoaded = (failure: MailConnectionFailure, { imap }: InboundAddress) =>
+  `older mail not loaded · ${describeMailFailure(failure, imap.host)}`;
+
 export const MailProvider = ({ children }: { children: ReactNode }) => {
   const { session } = useVault();
   const demo = isDemo();
@@ -191,6 +233,7 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
   const [records, setRecords] = useState<readonly AddressRecord[]>([]);
   const [recordsError, setRecordsError] = useState<string | null>(null);
   const [demoThreads, setDemoThreads] = useState<readonly ThreadState[]>([]);
+  const [demoWindows, setDemoWindows] = useState<readonly FolderWindow[]>([]);
   /** What the server last said, per mailbox. Never patched: `ops` is laid over it at render (`lib/reconcile.ts`). */
   const [baseByMailbox, setBaseByMailbox] = useState<MailboxSummaries>({});
   const [bodiesById, setBodiesById] = useState<Readonly<Record<string, BodyEntry>>>({});
@@ -205,6 +248,7 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
   const sessionRef = useRef(session);
   sessionRef.current = session;
   const [olderInFlight, setOlderInFlight] = useState<Readonly<Record<string, boolean>>>({});
+  const [isLoadingOlderInList, setIsLoadingOlderInList] = useState(false);
 
   /**
    * One entry per mailbox with a sync running; `dirty` makes the loop go round again, so every
@@ -280,6 +324,57 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
           candidate.address === mailbox.address && sameImap(candidate.imap, mailbox.imap),
       ),
     [],
+  );
+
+  /**
+   * The IMAP runner of the session open now, taken where the work starts, before its first await,
+   * as the generation is. Once that session has ended it refuses every task before reaching a
+   * manager, so one person's mail never travels over the next session's connections.
+   */
+  const bindRunOn = useCallback((): RunOn => {
+    const generation = sessionGeneration.current;
+    /**
+     * A task is made for one record. Once that address has been edited or removed it is refused
+     * rather than run: `manager.run` logs in with whatever mailbox it is handed, so old credentials
+     * would go back on the connection an edit just closed, and a draft or a Sent copy would land in
+     * the old mailbox. A task submitted before the edit is not interrupted: it finishes on the
+     * socket it started on (`live.ts`), which is how a send already past SMTP still files its copy.
+     * One submitted after waits for the edit's teardown, then runs as the new record.
+     */
+    return mailbox => async task => {
+      if (generation !== sessionGeneration.current || liveManagerRef.current === null) {
+        return VAULT_LOCKED;
+      }
+      if (!isCurrentMailbox(mailbox)) return ADDRESS_CHANGED;
+      const teardown = replacementsRef.current.get(mailbox.address);
+      if (teardown !== undefined) {
+        await teardown;
+        if (generation !== sessionGeneration.current) return VAULT_LOCKED;
+        if (!isCurrentMailbox(mailbox)) return ADDRESS_CHANGED;
+      }
+      const manager = liveManagerRef.current;
+      if (manager === null) return VAULT_LOCKED;
+      return manager.run(mailbox, task);
+    };
+  }, [isCurrentMailbox]);
+
+  const {
+    serverSearch,
+    found,
+    search,
+    askAndWait: askServersAndWait,
+    afterWrite: afterFoundWrite,
+    forget: forgetFound,
+  } = useServerSearch({ mailboxesRef, userIdRef, syncRunsRef, bindRunOn, activity });
+  const followSearch = useCallback(
+    (q: string | undefined) => {
+      if (q === undefined) {
+        search.stop();
+        return;
+      }
+      if (search.query() !== q.trim()) search.now(q);
+    },
+    [search],
   );
 
   const storeAddress = useCallback(
@@ -373,6 +468,7 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
       mailboxesRef.current = mailboxesRef.current.filter(mailbox => mailbox.address !== address);
       hydratedRef.current.delete(address);
       setRecords(current => current.filter(record => record.address !== address));
+      forgetFound(address);
       setBaseByMailbox(current => {
         const { [address]: _, ...rest } = current;
         return rest;
@@ -383,7 +479,7 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
       setBodiesById({});
       setPreviews(current => withoutMailboxPreviews(current, address));
     },
-    [session],
+    [session, forgetFound],
   );
 
   /**
@@ -436,6 +532,7 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
       // The next request starts a run of its own, with the new record, instead of joining that one.
       syncRunsRef.current.delete(address);
       if (isAnotherMailbox) {
+        forgetFound(address);
         hydratedRef.current.delete(address);
         for (const key of movedRef.current.keys()) {
           if (key.startsWith(`${address}/`)) movedRef.current.delete(key);
@@ -476,7 +573,7 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
         replacement.resolve();
       });
     },
-    [storeAddress],
+    [storeAddress, forgetFound],
   );
 
   /** A name touches no connection, so it shows before the vault has it. */
@@ -497,38 +594,6 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
     },
     [records, storeAddress],
   );
-
-  /**
-   * The IMAP runner of the session open now, taken where the work starts, before its first await,
-   * as the generation is. Once that session has ended it refuses every task before reaching a
-   * manager, so one person's mail never travels over the next session's connections.
-   */
-  const bindRunOn = useCallback((): RunOn => {
-    const generation = sessionGeneration.current;
-    /**
-     * A task is made for one record. Once that address has been edited or removed it is refused
-     * rather than run: `manager.run` logs in with whatever mailbox it is handed, so old credentials
-     * would go back on the connection an edit just closed, and a draft or a Sent copy would land in
-     * the old mailbox. A task submitted before the edit is not interrupted: it finishes on the
-     * socket it started on (`live.ts`), which is how a send already past SMTP still files its copy.
-     * One submitted after waits for the edit's teardown, then runs as the new record.
-     */
-    return mailbox => async task => {
-      if (generation !== sessionGeneration.current || liveManagerRef.current === null) {
-        return VAULT_LOCKED;
-      }
-      if (!isCurrentMailbox(mailbox)) return ADDRESS_CHANGED;
-      const teardown = replacementsRef.current.get(mailbox.address);
-      if (teardown !== undefined) {
-        await teardown;
-        if (generation !== sessionGeneration.current) return VAULT_LOCKED;
-        if (!isCurrentMailbox(mailbox)) return ADDRESS_CHANGED;
-      }
-      const manager = liveManagerRef.current;
-      if (manager === null) return VAULT_LOCKED;
-      return manager.run(mailbox, task);
-    };
-  }, [isCurrentMailbox]);
 
   const identities = records;
   /** The inbound record an address has now: what a send already claimed files its copy through. */
@@ -613,6 +678,7 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
             // A UIDVALIDITY reset dropped the cache; the threads on screen and the ops against them name invalid uids.
             if (result.state.status === 'failed' && result.state.invalidated) {
               setBaseByMailbox(current => ({ ...current, [address]: {} }));
+              forgetFound(address);
               setPreviews(current => withoutMailboxPreviews(current, address));
               setOps(current => current.filter(op => op.mailbox !== address));
             }
@@ -663,7 +729,7 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
       syncRunsRef.current.set(address, entry);
       return entry.promise;
     },
-    [bindRunOn, isCurrentMailbox, lookupTxt],
+    [bindRunOn, forgetFound, isCurrentMailbox, lookupTxt],
   );
 
   const sync = useCallback(
@@ -708,17 +774,10 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
     if (import.meta.env.DEV && isDemo()) {
       // Dynamic so the fixture module stays out of the production bundle; the `DEV` guard is what
       // lets Vite drop the branch.
-      void import('../dev/fixtures').then(({ DEMO_ADDRESSES, THREADS }) => {
+      void import('../dev/fixtures').then(({ DEMO_ADDRESSES, DEMO_WINDOWS, THREADS }) => {
         setRecords(DEMO_ADDRESSES);
-        setDemoThreads(
-          THREADS.map(thread => ({
-            ...thread,
-            folders: ['inbox'] as const,
-            foldersByMailbox: Object.fromEntries(
-              thread.mailboxes.map(mailbox => [mailbox, ['inbox'] as const]),
-            ),
-          })),
-        );
+        setDemoThreads(THREADS);
+        setDemoWindows(DEMO_WINDOWS);
       });
       setRecordsError(null);
       return;
@@ -806,6 +865,8 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
       setRecords([]);
       setRecordsError(null);
       setBaseByMailbox({});
+      search.stop();
+      forgetFound();
       setBodiesById({});
       setPreviews({});
       setOps([]);
@@ -817,7 +878,7 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
       // whoever unlocks next.
       toast.close();
     };
-  }, [store, files, userId, load, reset, activity]);
+  }, [store, files, userId, load, reset, activity, search.stop, forgetFound]);
 
   /** One mailbox's next window of a folder. A refused page reports like a refused flag write. */
   const loadOlderOn = useCallback(
@@ -844,32 +905,33 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
           const res = await loadOlderPage(runOn(mailbox), cache.folder(folder), isStale);
           if (generation !== sessionGeneration.current) return;
           if (!res.ok) {
-            setMailError(
-              `older mail not loaded · ${describeMailFailure(res.error, mailbox.imap.host)}`,
-            );
+            setMailError(olderNotLoaded(res.error, mailbox));
             return;
           }
           tearRunningSync(mailbox.address);
           const summaries = await cachedSummaries(cache);
           if (generation !== sessionGeneration.current) return;
-          setBaseByMailbox(current => ({ ...current, [mailbox.address]: summaries }));
-          setMailError(null);
-          if (!res.value.complete) return;
-          setSyncStates(current => {
-            const state = current[mailbox.address];
-            if (state?.status !== 'synced' || state.complete.includes(folder)) return current;
-            return {
-              ...current,
-              [mailbox.address]: { ...state, complete: [...state.complete, folder] },
-            };
+          // Flushed: a list paging across folders reads where this left it next.
+          flushSync(() => {
+            setBaseByMailbox(current => ({ ...current, [mailbox.address]: summaries }));
+            setMailError(null);
+            if (!res.value.complete) return;
+            setSyncStates(current => {
+              const state = current[mailbox.address];
+              if (state?.status !== 'synced' || state.complete.includes(folder)) return current;
+              return {
+                ...current,
+                [mailbox.address]: { ...state, complete: [...state.complete, folder] },
+              };
+            });
           });
         } catch (error) {
           if (generation !== sessionGeneration.current) return;
           setMailError(
-            `older mail not loaded · ${describeMailFailure(
+            olderNotLoaded(
               { kind: 'error', detail: error instanceof Error ? error.message : String(error) },
-              mailbox.imap.host,
-            )}`,
+              mailbox,
+            ),
           );
         }
       })().finally(() => {
@@ -900,6 +962,57 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
       }
     },
     [loadOlderOn],
+  );
+
+  const loadOlderInList = useCallback(
+    async (query: string): Promise<void> => {
+      // What a search named goes a page at a time, with nothing searched again.
+      if (planOf(query.trim(), mailboxesRef.current) !== null) {
+        setIsLoadingOlderInList(true);
+        try {
+          const page = await search.more();
+          if (page === null) return;
+          setMailError(page.result.ok ? null : olderNotLoaded(page.result.error, page.mailbox));
+        } finally {
+          setIsLoadingOlderInList(false);
+        }
+        return;
+      }
+      if (isDemo()) {
+        setDemoWindows([]);
+        return;
+      }
+      const generation = sessionGeneration.current;
+      const listingNow = () =>
+        listingOf({
+          threads: threadsRef.current,
+          view: 'unified',
+          q: query,
+          mailboxes: mailboxesRef.current,
+          windows: windowsRef.current,
+        });
+      setIsLoadingOlderInList(true);
+      try {
+        const rowsBefore = listingNow().threads.length;
+        for (let turn = 0; turn < OLDER_WINDOWS_PER_PAGE; turn += 1) {
+          const { older } = listingNow();
+          const mailbox = mailboxesRef.current.find(({ address }) => address === older?.mailbox);
+          if (older === null || mailbox === undefined) return;
+          await loadOlderOn(mailbox, older.folder);
+          if (generation !== sessionGeneration.current) return;
+          const after = listingNow();
+          // A row gained, or nothing moved: a failure said so under the box, and asking again
+          // this moment would only fail again.
+          if (after.threads.length > rowsBefore) return;
+          if (after.older?.folder === older.folder && after.older.reachedAt === older.reachedAt) {
+            return;
+          }
+        }
+      } finally {
+        if (generation === sessionGeneration.current) setIsLoadingOlderInList(false);
+      }
+    },
+    [loadOlderOn, search],
   );
 
   // A rename or a new send-only identity must not reopen IMAP for every mailbox; credentials are in the key.
@@ -941,18 +1054,30 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
 
   // The server's last word, with bodies merged in and pending ops laid over it on every render.
   const threads = useMemo(() => {
-    if (demo) return demoThreads;
+    if (demo) return [...demoThreads, ...threadList({ byMailbox: {}, found })];
     return threadList({
       byMailbox: baseByMailbox,
+      found,
       vaultSent,
       bodies: bodiesById,
       previews,
       overlay: threads => applyOps(threads, ops),
       drafts,
     });
-  }, [demo, demoThreads, baseByMailbox, vaultSent, bodiesById, previews, ops, drafts]);
+  }, [demo, demoThreads, baseByMailbox, found, vaultSent, bodiesById, previews, ops, drafts]);
 
   threadsRef.current = threads;
+
+  const windows = useMemo(
+    () =>
+      demo
+        ? demoWindows
+        : // What cannot offer older mail must not clip a list to where its cache stops.
+          windowsOf(baseByMailbox, (mailbox, folder) => !hasOlderMail(syncStates[mailbox], folder)),
+    [demo, demoWindows, baseByMailbox, syncStates],
+  );
+  const windowsRef = useRef(windows);
+  windowsRef.current = windows;
 
   /**
    * The ops keep masking the base until a sync that started after this moment lands. None is asked
@@ -1046,7 +1171,7 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
 
       const generation = sessionGeneration.current;
       const runOn = bindRunOn();
-      /** Whether this batch has put a refusal in the status line, which its own successes keep. */
+      /** Whether this batch has put a refusal under the box, which its own successes keep. */
       let isRefusalShown = false;
       const refuse = (refused: readonly PendingOp[], reason: string) => {
         const ids = new Set(refused.map(op => op.id));
@@ -1119,9 +1244,10 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
                 );
               }
               if (change.kind === 'move') tearRunningSync(mailbox.address);
+              afterFoundWrite(mailbox.address, change, targets, res.value);
               acknowledge(ready.map(({ op }) => op));
               // Clears an earlier write's failure, never this batch's own: a refused thread or
-              // mailbox would otherwise vanish from the status line as the rest lands.
+              // mailbox would otherwise vanish from under the box as the rest lands.
               if (!isRefusalShown) setMailError(null);
               return;
             }
@@ -1147,7 +1273,7 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
       }
       return taken;
     },
-    [acknowledge, bindRunOn, requestSync, tearRunningSync, threads],
+    [acknowledge, afterFoundWrite, bindRunOn, requestSync, tearRunningSync, threads],
   );
 
   /** Sets a flag on every thread named; one already so needs no write and counts as taken. */
@@ -1371,6 +1497,13 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
       sync,
       loadOlder,
       isLoadingOlder: view => olderInFlight[view] === true,
+      windows,
+      loadOlderInList,
+      isLoadingOlderInList,
+      serverSearch,
+      search,
+      followSearch,
+      askServersAndWait,
       putAddress,
       replaceAddress,
       removeAddress,
@@ -1398,6 +1531,13 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
       sync,
       loadOlder,
       olderInFlight,
+      windows,
+      loadOlderInList,
+      isLoadingOlderInList,
+      serverSearch,
+      search,
+      followSearch,
+      askServersAndWait,
       putAddress,
       replaceAddress,
       removeAddress,

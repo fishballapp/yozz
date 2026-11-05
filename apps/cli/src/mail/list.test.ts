@@ -129,6 +129,48 @@ layer(NodeServices.layer)(it => {
       }),
     );
 
+    it.effect('lists the inbox with no --query, and everything but Trash with an empty one', () =>
+      Effect.gen(function* () {
+        const { world, homes, server, servers } = yield* makeMailWorld();
+        const list = (...args: string[]) =>
+          runCli(['list', ...args], { fetch: world.fetch, homes, servers });
+        server.deliver('INBOX', mail(1));
+        server.deliver('Archive', mail(2));
+        server.deliver('Trash', mail(3));
+
+        expect(idsOf((yield* list()).stdout)).toEqual(['mid/<m1@stripe.com>']);
+        expect(idsOf((yield* list('--query', '')).stdout)).toEqual([
+          'mid/<m2@stripe.com>',
+          'mid/<m1@stripe.com>',
+        ]);
+      }),
+    );
+
+    it.effect('takes in:archive to mean filed away, as the web app does', () =>
+      Effect.gen(function* () {
+        const { world, homes, server, servers } = yield* makeMailWorld();
+        const list = (...args: string[]) =>
+          runCli(['list', ...args], { fetch: world.fetch, homes, servers });
+        // A conversation with a message archived and its reply still in the inbox is in the inbox.
+        server.deliver('Archive', mail(1, { subject: 'Your receipt' }));
+        server.deliver(
+          'INBOX',
+          mail(2, {
+            subject: 'Re: Your receipt',
+            inReplyTo: '<m1@stripe.com>',
+            references: ['<m1@stripe.com>'],
+          }),
+        );
+        server.deliver('Archive', mail(3));
+
+        expect(idsOf((yield* list('--query', 'in:archive')).stdout)).toEqual([
+          'mid/<m3@stripe.com>',
+        ]);
+        const needle = (yield* list('--query', 'in:archive stripe')).stdout;
+        expect(idsOf(needle)).toEqual(['mid/<m3@stripe.com>']);
+      }),
+    );
+
     it.effect('prints every conversation --limit asks for, however long their rows', () =>
       Effect.gen(function* () {
         const { world, homes, server, servers } = yield* makeMailWorld();

@@ -19,7 +19,9 @@ export type MailConnectionFailure =
   | { readonly kind: 'smtp'; readonly reason: SmtpFailure }
   | { readonly kind: 'auth'; readonly text: string }
   /** Work waited out its limit with nothing crossing the connection. */
-  | { readonly kind: 'stalled' };
+  | { readonly kind: 'stalled' }
+  /** Its `signal` aborted, so nobody is waiting for the answer. */
+  | { readonly kind: 'cancelled' };
 
 export type MailClient = ImapClient & {
   /**
@@ -37,6 +39,8 @@ export type MailTask<T> = {
   readonly effect: 'read' | 'write';
   /** Whether the task may be re-run on a fresh connection after a transport failure. APPEND must not. */
   readonly retry: boolean;
+  /** Aborted before it starts, the task never runs and answers `cancelled`. Running, it may stop itself. */
+  readonly signal?: AbortSignal;
 };
 
 /**

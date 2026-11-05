@@ -1,8 +1,9 @@
 import { type ImapMessageSummary, uidSets } from '@yozz.app/imap';
 import type { InboundAddress } from '@yozz.app/mail/addresses/record';
 import type { MailTask } from '@yozz.app/mail/connection';
+import { assembleMatches } from '@yozz.app/mail/threads/found';
 import type { SearchQuery } from '@yozz.app/mail/threads/query';
-import { assembleMatches, searchMailbox } from '@yozz.app/mail/threads/search';
+import { searchMailbox } from '@yozz.app/mail/threads/search';
 import type { FolderSummaries, MailboxSummaries } from '@yozz.app/mail/threads/summaries';
 import { FOLDERS, type Folder } from '@yozz.app/mail/threads/thread';
 import * as Effect from 'effect/Effect';
