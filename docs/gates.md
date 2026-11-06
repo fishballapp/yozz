@@ -137,7 +137,7 @@ pnpm -F @yozz.app/cli html:security     # `yozz read --serve-html` from the buil
 
 This gate runs in `ci.yml` on every push. It needs
 `pnpm -F @yozz.app/web exec playwright install chromium firefox webkit` once on a new machine; CI
-derives the installed Playwright version and caches those exact browser binaries against it.
+runs it in Playwright's image of the catalog's version, which already holds all three.
 
 ## Network, by hand, never CI
 

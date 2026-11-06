@@ -42,6 +42,14 @@ jobs:
     name: HTML containment
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    # Playwright's image holds the three browsers and the system libraries they need, so nothing is
+    # fetched from the runner's Ubuntu mirror, which has crawled past this job's limit. Its tag must
+    # be the catalog's `@playwright/test` (pnpm-workspace.yaml): bump both together. `--user 1001` is
+    # Playwright's own setup for this image on GitHub Actions; the sysctl lets that user bind the
+    # real port 993 the CLI's check needs.
+    container:
+      image: mcr.microsoft.com/playwright:v1.63.0-noble
+      options: --user 1001 --sysctl net.ipv4.ip_unprivileged_port_start=993
     steps:
       - uses: actions/checkout@v6
       - uses: pnpm/action-setup@v6
@@ -53,23 +61,8 @@ jobs:
       # html:security checks the emitted document as well as the real sanitizer module: a Vite
       # change that adds an inline script must fail before the host CSP blanks production.
       - run: pnpm -F @yozz.app/web build
-      - id: playwright-version
-        run: echo "version=$(pnpm -F @yozz.app/web exec playwright --version | cut -d ' ' -f 2)" >> "$GITHUB_OUTPUT"
-      # A browser build links against the OS it was built for: WebKit cached on Ubuntu 24.04 fails on
-      # 26.04 (no libicudata.so.74), so the release is in the key.
-      - id: os-release
-        run: echo "release=$(. /etc/os-release && echo "$ID-$VERSION_ID")" >> "$GITHUB_OUTPUT"
-      - uses: actions/cache@v4
-        id: playwright-cache
-        with:
-          path: ~/.cache/ms-playwright
-          key: ${{ runner.os }}-${{ steps.os-release.outputs.release }}-playwright-${{ steps.playwright-version.outputs.version }}
-      - if: steps.playwright-cache.outputs.cache-hit != 'true'
-        run: pnpm -F @yozz.app/web exec playwright install chromium firefox webkit
-      - run: pnpm -F @yozz.app/web exec playwright install-deps chromium firefox webkit
       - run: pnpm -F @yozz.app/web html:security
       # `yozz read --serve-html` from the built CLI, against a mail server on the real port 993.
-      - run: sudo sysctl -w net.ipv4.ip_unprivileged_port_start=993
       - run: pnpm -F @yozz.app/cli html:security
 
   # x509-limbo's 9739 path-validation testcases: a 39MB corpus, too big for vitest. Two
