@@ -50,7 +50,7 @@ catalog:
   "@fontsource-variable/geist": ^5.3.0
   "@fontsource-variable/geist-mono": ^5.3.0
   "@phosphor-icons/react": ^2.1.10
-  "@playwright/test": 1.63.0
+  "@playwright/test": 1.64.1
   "@tailwindcss/vite": ^4.3.3
   "@tanstack/markdown": ^0.0.15
   "@tanstack/react-router": ^1.170.36

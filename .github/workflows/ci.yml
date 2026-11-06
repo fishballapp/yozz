@@ -48,7 +48,7 @@ jobs:
     # Playwright's own setup for this image on GitHub Actions; the sysctl lets that user bind the
     # real port 993 the CLI's check needs.
     container:
-      image: mcr.microsoft.com/playwright:v1.63.0-noble
+      image: mcr.microsoft.com/playwright:v1.64.1-noble
       options: --user 1001 --sysctl net.ipv4.ip_unprivileged_port_start=993
     steps:
       - uses: actions/checkout@v6
