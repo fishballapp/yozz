@@ -61,7 +61,7 @@ jobs:
     needs: gates
     # GitHub-hosted on purpose: npm trusted publishing does not work on self-hosted runners.
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     permissions:
       contents: read
       id-token: write
@@ -102,10 +102,11 @@ jobs:
           echo "tag=${TAG:-latest}" >> "$GITHUB_OUTPUT"
       - run: pnpm -F @yozz.app/cli publish --tag ${{ steps.cli.outputs.tag }}
       # A green publish has reported a version npm did not record (docs/open-source.md), and a new
-      # version can take minutes to show, so ask the registry for this exact version for a while.
+      # version can take minutes to show (0.4.7 took over three), so ask the registry for this exact
+      # version for up to ten minutes.
       - name: Check npm has the CLI
         run: |
-          for _ in $(seq 1 12); do
+          for _ in $(seq 1 40); do
             [ "$(npm view "@yozz.app/cli@${{ steps.cli.outputs.version }}" version)" = "${{ steps.cli.outputs.version }}" ] && exit 0
             sleep 15
           done
