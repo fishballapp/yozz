@@ -23,7 +23,7 @@ import {
   buildUidExpungeCommand,
   buildUidSearchCommand,
   type OutgoingCommand,
-  type UidSearchCriterion,
+  type UidSearchCriteria,
 } from './commands.ts';
 import type { ImapAddress, ImapEnvelope } from './envelope.ts';
 import {
@@ -146,8 +146,8 @@ export type ImapClient = {
   readonly expunge: () => Promise<ImapResult<void>>;
   /** RFC 4315. Refuses without UIDPLUS rather than falling back to EXPUNGE, which erases more than asked. */
   readonly uidExpunge: (uidSet: string) => Promise<ImapResult<void>>;
-  /** The selected mailbox's uids matching one criterion, ascending. */
-  readonly uidSearch: (criterion: UidSearchCriterion) => Promise<ImapResult<readonly number[]>>;
+  /** The selected mailbox's uids matching every one of these keys, ascending. */
+  readonly uidSearch: (criteria: UidSearchCriteria) => Promise<ImapResult<readonly number[]>>;
   /** RFC 6851. Answers with the RFC 4315 `COPYUID`, or null when the server gave none. Refuses without MOVE. */
   readonly move: (uidSet: string, mailbox: string) => Promise<ImapResult<CopyUid | null>>;
   readonly create: (mailbox: string) => Promise<ImapResult<void>>;
@@ -928,9 +928,9 @@ export const createImapClient = (
         return { ok: true, value: undefined };
       }),
 
-    uidSearch: criterion =>
+    uidSearch: criteria =>
       enqueueCommand(async () => {
-        const res = await executeCommand(tag => buildUidSearchCommand(tag, criterion));
+        const res = await executeCommand(tag => buildUidSearchCommand(tag, criteria));
         if (!res.ok) return res;
         const found = res.value.untagged.flatMap(item =>
           item.kind === 'search' ? [...item.uids] : [],

@@ -219,7 +219,7 @@ describe('IMAP Client transcripts and state machine', () => {
     });
   });
 
-  it('searches one criterion at a time, as a UTF-8 literal when it is not plain ASCII', async () => {
+  it('searches a key or several at once, as a UTF-8 literal when a value is not plain ASCII', async () => {
     const steps = parseTranscript('uid-search.txt');
     await runTranscriptSession(steps, async client => {
       const reply = { key: 'HEADER', header: 'Reply-To' } as const;
@@ -237,6 +237,20 @@ describe('IMAP Client transcripts and state machine', () => {
       expect(await found({ key: 'FLAGGED' })).toEqual([2]);
       expect(await found({ key: 'SINCE', date: { year: 2026, month: 2, day: 1 } })).toEqual([8]);
       expect(await found({ key: 'BEFORE', date: { year: 2026, month: 10, day: 28 } })).toEqual([6]);
+      expect(
+        await found([
+          { key: 'UNSEEN' },
+          { key: 'SINCE', date: { year: 2026, month: 2, day: 1 } },
+          { key: 'FROM', value: 'stripe' },
+        ]),
+      ).toEqual([8]);
+      expect(
+        await found([
+          { key: 'FLAGGED' },
+          { key: 'SUBJECT', value: 'Grüße' },
+          { key: 'TO', value: 'ann@example.com' },
+        ]),
+      ).toEqual([2, 9]);
     });
   });
 

@@ -37,6 +37,10 @@ Or for a specific host with authentication:
 YOZZ_IMAP_HOST=imap.example.com YOZZ_IMAP_USER=me@example.com YOZZ_IMAP_PASSWORD=secret pnpm -F @yozz.app/imap live imap.example.com
 ```
 
+With credentials it also checks, read-only (`UID SEARCH` and `FETCH` only), that one `UID SEARCH` of several keys
+answers the uids its keys answer apart, intersected: `ok` or `MISMATCH` per command. A slow server
+(Forward Email takes 25 s or more a search) makes it take minutes.
+
 A literal over 64 MiB (`DEFAULT_MAX_LITERAL_BYTES`, or `maxLiteralBytes` in the options) is a protocol failure.
 
 `harness/relay-load.ts` pushes large messages through the hosted yozz.app relay, up over SMTP and

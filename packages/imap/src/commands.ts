@@ -247,6 +247,9 @@ export type UidSearchCriterion =
   | { readonly key: 'BEFORE'; readonly date: ImapSearchDate }
   | { readonly key: 'SINCE'; readonly date: ImapSearchDate };
 
+/** One key, or several that a message must all meet. */
+export type UidSearchCriteria = UidSearchCriterion | readonly UidSearchCriterion[];
+
 /** A calendar day; `month` runs 1 to 12. */
 export type ImapSearchDate = {
   readonly year: number;
@@ -254,41 +257,45 @@ export type ImapSearchDate = {
   readonly day: number;
 };
 
-/**
- * One `UID SEARCH <key>`. A printable-ASCII value is a quoted string in the default charset;
- * anything else is a UTF-8 literal, which every server must accept.
- */
-export const buildUidSearchCommand = (
-  tag: string,
-  criterion: UidSearchCriterion,
-): OutgoingCommand => {
-  if (criterion.key === 'UNSEEN' || criterion.key === 'FLAGGED') {
-    return { lines: [{ text: stringToBytes(`${tag} UID SEARCH ${criterion.key}\r\n`) }] };
-  }
+/** A key as command text, which stops at its literal when it has one. */
+type SearchPiece = { readonly text: string; readonly literal?: Uint8Array };
+
+const searchPieceOf = (criterion: UidSearchCriterion): SearchPiece => {
+  if (criterion.key === 'UNSEEN' || criterion.key === 'FLAGGED') return { text: criterion.key };
   if (criterion.key === 'BEFORE' || criterion.key === 'SINCE') {
     const { year, month, day } = criterion.date;
-    const date = `${day}-${MONTHS[month - 1]}-${String(year).padStart(4, '0')}`;
-    return { lines: [{ text: stringToBytes(`${tag} UID SEARCH ${criterion.key} ${date}\r\n`) }] };
+    return {
+      text: `${criterion.key} ${day}-${MONTHS[month - 1]}-${String(year).padStart(4, '0')}`,
+    };
   }
   const key =
     criterion.key === 'HEADER' ? `HEADER ${quoteString(criterion.header)}` : criterion.key;
   return isSafeQuotedString(criterion.value)
-    ? {
-        lines: [
-          {
-            text: stringToBytes(`${tag} UID SEARCH ${key} ${quoteString(criterion.value)}\r\n`),
-          },
-        ],
-      }
-    : {
-        lines: [
-          {
-            text: stringToBytes(`${tag} UID SEARCH CHARSET UTF-8 ${key} `),
-            literal: stringToBytes(criterion.value),
-          },
-          { text: stringToBytes('\r\n') },
-        ],
-      };
+    ? { text: `${key} ${quoteString(criterion.value)}` }
+    : { text: `${key} `, literal: stringToBytes(criterion.value) };
+};
+
+/**
+ * One `UID SEARCH <key> <key>…`: a message must meet every key (RFC 9051 §6.4.4), and no keys at all
+ * is `ALL`. A printable-ASCII value is a quoted string in the default charset; if any value is not,
+ * the command says `CHARSET UTF-8` and sends that value as a literal, which every server must accept.
+ */
+export const buildUidSearchCommand = (
+  tag: string,
+  criteria: UidSearchCriteria,
+): OutgoingCommand => {
+  const pieces = [criteria].flat().map(searchPieceOf);
+  const isUtf8 = pieces.some(({ literal }) => literal !== undefined);
+  const lines: OutgoingCommandLine[] = [];
+  let text = `${tag} UID SEARCH${isUtf8 ? ' CHARSET UTF-8' : ''}${pieces.length === 0 ? ' ALL' : ''}`;
+  for (const piece of pieces) {
+    text += ` ${piece.text}`;
+    if (piece.literal === undefined) continue;
+    lines.push({ text: stringToBytes(text), literal: piece.literal });
+    text = '';
+  }
+  lines.push({ text: stringToBytes(`${text}\r\n`) });
+  return { lines };
 };
 
 /** RFC 6851. */

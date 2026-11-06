@@ -2,7 +2,8 @@ import { connect, type Socket } from 'node:net';
 import { type ByteDuplex, startTls, type TlsConnection, type TlsFailure } from '@yozz.app/tls';
 import { endGracefully, HOSTS, IMAP_PORT, socketTransport } from '@yozz.app/tls/harness';
 import { compileAnchors, ROOT_BUNDLE, YOZZ_VALIDATOR } from '@yozz.app/x509';
-import { createImapClient } from '../src/client.ts';
+import { createImapClient, type ImapMessageSummary } from '../src/client.ts';
+import type { ImapSearchDate, UidSearchCriterion } from '../src/commands.ts';
 
 const describeFailure = (failure: TlsFailure): string => {
   switch (failure.kind) {
@@ -55,6 +56,88 @@ const tlsByteDuplex = (connection: TlsConnection): ByteDuplex => ({
     }
   },
 });
+
+type LiveClient = ReturnType<typeof createImapClient>;
+const MONTH_NAMES = [
+  'Jan',
+  'Feb',
+  'Mar',
+  'Apr',
+  'May',
+  'Jun',
+  'Jul',
+  'Aug',
+  'Sep',
+  'Oct',
+  'Nov',
+  'Dec',
+];
+
+/** The day of an INTERNALDATE such as `23-Aug-2026 09:00:00 +0000`. */
+const dayOf = (internalDate: string | null): ImapSearchDate | null => {
+  const [, day, month, year] =
+    /^\s*(\d{1,2})-([A-Za-z]{3})-(\d{4})/u.exec(internalDate ?? '') ?? [];
+  const index = MONTH_NAMES.indexOf(month ?? '');
+  return day === undefined || year === undefined || index < 0
+    ? null
+    : { year: Number(year), month: index + 1, day: Number(day) };
+};
+
+/**
+ * Read-only: whether one `UID SEARCH` of several keys answers the uids its keys answer apart,
+ * intersected, which is what yozz's folded search commands rely on. The keys come from the last
+ * messages fetched, so the selected folder needs mail in it.
+ */
+const checkAndOfKeys = async (
+  client: LiveClient,
+  messages: readonly ImapMessageSummary[],
+): Promise<{ readonly text: string; readonly failed: number }> => {
+  const sender = messages.flatMap(({ envelope }) => envelope?.from[0]?.mailbox ?? []).at(0);
+  const word = messages
+    .flatMap(({ envelope }) => envelope?.subject?.split(/\s+/u) ?? [])
+    .find(candidate => /^[a-z]{4,}$/iu.test(candidate));
+  if (sender === undefined || word === undefined) {
+    return {
+      text: 'AND of keys: skipped, the last messages name no sender and subject word to search for',
+      failed: 0,
+    };
+  }
+  const days = messages.flatMap(({ internalDate }) => dayOf(internalDate) ?? []);
+  const since = days.at(Math.floor(days.length / 2));
+  const from = { key: 'FROM', value: sender } as const;
+  const subject = { key: 'SUBJECT', value: word } as const;
+  const commands: readonly (readonly UidSearchCriterion[])[] = [
+    [{ key: 'UNSEEN' }, from],
+    [{ key: 'FLAGGED' }, from],
+    [from, subject],
+    [from, { key: 'TEXT', value: word }],
+    [{ key: 'HEADER', header: 'Reply-To', value: sender }, subject],
+    ...(since === undefined
+      ? []
+      : [
+          [{ key: 'UNSEEN' }, { key: 'SINCE', date: since }, from] as const,
+          [{ key: 'SINCE', date: since }, subject] as const,
+        ]),
+  ];
+  const verdicts = await Promise.all(
+    commands.map(async keys => {
+      const name = keys.map(({ key }) => key).join(' ');
+      const together = await client.uidSearch(keys);
+      const apart = await Promise.all(keys.map(key => client.uidSearch(key)));
+      const parts = apart.flatMap(answer => (answer.ok ? [answer.value] : []));
+      if (!together.ok || parts.length !== keys.length) return `REFUSED  ${name}`;
+      const expected = parts.reduce((left, right) => left.filter(uid => right.includes(uid)));
+      const isSame =
+        together.value.length === expected.length &&
+        together.value.every(uid => expected.includes(uid));
+      return `${isSame ? 'ok      ' : 'MISMATCH'} ${name}: ${together.value.length} found, ${expected.length} expected`;
+    }),
+  );
+  return {
+    text: `AND of keys, read-only:\n        ${verdicts.join('\n        ')}`,
+    failed: verdicts.filter(verdict => !verdict.startsWith('ok')).length,
+  };
+};
 
 const anchors = compileAnchors(ROOT_BUNDLE);
 const requested = process.argv.slice(2);
@@ -169,6 +252,10 @@ for (const host of targets) {
         await tlsResult.connection.close();
         continue;
       }
+
+      const andOfKeys = await checkAndOfKeys(client, summariesRes.value);
+      failures += andOfKeys.failed;
+      console.log(`      ${andOfKeys.text}`);
 
       console.log(`      Last ${summariesRes.value.length} messages:`);
       for (const msg of summariesRes.value) {

@@ -540,32 +540,35 @@ export const makeFakeImapServer = ({
             if (quirks.searchDelayMs !== undefined) {
               await new Promise(resolve => setTimeout(resolve, quirks.searchDelayMs));
             }
-            // The messages the one key matches. TEXT is the body alone, as Forward Email's server
-            // matches it, so a subject is found only by a SUBJECT key.
-            const key =
-              /HEADER "((?:[^"\\]|\\.)*)" "((?:[^"\\]|\\.)*)"|(SUBJECT|FROM|TO|CC|BCC|TEXT) "((?:[^"\\]|\\.)*)"|(UNSEEN|FLAGGED)|(SINCE|BEFORE) (\S+)/u.exec(
-                rest,
-              );
-            const [, headerName, headerValue, textKey, textValue, flagKey, dateKey, dateValue] =
-              key ?? [];
-            const name = headerName ?? textKey ?? '';
-            const needle = (headerValue ?? textValue ?? '').replace(/\\(.)/gu, '$1').toLowerCase();
-            const hits = folder.messages.filter(message => {
-              if (flagKey === 'UNSEEN') return !message.flags.has('\\Seen');
-              if (flagKey === 'FLAGGED') return message.flags.has('\\Flagged');
-              if (dateKey !== undefined) {
-                const day = dayOf(new Date(Date.parse(message.message.date)));
-                const asked = searchDayOf(dateValue ?? '');
-                return dateKey === 'SINCE' ? day >= asked : day < asked;
-              }
-              const raw = new TextDecoder().decode(message.raw).toLowerCase();
-              const split = raw.indexOf('\r\n\r\n');
-              const head = raw.slice(0, split).split('\r\n');
-              const body = raw.slice(split + 4);
-              if (name === 'TEXT') return body.includes(needle);
-              const field = `${name.toLowerCase()}:`;
-              return head.some(line => line.startsWith(field) && line.includes(needle));
-            });
+            // The messages that meet every key, as IMAP has it. TEXT is the body alone, as Forward
+            // Email's server matches it, so a subject is found only by a SUBJECT key.
+            const keys = rest.matchAll(
+              /HEADER "((?:[^"\\]|\\.)*)" "((?:[^"\\]|\\.)*)"|(SUBJECT|FROM|TO|CC|BCC|TEXT) "((?:[^"\\]|\\.)*)"|(UNSEEN|FLAGGED)|(SINCE|BEFORE) (\S+)/gu,
+            );
+            const tests = [...keys].map(
+              ([, headerName, headerValue, textKey, textValue, flagKey, dateKey, dateValue]) =>
+                (message: (typeof folder.messages)[number]) => {
+                  if (flagKey === 'UNSEEN') return !message.flags.has('\\Seen');
+                  if (flagKey === 'FLAGGED') return message.flags.has('\\Flagged');
+                  if (dateKey !== undefined) {
+                    const day = dayOf(new Date(Date.parse(message.message.date)));
+                    const asked = searchDayOf(dateValue ?? '');
+                    return dateKey === 'SINCE' ? day >= asked : day < asked;
+                  }
+                  const name = headerName ?? textKey ?? '';
+                  const needle = (headerValue ?? textValue ?? '')
+                    .replace(/\\(.)/gu, '$1')
+                    .toLowerCase();
+                  const raw = new TextDecoder().decode(message.raw).toLowerCase();
+                  const split = raw.indexOf('\r\n\r\n');
+                  const head = raw.slice(0, split).split('\r\n');
+                  const body = raw.slice(split + 4);
+                  if (name === 'TEXT') return body.includes(needle);
+                  const field = `${name.toLowerCase()}:`;
+                  return head.some(line => line.startsWith(field) && line.includes(needle));
+                },
+            );
+            const hits = folder.messages.filter(message => tests.every(test => test(message)));
             await send(`* SEARCH${hits.map(({ uid }) => ` ${uid}`).join('')}\r\n`);
             await ok('SEARCH completed');
             return true;

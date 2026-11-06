@@ -24,8 +24,9 @@ const server = (present: readonly number[] = [], over: Partial<ImapClient> = {})
   const client = stubImapClient({
     list: async () => ({ ok: true, value: [DRAFTS] }),
     // How the mirror finds every copy of itself, including one a failed erase left behind.
-    uidSearch: async criterion => {
-      if (criterion.key !== 'HEADER') throw new Error(`searched ${criterion.key}`);
+    uidSearch: async criteria => {
+      const [criterion] = [criteria].flat();
+      if (criterion?.key !== 'HEADER') throw new Error(`searched ${criterion?.key}`);
       did.push(`search ${criterion.header} ${criterion.value}`);
       return { ok: true, value: [...present] };
     },

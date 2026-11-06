@@ -45,33 +45,55 @@ const CRITERIA_OF: Readonly<
 
 /** One thing a message must satisfy: any of these commands, or being one of `known`. */
 type Condition = {
-  readonly criteria: readonly UidSearchCriterion[];
+  readonly commands: readonly (readonly UidSearchCriterion[])[];
   readonly known: readonly number[];
 };
 
-/** What a query asks of one folder, the fewest commands first so an empty answer saves the rest. */
+/**
+ * What a query asks of one folder, the fewest commands first so an empty answer saves the rest. The
+ * flag and date keys are not commands of their own: a command's keys are ANDed, so they ride on the
+ * first term's commands. A term a cached attachment name widens cannot carry them, as that name
+ * never met the server.
+ */
 const conditionsOf = (
   query: SearchQuery,
   folder: Folder,
   cached: readonly ImapMessageSummary[],
 ): readonly Condition[] => {
-  const single: readonly Condition[] = [
+  const filters: readonly UidSearchCriterion[] = [
     ...(query.isUnread ? [{ key: 'UNSEEN' } as const] : []),
     ...(query.isStarred ? [{ key: 'FLAGGED' } as const] : []),
     ...query.before.map(date => ({ key: 'BEFORE', date }) as const),
     ...query.after.map(date => ({ key: 'SINCE', date }) as const),
-  ].map(criterion => ({ criteria: [criterion], known: [] }));
-  const termed = query.terms.map(({ field, text }) => ({
-    criteria: CRITERIA_OF[field](text, folder),
-    // ponytail: a name is on no server's index, so this is only what this machine has synced.
-    known:
-      field === 'any'
-        ? cached
-            .filter(({ attachmentNames }) => attachmentNames.some(name => includesText(name, text)))
-            .map(({ uid }) => uid)
-        : [],
-  }));
-  return [...single, ...termed].toSorted((a, b) => a.criteria.length - b.criteria.length);
+  ];
+  const termed = query.terms
+    .map(({ field, text }) => ({
+      commands: CRITERIA_OF[field](text, folder).map(criterion => [criterion]),
+      // ponytail: a name is on no server's index, so this is only what this machine has synced.
+      known:
+        field === 'any'
+          ? cached
+              .filter(({ attachmentNames }) =>
+                attachmentNames.some(name => includesText(name, text)),
+              )
+              .map(({ uid }) => uid)
+          : [],
+    }))
+    // Fewest commands first, and of equal ones a term only the server answers first: it can carry
+    // the filters, and it is the one that can come back empty and end the search early.
+    .toSorted(
+      (a, b) =>
+        a.commands.length - b.commands.length ||
+        Number(a.known.length > 0) - Number(b.known.length > 0),
+    );
+  if (filters.length === 0) return termed;
+  const carrier = termed.findIndex(({ known }) => known.length === 0);
+  if (carrier === -1) return [{ commands: [filters], known: [] }, ...termed];
+  return termed.map((condition, index) =>
+    index === carrier
+      ? { ...condition, commands: condition.commands.map(command => [...filters, ...command]) }
+      : condition,
+  );
 };
 
 const CANCELLED = { ok: false, error: { kind: 'cancelled' } } as const;
@@ -122,11 +144,11 @@ const searchFolder = async (
 ): Promise<Result<FolderMatches, MailConnectionFailure>> => {
   const { folder, cached, signal } = inScope;
   let matched: ReadonlySet<number> | null = null;
-  for (const { criteria, known } of conditionsOf(query, folder, cached)) {
+  for (const { commands, known } of conditionsOf(query, folder, cached)) {
     const meeting = new Set(known);
-    for (const criterion of criteria) {
+    for (const command of commands) {
       if (signal?.aborted === true) return CANCELLED;
-      const found = await run(commandTask(inScope, client => client.uidSearch(criterion)));
+      const found = await run(commandTask(inScope, client => client.uidSearch(command)));
       if (!found.ok) return found;
       for (const uid of found.value) meeting.add(uid);
     }

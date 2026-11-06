@@ -702,16 +702,17 @@ describe('createLiveManager', () => {
               log.push('IDLE');
               return fake.idle();
             },
-            uidSearch: async criterion => {
-              log.push(`SEARCH ${current} ${criterion.key}`);
-              if (hold.key === criterion.key) {
+            uidSearch: async criteria => {
+              const key = [criteria].flat().at(0)?.key ?? '';
+              log.push(`SEARCH ${current} ${key}`);
+              if (hold.key === key) {
                 hold.key = null;
                 hold.reached?.();
                 await new Promise<void>(resolve => {
                   hold.release = resolve;
                 });
               }
-              return { ok: true, value: answers[current ?? '']?.[criterion.key] ?? [] };
+              return { ok: true, value: answers[current ?? '']?.[key] ?? [] };
             },
           };
           return { ok: true, value: { client, close: async () => {}, resumed: false } };

@@ -94,28 +94,28 @@ layer(NodeServices.layer)(it => {
       }),
     );
 
-    it.effect('sends an operator’s own commands, dates first, and stops at an empty answer', () =>
-      Effect.gen(function* () {
-        const { server, list, searches } = yield* world();
-        server.deliver('INBOX', mail(1, { from: 'a@acme.test', cc: ['b@acme.test'] }));
+    it.effect(
+      'sends an operator’s own commands, the dates inside the first, and stops at an empty answer',
+      () =>
+        Effect.gen(function* () {
+          const { server, list, searches } = yield* world();
+          server.deliver('INBOX', mail(1, { from: 'a@acme.test', cc: ['b@acme.test'] }));
 
-        yield* list(
-          '--query',
-          'in:inbox from:acme to:acme subject:Invoice after:2026-10-01 before:2026/11/01',
-        );
-        expect(searches()).toEqual([
-          'BEFORE 1-Nov-2026',
-          'SINCE 1-Oct-2026',
-          'FROM "acme"',
-          'SUBJECT "Invoice"',
-          'TO "acme"',
-          'CC "acme"',
-        ]);
+          yield* list(
+            '--query',
+            'in:inbox from:acme to:acme subject:Invoice after:2026-10-01 before:2026/11/01',
+          );
+          expect(searches()).toEqual([
+            'BEFORE 1-Nov-2026 SINCE 1-Oct-2026 FROM "acme"',
+            'SUBJECT "Invoice"',
+            'TO "acme"',
+            'CC "acme"',
+          ]);
 
-        const asked = searches().length;
-        yield* list('--query', 'in:inbox from:nobody to:acme');
-        expect(searches().slice(asked)).toEqual(['FROM "nobody"']);
-      }),
+          const asked = searches().length;
+          yield* list('--query', 'in:inbox from:nobody to:acme');
+          expect(searches().slice(asked)).toEqual(['FROM "nobody"']);
+        }),
     );
 
     it.effect('wants two terms in one message, not across a conversation', () =>
@@ -218,7 +218,7 @@ layer(NodeServices.layer)(it => {
           expect(idsOf((yield* list('--query', 'in:inbox needle is:unread')).stdout)).toEqual([
             'mid/<m3@stripe.com>',
           ]);
-          expect(searches()[0]).toBe('UNSEEN');
+          expect(searches()[0]).toBe('UNSEEN SUBJECT "needle"');
         }),
       );
 
@@ -239,7 +239,7 @@ layer(NodeServices.layer)(it => {
           expect(idsOf((yield* list('--query', 'in:inbox is:unread is:starred')).stdout)).toEqual([
             'mid/<m3@stripe.com>',
           ]);
-          expect(searches()).toEqual(['UNSEEN', 'FLAGGED']);
+          expect(searches()).toEqual(['UNSEEN FLAGGED']);
         }),
       );
     });

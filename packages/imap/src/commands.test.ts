@@ -5,7 +5,7 @@ import {
   buildUidExpungeCommand,
   buildUidSearchCommand,
   formatImapDateTime,
-  type UidSearchCriterion,
+  type UidSearchCriteria,
 } from './commands.ts';
 
 describe('formatImapDateTime', () => {
@@ -48,8 +48,8 @@ describe('buildUidExpungeCommand', () => {
 });
 
 describe('buildUidSearchCommand', () => {
-  const sent = (criterion: UidSearchCriterion) =>
-    buildUidSearchCommand('a1', criterion)
+  const sent = (criteria: UidSearchCriteria) =>
+    buildUidSearchCommand('a1', criteria)
       .lines.map(({ text, literal }) =>
         literal === undefined
           ? asciiToString(text)
@@ -86,6 +86,32 @@ describe('buildUidSearchCommand', () => {
     expect(sent({ key: 'HEADER', header: 'Reply-To', value: 'Grüße' })).toBe(
       'a1 UID SEARCH CHARSET UTF-8 HEADER "Reply-To" {7}<Grüße>\r\n',
     );
+  });
+
+  it('asks several keys as one command, which a message must all meet', () => {
+    expect(
+      sent([
+        { key: 'UNSEEN' },
+        { key: 'SINCE', date: { year: 2026, month: 2, day: 1 } },
+        { key: 'FROM', value: 'stripe' },
+      ]),
+    ).toBe('a1 UID SEARCH UNSEEN SINCE 1-Feb-2026 FROM "stripe"\r\n');
+    expect(sent([{ key: 'FROM', value: 'stripe' }])).toBe('a1 UID SEARCH FROM "stripe"\r\n');
+  });
+
+  it('names the charset once and sends each non-ASCII value as a literal among the others', () => {
+    expect(
+      sent([
+        { key: 'UNSEEN' },
+        { key: 'SUBJECT', value: 'Grüße' },
+        { key: 'FROM', value: 'ann' },
+        { key: 'TO', value: 'Grüße' },
+      ]),
+    ).toBe('a1 UID SEARCH CHARSET UTF-8 UNSEEN SUBJECT {7}<Grüße> FROM "ann" TO {7}<Grüße>\r\n');
+  });
+
+  it('asks for every message when it is given no key, rather than send a command that is malformed', () => {
+    expect(sent([])).toBe('a1 UID SEARCH ALL\r\n');
   });
 
   it('never lets a line break into the command line', () => {

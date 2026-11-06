@@ -1,4 +1,9 @@
-import type { ImapResult, ImapSelected, UidSearchCriterion } from '@yozz.app/imap';
+import type {
+  ImapResult,
+  ImapSelected,
+  UidSearchCriteria,
+  UidSearchCriterion,
+} from '@yozz.app/imap';
 import { describe, expect, it } from 'vitest';
 import type { MailClient, MailTask, RunTask } from '../connection.ts';
 import { stubImapClient } from '../testing/fake-imap-client.ts';
@@ -16,8 +21,14 @@ const SELECTED: ImapSelected = {
   readOnly: false,
 };
 
+/** The keys of a command, in the order they were sent. */
+const keysOf = (criteria: UidSearchCriteria) => [criteria].flat().map(({ key }) => key);
+
 /** Runs a task at once on a client that records each command and may be told to do something first. */
-const world = (onSearch: (commands: readonly string[]) => void = () => {}) => {
+const world = (
+  onSearch: (commands: readonly string[]) => void = () => {},
+  answer: (criteria: readonly UidSearchCriterion[]) => readonly number[] = () => [],
+) => {
   const commands: string[] = [];
   let selected: string | null = null;
   const client = {
@@ -28,10 +39,10 @@ const world = (onSearch: (commands: readonly string[]) => void = () => {}) => {
       selected = name;
       return { ok: true, value: SELECTED };
     },
-    uidSearch: async (criterion: UidSearchCriterion): Promise<ImapResult<readonly number[]>> => {
-      commands.push(`SEARCH ${criterion.key}`);
+    uidSearch: async (criteria: UidSearchCriteria): Promise<ImapResult<readonly number[]>> => {
+      commands.push(`SEARCH ${keysOf(criteria).join(' ')}`);
       onSearch(commands);
-      return { ok: true, value: [] };
+      return { ok: true, value: answer([criteria].flat()) };
     },
   } as unknown as MailClient;
   const run: RunTask = <T>(task: MailTask<T>) => task.run(client);
@@ -144,9 +155,9 @@ describe('searchMailbox', () => {
     const client = {
       ...stubImapClient(),
       ensureSelected: async () => ({ ok: true, value: SELECTED }),
-      uidSearch: async ({ key }: UidSearchCriterion) => {
-        commands.push(`SEARCH ${key}`);
-        return { ok: true, value: key === 'FROM' ? uids : [] };
+      uidSearch: async (criteria: UidSearchCriteria) => {
+        commands.push(`SEARCH ${keysOf(criteria).join(' ')}`);
+        return { ok: true, value: keysOf(criteria).includes('FROM') ? uids : [] };
       },
       fetchSummaries: async (set: string) => {
         commands.push('FETCH');
@@ -192,9 +203,9 @@ describe('searchMailbox', () => {
       const client = {
         ...stubImapClient(),
         ensureSelected: async () => ({ ok: true, value: SELECTED }),
-        uidSearch: async ({ key }: UidSearchCriterion) => ({
+        uidSearch: async (criteria: UidSearchCriteria) => ({
           ok: true,
-          value: key === 'FROM' ? uids : [],
+          value: keysOf(criteria).includes('FROM') ? uids : [],
         }),
         fetchSummaries: async () => ({
           ok: true,
@@ -300,5 +311,181 @@ describe('searchMailbox', () => {
       onMatches: ({ folder }) => heard.push(folder),
     });
     expect(heard).toEqual(['inbox', 'sent']);
+  });
+
+  describe('how many commands a query costs a folder', () => {
+    const searched = async (query: string, folders: readonly ('inbox' | 'sent')[] = ['inbox']) => {
+      // Every command finds uid 1, so none ends the folder early.
+      const { commands, run } = world(undefined, () => [1]);
+      await searchMailbox({
+        run,
+        cache: await cacheWithFolders(),
+        folders,
+        query: parseQuery(query),
+      });
+      return commands.filter(command => command.startsWith('SEARCH')).map(c => c.slice(7));
+    };
+
+    it('is one for flags, dates and a one-key term together', async () => {
+      expect(await searched('is:unread from:stripe after:2026/01/01')).toEqual([
+        'UNSEEN SINCE FROM',
+      ]);
+    });
+
+    it('is one for flags and dates alone', async () => {
+      expect(await searched('is:unread is:starred before:2026/01/01')).toEqual([
+        'UNSEEN FLAGGED BEFORE',
+      ]);
+    });
+
+    it('carries the flag on each field of a bare word, and costs no command of its own', async () => {
+      const inbox = await searched('is:unread invoice');
+      expect(inbox).toHaveLength(6);
+      expect(inbox.every(keys => keys.startsWith('UNSEEN '))).toBe(true);
+      expect(await searched('is:unread invoice', ['sent'])).toHaveLength(7);
+    });
+
+    it('puts the flag on the term with the fewest commands, and no other', async () => {
+      expect(await searched('invoice from:stripe is:starred')).toEqual([
+        'FLAGGED FROM',
+        'SUBJECT',
+        'FROM',
+        'TO',
+        'CC',
+        'HEADER',
+        'TEXT',
+      ]);
+    });
+
+    it('is the commands of its terms and nothing for the words that are plain', async () => {
+      expect(await searched('invoice')).toHaveLength(6);
+    });
+
+    it('keeps the flag in a command of its own when a cached attachment name widens the only term', async () => {
+      const cache = await cacheWithFolders();
+      await cache.folder('inbox').putSummaries([
+        {
+          seq: 1,
+          uid: 7,
+          flags: [],
+          internalDate: '01-Jan-2026 00:00:00 +0000',
+          size: 1,
+          envelope: null,
+          references: [],
+          gmailThreadId: null,
+          attachmentNames: ['invoice.pdf'],
+        },
+      ]);
+      const { commands, run } = world(undefined, () => [1]);
+      await searchMailbox({
+        run,
+        cache,
+        folders: ['inbox'],
+        query: parseQuery('is:unread invoice'),
+      });
+      // The name never met the server, so the flag has to be asked of it apart from the term.
+      expect(commands.filter(command => command.startsWith('SEARCH'))).toEqual([
+        'SEARCH UNSEEN',
+        'SEARCH SUBJECT',
+        'SEARCH FROM',
+        'SEARCH TO',
+        'SEARCH CC',
+        'SEARCH HEADER',
+        'SEARCH TEXT',
+      ]);
+    });
+
+    it('asks a term only the server answers before an equal one a cached name widens', async () => {
+      const cache = await cacheWithFolders();
+      await cache.folder('inbox').putSummaries([
+        {
+          seq: 1,
+          uid: 7,
+          flags: [],
+          internalDate: '01-Jan-2026 00:00:00 +0000',
+          size: 1,
+          envelope: null,
+          references: [],
+          gmailThreadId: null,
+          attachmentNames: ['invoice.pdf'],
+        },
+      ]);
+      // Nothing is unread and urgent, so the search ends without asking about the invoice.
+      const { commands, run } = world(undefined, () => []);
+      await searchMailbox({
+        run,
+        cache,
+        folders: ['inbox'],
+        query: parseQuery('invoice urgent is:unread'),
+      });
+      const searches = commands.filter(command => command.startsWith('SEARCH'));
+      expect(searches).toHaveLength(6);
+      expect(searches.every(command => command.startsWith('SEARCH UNSEEN '))).toBe(true);
+    });
+
+    it('stops at the first empty answer, and asks nothing of the other terms', async () => {
+      const { commands, run } = world();
+      await searchMailbox({
+        run,
+        cache: await cacheWithFolders(),
+        folders: ['inbox'],
+        query: parseQuery('is:unread from:stripe invoice'),
+      });
+      expect(commands.filter(command => command.startsWith('SEARCH'))).toEqual([
+        'SEARCH UNSEEN FROM',
+      ]);
+    });
+  });
+
+  describe('what folded commands find', () => {
+    type Mail = {
+      readonly uid: number;
+      readonly isUnread: boolean;
+      readonly isStarred: boolean;
+      readonly from: string;
+      readonly subject: string;
+    };
+    const MAIL: readonly Mail[] = [
+      { uid: 1, isUnread: true, isStarred: false, from: 'stripe', subject: 'invoice' },
+      { uid: 2, isUnread: false, isStarred: false, from: 'stripe', subject: 'invoice' },
+      { uid: 3, isUnread: true, isStarred: true, from: 'ann', subject: 'invoice' },
+      { uid: 4, isUnread: true, isStarred: true, from: 'stripe', subject: 'lunch' },
+    ];
+    /** A server that meets every key of a command, as RFC 9051 has it. */
+    const hitsOf = async (query: string) => {
+      const meeting = (criterion: UidSearchCriterion, mail: Mail) => {
+        if (criterion.key === 'UNSEEN') return mail.isUnread;
+        if (criterion.key === 'FLAGGED') return mail.isStarred;
+        if (criterion.key === 'FROM') return mail.from === criterion.value;
+        if (criterion.key === 'SUBJECT') return mail.subject === criterion.value;
+        return false;
+      };
+      const { run } = world(undefined, criteria =>
+        MAIL.filter(mail => criteria.every(criterion => meeting(criterion, mail))).map(
+          ({ uid }) => uid,
+        ),
+      );
+      const result = await searchMailbox({
+        run,
+        cache: await cacheWithFolders(),
+        folders: ['inbox'],
+        query: parseQuery(query),
+      });
+      if (!result.ok) throw new Error('The search failed');
+      return result.value[0]?.hits;
+    };
+
+    it('is what the flag and the sender met apart', async () => {
+      expect(await hitsOf('is:unread from:stripe')).toEqual([4, 1]);
+      expect(await hitsOf('is:unread is:starred from:stripe')).toEqual([4]);
+    });
+
+    it('is what the flag and a word met apart, by uid', async () => {
+      expect(await hitsOf('is:unread invoice')).toEqual([3, 1]);
+    });
+
+    it('is what the flag met apart with two terms, one of them carrying it', async () => {
+      expect(await hitsOf('is:unread from:stripe invoice')).toEqual([1]);
+    });
   });
 });
