@@ -1,4 +1,11 @@
-import type { ImapClient, ImapIdle, ImapResult, ImapSelected, ImapUntagged } from '@yozz.app/imap';
+import type {
+  ImapClient,
+  ImapIdle,
+  ImapMessageSummary,
+  ImapResult,
+  ImapSelected,
+  ImapUntagged,
+} from '@yozz.app/imap';
 import type { InboundAddress } from '@yozz.app/mail/addresses/record';
 import type { MailConnectionFailure, MailTask, RunTask } from '@yozz.app/mail/connection';
 import { memoryMailCache } from '@yozz.app/mail/testing/memory-mail-cache';
@@ -583,6 +590,52 @@ describe('createLiveManager', () => {
       await advance(11 * 60_000);
       expect(states.at(-1)).toMatchObject({ status: 'failed', failure: { kind: 'stalled' } });
       void search;
+    });
+  });
+
+  describe('a FETCH of summaries waiting for its answer', () => {
+    /** A connection whose window fetch is answered only when the test says. */
+    const fetching = () => {
+      const answer = Promise.withResolvers<ImapResult<readonly ImapMessageSummary[]>>();
+      const manager = managerOver(async () => ({
+        ok: true,
+        value: {
+          client: { ...createFakeClient(), fetchSummariesBySeq: () => answer.promise },
+          close: async () => {},
+          resumed: false,
+        },
+      }));
+      const window = manager.run(MAILBOX, {
+        priority: 'user',
+        effect: 'read',
+        retry: true,
+        run: async client => {
+          const fetched = await client.fetchSummariesBySeq('449:*');
+          return fetched.ok
+            ? { ok: true, value: fetched.value.length }
+            : { ok: false, error: { kind: 'imap', reason: fetched.reason } };
+        },
+      });
+      return { window, answer };
+    };
+
+    it('survives the minutes a slow server builds its answer in silence', async () => {
+      const { window, answer } = fetching();
+      await flush();
+
+      await advance(3 * 60_000);
+      expect(states.some(state => state.status === 'failed')).toBe(false);
+
+      answer.resolve({ ok: true, value: [] });
+      expect(await window).toEqual({ ok: true, value: 0 });
+    });
+
+    it('fails as stalled when the server never answers', async () => {
+      fetching();
+      await flush();
+
+      await advance(6 * 60_000);
+      expect(states.at(-1)).toMatchObject({ status: 'failed', failure: { kind: 'stalled' } });
     });
   });
 

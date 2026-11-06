@@ -57,5 +57,13 @@ export const appendQuietLimitMs = (bytes: number): number => 60_000 + (bytes / 2
  */
 export const SEARCH_QUIET_LIMIT_MS = 10 * 60_000;
 
+/**
+ * How long a FETCH of a range's summaries (envelopes and structures, up to a 200-message window)
+ * or attachment names may go with nothing crossing the connection. Forward Email builds the whole
+ * answer before it sends a byte, and a 200-message window has taken it from under a second to past
+ * the minute other work gets, which failed a first sync's Archive.
+ */
+export const SUMMARIES_QUIET_LIMIT_MS = 5 * 60_000;
+
 /** Runs a task on one mailbox's session. */
 export type RunTask = <T>(task: MailTask<T>) => Promise<Result<T, MailConnectionFailure>>;

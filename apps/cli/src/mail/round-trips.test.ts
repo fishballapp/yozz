@@ -1,6 +1,6 @@
 import * as NodeServices from '@effect/platform-node/NodeServices';
 import { assert, describe, expect, layer } from '@effect/vitest';
-import { SEARCH_QUIET_LIMIT_MS } from '@yozz.app/mail/connection';
+import { SEARCH_QUIET_LIMIT_MS, SUMMARIES_QUIET_LIMIT_MS } from '@yozz.app/mail/connection';
 import * as Clock from 'effect/Clock';
 import * as Effect from 'effect/Effect';
 import * as Exit from 'effect/Exit';
@@ -517,20 +517,28 @@ layer(NodeServices.layer)(it => {
       );
     });
 
-    it.effect('gives each UID SEARCH the time a slow server takes, then limits it as before', () =>
-      Effect.gen(function* () {
-        const { world, homes, server, servers } = yield* makeMailWorld();
-        server.deliver('INBOX', mail(1));
-        yield* runCli(['list', '--query', 'from:acme.test'], {
-          fetch: world.fetch,
-          homes,
-          servers,
-        });
-        expect(searchesOf(server).length).toBeGreaterThan(0);
-        expect(server.quietLimits).toEqual(
-          searchesOf(server).flatMap(() => [SEARCH_QUIET_LIMIT_MS, QUIET_LIMIT_MS]),
-        );
-      }),
+    it.effect(
+      'gives each UID SEARCH and summary FETCH the time a slow server takes, then limits it as before',
+      () =>
+        Effect.gen(function* () {
+          const { world, homes, server, servers } = yield* makeMailWorld();
+          server.deliver('INBOX', mail(1));
+          yield* runCli(['list', '--query', 'from:acme.test'], {
+            fetch: world.fetch,
+            homes,
+            servers,
+          });
+          const raised = server.quietLimits.filter((_, index) => index % 2 === 0);
+          expect(server.quietLimits).toEqual(raised.flatMap(ms => [ms, QUIET_LIMIT_MS]));
+          expect(searchesOf(server).length).toBeGreaterThan(0);
+          expect(raised.filter(ms => ms === SEARCH_QUIET_LIMIT_MS)).toHaveLength(
+            searchesOf(server).length,
+          );
+          // The first sync's window.
+          expect(raised.filter(ms => ms !== SEARCH_QUIET_LIMIT_MS)).toEqual([
+            SUMMARIES_QUIET_LIMIT_MS,
+          ]);
+        }),
     );
   });
 });

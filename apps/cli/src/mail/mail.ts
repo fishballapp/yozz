@@ -14,6 +14,7 @@ import {
   type Result,
   type RunTask,
   SEARCH_QUIET_LIMIT_MS,
+  SUMMARIES_QUIET_LIMIT_MS,
 } from '@yozz.app/mail/connection';
 import { describeMailFailure } from '@yozz.app/mail/describe-failure';
 import type { TxtLookup } from '@yozz.app/mail/threads/dkim';
@@ -160,6 +161,12 @@ export class Mail extends Context.Service<
                 ),
               uidSearch: criterion =>
                 quietFor(SEARCH_QUIET_LIMIT_MS, () => client.uidSearch(criterion)),
+              fetchSummaries: uidSet =>
+                quietFor(SUMMARIES_QUIET_LIMIT_MS, () => client.fetchSummaries(uidSet)),
+              fetchSummariesBySeq: seqSet =>
+                quietFor(SUMMARIES_QUIET_LIMIT_MS, () => client.fetchSummariesBySeq(seqSet)),
+              fetchAttachmentNames: uidSet =>
+                quietFor(SUMMARIES_QUIET_LIMIT_MS, () => client.fetchAttachmentNames(uidSet)),
               ensureSelected: async name =>
                 selected.name === name && selected.info !== null
                   ? { ok: true, value: selected.info }

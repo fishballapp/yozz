@@ -15,6 +15,7 @@ import {
   type Result,
   type RunTask,
   SEARCH_QUIET_LIMIT_MS,
+  SUMMARIES_QUIET_LIMIT_MS,
 } from '@yozz.app/mail/connection';
 import type { ActivityTracker } from './activity';
 import type { MailConnection } from './connection';
@@ -140,7 +141,8 @@ const IDLE_RECONNECT_MIN_GAP_MS = 60 * 1000;
 /**
  * Work waiting this long with nothing moving has stalled. Measured as no progress, not as a task's
  * age: an APPEND of a large message takes minutes to upload, and has `appendQuietLimitMs` for the
- * silence after it; a UID SEARCH has `SEARCH_QUIET_LIMIT_MS`.
+ * silence after it; a UID SEARCH has `SEARCH_QUIET_LIMIT_MS`, and a FETCH of summaries
+ * `SUMMARIES_QUIET_LIMIT_MS`.
  */
 const STALL_MS = 60 * 1000;
 const STALL_CHECK_MS = 10 * 1000;
@@ -292,6 +294,12 @@ export const createLiveManager = (deps: {
           forgetListOnRefusal(await client.append(folderName, message, flags, internalDate)),
         ),
       uidSearch: criterion => quietFor(SEARCH_QUIET_LIMIT_MS, () => client.uidSearch(criterion)),
+      fetchSummaries: uidSet =>
+        quietFor(SUMMARIES_QUIET_LIMIT_MS, () => client.fetchSummaries(uidSet)),
+      fetchSummariesBySeq: seqSet =>
+        quietFor(SUMMARIES_QUIET_LIMIT_MS, () => client.fetchSummariesBySeq(seqSet)),
+      fetchAttachmentNames: uidSet =>
+        quietFor(SUMMARIES_QUIET_LIMIT_MS, () => client.fetchAttachmentNames(uidSet)),
       ensureSelected: async name => {
         const known = socket().selectedInfo;
         if (socket().selected === name && known !== null) return { ok: true, value: known };
