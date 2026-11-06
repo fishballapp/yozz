@@ -640,8 +640,12 @@ export const prefetchBodies = async (
           const landed: PrefetchedBody[] = [];
           for (const { uid, bytes } of raw.value) {
             try {
-              const body = await parseBody(bytes, lookupTxt);
-              await folderCache.putBody(uid, body);
+              const { body, isFinal } = await parseBody(bytes, lookupTxt);
+              // The check can wait seconds on DNS: a lock or sign-out in that time has emptied the
+              // cache, and a write now would refill it with plaintext.
+              if (isStale()) return;
+              // A check whose lookup got no answer is shown for now and never kept.
+              if (isFinal) await folderCache.putBody(uid, body);
               landed.push({ at: { folder, uidValidity, uid }, body });
             } catch {
               // Best effort.

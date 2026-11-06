@@ -92,6 +92,13 @@ describe('the message details panel: signed by', () => {
     await reader.unmount();
   });
 
+  it('says a check still under way is under way, not that it failed', async () => {
+    const reader = await mount(received({ senderCheck: { status: 'checking' } }));
+    expect(reader.details()).toContain('signed bychecking…');
+    expect(reader.details()).not.toContain("couldn't be verified");
+    await reader.unmount();
+  });
+
   it('says nothing before the body, and so the check, has arrived', async () => {
     const reader = await mount(received({ bodyStatus: 'loading' }));
     expect(reader.details()).not.toContain('signed by');

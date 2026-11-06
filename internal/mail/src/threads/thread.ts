@@ -22,11 +22,14 @@ export type BodyStatus = 'pending' | 'loading' | 'failed';
 /**
  * Whether a DKIM signature the reader checked itself (`verifySender`) vouches for a message's From,
  * and for the address the reader shows. `unverified` is not `forged`: a forger can strip a
- * signature, and lists and forwards break real ones, so it only means YOZZ cannot say.
+ * signature, and lists and forwards break real ones, so it only means YOZZ cannot say. `checking`
+ * is neither: the body is on screen and the answer is not in yet. It is never stored, and never
+ * given to a surface that reads once (the CLI, the agent tools), which wait for the answer.
  */
 export type SenderCheck =
   | { readonly status: 'verified'; readonly signedBy: string }
-  | { readonly status: 'unverified' };
+  | { readonly status: 'unverified' }
+  | { readonly status: 'checking' };
 
 /**
  * A sender as compared: the whole address, lowercased. The domain is case-insensitive by RFC 5321;
@@ -45,7 +48,11 @@ export const senderCheckOf = (
     ? { status: 'verified', signedBy: dkim.domain }
     : { status: 'unverified' };
 
-/** The domain that signed the message, or null: what every surface (panel, CLI, agent tools) reports of a `SenderCheck`. */
+/**
+ * The domain that signed the message, or null: what every surface (panel, CLI, agent tools) reports
+ * of a `SenderCheck`. Null for `checking` too, so only a surface that waited for the answer may
+ * word a null as "couldn't be verified".
+ */
 export const signedByOf = (check: SenderCheck | undefined): string | null =>
   check?.status === 'verified' ? check.signedBy : null;
 

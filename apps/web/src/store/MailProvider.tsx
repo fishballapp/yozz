@@ -6,6 +6,7 @@ import {
 } from '@yozz.app/mail/addresses/record';
 import type { MailConnectionFailure, Result } from '@yozz.app/mail/connection';
 import { describeMailFailure } from '@yozz.app/mail/describe-failure';
+import type { FetchedBody } from '@yozz.app/mail/threads/bodies';
 import {
   type BodyEntry,
   type BodyOutcome,
@@ -44,7 +45,7 @@ import type {
   SyncScope,
 } from '@yozz.app/mail/threads/sync';
 import { staleMailboxes } from '@yozz.app/mail/threads/sync-staleness';
-import type { Location, ThreadState } from '@yozz.app/mail/threads/thread';
+import type { Location, SenderCheck, ThreadState } from '@yozz.app/mail/threads/thread';
 import {
   type Folder,
   isArchived,
@@ -231,6 +232,16 @@ const whereNow = (
 const olderNotLoaded = (failure: MailConnectionFailure, { imap }: InboundAddress) =>
   `older mail not loaded · ${describeMailFailure(failure, imap.host)}`;
 
+/** Retires the body fetches reading `mailbox`, which an edit or a removal has made stale. */
+const dropInFlightBodies = (
+  inFlight: Map<string, { readonly mailbox: string; readonly promise: Promise<BodyOutcome> }>,
+  mailbox: string,
+) => {
+  for (const [messageId, fetch] of inFlight) {
+    if (fetch.mailbox === mailbox) inFlight.delete(messageId);
+  }
+};
+
 export const MailProvider = ({ children }: { children: ReactNode }) => {
   const { session } = useVault();
   const demo = isDemo();
@@ -252,7 +263,10 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
   const syncStatesRef = useRef(syncStates);
   syncStatesRef.current = syncStates;
   const [mailError, setMailError] = useState<string | null>(null);
-  const inFlightBodiesRef = useRef<Map<string, Promise<BodyOutcome>>>(new Map());
+  /** Each body fetch under way, by message id, and the mailbox it reads: an edit drops only its own. */
+  const inFlightBodiesRef = useRef<
+    Map<string, { readonly mailbox: string; readonly promise: Promise<BodyOutcome> }>
+  >(new Map());
   /** The DKIM key lookups of this session, kept so a sender's many messages cost one request. */
   const [lookupTxt] = useState(() => createTxtLookup());
   const sessionRef = useRef(session);
@@ -484,7 +498,9 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
       });
       setOps(current => current.filter(op => op.mailbox !== address));
       // All of them: a `mid/<Message-ID>` id carries no mailbox, and a body kept under one could
-      // later be shown for a different message.
+      // later be shown for a different message. The fetches under way for other mailboxes go on and
+      // put theirs back; this one's are retired.
+      dropInFlightBodies(inFlightBodiesRef.current, address);
       setBodiesById({});
       setPreviews(current => withoutMailboxPreviews(current, address));
     },
@@ -552,7 +568,7 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
         });
         setOps(current => current.filter(op => op.mailbox !== address));
         // All of them, as a removal does: an id carries no mailbox.
-        inFlightBodiesRef.current.clear();
+        dropInFlightBodies(inFlightBodiesRef.current, address);
         setBodiesById({});
         setPreviews(current => withoutMailboxPreviews(current, address));
       }
@@ -1407,6 +1423,10 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
       const thread = threads.find(t => t.id === threadId);
       const message = thread?.messages.find(m => m.id === messageId);
       if (message === undefined || thread === undefined) return Promise.resolve(failed);
+      // A second caller awaits the same fetch: it resolves once the sender check has, so a caller
+      // that reads once (the agent tools) never sees a check still pending, even on a body already on screen.
+      const inFlight = inFlightBodiesRef.current.get(messageId);
+      if (inFlight !== undefined) return inFlight.promise;
       if (message.bodyStatus === undefined) {
         const {
           body,
@@ -1428,9 +1448,6 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
           senderCheck,
         });
       }
-      // A second caller awaits the same fetch.
-      const inFlight = inFlightBodiesRef.current.get(messageId);
-      if (inFlight !== undefined) return inFlight;
 
       const userId = userIdRef.current;
       // Any copy will do for a body.
@@ -1450,15 +1467,15 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
       const isStale = () => generation !== sessionGeneration.current || !isCurrentMailbox(mailbox);
       /**
        * Retires this fetch if its record has moved on. The body goes back to `pending`, which is
-       * what loads it again with the current credentials: left `loading`, a password or port edit
-       * (which keeps the bodies) would leave the spinner up for ever, since only `pending` is fetched
-       * and only `failed` offers Retry.
+       * what loads it again with the current credentials: left `loading` or `checking`, a password
+       * or port edit (which keeps the bodies) would leave it so for ever, since only `pending` is
+       * fetched and only `failed` offers Retry. `own` is the entry this fetch has set so far.
        */
-      const isRetired = () => {
+      const isRetired = (own: BodyEntry = loadingEntry) => {
         if (!isStale()) return false;
         if (generation === sessionGeneration.current) {
           setBodiesById(current => {
-            if (current[messageId] !== loadingEntry) return current;
+            if (current[messageId] !== own) return current;
             const { [messageId]: _, ...rest } = current;
             return rest;
           });
@@ -1468,21 +1485,45 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
       const runOn = bindRunOn();
       const promise = (async (): Promise<BodyOutcome> => {
         try {
-          const [{ fetchBodyAt }, { createMailCache }] = await Promise.all([
+          const [{ fetchOpenBodyAt }, { createMailCache }] = await Promise.all([
             import('@yozz.app/mail/threads/bodies'),
             import('../threads/cache'),
           ]);
           const cache = createMailCache(userId, mailboxAddress).folder(folder);
           const cached = await cache.getBody(uid);
           if (isRetired()) return failed;
-          const fetchFresh = () => {
-            // Only the network says "Loading…": a body on the device replaces `pending` directly.
-            setEntry(loadingEntry);
-            // Refused when the copy's folder was renumbered: a stale uid would fetch whatever now
-            // holds that number. Caches the body when it is small enough.
-            return fetchBodyAt(runOn(mailbox), cache, copy, message.rawSize, lookupTxt, isStale);
-          };
-          const res = cached !== null ? { ok: true as const, value: cached } : await fetchFresh();
+          const loadedFrom = (
+            body: Omit<FetchedBody, 'dkim'>,
+            senderCheck: SenderCheck,
+          ): BodyOutcome => ({
+            status: 'loaded',
+            body: body.paragraphs,
+            html: body.html,
+            hasTextPart: body.hasTextPart,
+            htmlSaysMore: body.htmlSaysMore,
+            inlineImagesTruncated: body.inlineImagesTruncated,
+            attachments: body.attachments,
+            senderCheck,
+          });
+          // A body on the device was kept with its check settled: nothing is pending.
+          if (cached !== null) {
+            const loaded = loadedFrom(cached, senderCheckOf(cached.dkim, message.fromAddress));
+            setEntry(loaded);
+            setMailError(null);
+            return loaded;
+          }
+          // Only the network says "Loading…": a body on the device replaces `pending` directly.
+          setEntry(loadingEntry);
+          // Refused when the copy's folder was renumbered: a stale uid would fetch whatever now
+          // holds that number. Caches the body, once its check is in, when it is small enough.
+          const res = await fetchOpenBodyAt(
+            runOn(mailbox),
+            cache,
+            copy,
+            message.rawSize,
+            lookupTxt,
+            isStale,
+          );
           if (isRetired()) return failed;
           if (!res.ok) {
             setEntry(failed);
@@ -1491,18 +1532,27 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
             );
             return failed;
           }
-          const loaded: BodyOutcome = {
-            status: 'loaded',
-            body: res.value.paragraphs,
-            html: res.value.html,
-            hasTextPart: res.value.hasTextPart,
-            htmlSaysMore: res.value.htmlSaysMore,
-            inlineImagesTruncated: res.value.inlineImagesTruncated,
-            attachments: res.value.attachments,
-            senderCheck: senderCheckOf(res.value.dkim, message.fromAddress),
-          };
-          setEntry(loaded);
+          // The body is readable now; its sender check reads as pending until it lands.
+          const checking = loadedFrom(res.value.body, { status: 'checking' });
+          // Over this fetch's own "Loading…", or an entry another mailbox's edit cleared; never
+          // over a newer fetch's.
+          setBodiesById(current =>
+            current[messageId] === loadingEntry || current[messageId] === undefined
+              ? { ...current, [messageId]: checking }
+              : current,
+          );
           setMailError(null);
+          const { dkim } = await res.value.check;
+          const senderCheck = senderCheckOf(dkim, message.fromAddress);
+          if (isRetired(checking)) return failed;
+          const loaded = loadedFrom(res.value.body, senderCheck);
+          // Over its own pending entry, or an entry another mailbox's edit cleared meanwhile: the
+          // body is still this mailbox's. Not over a newer fetch's.
+          setBodiesById(current =>
+            current[messageId] === checking || current[messageId] === undefined
+              ? { ...current, [messageId]: loaded }
+              : current,
+          );
           return loaded;
         } catch (err) {
           if (isRetired()) return failed;
@@ -1516,10 +1566,10 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
           return failed;
         }
       })();
-      inFlightBodiesRef.current.set(messageId, promise);
+      inFlightBodiesRef.current.set(messageId, { mailbox: mailboxAddress, promise });
       // By identity: an edit may have cleared this fetch's slot for a newer one.
       void promise.finally(() => {
-        if (inFlightBodiesRef.current.get(messageId) === promise) {
+        if (inFlightBodiesRef.current.get(messageId)?.promise === promise) {
           inFlightBodiesRef.current.delete(messageId);
         }
       });

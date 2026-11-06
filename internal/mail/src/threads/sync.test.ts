@@ -1,6 +1,7 @@
 import type { ImapMessageSummary } from '@yozz.app/imap';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { MailClient, MailConnectionFailure, MailTask, Result } from '../connection.ts';
+import { signMessage } from '../testing/dkim-signer.ts';
 import type { FetchedBody } from './bodies.ts';
 import type { FolderSync } from './cache.ts';
 import { cachedPreviews } from './hydrate.ts';
@@ -1158,6 +1159,96 @@ describe('prefetchBodies', () => {
       noKeys,
     );
     expect(fetchRawMessages).not.toHaveBeenCalled();
+  });
+
+  describe('a sender check that waits on DNS', () => {
+    /** A message signed by x.example with a key nobody publishes, so a lookup decides what it comes to. */
+    const signedRaw = async () => {
+      const key = (await crypto.subtle.generateKey({ name: 'Ed25519' }, true, [
+        'sign',
+        'verify',
+      ])) as CryptoKeyPair;
+      const signed = await signMessage(
+        ['From: a@x.example', 'Subject: hi', '', 'body', ''].join('\r\n'),
+        {
+          key: key.privateKey,
+          algorithm: 'ed25519-sha256',
+          domain: 'x.example',
+          selector: 's',
+          headers: ['from', 'subject'],
+        },
+      );
+      return new TextEncoder().encode(signed);
+    };
+    const inbox = () =>
+      fakeCache({
+        inbox: {
+          sync: { name: 'INBOX', uidValidity: 1, lastUid: 1, complete: true },
+          summaries: [summary(1)],
+        },
+      });
+    const prefetchOne = async (
+      cache: ReturnType<typeof inbox>,
+      lookupTxt: Parameters<typeof prefetchBodies>[5],
+      isStale: () => boolean = () => false,
+      onBodies: Parameters<typeof prefetchBodies>[7] = () => {},
+    ) => {
+      ensureSelected.mockResolvedValue({ ok: true, value: { uidValidity: 1 } });
+      const bytes = await signedRaw();
+      fetchRawMessages.mockResolvedValue({ ok: true, value: [{ uid: 1, bytes }] });
+      await prefetchBodies(
+        run,
+        cache,
+        { inbox: { uidValidity: 1, summaries: cache.read('inbox').summaries } },
+        1024 * 1024,
+        30,
+        lookupTxt,
+        isStale,
+        onBodies,
+      );
+    };
+
+    it('writes nothing when the session ends while the check is pending', async () => {
+      const cache = inbox();
+      const answer = Promise.withResolvers<readonly string[]>();
+      let isStale = false;
+      const onBodies = vi.fn();
+      const prefetching = prefetchOne(
+        cache,
+        () => {
+          // The lock lands while DNS is being asked.
+          isStale = true;
+          return answer.promise;
+        },
+        () => isStale,
+        onBodies,
+      );
+      await vi.waitFor(() => expect(isStale).toBe(true));
+      answer.resolve([]);
+      await prefetching;
+      expect(await cache.folder('inbox').getBody(1)).toBeNull();
+      expect(onBodies).not.toHaveBeenCalled();
+    });
+
+    it('shows a body whose lookup got no answer, and keeps none of it', async () => {
+      const cache = inbox();
+      const onBodies = vi.fn();
+      await prefetchOne(
+        cache,
+        async () => null,
+        () => false,
+        onBodies,
+      );
+      expect(onBodies).toHaveBeenCalledTimes(1);
+      expect(onBodies.mock.calls[0]?.[0][0].body).toMatchObject({ dkim: null });
+      expect(await cache.folder('inbox').getBody(1)).toBeNull();
+    });
+
+    it('keeps a body whose signer has no key: that answer is final', async () => {
+      const cache = inbox();
+      await prefetchOne(cache, async () => []);
+      expect(await cache.folder('inbox').getBody(1)).toMatchObject({ dkim: null });
+    });
   });
 
   it('hands each batch that lands to onBodies at once, and cachedPreviews reads it back', async () => {

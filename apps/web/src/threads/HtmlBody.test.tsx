@@ -8,7 +8,7 @@ import { createRoot } from 'react-dom/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { clearCachedFrames } from './frame-cache';
 import { HtmlBody } from './HtmlBody';
-import { IMAGE_CONSENTS_RECORD_TYPE, IMAGE_SENDER_RECORD_TYPE } from './remote-images';
+import { IMAGE_CONSENTS_RECORD_TYPE, IMAGE_SENDER_RECORD_TYPE, trustSender } from './remote-images';
 import { RemoteImagesStoreProvider } from './remote-images-context';
 
 const problems = vi.hoisted(() => [] as { title: string; description: string }[]);
@@ -379,6 +379,43 @@ describe('HtmlBody remembered consent', () => {
     expect(forged.button('Load remote images')).toBeDefined();
     expect(forged.button('Always from')).toBeUndefined();
     forged.container.remove();
+  });
+
+  it('offers no "Always from" while the check is under way, and does not load a trusted sender on its word', async () => {
+    const { store } = fakeRecordStore();
+    const CHECKING = { status: 'checking' } as const;
+    // Not trusted: the way to load this one message is there at once, the "always" waits for the check.
+    const stranger = await mountWithheld(html, { store, senderCheck: CHECKING });
+    await settle();
+    expect(stranger.button('Load remote images')).toBeDefined();
+    expect(stranger.button('Always from')).toBeUndefined();
+    stranger.container.remove();
+
+    await trustSender(store, { address: 'news@sender.example', addedAt: 1 });
+    // Trusted: nothing is offered, since the check may be about to load it by itself, and
+    // nothing is loaded until it says the message is verified.
+    const trusted = await mountWithheld(html, {
+      store,
+      messageId: 'mid/<m2@sender.example>',
+      senderCheck: CHECKING,
+    });
+    await settle();
+    expect(loaded(trusted.srcdoc())).toBe(false);
+    expect(trusted.button('Load remote images')).toBeUndefined();
+    expect(trusted.container.textContent).not.toContain('The sender may learn');
+    await act(async () =>
+      trusted.root.render(
+        <Reader
+          html={html}
+          store={store}
+          messageId="mid/<m2@sender.example>"
+          senderCheck={VERIFIED}
+        />,
+      ),
+    );
+    await settle();
+    expect(loaded(trusted.srcdoc())).toBe(true);
+    trusted.container.remove();
   });
 
   it('offers no "Always from" on an unverified message, but still loads it for that message', async () => {

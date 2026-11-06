@@ -13,6 +13,7 @@ import '@yozz.app/mail/compose/send-machine';
 import '@yozz.app/mail/threads/sync';
 import '../compose/submit';
 import { SENT_RECORD_TYPE } from '@yozz.app/mail/compose/sent-record';
+import { signMessage } from '@yozz.app/mail/testing/dkim-signer';
 import { fakeFileStore } from '@yozz.app/mail/testing/fake-file-store';
 import { fakeRecordStore } from '@yozz.app/mail/testing/fake-record-store';
 import type { ThreadState } from '@yozz.app/mail/threads/thread';
@@ -70,6 +71,10 @@ const mocks = vi.hoisted(() => ({
   answer: null as unknown,
   /** The next body written to the device cache waits here. */
   bodyWrite: null as Gate | null,
+  /** The next DNS-over-HTTPS lookup waits here, which keeps a message's sender check pending. */
+  doh: null as Gate | null,
+  /** The key record DNS answers with; none is a name that does not exist. */
+  dohRecord: null as string | null,
   /** How many bodies were written to the device cache. */
   bodiesWritten: 0,
   /** The next task to reach a manager waits here before it answers. */
@@ -168,6 +173,21 @@ vi.stubGlobal('localStorage', {
   getItem: (key: string) => storage.get(key) ?? null,
   setItem: (key: string, value: string) => storage.set(key, value),
   removeItem: (key: string) => storage.delete(key),
+});
+
+// The only network the store reaches by itself is the sender check's key lookup.
+vi.stubGlobal('fetch', async () => {
+  const held = mocks.doh;
+  mocks.doh = null;
+  await held?.pass();
+  const record = mocks.dohRecord;
+  return new Response(
+    JSON.stringify(
+      record === null
+        ? { Status: 3 }
+        : { Status: 0, Answer: [{ name: 'k', type: 16, data: `"${record}"` }] },
+    ),
+  );
 });
 
 /** Held by both sessions under the same servers: the case where a socket could be shared. */
@@ -304,6 +324,30 @@ const nextAccount = async () => ({
 /** The message the server hands over for LUNCH's body. */
 const LUNCH_RAW = new TextEncoder().encode('Subject: Lunch\r\n\r\nThe code is 4417.\r\n');
 
+/**
+ * LUNCH signed by example.org, and the key record that verifies it. DNS answers with the record
+ * only when a test sets `mocks.dohRecord` to it: without, the signature has no key and the message
+ * ends unverified.
+ */
+const signedLunch = async () => {
+  const keys = (await crypto.subtle.generateKey({ name: 'Ed25519' }, true, [
+    'sign',
+    'verify',
+  ])) as CryptoKeyPair;
+  const raw = new Uint8Array(await crypto.subtle.exportKey('raw', keys.publicKey)).toBase64();
+  const signed = await signMessage(
+    'From: Bob <bob@example.org>\r\nSubject: Lunch\r\n\r\nThe code is 4417.\r\n',
+    {
+      key: keys.privateKey,
+      algorithm: 'ed25519-sha256',
+      domain: 'example.org',
+      selector: 'k',
+      headers: ['from', 'subject'],
+    },
+  );
+  return { raw: new TextEncoder().encode(signed), record: `v=DKIM1; k=ed25519; p=${raw}` };
+};
+
 const LUNCH: ThreadState = {
   id: 't1',
   mailboxes: [ALICE.address],
@@ -354,6 +398,8 @@ beforeEach(() => {
   mocks.navigation = null;
   mocks.answer = null;
   mocks.bodyWrite = null;
+  mocks.doh = null;
+  mocks.dohRecord = null;
   mocks.bodiesWritten = 0;
   mocks.task = null;
   mocks.syncLands = false;
@@ -506,21 +552,22 @@ describe("an ended session's answers", () => {
     expect(stored.map(row => row.naturalKey)).toContain(WORK.address);
   });
 
-  it("a body whose cache write lands after the session ended is shown in nobody else's thread", async () => {
+  it("a body whose sender check lands after the session ended is shown in nobody else's thread", async () => {
     const [message] = LUNCH.messages;
     if (message === undefined) throw new Error('no message');
     mocks.threads = [{ ...LUNCH, messages: [{ ...message, bodyStatus: 'pending', rawSize: 64 }] }];
-    mocks.answer = { ok: true, value: LUNCH_RAW };
+    mocks.answer = { ok: true, value: (await signedLunch()).raw };
     const { mail, replaceSession } = await mount((await vault()).store);
-    const bodyWrite = gate();
-    mocks.bodyWrite = bodyWrite;
+    const lookup = gate();
+    mocks.doh = lookup;
     const loaded = mail().loadBody('t1', 'm1');
-    await act(() => bodyWrite.reached);
+    await act(() => lookup.reached);
 
     await replaceSession(await nextAccount());
-    bodyWrite.open();
+    lookup.open();
     expect(await act(() => loaded)).toEqual({ status: 'failed' });
     expect(mail().threads[0]?.messages[0]?.body).toEqual([]);
+    expect(mocks.bodiesWritten).toBe(0);
   });
 
   it('a body fetched across the end of its session is never written to the device cache', async () => {
@@ -606,11 +653,12 @@ describe('an edited address', () => {
 
   it('shows no body fetched for the mailbox it had once another host or login replaced it', async () => {
     lunchBody();
+    mocks.answer = { ok: true, value: (await signedLunch()).raw };
     const { mail } = await mount((await vault()).store);
-    const bodyWrite = gate();
-    mocks.bodyWrite = bodyWrite;
+    const lookup = gate();
+    mocks.doh = lookup;
     const loaded = mail().loadBody('t1', 'm1');
-    await act(() => bodyWrite.reached);
+    await act(() => lookup.reached);
 
     await act(() =>
       mail().replaceAddress({
@@ -618,9 +666,189 @@ describe('an edited address', () => {
         imap: { ...ALICE.imap, host: 'imap.other.example' },
       } as AddressRecord),
     );
-    bodyWrite.open();
+    lookup.open();
     expect(await act(() => loaded)).toEqual({ status: 'failed' });
     expect(mail().threads[0]?.messages[0]?.body).toEqual([]);
+  });
+
+  it('goes back to pending when a login edit keeps the bodies and retires a check in flight', async () => {
+    lunchBody();
+    mocks.answer = { ok: true, value: (await signedLunch()).raw };
+    const { mail } = await mount((await vault()).store);
+    const lookup = gate();
+    mocks.doh = lookup;
+    const loaded = mail().loadBody('t1', 'm1');
+    await act(() => lookup.reached);
+
+    await act(() =>
+      mail().replaceAddress({
+        ...ALICE,
+        imap: { ...ALICE.imap, password: 'new-pw' },
+      } as AddressRecord),
+    );
+    lookup.open();
+    expect(await act(() => loaded)).toEqual({ status: 'failed' });
+    // Not left checking: the thread page fetches it again as the new record.
+    expect(mail().threads[0]?.messages[0]?.bodyStatus).toBe('pending');
+  });
+});
+
+describe("a message's sender check", () => {
+  const openLunch = async () => {
+    const [message] = LUNCH.messages;
+    if (message === undefined) throw new Error('no message');
+    mocks.threads = [
+      {
+        ...LUNCH,
+        messages: [
+          { ...message, fromAddress: 'bob@example.org', bodyStatus: 'pending', rawSize: 64 },
+        ],
+      },
+    ];
+    const signed = await signedLunch();
+    mocks.answer = { ok: true, value: signed.raw };
+    const { mail } = await mount((await vault()).store);
+    const lookup = gate();
+    mocks.doh = lookup;
+    const lunch = () => mail().threads[0]?.messages[0];
+    return { mail, lunch, lookup, record: signed.record };
+  };
+
+  it('shows the body at once and the check as pending, until the key is found', async () => {
+    const { mail, lunch, lookup, record } = await openLunch();
+    mocks.dohRecord = record;
+    const loaded = mail().loadBody('t1', 'm1');
+    await act(() => lookup.reached);
+
+    expect(lunch()?.body).toEqual(['The code is 4417.']);
+    expect(lunch()?.bodyStatus).toBeUndefined();
+    expect(lunch()?.senderCheck).toEqual({ status: 'checking' });
+    // The cache keeps a body with its check settled, never half of one.
+    expect(mocks.bodiesWritten).toBe(0);
+
+    lookup.open();
+    await act(() => loaded);
+    expect(lunch()?.senderCheck).toEqual({ status: 'verified', signedBy: 'example.org' });
+    await vi.waitFor(() => expect(mocks.bodiesWritten).toBe(1));
+  });
+
+  it('ends unverified, not pending, when the signer has no key', async () => {
+    const { mail, lunch, lookup } = await openLunch();
+    const loaded = mail().loadBody('t1', 'm1');
+    await act(() => lookup.reached);
+    expect(lunch()?.senderCheck).toEqual({ status: 'checking' });
+
+    lookup.open();
+    await act(() => loaded);
+    expect(lunch()?.senderCheck).toEqual({ status: 'unverified' });
+  });
+
+  /** The vault holds a second mailbox too, whose edits and removal are not this message's. */
+  const openLunchBesideWork = async () => {
+    const theirs = await vault();
+    await theirs.store.put({
+      type: ADDRESS_RECORD_TYPE,
+      naturalKey: WORK.address,
+      plaintext: JSON.stringify(WORK),
+    });
+    const [message] = LUNCH.messages;
+    if (message === undefined) throw new Error('no message');
+    mocks.threads = [
+      {
+        ...LUNCH,
+        messages: [
+          { ...message, fromAddress: 'bob@example.org', bodyStatus: 'pending', rawSize: 64 },
+        ],
+      },
+    ];
+    const signed = await signedLunch();
+    mocks.answer = { ok: true, value: signed.raw };
+    mocks.dohRecord = signed.record;
+    const { mail } = await mount(theirs.store);
+    await vi.waitFor(() => expect(mail().identities).toHaveLength(2));
+    const lookup = gate();
+    mocks.doh = lookup;
+    return { mail, lookup, lunch: () => mail().threads[0]?.messages[0] };
+  };
+
+  it("settles a message's check when another mailbox is removed meanwhile", async () => {
+    const { mail, lookup, lunch } = await openLunchBesideWork();
+    const loaded = mail().loadBody('t1', 'm1');
+    await act(() => lookup.reached);
+    expect(lunch()?.senderCheck).toEqual({ status: 'checking' });
+
+    await act(() => mail().removeAddress(WORK.address));
+    lookup.open();
+    expect(await act(() => loaded)).toMatchObject({
+      status: 'loaded',
+      senderCheck: { status: 'verified' },
+    });
+    // Not left pending or checking: the removal was not this message's mailbox.
+    expect(lunch()?.bodyStatus).toBeUndefined();
+    expect(lunch()?.senderCheck).toEqual({ status: 'verified', signedBy: 'example.org' });
+  });
+
+  it("never answers a caller that reads once with a pending check after another mailbox's login changed", async () => {
+    const { mail, lookup, lunch } = await openLunchBesideWork();
+    const task = gate();
+    mocks.task = task;
+    const first = mail().loadBody('t1', 'm1');
+    await act(() => task.reached);
+
+    // Editing WORK clears every body entry, and the fetch under way then sets its own.
+    await act(() =>
+      mail().replaceAddress({
+        ...WORK,
+        imap: { ...WORK.imap, host: 'imap.other.example' },
+      } as AddressRecord),
+    );
+    task.open();
+    await act(() => lookup.reached);
+    expect(lunch()?.senderCheck).toEqual({ status: 'checking' });
+
+    let isSettled = false;
+    const second = mail()
+      .loadBody('t1', 'm1')
+      .then(outcome => {
+        isSettled = true;
+        return outcome;
+      });
+    await settle();
+    expect(isSettled).toBe(false);
+
+    lookup.open();
+    expect(await act(() => second)).toMatchObject({
+      status: 'loaded',
+      senderCheck: { status: 'verified', signedBy: 'example.org' },
+    });
+    await act(() => first);
+    // One fetch of the message, not one more for the second caller.
+    expect(mocks.runs.filter(run => run.mailbox === ALICE.address)).toHaveLength(1);
+  });
+
+  it('answers a caller that reads once only when the check has, even with the body on screen', async () => {
+    const { mail, lookup, record } = await openLunch();
+    mocks.dohRecord = record;
+    const first = mail().loadBody('t1', 'm1');
+    await act(() => lookup.reached);
+
+    let settled = false;
+    const second = mail()
+      .loadBody('t1', 'm1')
+      .then(outcome => {
+        settled = true;
+        return outcome;
+      });
+    await settle();
+    expect(settled).toBe(false);
+
+    lookup.open();
+    const outcome = await act(() => second);
+    expect(outcome).toMatchObject({
+      status: 'loaded',
+      senderCheck: { status: 'verified', signedBy: 'example.org' },
+    });
+    expect(await act(() => first)).toEqual(outcome);
   });
 });
 

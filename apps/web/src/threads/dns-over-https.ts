@@ -12,6 +12,11 @@ const NXDOMAIN = 3;
 const TIMEOUT_MS = 8000;
 /** Prefetch checks many messages from the same sender; a key rotated within this stays old for a session at most this long. */
 const CACHE_MS = 10 * 60 * 1000;
+/**
+ * How long a failed lookup is remembered, and how long a resolver that did not answer at all is left
+ * alone. Short: it stands for a moment's trouble, and a retry after it is cheap.
+ */
+const FAILURE_MS = 60 * 1000;
 
 const answerSchema = z.object({
   Status: z.number(),
@@ -56,7 +61,9 @@ const queryTxt = async (
 
 /**
  * `[]` when the name has no TXT record; `null` when the lookup failed. Answers (and in-flight
- * lookups) are kept for the session, failures are not.
+ * lookups) are kept for the session, and a failure briefly (`FAILURE_MS`). When the resolver itself
+ * does not answer (blocked, or too slow for `TIMEOUT_MS`) no name is asked until then: each message
+ * would otherwise wait out the timeout for its own sender.
  */
 export const createTxtLookup = (
   fetchDoh: typeof fetch = fetch,
@@ -64,15 +71,25 @@ export const createTxtLookup = (
 ): TxtLookup => {
   const answers = new Map<
     string,
-    { readonly expiresAt: number; readonly records: Promise<readonly string[] | null> }
+    { expiresAt: number; readonly records: Promise<readonly string[] | null> }
   >();
+  let unreachableUntil = 0;
+  const reachingFetch: typeof fetch = async (input, init) => {
+    try {
+      return await fetchDoh(input, init);
+    } catch (error) {
+      unreachableUntil = now() + FAILURE_MS;
+      throw error;
+    }
+  };
   return async name => {
     const known = answers.get(name);
     if (known !== undefined && known.expiresAt > now()) return known.records;
-    const records = queryTxt(fetchDoh, name);
-    answers.set(name, { expiresAt: now() + CACHE_MS, records });
-    const found = await records;
-    if (found === null && answers.get(name)?.records === records) answers.delete(name);
+    if (unreachableUntil > now()) return null;
+    const entry = { expiresAt: now() + CACHE_MS, records: queryTxt(reachingFetch, name) };
+    answers.set(name, entry);
+    const found = await entry.records;
+    if (found === null) entry.expiresAt = now() + FAILURE_MS;
     return found;
   };
 };

@@ -110,7 +110,7 @@ export const HtmlBody = ({
   messageId: string;
   fromName: string;
   fromAddress: string;
-  /** "Always from" is offered only when this is `verified`; undefined means not known yet. */
+  /** "Always from" is offered only when this is `verified`; undefined means not known yet, `checking` that it is on its way. */
   senderCheck: SenderCheck | undefined;
   inlineImagesTruncated: boolean;
   fallback: ReactNode;
@@ -121,6 +121,9 @@ export const HtmlBody = ({
   const isVerified = senderCheck?.status === 'verified';
   const isTrustedSender = isLoadedByTrust(remoteImages.trustOf(fromAddress), senderCheck);
   const isRemoteAllowed = remoteImages.isConsented(consent) || isTrustedSender;
+  // A trusted sender's message may be about to load by itself, so nothing is offered until the check says.
+  const isAwaitingTrust =
+    senderCheck?.status === 'checking' && remoteImages.trustOf(fromAddress) !== undefined;
   const allowRemoteImages = () => remoteImages.consent(consent);
   // A withheld picture looks like a picture, so the first click on one explains what loading costs.
   const [asksBeforeImageClick, setAsksBeforeImageClick] = useChromePref(
@@ -179,9 +182,9 @@ export const HtmlBody = ({
 
   return (
     <div className="space-y-2">
-      {/* Nothing is offered until the remembered answers are read, or the bar flashes on a
-          message about to load by itself. */}
-      {remoteImages.isReady && hasRemoteImages && !isRemoteAllowed && (
+      {/* Nothing is offered until the remembered answers are read and a trusted sender's check is in,
+          or the bar flashes on a message about to load by itself. */}
+      {remoteImages.isReady && !isAwaitingTrust && hasRemoteImages && !isRemoteAllowed && (
         <div className="flex min-h-11 flex-wrap items-center gap-x-2 lg:min-h-7">
           {/* Pulled out by its padding as a pair, so whichever button starts a line on a phone
               lines up with the text under it. */}

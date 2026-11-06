@@ -23,9 +23,26 @@ export type FetchedBody = {
   /**
    * The From address a DKIM signature vouches for and the domain that signed it, or null. A property
    * of the message, not of the mailbox that received the copy; `senderCheckOf` compares `from` with
-   * the address the reader shows.
+   * the address the reader shows. Always a settled answer: a body that is still being checked is an
+   * `OpenedBody`, and only becomes a `FetchedBody` (the one the cache keeps) once the check is in.
    */
   readonly dkim: { readonly from: string; readonly domain: string } | null;
+};
+
+/** What a sender check came to. */
+export type SenderOutcome = {
+  readonly dkim: FetchedBody['dkim'];
+  /**
+   * False when a key lookup got no answer (`lookup-failed`): the sender may well be signed, so the
+   * body shows as not verified for now and is never kept, and the next open checks it again.
+   */
+  readonly isFinal: boolean;
+};
+
+/** A body readable at once, with its sender check still on its way. `check` never rejects. */
+export type OpenedBody = {
+  readonly body: Omit<FetchedBody, 'dkim'>;
+  readonly check: Promise<SenderOutcome>;
 };
 
 // RFC822.SIZE is checked before BODY.PEEK[], then the received byte count again before parsing.
@@ -206,11 +223,9 @@ const inlineCidImages = (
   return { html: rendered, truncated };
 };
 
-export const parseBody = async (raw: Uint8Array, lookupTxt: TxtLookup): Promise<FetchedBody> => {
-  if (raw.byteLength > MAX_RAW_MESSAGE_BYTES) {
-    throw new Error('Message is too large to open safely');
-  }
-  const [mail, verdict] = await Promise.all([PostalMime.parse(raw), verifySender(raw, lookupTxt)]);
+/** The message's own content: everything `FetchedBody` holds but the check of who sent it. */
+const contentOf = async (raw: Uint8Array): Promise<Omit<FetchedBody, 'dkim'>> => {
+  const mail = await PostalMime.parse(raw);
   // The text part stays even when HTML renders: it is the snippet and the fallback.
   const senderText = mail.text?.trim() ? mail.text : null;
   const text =
@@ -250,22 +265,49 @@ export const parseBody = async (raw: Uint8Array, lookupTxt: TxtLookup): Promise<
     ...(inlinedHtml === null ? {} : { html: inlinedHtml.html }),
     inlineImagesTruncated: inlinedHtml?.truncated ?? false,
     attachments,
-    // ponytail: a lookup that failed (DNS down) stores unverified like any other, and the body
-    // cache keeps it: a missing badge on that message, fixed by clearing the cache. Un-park if
-    // senders are seen unverified for good after an outage.
-    dkim: verdict.status === 'verified' ? { from: verdict.from, domain: verdict.domain } : null,
   };
 };
 
-/** Fetch one message body on the mailbox's live connection. */
-export const fetchBody = async (
+/**
+ * The body as soon as it is parsed, and the sender check beside it, started first so the two
+ * overlap. A caller that shows the body must show the check as pending until `dkim` settles.
+ */
+export const openBody = async (raw: Uint8Array, lookupTxt: TxtLookup): Promise<OpenedBody> => {
+  if (raw.byteLength > MAX_RAW_MESSAGE_BYTES) {
+    throw new Error('Message is too large to open safely');
+  }
+  // `verifySender` is total, so this promise never rejects, even when the parse below throws.
+  const check = verifySender(raw, lookupTxt).then(
+    (verdict): SenderOutcome => ({
+      dkim: verdict.status === 'verified' ? { from: verdict.from, domain: verdict.domain } : null,
+      isFinal: !(verdict.status === 'unverified' && verdict.reason === 'lookup-failed'),
+    }),
+  );
+  return { body: await contentOf(raw), check };
+};
+
+/**
+ * The whole body, check included: for a caller that reads once and cannot show a check pending.
+ * `isFinal` says whether the body may be kept.
+ */
+export const parseBody = async (
+  raw: Uint8Array,
+  lookupTxt: TxtLookup,
+): Promise<{ readonly body: FetchedBody; readonly isFinal: boolean }> => {
+  const { body, check } = await openBody(raw, lookupTxt);
+  const { dkim, isFinal } = await check;
+  return { body: { ...body, dkim }, isFinal };
+};
+
+/** Fetch one message on the mailbox's live connection and open it: the body now, its check to follow. */
+export const fetchOpenBody = async (
   run: RunTask,
   /** The IMAP folder name the uid belongs to, from the folder's sync mark. */
   folderName: string,
   uid: number,
   expectedRawSize: number | undefined,
   lookupTxt: TxtLookup,
-): Promise<Result<FetchedBody, MailConnectionFailure>> => {
+): Promise<Result<OpenedBody, MailConnectionFailure>> => {
   if (
     expectedRawSize !== undefined &&
     (!Number.isSafeInteger(expectedRawSize) || expectedRawSize < 0)
@@ -296,7 +338,7 @@ export const fetchBody = async (
   if (!raw.ok) return raw;
   // After the task: the connection is not held while DNS answers.
   try {
-    return { ok: true, value: await parseBody(raw.value, lookupTxt) };
+    return { ok: true, value: await openBody(raw.value, lookupTxt) };
   } catch (error) {
     return {
       ok: false,
@@ -305,23 +347,13 @@ export const fetchBody = async (
   }
 };
 
-/**
- * Fetches the body of one copy, off its folder's sync mark, and caches it when the message is small
- * enough. A copy read under another `UIDVALIDITY` is refused: its uid may now name other mail.
- */
-export const fetchBodyAt = async (
-  run: RunTask,
-  /** The copy's folder in the mail cache: its sync mark, and where the body is kept. */
+/** The folder name a copy's uid belongs to, unless its folder never synced or was renumbered: a stale uid may now name other mail. */
+const folderNameOf = async (
   folderCache: {
     readonly getSync: () => Promise<{ readonly name: string; readonly uidValidity: number } | null>;
-    readonly putBody: (uid: number, body: FetchedBody) => Promise<void>;
   },
   copy: Omit<Location, 'mailbox'>,
-  expectedRawSize: number | undefined,
-  lookupTxt: TxtLookup,
-  /** The cache this was fetched for has been cleared since (a lock, an address removed): keep nothing. */
-  isStale: () => boolean = () => false,
-): Promise<Result<FetchedBody, MailConnectionFailure>> => {
+): Promise<Result<string, MailConnectionFailure>> => {
   const mark = await folderCache.getSync();
   if (mark === null) {
     return { ok: false, error: { kind: 'error', detail: `${copy.folder} has not synced` } };
@@ -329,14 +361,70 @@ export const fetchBodyAt = async (
   if (mark.uidValidity !== copy.uidValidity) {
     return { ok: false, error: { kind: 'error', detail: renumberedText(copy.folder) } };
   }
-  const res = await fetchBody(run, mark.name, copy.uid, expectedRawSize, lookupTxt);
-  if (
-    res.ok &&
-    !isStale() &&
-    (expectedRawSize ?? Number.POSITIVE_INFINITY) <= MAX_CACHED_BODY_BYTES
-  ) {
+  return { ok: true, value: mark.name };
+};
+
+/** The cache this was fetched for: what it is told of the copy's folder, and where a body is kept. */
+type BodyFolderCache = {
+  readonly getSync: () => Promise<{ readonly name: string; readonly uidValidity: number } | null>;
+  readonly putBody: (uid: number, body: FetchedBody) => Promise<void>;
+};
+
+const isCacheable = (expectedRawSize: number | undefined) =>
+  (expectedRawSize ?? Number.POSITIVE_INFINITY) <= MAX_CACHED_BODY_BYTES;
+
+/**
+ * Fetches the body of one copy, off its folder's sync mark, waits for its sender check and caches
+ * it when the message is small enough and the check is final. A copy read under another
+ * `UIDVALIDITY` is refused: its uid may now name other mail.
+ */
+export const fetchBodyAt = async (
+  run: RunTask,
+  folderCache: BodyFolderCache,
+  copy: Omit<Location, 'mailbox'>,
+  expectedRawSize: number | undefined,
+  lookupTxt: TxtLookup,
+  /** The cache this was fetched for has been cleared since (a lock, an address removed): keep nothing. */
+  isStale: () => boolean = () => false,
+): Promise<Result<FetchedBody, MailConnectionFailure>> => {
+  const folderName = await folderNameOf(folderCache, copy);
+  if (!folderName.ok) return folderName;
+  const opened = await fetchOpenBody(run, folderName.value, copy.uid, expectedRawSize, lookupTxt);
+  if (!opened.ok) return opened;
+  const { dkim, isFinal } = await opened.value.check;
+  const body = { ...opened.value.body, dkim };
+  if (isFinal && !isStale() && isCacheable(expectedRawSize)) {
     // Best effort: a body that did not cache is fetched again next time.
-    await folderCache.putBody(copy.uid, res.value).catch(() => {});
+    await folderCache.putBody(copy.uid, body).catch(() => {});
+  }
+  return { ok: true, value: body };
+};
+
+/**
+ * `fetchBodyAt` for a reader that shows the body at once. The cache keeps a body with its check
+ * settled and final, never half of one, so it is written when `check` lands; a tab closed before
+ * then, or a lookup that got no answer, leaves nothing, and the next open fetches the message again.
+ */
+export const fetchOpenBodyAt = async (
+  run: RunTask,
+  folderCache: BodyFolderCache,
+  copy: Omit<Location, 'mailbox'>,
+  expectedRawSize: number | undefined,
+  lookupTxt: TxtLookup,
+  isStale: () => boolean = () => false,
+): Promise<Result<OpenedBody, MailConnectionFailure>> => {
+  const folderName = await folderNameOf(folderCache, copy);
+  if (!folderName.ok) return folderName;
+  const res = await fetchOpenBody(run, folderName.value, copy.uid, expectedRawSize, lookupTxt);
+  if (res.ok && isCacheable(expectedRawSize)) {
+    const { body, check } = res.value;
+    void (async () => {
+      const { dkim, isFinal } = await check;
+      // Best effort, and judged when the check lands: the cache may have been cleared meanwhile.
+      if (isFinal && !isStale()) {
+        await folderCache.putBody(copy.uid, { ...body, dkim }).catch(() => {});
+      }
+    })();
   }
   return res;
 };

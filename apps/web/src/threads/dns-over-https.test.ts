@@ -92,17 +92,60 @@ describe('createTxtLookup', () => {
     expect(asked).toHaveLength(2);
   });
 
-  it('does not keep a failed lookup, so the next message tries again', async () => {
-    let isDown = true;
-    const { fetchDoh, asked } = server(() =>
-      isDown
-        ? answer({ Status: 2 })
-        : answer({ Status: 0, Answer: [{ name: NAME, type: 16, data: '"p=KEY"' }] }),
-    );
-    const lookup = createTxtLookup(fetchDoh);
-    expect(await lookup(NAME)).toBeNull();
-    isDown = false;
-    expect(await lookup(NAME)).toEqual(['p=KEY']);
-    expect(asked).toHaveLength(2);
+  describe('when the lookup fails', () => {
+    const found = () => answer({ Status: 0, Answer: [{ name: NAME, type: 16, data: '"p=KEY"' }] });
+
+    it('remembers a failed name briefly, so the same sender is not asked again at once', async () => {
+      let clock = 0;
+      let isDown = true;
+      const { fetchDoh, asked } = server(() => (isDown ? answer({ Status: 2 }) : found()));
+      const lookup = createTxtLookup(fetchDoh, () => clock);
+      expect(await lookup(NAME)).toBeNull();
+      isDown = false;
+      clock += 30 * 1000;
+      expect(await lookup(NAME)).toBeNull();
+      expect(asked).toHaveLength(1);
+      // Gone after a minute: the next message from the sender tries again.
+      clock += 31 * 1000;
+      expect(await lookup(NAME)).toEqual(['p=KEY']);
+      expect(asked).toHaveLength(2);
+    });
+
+    it('asks other names while only one was refused', async () => {
+      const { fetchDoh, asked } = server(() => answer({ Status: 2 }));
+      const lookup = createTxtLookup(fetchDoh);
+      await lookup(NAME);
+      await lookup('fm1._domainkey.fastmail.com');
+      expect(asked).toHaveLength(2);
+    });
+
+    it('stops asking every name once the resolver itself did not answer, until a minute has passed', async () => {
+      let clock = 0;
+      let isBlocked = true;
+      const { fetchDoh, asked } = server(() => {
+        if (isBlocked) throw new DOMException('The operation timed out.', 'TimeoutError');
+        return found();
+      });
+      const lookup = createTxtLookup(fetchDoh, () => clock);
+      expect(await lookup(NAME)).toBeNull();
+      isBlocked = false;
+      // Another sender's key: not asked, since the resolver is known not to answer.
+      clock += 30 * 1000;
+      expect(await lookup('fm1._domainkey.fastmail.com')).toBeNull();
+      expect(asked).toHaveLength(1);
+      clock += 31 * 1000;
+      expect(await lookup('fm1._domainkey.fastmail.com')).toEqual(['p=KEY']);
+      expect(asked).toHaveLength(2);
+    });
+
+    it('asks once for a name many messages need at the same time, even when it fails', async () => {
+      const { fetchDoh, asked } = server(() => {
+        throw new TypeError('Failed to fetch');
+      });
+      const lookup = createTxtLookup(fetchDoh);
+      const together = await Promise.all(Array.from({ length: 5 }, () => lookup(NAME)));
+      expect(together).toEqual(Array.from({ length: 5 }, () => null));
+      expect(asked).toHaveLength(1);
+    });
   });
 });

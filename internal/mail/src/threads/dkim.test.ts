@@ -1,5 +1,5 @@
 import { KeyObject } from 'node:crypto';
-import { beforeAll, describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it, vi } from 'vitest';
 import { type SignOptions, signMessage } from '../testing/dkim-signer.ts';
 import { type TxtLookup, verifySender } from './dkim.ts';
 
@@ -273,15 +273,21 @@ describe('verifySender: alignment', () => {
   });
 });
 
+const signedTwiceForLookups = async () => {
+  const lower = await signRsa(MESSAGE, { selector: 'low' });
+  const upper = await signRsa(lower, { selector: 'up' });
+  return { upper };
+};
+
 describe('verifySender: keys', () => {
   it('refuses a revoked key', async () => {
     const revoked = { 'rsa._domainkey.example.com': ['v=DKIM1; k=rsa; p='] };
     expect(await verify(await signRsa(MESSAGE), revoked)).toEqual(unverified('key-revoked'));
   });
 
-  it('refuses when DNS fails, has nothing, or throws', async () => {
+  it('refuses when DNS fails, has nothing, or throws, and says which', async () => {
     const signed = bytes(await signRsa(MESSAGE));
-    expect(await verifySender(signed, async () => null)).toEqual(unverified('key-unavailable'));
+    expect(await verifySender(signed, async () => null)).toEqual(unverified('lookup-failed'));
     expect(await verifySender(signed, async () => [])).toEqual(unverified('key-unavailable'));
     expect(await verifySender(signed, async () => ['v=spf1 -all'])).toEqual(
       unverified('key-unavailable'),
@@ -290,7 +296,15 @@ describe('verifySender: keys', () => {
       await verifySender(signed, () => {
         throw new Error('offline');
       }),
-    ).toEqual(unverified('key-unavailable'));
+    ).toEqual(unverified('lookup-failed'));
+  });
+
+  it('reports a failed lookup over another signature’s missing key, since a retry may verify it', async () => {
+    const { upper } = await signedTwiceForLookups();
+    const verdict = await verifySender(bytes(upper), async name =>
+      name.startsWith('up.') ? [] : null,
+    );
+    expect(verdict).toEqual(unverified('lookup-failed'));
   });
 
   it('refuses rsa-sha1 even when the signature is good', async () => {
@@ -405,6 +419,75 @@ describe('verifySender: several signatures', () => {
     const { lookup, asked } = zone(records);
     expect(await verifySender(bytes(signed), lookup)).toEqual(unverified('bad-signature'));
     expect(asked).toHaveLength(5);
+  });
+});
+
+describe('verifySender: signatures checked at once', () => {
+  /** A zone whose lookups wait to be answered, by name, in whatever order a test chooses. */
+  const slowZone = (records: Readonly<Record<string, readonly string[]>>) => {
+    const waiting = new Map<string, PromiseWithResolvers<readonly string[]>>();
+    const lookup: TxtLookup = name => {
+      const answer = Promise.withResolvers<readonly string[]>();
+      waiting.set(name, answer);
+      return answer.promise;
+    };
+    return {
+      lookup,
+      asked: () => [...waiting.keys()],
+      answer: (name: string) => waiting.get(name)?.resolve(records[name] ?? []),
+    };
+  };
+
+  const signedTwice = async () => {
+    const lower = await signRsa(MESSAGE, { selector: 'low' });
+    const upper = await signRsa(lower, { domain: 'mail.example.com', selector: 'up' });
+    return { upper };
+  };
+
+  it('asks for every key before any is answered, so a slow resolver is waited on once', async () => {
+    const { upper } = await signedTwice();
+    const key = keys['rsa._domainkey.example.com'] ?? [];
+    const zoned = slowZone({
+      'low._domainkey.example.com': key,
+      'up._domainkey.mail.example.com': key,
+    });
+    const verdict = verifySender(bytes(upper), zoned.lookup);
+    await vi.waitFor(() =>
+      expect(zoned.asked().toSorted()).toEqual([
+        'low._domainkey.example.com',
+        'up._domainkey.mail.example.com',
+      ]),
+    );
+    zoned.answer('low._domainkey.example.com');
+    zoned.answer('up._domainkey.mail.example.com');
+    expect((await verdict).status).toBe('verified');
+  });
+
+  it('reports the topmost signature that verifies, whichever lookup answers first', async () => {
+    const { upper } = await signedTwice();
+    const key = keys['rsa._domainkey.example.com'] ?? [];
+    const zoned = slowZone({
+      'low._domainkey.example.com': key,
+      'up._domainkey.mail.example.com': key,
+    });
+    const verdict = verifySender(bytes(upper), zoned.lookup);
+    await vi.waitFor(() => expect(zoned.asked()).toHaveLength(2));
+    zoned.answer('low._domainkey.example.com');
+    await new Promise(resolve => setTimeout(resolve, 10));
+    zoned.answer('up._domainkey.mail.example.com');
+    expect(await verdict).toEqual({ ...VERIFIED, domain: 'mail.example.com' });
+  });
+
+  it('verifies on a lower signature when the top one has no key, however slowly', async () => {
+    const { upper } = await signedTwice();
+    const zoned = slowZone({
+      'low._domainkey.example.com': keys['rsa._domainkey.example.com'] ?? [],
+    });
+    const verdict = verifySender(bytes(upper), zoned.lookup);
+    await vi.waitFor(() => expect(zoned.asked()).toHaveLength(2));
+    zoned.answer('low._domainkey.example.com');
+    zoned.answer('up._domainkey.mail.example.com');
+    expect(await verdict).toEqual(VERIFIED);
   });
 });
 

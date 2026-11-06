@@ -1,9 +1,17 @@
 import { DEFAULT_MAX_LITERAL_BYTES } from '@yozz.app/imap';
-import { beforeAll, describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it, vi } from 'vitest';
 import { signMessage } from '../testing/dkim-signer.ts';
 import { stubImapClient } from '../testing/fake-imap-client.ts';
 import { memoryMailCache } from '../testing/memory-mail-cache.ts';
-import { fetchBody, fetchBodyAt, htmlHasWordsTextLacks, htmlToText, parseBody } from './bodies.ts';
+import {
+  fetchBodyAt,
+  fetchOpenBody,
+  fetchOpenBodyAt,
+  htmlHasWordsTextLacks,
+  htmlToText,
+  openBody,
+  parseBody,
+} from './bodies.ts';
 import { MAX_CACHED_BODY_BYTES } from './body-state.ts';
 import type { TxtLookup } from './dkim.ts';
 
@@ -11,7 +19,8 @@ const raw = (text: string) => new TextEncoder().encode(text.replace(/\n/g, '\r\n
 
 const noKeys: TxtLookup = async () => [];
 
-const parse = (data: Uint8Array, lookupTxt: TxtLookup = noKeys) => parseBody(data, lookupTxt);
+const parse = async (data: Uint8Array, lookupTxt: TxtLookup = noKeys) =>
+  (await parseBody(data, lookupTxt)).body;
 
 describe('parseBody', () => {
   it('an HTML-only message reduces to paragraphs but does not claim a text part', async () => {
@@ -275,9 +284,50 @@ ${'<div>'.repeat(2_000)}deep<script>garbage()</script><style>.garbage{}</style>$
       expect((await parse(new TextEncoder().encode(other), lookup)).dkim).toBeNull();
     });
 
-    it('keeps none when the key could not be looked up', async () => {
-      const body = await parse(new TextEncoder().encode(await signed()), async () => null);
-      expect(body.dkim).toBeNull();
+    it('keeps none when the key could not be looked up, and says the answer is not final', async () => {
+      const signedBytes = new TextEncoder().encode(await signed());
+      const failed = await parseBody(signedBytes, async () => null);
+      expect(failed.body.dkim).toBeNull();
+      expect(failed.isFinal).toBe(false);
+      // A name with no key is an answer: a later check would find the same.
+      const none = await parseBody(signedBytes, async () => []);
+      expect(none.body.dkim).toBeNull();
+      expect(none.isFinal).toBe(true);
+    });
+
+    it('opens the body while the key is still being looked up, and the check settles after', async () => {
+      const key = Promise.withResolvers<readonly string[]>();
+      const opened = await openBody(new TextEncoder().encode(await signed()), () => key.promise);
+      // Readable now, with the lookup unanswered.
+      expect(opened.body.paragraphs).toEqual(['hi']);
+      expect('dkim' in opened.body).toBe(false);
+      key.resolve(keys['s._domainkey.news.example'] ?? []);
+      expect(await opened.check).toEqual({
+        dkim: { from: 'digest@news.example', domain: 'news.example' },
+        isFinal: true,
+      });
+    });
+
+    it('settles to none, never a throw, when the lookup throws', async () => {
+      const opened = await openBody(new TextEncoder().encode(await signed()), async () => {
+        throw new Error('offline');
+      });
+      expect(await opened.check).toEqual({ dkim: null, isFinal: false });
+    });
+
+    it('parseBody waits for the check, which is what the CLI reads once', async () => {
+      const key = Promise.withResolvers<readonly string[]>();
+      let isSettled = false;
+      const parsing = parse(new TextEncoder().encode(await signed()), () => key.promise).then(
+        body => {
+          isSettled = true;
+          return body;
+        },
+      );
+      await new Promise(resolve => setTimeout(resolve, 20));
+      expect(isSettled).toBe(false);
+      key.resolve(keys['s._domainkey.news.example'] ?? []);
+      expect((await parsing).dkim).toEqual({ from: 'digest@news.example', domain: 'news.example' });
     });
   });
 });
@@ -424,15 +474,15 @@ ${html}
   });
 });
 
-describe('fetchBody size boundary', () => {
+describe('fetchOpenBody size boundary', () => {
   const unusedRun = (async () => {
     throw new Error('run should not be called');
-  }) as Parameters<typeof fetchBody>[0];
+  }) as Parameters<typeof fetchOpenBody>[0];
 
   it.each([-1, 1.5, Number.MAX_SAFE_INTEGER + 1])(
     'refuses an invalid advertised size (%s) before connecting',
     async size => {
-      await expect(fetchBody(unusedRun, 'INBOX', 1, size, noKeys)).resolves.toEqual({
+      await expect(fetchOpenBody(unusedRun, 'INBOX', 1, size, noKeys)).resolves.toEqual({
         ok: false,
         error: { kind: 'error', detail: 'Message size is unavailable' },
       });
@@ -441,7 +491,7 @@ describe('fetchBody size boundary', () => {
 
   it('refuses an oversized message before connecting', async () => {
     await expect(
-      fetchBody(unusedRun, 'INBOX', 1, DEFAULT_MAX_LITERAL_BYTES + 1, noKeys),
+      fetchOpenBody(unusedRun, 'INBOX', 1, DEFAULT_MAX_LITERAL_BYTES + 1, noKeys),
     ).resolves.toEqual({
       ok: false,
       error: { kind: 'error', detail: 'Message is too large to open safely' },
@@ -550,6 +600,30 @@ describe('fetchBodyAt', () => {
     expect(await folder.getBody(1)).toBeNull();
   });
 
+  it('hands over a body whose check got no answer but does not cache it', async () => {
+    const key = await crypto.subtle.generateKey({ name: 'Ed25519' }, true, ['sign', 'verify']);
+    const signedMessage = await signMessage(
+      ['From: a@x.example', 'Subject: Hi', '', 'Hello.', ''].join('\r\n'),
+      {
+        key: (key as CryptoKeyPair).privateKey,
+        algorithm: 'ed25519-sha256',
+        domain: 'x.example',
+        selector: 's',
+        headers: ['from', 'subject'],
+      },
+    );
+    const folder = await synced();
+    const res = await fetchBodyAt(
+      runFor(new TextEncoder().encode(signedMessage)),
+      folder,
+      { folder: 'archive', uidValidity: 7, uid: 1 },
+      100,
+      async () => null,
+    );
+    expect(res).toMatchObject({ ok: true, value: { paragraphs: ['Hello.'], dkim: null } });
+    expect(await folder.getBody(1)).toBeNull();
+  });
+
   it('leaves a large body out of the cache', async () => {
     const folder = await synced();
     await fetchBodyAt(
@@ -576,5 +650,148 @@ describe('fetchBodyAt', () => {
       error: { kind: 'error', detail: 'archive was renumbered; reopen the conversation' },
     });
     expect(fetched).toEqual([]);
+  });
+});
+
+describe('fetchOpenBodyAt', () => {
+  const message = raw('From: a@x\nSubject: Hi\n\nHello there.');
+  const copy = { folder: 'archive', uidValidity: 7, uid: 1 } as const;
+  const synced = async () => {
+    const folder = memoryMailCache().folder('archive');
+    await folder.putSync({ name: 'Archive', uidValidity: 7, lastUid: 1, complete: true });
+    return folder;
+  };
+  /** A message signed by x.example, and a lookup that answers when told to. */
+  const signedByX = async () => {
+    const key = (await crypto.subtle.generateKey({ name: 'Ed25519' }, true, [
+      'sign',
+      'verify',
+    ])) as CryptoKeyPair;
+    const publicKey = new Uint8Array(
+      await crypto.subtle.exportKey('raw', key.publicKey),
+    ).toBase64();
+    const signed = await signMessage(
+      ['From: a@x.example', 'Subject: Hi', '', 'Hello.', ''].join('\r\n'),
+      {
+        key: key.privateKey,
+        algorithm: 'ed25519-sha256',
+        domain: 'x.example',
+        selector: 's',
+        headers: ['from', 'subject'],
+      },
+    );
+    const answer = Promise.withResolvers<readonly string[]>();
+    return {
+      raw: new TextEncoder().encode(signed),
+      answer,
+      publish: () => answer.resolve([`v=DKIM1; k=ed25519; p=${publicKey}`]),
+    };
+  };
+  const servedRun =
+    (served: Uint8Array): Parameters<typeof fetchOpenBodyAt>[0] =>
+    task =>
+      task.run({
+        ...stubImapClient({ fetchRaw: async () => ({ ok: true, value: served }) }),
+        ensureSelected: async name => ({
+          ok: true,
+          value: {
+            name,
+            exists: 1,
+            uidValidity: 7,
+            uidNext: 2,
+            flags: [],
+            permanentFlags: [],
+            readOnly: false,
+          },
+        }),
+      });
+
+  const run = servedRun(message);
+
+  it('hands the body over before the check lands, and caches it only once it has', async () => {
+    const folder = await synced();
+    const signed = await signedByX();
+    const res = await fetchOpenBodyAt(
+      servedRun(signed.raw),
+      folder,
+      copy,
+      100,
+      () => signed.answer.promise,
+    );
+    if (!res.ok) throw new Error('not fetched');
+    expect(res.value.body.paragraphs).toEqual(['Hello.']);
+    // Pending: not kept, so a reload cannot find a body claiming to be unchecked or unsigned.
+    expect(await folder.getBody(1)).toBeNull();
+
+    signed.publish();
+    expect((await res.value.check).dkim).toEqual({ from: 'a@x.example', domain: 'x.example' });
+    await vi.waitFor(async () =>
+      expect(await folder.getBody(1)).toMatchObject({
+        paragraphs: ['Hello.'],
+        dkim: { from: 'a@x.example', domain: 'x.example' },
+      }),
+    );
+  });
+
+  it('keeps nothing when the cache went stale while the check was pending', async () => {
+    const folder = await synced();
+    const signed = await signedByX();
+    let isStale = false;
+    const res = await fetchOpenBodyAt(
+      servedRun(signed.raw),
+      folder,
+      copy,
+      100,
+      () => signed.answer.promise,
+      () => isStale,
+    );
+    if (!res.ok) throw new Error('not fetched');
+    isStale = true;
+    signed.publish();
+    await res.value.check;
+    await new Promise(resolve => setTimeout(resolve, 10));
+    expect(await folder.getBody(1)).toBeNull();
+  });
+
+  it('shows a lookup that got no answer as not verified but keeps nothing, so the next open checks again', async () => {
+    const folder = await synced();
+    const signed = await signedByX();
+    const res = await fetchOpenBodyAt(servedRun(signed.raw), folder, copy, 100, async () => null);
+    if (!res.ok) throw new Error('not fetched');
+    expect(await res.value.check).toEqual({ dkim: null, isFinal: false });
+    await new Promise(resolve => setTimeout(resolve, 10));
+    expect(await folder.getBody(1)).toBeNull();
+  });
+
+  it('keeps a body whose signer has no key: that answer is final', async () => {
+    const folder = await synced();
+    const signed = await signedByX();
+    const res = await fetchOpenBodyAt(servedRun(signed.raw), folder, copy, 100, async () => []);
+    if (!res.ok) throw new Error('not fetched');
+    await res.value.check;
+    await vi.waitFor(async () => expect(await folder.getBody(1)).toMatchObject({ dkim: null }));
+  });
+
+  it('leaves a large body out of the cache', async () => {
+    const folder = await synced();
+    const res = await fetchOpenBodyAt(run, folder, copy, MAX_CACHED_BODY_BYTES + 1, noKeys);
+    if (!res.ok) throw new Error('not fetched');
+    await res.value.check;
+    await new Promise(resolve => setTimeout(resolve, 10));
+    expect(await folder.getBody(1)).toBeNull();
+  });
+
+  it('refuses a copy whose folder was renumbered, as fetchBodyAt does', async () => {
+    const res = await fetchOpenBodyAt(
+      run,
+      await synced(),
+      { ...copy, uidValidity: 6 },
+      100,
+      noKeys,
+    );
+    expect(res).toEqual({
+      ok: false,
+      error: { kind: 'error', detail: 'archive was renumbered; reopen the conversation' },
+    });
   });
 });

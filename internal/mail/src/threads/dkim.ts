@@ -41,8 +41,10 @@ export type UnverifiedReason =
   /** `l=` is not the whole body: anything after it would be unsigned. */
   | 'partial-body'
   | 'body-changed'
-  /** The lookup failed, or the name holds no DKIM key record. */
+  /** DNS answered, and the name holds no DKIM key record. */
   | 'key-unavailable'
+  /** DNS did not answer (an error, a timeout, a throw): a later check may find the key, so this verdict is not final. */
+  | 'lookup-failed'
   /** An empty `p=`. */
   | 'key-revoked'
   /** The record or its key is unreadable, or the record's `k=`, `h=` or `s=` rules this signature out. */
@@ -319,7 +321,7 @@ const keyFor = async (
   const records = await Promise.try(() =>
     lookupTxt(`${signature.selector}._domainkey.${signature.domain}`),
   ).catch(() => null);
-  if (records === null) return 'key-unavailable';
+  if (records === null) return 'lookup-failed';
   const tags = records
     .map(parseTagList)
     .find(
@@ -406,9 +408,14 @@ const verifySignature = async (
     : unverified('bad-signature');
 };
 
+const isLookupFailed = (verdict: DkimVerdict) =>
+  verdict.status === 'unverified' && verdict.reason === 'lookup-failed';
+
 /**
  * Verified when one of the first `MAX_SIGNATURES` DKIM signatures, top first, is valid and aligned
- * with the single From. Total: malformed input is `unverified`, never a throw.
+ * with the single From. Total: malformed input is `unverified`, never a throw. The signatures are
+ * checked at once, since each may wait on DNS, and the verdict is still the topmost one that
+ * verifies: it does not depend on which lookup answers first.
  */
 export const verifySender = async (raw: Uint8Array, lookupTxt: TxtLookup): Promise<DkimVerdict> => {
   const message = splitMessage(raw);
@@ -425,12 +432,18 @@ export const verifySender = async (raw: Uint8Array, lookupTxt: TxtLookup): Promi
     digests.set(canonicalization, digest);
     return digest;
   };
+  const checks = fields
+    .slice(0, MAX_SIGNATURES)
+    .map(field => verifySignature(message, field, from, lookupTxt, bodyDigest));
   const verdicts: DkimVerdict[] = [];
-  for (const field of fields.slice(0, MAX_SIGNATURES)) {
-    const verdict = await verifySignature(message, field, from, lookupTxt, bodyDigest);
+  for (const check of checks) {
+    const verdict = await check;
     if (verdict.status === 'verified') return verdict;
     verdicts.push(verdict);
   }
-  // The top signature's reason: usually the newest hop's, such as a mailing list's.
-  return verdicts[0] ?? { status: 'unverified', reason: 'no-signature' };
+  // A lookup that failed first, since a later check may verify that signature; else the top
+  // signature's reason, usually the newest hop's, such as a mailing list's.
+  return (
+    verdicts.find(isLookupFailed) ?? verdicts[0] ?? { status: 'unverified', reason: 'no-signature' }
+  );
 };

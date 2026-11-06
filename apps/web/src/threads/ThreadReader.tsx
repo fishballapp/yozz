@@ -19,7 +19,7 @@ import {
 import { Link } from '@tanstack/react-router';
 import { replyAllCc } from '@yozz.app/mail/compose/seed';
 import { movesOffered } from '@yozz.app/mail/threads/reconcile';
-import type { ThreadState } from '@yozz.app/mail/threads/thread';
+import type { SenderCheck, ThreadState } from '@yozz.app/mail/threads/thread';
 import {
   addresseesOf,
   inboxesOf,
@@ -27,7 +27,6 @@ import {
   type Message,
   newestInbound,
   type Recipient,
-  signedByOf,
 } from '@yozz.app/mail/threads/thread';
 import { fullTime } from '@yozz.app/mail/time';
 import { cn } from 'cn';
@@ -90,6 +89,15 @@ const Detail = ({ term, children }: { term: string; children: ReactNode }) => (
   </div>
 );
 
+/** What the check of who signed a message has to say; a check still under way says so, not that it failed. */
+const SignedBy = ({ check }: { check: SenderCheck }) => {
+  if (check.status === 'checking') return 'checking…';
+  if (check.status === 'unverified') return "couldn't be verified";
+  return (
+    <span className="font-mono text-paper-dim [overflow-wrap:anywhere]">{check.signedBy}</span>
+  );
+};
+
 /** Who and where, as one table: the popover and the inline block both show these rows. */
 const DetailsTable = ({
   message,
@@ -99,7 +107,6 @@ const DetailsTable = ({
   ownedAddresses: readonly string[];
 }) => {
   const inboxes = inboxesOf(message);
-  const signedBy = signedByOf(message.senderCheck);
 
   return (
     <dl className="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-4 gap-y-1.5 text-2xs">
@@ -121,14 +128,10 @@ const DetailsTable = ({
           ownedAddresses={ownedAddresses}
         />
       </Detail>
-      {/* Received mail whose body has been checked: your own copies and drafts have no sender to check. */}
+      {/* Received mail whose body has arrived: your own copies and drafts have no sender to check. */}
       {inboxes.length > 0 && message.senderCheck !== undefined && (
         <Detail term="signed by">
-          {signedBy === null ? (
-            "couldn't be verified"
-          ) : (
-            <span className="font-mono text-paper-dim [overflow-wrap:anywhere]">{signedBy}</span>
-          )}
+          <SignedBy check={message.senderCheck} />
         </Detail>
       )}
       {message.replyTo !== undefined && (
