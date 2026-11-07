@@ -16,6 +16,7 @@ import {
   withoutMailboxPreviews,
 } from '@yozz.app/mail/threads/body-state';
 import type { MailCache } from '@yozz.app/mail/threads/cache';
+import { createSnapshotWriter, restoreSnapshot } from '@yozz.app/mail/threads/cache-snapshot';
 import { groupThreads, layThreads } from '@yozz.app/mail/threads/hydrate';
 import {
   type FolderWindow,
@@ -271,6 +272,13 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
   const [lookupTxt] = useState(() => createTxtLookup());
   const sessionRef = useRef(session);
   sessionRef.current = session;
+  /** Writes each mailbox's list to the vault after its syncs, for a device that has none yet. */
+  const snapshotWriter = useMemo(
+    () => (session === null ? null : createSnapshotWriter(session)),
+    [session],
+  );
+  const snapshotWriterRef = useRef(snapshotWriter);
+  snapshotWriterRef.current = snapshotWriter;
   const [olderInFlight, setOlderInFlight] = useState<Readonly<Record<string, boolean>>>({});
   const [isLoadingOlderInList, setIsLoadingOlderInList] = useState(false);
 
@@ -650,6 +658,8 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
       const generation = sessionGeneration.current;
       const runOn = bindRunOn();
       const userId = userIdRef.current;
+      const session = sessionRef.current;
+      const snapshots = snapshotWriterRef.current;
       if (userId === null) return Promise.resolve();
       const entry: { dirty: SyncScope | null; isTorn: boolean; promise: Promise<void> } = {
         dirty: scope,
@@ -669,6 +679,17 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
           // The cache is the list until the server answers.
           if (!hydratedRef.current.has(address)) {
             hydratedRef.current.add(address);
+            // A device with no cache of this mailbox starts from the vault's copy of its list.
+            if (session !== null) {
+              await restoreSnapshot({
+                store: session.store,
+                files: session.files,
+                cache,
+                mailbox,
+                isStale,
+              });
+              if (isStale()) return;
+            }
             const { cachedSummaries, cachedPreviews } = await import(
               '@yozz.app/mail/threads/hydrate'
             );
@@ -761,6 +782,7 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
                 // The server's flags just arrived; an earlier refused write is moot.
                 setMailError(null);
               }
+              if (!isStale()) void snapshots?.save(mailbox, cache);
               void prefetchBodies(
                 runOn(mailbox),
                 cache,

@@ -5,12 +5,18 @@ import type { Folder } from '../threads/thread.ts';
 
 /** A `MailCache` in memory, for tests of what reads and writes one. */
 export const memoryMailCache = (): MailCache => {
-  const folders = new Map<Folder, FolderCache>();
-  const folderCache = (): FolderCache => {
+  type EmptiableFolderCache = FolderCache & { readonly empty: () => void };
+  const folders = new Map<Folder, EmptiableFolderCache>();
+  const folderCache = (): EmptiableFolderCache => {
     let sync: FolderSync | null = null;
     const summaries = new Map<number, ImapMessageSummary>();
     const bodies = new Map<number, FetchedBody>();
     return {
+      empty: () => {
+        sync = null;
+        summaries.clear();
+        bodies.clear();
+      },
       getSync: async () => sync,
       putSync: async next => {
         sync = next;
@@ -44,8 +50,9 @@ export const memoryMailCache = (): MailCache => {
       folders.set(folder, created);
       return created;
     },
+    // In place, as a store's rows are: a sync holding a folder's cache writes on into it.
     clear: async () => {
-      folders.clear();
+      for (const folder of folders.values()) folder.empty();
     },
   };
 };

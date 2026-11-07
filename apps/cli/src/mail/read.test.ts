@@ -407,7 +407,7 @@ layer(NodeServices.layer)(it => {
           }),
       );
 
-      it.effect('--remote-images saves nothing, and reads the vault only', () =>
+      it.effect('--remote-images saves no consent: the only writes are the cache snapshot', () =>
         Effect.gen(function* () {
           const { world, homes, server, servers } = yield* makeMailWorld();
           server.deliver('INBOX', mail(1, { html: HTML }));
@@ -415,7 +415,13 @@ layer(NodeServices.layer)(it => {
             ['read', 'mid/<m1@stripe.com>', '--serve-html', '--remote-images'],
             { fetch: world.fetch, homes, servers },
           );
-          expect(world.calls.every(({ method }) => method === 'GET')).toBe(true);
+          const writes = world.calls.filter(({ method }) => method !== 'GET');
+          expect(
+            writes.every(
+              ({ url }) =>
+                url.includes('/vault/records/cache-snapshot/') || url.includes('/vault/files/'),
+            ),
+          ).toBe(true);
           yield* Fiber.interrupt(run);
         }),
       );

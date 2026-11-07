@@ -27,9 +27,11 @@ import { createServer as createViteServer, type Plugin } from 'vite';
 type UnlockModule = typeof import('../src/vault/unlock');
 type AuthModule = typeof import('../src/vault/auth-client');
 type CollectModule = typeof import('@yozz.app/mail/vault/collect-files');
+type SnapshotModule = typeof import('@yozz.app/mail/threads/cache-snapshot');
 const UNLOCK = '/src/vault/unlock.ts' as string;
 const AUTH = '/src/vault/auth-client.ts' as string;
 const COLLECT = `/@fs${fileURLToPath(import.meta.resolve('@yozz.app/mail/vault/collect-files'))}`;
+const SNAPSHOT = `/@fs${fileURLToPath(import.meta.resolve('@yozz.app/mail/threads/cache-snapshot'))}`;
 
 const run = promisify(execFile);
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -189,6 +191,18 @@ const imapServerFor = async (tlsOptions: { key: Buffer; cert: Buffer }) => {
   const modulePath = resolve(CLI_APP, 'src/mail/fake-imap-server.ts') as string;
   const { makeFakeImapServer } = (await import(modulePath)) as {
     readonly makeFakeImapServer: (login: { username: string; password: string }) => {
+      readonly deliver: (
+        folderName: string,
+        message: {
+          from: string;
+          fromName: string;
+          to: string;
+          subject: string;
+          messageId: string;
+          date: string;
+          text: string;
+        },
+      ) => number;
       readonly folders: ReadonlyMap<
         string,
         { readonly messages: readonly { readonly raw: Uint8Array }[] }
@@ -493,7 +507,11 @@ const withViewports = async (
   await page.setViewportSize({ width: 1280, height: 800 });
 };
 
-/** Every request a page makes for one file, as the Worker answered it. */
+/** The files that hold a mailbox's list snapshot, which no attachment check counts. */
+const snapshotFiles = new Set<string>();
+const fileIdOf = (url: string) => new URL(url).pathname.split('/').at(-1) ?? '';
+
+/** Every request a page makes for one attachment file, as the Worker answered it. */
 const watchFiles = (page: Page) => {
   const traffic: { method: string; url: string; status: number }[] = [];
   page.on('response', response => {
@@ -504,7 +522,69 @@ const watchFiles = (page: Page) => {
       status: response.status(),
     });
   });
-  return traffic;
+  return () => traffic.filter(({ url }) => !snapshotFiles.has(fileIdOf(url)));
+};
+
+/** Waits for the vault to hold a list snapshot of every mailbox, and notes the files they name. */
+const learnSnapshots = async (page: Page) => {
+  for (let attempt = 0; attempt < 60; attempt += 1) {
+    const fileIds = await page.evaluate(
+      async ({ UNLOCK, SNAPSHOT }) => {
+        const unlock = (await import(UNLOCK)) as UnlockModule;
+        const snapshot = (await import(SNAPSHOT)) as SnapshotModule;
+        const session = await unlock.resumeSession();
+        if (session === null) throw new Error('no session to read the snapshots in');
+        const rows = await session.store.list(snapshot.CACHE_SNAPSHOT_RECORD_TYPE);
+        return rows.flatMap(
+          ({ plaintext }) => snapshot.parseSnapshotRecord(plaintext)?.fileId ?? [],
+        );
+      },
+      { UNLOCK, SNAPSHOT },
+    );
+    if (fileIds.length > 0) {
+      for (const id of fileIds) snapshotFiles.add(id);
+      return;
+    }
+    await page.waitForTimeout(500);
+  }
+  throw new Error('no list snapshot reached the vault');
+};
+
+/** Mail in the demo inbox, so a list snapshot has something to show. */
+const DEMO_INBOX = [
+  {
+    fromName: 'Northwind Coffee',
+    from: 'orders@northwind.test',
+    subject: 'Your beans ship Tuesday',
+    text: 'Two bags of the Ethiopia Guji roast are packed and leave the roastery on Tuesday.',
+  },
+  {
+    fromName: 'Priya Raman',
+    from: 'priya@studio-raman.test',
+    subject: 'Logo round two',
+    text: 'Three directions attached in the shared folder; the second one is my favourite.',
+  },
+  {
+    fromName: 'Harbour Dental',
+    from: 'reminders@harbourdental.test',
+    subject: 'Check-up on 18 November, 9:30',
+    text: 'Reply C to confirm or R to rearrange.',
+  },
+].map((message, index) => ({
+  ...message,
+  to: MAILBOX,
+  messageId: `<demo-${index}@fishball.test>`,
+  date: `Fri, 0${index + 4} Nov 2026 09:0${index}:00 +0000`,
+}));
+
+/**
+ * A browser profile whose mail server never answers: the relay's WebSocket opens and nothing goes
+ * through it. Whatever its list shows came from the vault.
+ */
+const unreachableProfile = async (browser: Awaited<ReturnType<typeof chromium.launch>>) => {
+  const context = await browser.newContext();
+  await context.routeWebSocket(/\/api\/v1\/relay/u, () => {});
+  return context;
 };
 
 const main = async () => {
@@ -524,6 +604,7 @@ const main = async () => {
     smtp.listen(SMTP_PORT, done);
   });
   const { imap, server: imapServer } = await imapServerFor(tlsOptions);
+  for (const message of DEMO_INBOX) imap.deliver('INBOX', message);
 
   let worker: ChildProcess | null = null;
   process.env.VITE_API_URL = API;
@@ -548,11 +629,41 @@ const main = async () => {
     await routeRelay(phone, portFor);
     const page = await laptop.newPage();
     const filesTraffic = watchFiles(page);
-    const gets = () => filesTraffic.filter(({ method }) => method === 'GET');
+    const gets = () => filesTraffic().filter(({ method }) => method === 'GET');
 
     await signUp(page, persistTo);
+
+    // ---- A new device shows the inbox from the vault's snapshot of its list ----
+    const subjectOf = (current: Page, subject: string) =>
+      current.getByText(subject, { exact: true }).first();
+    const freshBefore = await unreachableProfile(browser);
+    const before = await freshBefore.newPage();
+    await logIn(before);
+    await before.waitForTimeout(3_000);
+    assert(
+      'with no snapshot yet, a device whose server does not answer shows no mail',
+      !(await subjectOf(before, 'Logo round two').isVisible()),
+    );
+    await withViewports(before, width =>
+      capture(before, `snapshot-before-${width}`, current => current.locator('body')),
+    );
+    await freshBefore.close();
+
     await logIn(page);
     ok('signed up and logged in against the local Worker');
+    await subjectOf(page, 'Logo round two').waitFor({ timeout: 30_000 });
+    await learnSnapshots(page);
+    ok('a sync writes the list snapshot to the vault');
+
+    const freshAfter = await unreachableProfile(browser);
+    const after = await freshAfter.newPage();
+    await logIn(after);
+    await subjectOf(after, 'Logo round two').waitFor({ timeout: 10_000 });
+    ok('a new device whose server does not answer shows the inbox from the snapshot');
+    await withViewports(after, width =>
+      capture(after, `snapshot-after-${width}`, current => current.locator('body')),
+    );
+    await freshAfter.close();
 
     // Over 1 MB, which the old ~400 KB wall refused as a connection error.
     const report = { name: 'report.bin', bytes: new Uint8Array(randomBytes(1_500_000)) };
@@ -561,7 +672,7 @@ const main = async () => {
     await openComposer(page, { from: SEND_ONLY, subject: 'Quarterly report' });
     await pick(page, [report]);
     await waitForUpload(page, report.name);
-    const puts = filesTraffic.filter(({ method }) => method === 'PUT');
+    const puts = filesTraffic().filter(({ method }) => method === 'PUT');
     assert('the cross-origin PUT reached the Worker from a browser', puts.length === 1, puts);
     assert('and the Worker stored it', puts[0]?.status === 200, puts);
     assert('Web and API are different origins', new URL(WEB).origin !== new URL(API).origin);
@@ -574,7 +685,7 @@ const main = async () => {
     ok('a reload keeps the chip');
     assert(
       'and a reload uploads nothing again',
-      filesTraffic.filter(f => f.method === 'PUT').length === 1,
+      filesTraffic().filter(f => f.method === 'PUT').length === 1,
     );
 
     // What R2 holds is the file's size plus the IV and tag, and none of its bytes.
@@ -607,7 +718,11 @@ const main = async () => {
     await secondDevice.waitForSelector('#compose-to', { timeout: 30_000 });
     await waitForUpload(secondDevice, report.name);
     ok('a second browser profile opens the draft with its chip');
-    assert('and it has downloaded nothing to show it', secondTraffic.length === 0, secondTraffic);
+    assert(
+      'and it has downloaded nothing to show it',
+      secondTraffic().length === 0,
+      secondTraffic(),
+    );
     const [onSecond] = await Promise.all([
       secondDevice.waitForEvent('download'),
       chipOf(secondDevice, report.name)
@@ -840,13 +955,15 @@ const main = async () => {
       .waitFor();
     ok('Send refuses over a failed upload, and says why');
     await page.unroute(route);
-    const putsBeforeRetry = filesTraffic.filter(({ method }) => method === 'PUT');
+    const putsBeforeRetry = filesTraffic().filter(({ method }) => method === 'PUT');
     await page
       .getByRole('dialog')
       .getByRole('button', { name: `Retry ${stuck.name}` })
       .click();
     await waitForUpload(page, stuck.name);
-    const retriedPut = filesTraffic.filter(({ method }) => method === 'PUT').at(-1);
+    const retriedPut = filesTraffic()
+      .filter(({ method }) => method === 'PUT')
+      .at(-1);
     assert(
       'a retry uploads under a new id',
       retriedPut !== undefined && !putsBeforeRetry.some(({ url }) => url === retriedPut.url),

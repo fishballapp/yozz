@@ -7,7 +7,7 @@ import * as Path from 'effect/Path';
 import { seal, writePrivateFile } from '../files.ts';
 import { makeFakeImapServer } from '../mail/fake-imap-server.ts';
 import { ADDRESS, inbound, mail, makeMailWorld } from '../mail/mail-world.ts';
-import { failureOf, runCli, USER_ID } from '../test-world.ts';
+import { failureOf, makeHomes, runCli, USER_ID, writeCredentials } from '../test-world.ts';
 import { mailboxCache } from './disk.ts';
 
 const idsOf = (stdout: string): string[] =>
@@ -59,6 +59,38 @@ layer(NodeServices.layer)(it => {
         }
         // The mailbox's directory is named by a digest, not the address.
         expect(files.every(file => !file.includes('@'))).toBe(true);
+      }),
+    );
+
+    it.effect("a machine with no cache starts from the vault's snapshot and reads on from it", () =>
+      Effect.gen(function* () {
+        const { world, homes, server, servers } = yield* makeMailWorld();
+        server.deliver('INBOX', mail(1));
+        server.deliver('INBOX', mail(2));
+        yield* runCli(['list'], { fetch: world.fetch, homes, servers });
+        expect(yield* world.readRecords('cache-snapshot')).toHaveLength(1);
+        expect(world.files.size).toBe(1);
+
+        server.deliver('INBOX', mail(3));
+        const laptop = yield* makeHomes;
+        yield* writeCredentials(laptop, JSON.stringify(world.credentials));
+        const before = server.commands.length;
+        const { exit, stdout } = yield* runCli(['list'], {
+          fetch: world.fetch,
+          homes: laptop,
+          servers,
+        });
+
+        assert.isTrue(Exit.isSuccess(exit));
+        expect(idsOf(stdout).toSorted()).toEqual([
+          'mid/<m1@stripe.com>',
+          'mid/<m2@stripe.com>',
+          'mid/<m3@stripe.com>',
+        ]);
+        // Incremental from the snapshot's marks: no folder is read by sequence number from scratch.
+        const commands = server.commands.slice(before);
+        expect(commands.filter(command => command.startsWith('FETCH '))).toEqual([]);
+        expect(commands).toContainEqual(expect.stringMatching(/^UID FETCH 3:\* /u));
       }),
     );
 

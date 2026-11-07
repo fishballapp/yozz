@@ -149,7 +149,9 @@ const syncFolder = async (
     mark = null;
     invalidated = true;
   }
-  const known = mark === null ? [] : await folderCache.listSummaries();
+  // Even with no mark: summaries left without one (a restore cut short) are dropped below, not kept
+  // for good.
+  const known = await folderCache.listSummaries();
 
   const newMail = await readNewMail(client, mark, { exists, uidNext });
   if (!newMail.ok) return failed({ kind: 'imap', reason: newMail.reason });

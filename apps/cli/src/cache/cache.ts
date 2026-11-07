@@ -3,6 +3,7 @@ import { listDrafts } from '@yozz.app/mail/compose/draft-vault';
 import { listSentRecords } from '@yozz.app/mail/compose/sent-vault';
 import type { MailConnectionFailure } from '@yozz.app/mail/connection';
 import type { MailCache } from '@yozz.app/mail/threads/cache';
+import { createSnapshotWriter, restoreSnapshot } from '@yozz.app/mail/threads/cache-snapshot';
 import {
   cachedPreviews,
   cachedSummaries,
@@ -17,6 +18,7 @@ import type { Folder, ThreadState } from '@yozz.app/mail/threads/thread';
 import * as Clock from 'effect/Clock';
 import * as Context from 'effect/Context';
 import * as Effect from 'effect/Effect';
+import * as FiberSet from 'effect/FiberSet';
 import * as Layer from 'effect/Layer';
 import * as Option from 'effect/Option';
 import * as Path from 'effect/Path';
@@ -33,6 +35,9 @@ import { Mail, mailServerError } from '../mail/mail.ts';
 import { Settings } from '../settings.ts';
 import { Vault } from '../vault/vault.ts';
 import { type MailboxCache, mailboxCache, usingCache } from './disk.ts';
+
+/** How long a command waits at exit for its snapshot write, which is best effort. */
+const SNAPSHOT_EXIT_WAIT = '10 seconds';
 
 type VaultFailure =
   | KeyRevoked
@@ -101,7 +106,11 @@ export class Cache extends Context.Service<
     ) => Effect.Effect<void, MailServerError | UsageError>;
   }
 >()('@yozz.app/cli/Cache') {
-  /** `$XDG_CACHE_HOME/yozz/<userId>/`, a directory per mailbox, sealed under the vault's cache key. */
+  /**
+   * `$XDG_CACHE_HOME/yozz/<userId>/`, a directory per mailbox, sealed under the vault's cache key. A
+   * mailbox with no cache here starts from the vault's snapshot of its list, and each sync that lands
+   * may write a new one, which the command waits for only once its own answer is out.
+   */
   static readonly layer = Layer.effect(
     Cache,
     Effect.gen(function* () {
@@ -110,6 +119,16 @@ export class Cache extends Context.Service<
       const settings = yield* Settings;
       const path = yield* Path.Path;
       const root = settings.cacheDir(vault.account.userId);
+      // Neither snapshot call rejects, so the stores are taken out of `use` once.
+      const [store, files] = yield* vault
+        .use(async (records, files) => [records, files] as const)
+        .pipe(Effect.orDie);
+      const snapshots = createSnapshotWriter({ store, files });
+      const saving = yield* FiberSet.make();
+      // Best effort, so a vault that stops answering costs the snapshot, not the command's exit.
+      yield* Effect.addFinalizer(() =>
+        FiberSet.awaitEmpty(saving).pipe(Effect.timeoutOption(SNAPSHOT_EXIT_WAIT)),
+      );
       const caches = new Map<string, MailboxCache>(
         yield* Effect.forEach(
           mail.mailboxes,
@@ -152,11 +171,15 @@ export class Cache extends Context.Service<
        */
       const syncNow = Effect.fnUntraced(function* (mailbox: InboundAddress) {
         const startedAt = yield* Clock.currentTimeMillis;
-        const { state } = yield* usingCache(() =>
-          syncMailbox(mail.runOn(mailbox), cacheOf(mailbox).mail),
-        );
+        const cache = cacheOf(mailbox).mail;
+        yield* Effect.promise(() => restoreSnapshot({ store, files, cache, mailbox }));
+        const { state } = yield* usingCache(() => syncMailbox(mail.runOn(mailbox), cache));
         if (state.status === 'failed') return yield* failed(mailbox, state.failure);
         yield* cacheOf(mailbox).setSyncedAt(startedAt);
+        yield* FiberSet.run(
+          saving,
+          Effect.promise(() => snapshots.save(mailbox, cache)),
+        );
       });
 
       const sync = Effect.fn('Cache.sync')(function* (

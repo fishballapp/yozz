@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
+import { ADDRESS_RECORD_TYPE } from '../addresses/record.ts';
 import { DRAFT_RECORD_TYPE, type DraftRecord } from '../compose/draft-record.ts';
 import { SENT_RECORD_TYPE, type SentRecord } from '../compose/sent-record.ts';
 import { fakeFileStore } from '../testing/fake-file-store.ts';
 import { fakeRecordStore } from '../testing/fake-record-store.ts';
+import { CACHE_SNAPSHOT_RECORD_TYPE, type SnapshotRecord } from '../threads/cache-snapshot.ts';
 import { collectFiles, FILE_GRACE_MS } from './collect-files.ts';
 import type { FileStore } from './file-store.ts';
 import type { RecordStore } from './record-store.ts';
@@ -117,9 +119,60 @@ describe('collectFiles', () => {
     expect(files.has('kept')).toBe(false);
   });
 
+  describe('cache snapshots', () => {
+    const CURRENT = '00000000-0000-4000-8000-000000000001';
+    const REPLACED = '00000000-0000-4000-8000-000000000002';
+    const snapshot = (fileId: string): SnapshotRecord => ({
+      fileId,
+      host: 'imap.x.co',
+      username: 'me@x.co',
+      writtenAt: 0,
+      digest: 'd',
+    });
+
+    /** A vault with a snapshot of `me@x.co` naming CURRENT, both files old, and the address if `hasAddress`. */
+    const snapshotWorld = async ({ hasAddress }: { hasAddress: boolean }) => {
+      const stored = await world({});
+      await stored.records.put({
+        type: CACHE_SNAPSHOT_RECORD_TYPE,
+        naturalKey: 'me@x.co',
+        plaintext: JSON.stringify(snapshot(CURRENT)),
+      });
+      if (hasAddress) {
+        // Only its presence counts, so the plaintext is not an address record's.
+        await stored.records.put({
+          type: ADDRESS_RECORD_TYPE,
+          naturalKey: 'me@x.co',
+          plaintext: '',
+        });
+      }
+      for (const id of [CURRENT, REPLACED]) {
+        await stored.fileStore.put(id, new Uint8Array([1]));
+        const row = stored.files.get(id);
+        if (row === undefined) throw new Error('the fixture stored nothing');
+        row.createdAt = OLD;
+      }
+      return stored;
+    };
+
+    it('keeps the file a snapshot names and collects the one it replaced', async () => {
+      const { records, fileStore, files } = await snapshotWorld({ hasAddress: true });
+      // `kept` is named by nothing here either.
+      expect(await collectFiles(records, fileStore, NOW)).toBe(2);
+      expect([...files.keys()]).toEqual([CURRENT]);
+    });
+
+    it('collects the snapshot of an address that has been removed', async () => {
+      const { records, fileStore, files } = await snapshotWorld({ hasAddress: false });
+      expect(await collectFiles(records, fileStore, NOW)).toBe(3);
+      expect(files.size).toBe(0);
+    });
+  });
+
   it.each([
     ['a draft', DRAFT_RECORD_TYPE],
     ['a sent', SENT_RECORD_TYPE],
+    ['a cache snapshot', CACHE_SNAPSHOT_RECORD_TYPE],
   ])('deletes nothing when %s row does not parse', async (_label, type) => {
     const { records, fileStore, files } = await world({});
     await records.put({ type, naturalKey: 'unreadable', plaintext: '{"not":"this build"}' });
