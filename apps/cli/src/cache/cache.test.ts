@@ -6,7 +6,7 @@ import * as FileSystem from 'effect/FileSystem';
 import * as Path from 'effect/Path';
 import { seal, writePrivateFile } from '../files.ts';
 import { makeFakeImapServer } from '../mail/fake-imap-server.ts';
-import { ADDRESS, inbound, mail, makeMailWorld, SECOND } from '../mail/mail-world.ts';
+import { ADDRESS, inbound, mail, makeMailWorld } from '../mail/mail-world.ts';
 import { failureOf, makeHomes, runCli, USER_ID, writeCredentials } from '../test-world.ts';
 import { mailboxCache } from './disk.ts';
 
@@ -40,14 +40,13 @@ layer(NodeServices.layer)(it => {
 
         const dir = path.join(homes.XDG_CACHE_HOME, 'yozz', USER_ID);
         const files = yield* filesUnder(dir);
-        // A file per folder the server has, the sync time, the body read and the snapshot written.
+        // A file per folder the server has, the mailbox's sync time, and the body read.
         expect(files.map(file => path.basename(file)).toSorted()).toEqual([
           'account.bin',
           'archive.bin',
           'inbox-100-1.bin',
           'inbox.bin',
           'sent.bin',
-          'snapshot.bin',
           'trash.bin',
         ]);
         for (const file of files) {
@@ -93,67 +92,6 @@ layer(NodeServices.layer)(it => {
         expect(commands.filter(command => command.startsWith('FETCH '))).toEqual([]);
         expect(commands).toContainEqual(expect.stringMatching(/^UID FETCH 3:\* /u));
       }),
-    );
-
-    it.effect(
-      'a machine with an old cache shows the newer list from the vault while its mail server refuses',
-      () =>
-        Effect.gen(function* () {
-          const { world, homes, second, servers, addSecond, expireSecond } = yield* makeMailWorld();
-          yield* addSecond();
-          second.deliver('INBOX', mail(1));
-          second.deliver('INBOX', mail(2));
-          yield* runCli(['list'], { fetch: world.fetch, homes, servers });
-
-          // Elsewhere, 1 is filed and 3 arrives; another machine syncs that and saves its list.
-          const inbox = second.folders.get('INBOX');
-          if (inbox === undefined) throw new Error('no INBOX');
-          inbox.messages = inbox.messages.filter(({ uid }) => uid !== 1);
-          second.deliver('INBOX', mail(3));
-          // The first snapshot is older than the interval, so the other machine may replace it.
-          const [saved] = (yield* world.readRecords('cache-snapshot')).filter(
-            ({ naturalKey }) => naturalKey === SECOND,
-          );
-          if (saved === undefined) throw new Error('no snapshot of the second address');
-          yield* world.putRecord({
-            type: 'cache-snapshot',
-            naturalKey: SECOND,
-            revision: saved.revision,
-            plaintext: JSON.stringify({ ...JSON.parse(saved.plaintext), writtenAt: 0 }),
-          });
-          const laptop = yield* makeHomes;
-          yield* writeCredentials(laptop, JSON.stringify(world.credentials));
-          yield* runCli(['list'], { fetch: world.fetch, homes: laptop, servers });
-
-          // This machine's mail server now refuses it, so its list is the cache's alone.
-          yield* expireSecond();
-          const before = world.calls.length;
-          const { exit, stdout, stderr } = yield* runCli(['list', '--sync'], {
-            fetch: world.fetch,
-            homes,
-            servers,
-          });
-
-          assert.isTrue(Exit.isSuccess(exit), stderr);
-          const out = JSON.parse(stdout);
-          expect(idsOf(stdout).toSorted()).toEqual(['mid/<m2@stripe.com>', 'mid/<m3@stripe.com>']);
-          // Both mailboxes restored from one listing of the records. The one record read on its
-          // own is the writer's, after the first address's sync landed.
-          const reads = world.calls
-            .slice(before)
-            .filter(
-              ({ url, method }) => method === 'GET' && url.includes('/records/cache-snapshot'),
-            );
-          expect(reads.filter(({ url }) => url.endsWith('/records/cache-snapshot'))).toHaveLength(
-            1,
-          );
-          expect(reads.filter(({ url }) => url.includes('/records/cache-snapshot/'))).toHaveLength(
-            1,
-          );
-          expect(out.failed).toEqual([
-            expect.objectContaining({ address: SECOND, code: 'MailServerError' }),
-          ]);
-        }),
     );
 
     it.effect('drops a file that does not open and rebuilds it from the server', () =>

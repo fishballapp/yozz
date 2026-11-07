@@ -11,7 +11,7 @@ export class DeviceDbError extends Error {
 }
 
 const DB_NAME = 'yozz-device-state';
-const DB_VERSION = 12;
+const DB_VERSION = 11;
 
 type StoreSpec = { readonly name: string; readonly keyPath: string | string[] };
 
@@ -24,8 +24,6 @@ export const STORES = {
   mailBodies: { name: 'mail-bodies', keyPath: ['userId', 'account', 'folder', 'uid'] },
   /** A body's text alone, written beside every body: the list reads these without the bytes. */
   mailPreviews: { name: 'mail-previews', keyPath: ['userId', 'account', 'folder', 'uid'] },
-  /** Per mailbox, the digest of the vault snapshot its cache last took in or wrote. */
-  mailSnapshot: { name: 'mail-snapshot', keyPath: ['userId', 'account'] },
 } as const satisfies Record<string, StoreSpec>;
 
 /** Stores whose shape changed in a version: dropped and recreated on upgrade. Only the derived cache has ever changed shape. */

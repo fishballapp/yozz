@@ -22,7 +22,6 @@ type SyncRow = Scope & FolderSync;
 type SummaryRow = Scope & { readonly uid: number; readonly summary: ImapMessageSummary };
 type BodyRow = Scope & { readonly uid: number; readonly body: FetchedBody };
 type PreviewRow = Scope & { readonly uid: number; readonly paragraphs: readonly string[] };
-type SnapshotRow = Omit<Scope, 'folder'> & { readonly digest: string };
 
 /** Every store the mail cache owns, cleared together. */
 const MAIL_STORES = [
@@ -30,7 +29,6 @@ const MAIL_STORES = [
   STORES.mailSummaries.name,
   STORES.mailBodies.name,
   STORES.mailPreviews.name,
-  STORES.mailSnapshot.name,
 ] as const;
 
 type StoreName = (typeof STORES)[keyof typeof STORES]['name'];
@@ -238,28 +236,6 @@ export const createMailCache = (
   idbFactory?: IDBFactory,
 ): MailCache => ({
   folder: folder => createFolderCache({ userId, account: mailbox, folder }, idbFactory),
-
-  getSnapshotDigest: () =>
-    withDb<string | null>(
-      STORES.mailSnapshot.name,
-      'readonly',
-      (store, done) => {
-        const req = store.get([userId, mailbox]);
-        req.onsuccess = () => done((req.result as SnapshotRow | undefined)?.digest ?? null);
-      },
-      idbFactory,
-    ),
-
-  putSnapshotDigest: digest =>
-    withDb<void>(
-      STORES.mailSnapshot.name,
-      'readwrite',
-      (store, done) => {
-        store.put({ userId, account: mailbox, digest } satisfies SnapshotRow);
-        done();
-      },
-      idbFactory,
-    ),
 
   // Every store in one transaction.
   clear: async () => {

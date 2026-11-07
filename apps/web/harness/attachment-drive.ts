@@ -525,7 +525,7 @@ const watchFiles = (page: Page) => {
   return () => traffic.filter(({ url }) => !snapshotFiles.has(fileIdOf(url)));
 };
 
-/** Waits for the vault to name a list snapshot file not noted yet, and notes the files it names. */
+/** Waits for the vault to hold a list snapshot of every mailbox, and notes the files they name. */
 const learnSnapshots = async (page: Page) => {
   for (let attempt = 0; attempt < 60; attempt += 1) {
     const fileIds = await page.evaluate(
@@ -541,7 +541,7 @@ const learnSnapshots = async (page: Page) => {
       },
       { UNLOCK, SNAPSHOT },
     );
-    if (fileIds.some(id => !snapshotFiles.has(id))) {
+    if (fileIds.length > 0) {
       for (const id of fileIds) snapshotFiles.add(id);
       return;
     }
@@ -576,38 +576,6 @@ const DEMO_INBOX = [
   messageId: `<demo-${index}@fishball.test>`,
   date: `Fri, 0${index + 4} Nov 2026 09:0${index}:00 +0000`,
 }));
-
-/** Mail that arrives after a device last synced, which only the vault's snapshot can show it. */
-const LATE_MAIL = {
-  fromName: 'Aurora Rail',
-  from: 'trips@aurorarail.test',
-  subject: 'Window seat confirmed',
-  text: 'Coach C, seat 42, on the 08:15 to Edinburgh on Saturday.',
-  to: MAILBOX,
-  messageId: '<demo-late@fishball.test>',
-  date: 'Fri, 07 Nov 2026 09:03:00 +0000',
-};
-
-/** Dates the mailbox's snapshot record back past the write interval, so the next sync replaces it. */
-const ageSnapshot = (page: Page) =>
-  page.evaluate(
-    async ({ UNLOCK, SNAPSHOT, MAILBOX }) => {
-      const unlock = (await import(UNLOCK)) as UnlockModule;
-      const snapshot = (await import(SNAPSHOT)) as SnapshotModule;
-      const session = await unlock.resumeSession();
-      if (session === null) throw new Error('no session to age the snapshot in');
-      const row = await session.store.get(snapshot.CACHE_SNAPSHOT_RECORD_TYPE, MAILBOX);
-      const record = row === null ? null : snapshot.parseSnapshotRecord(row.plaintext);
-      if (row === null || record === null) throw new Error('no snapshot to age');
-      await session.store.put({
-        type: snapshot.CACHE_SNAPSHOT_RECORD_TYPE,
-        naturalKey: MAILBOX,
-        plaintext: JSON.stringify({ ...record, writtenAt: 0 }),
-        precondition: { expect: 'revision', revision: row.revision },
-      });
-    },
-    { UNLOCK, SNAPSHOT, MAILBOX },
-  );
 
 /**
  * A browser profile whose mail server never answers: the relay's WebSocket opens and nothing goes
@@ -694,27 +662,6 @@ const main = async () => {
     ok('a new device whose server does not answer shows the inbox from the snapshot');
     await withViewports(after, width =>
       capture(after, `snapshot-after-${width}`, current => current.locator('body')),
-    );
-
-    // ---- A device with an older cache shows the newer list from the vault's snapshot ----
-    imap.deliver('INBOX', LATE_MAIL);
-    await ageSnapshot(page);
-    await page.reload();
-    await subjectOf(page, LATE_MAIL.subject).waitFor({ timeout: 30_000 });
-    await learnSnapshots(page);
-    ok('a device that synced the new mail writes a newer snapshot');
-    await withViewports(after, width =>
-      capture(after, `stale-before-${width}`, current => current.locator('body')),
-    );
-    assert(
-      'before it reloads, that device shows the list it last had',
-      !(await subjectOf(after, LATE_MAIL.subject).isVisible()),
-    );
-    await after.reload();
-    await subjectOf(after, LATE_MAIL.subject).waitFor({ timeout: 10_000 });
-    ok('a device with an older cache whose server does not answer shows the newer list');
-    await withViewports(after, width =>
-      capture(after, `stale-after-${width}`, current => current.locator('body')),
     );
     await freshAfter.close();
 

@@ -42,7 +42,6 @@ export const memoryMailCache = (): MailCache => {
       },
     };
   };
-  let snapshotDigest: string | null = null;
   return {
     folder: folder => {
       const existing = folders.get(folder);
@@ -51,14 +50,9 @@ export const memoryMailCache = (): MailCache => {
       folders.set(folder, created);
       return created;
     },
-    getSnapshotDigest: async () => snapshotDigest,
-    putSnapshotDigest: async digest => {
-      snapshotDigest = digest;
-    },
     // In place, as a store's rows are: a sync holding a folder's cache writes on into it.
     clear: async () => {
       for (const folder of folders.values()) folder.empty();
-      snapshotDigest = null;
     },
   };
 };

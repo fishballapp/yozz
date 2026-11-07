@@ -123,8 +123,6 @@ const fakeCache = (seed: Partial<Record<Folder, Seed>> = {}) => {
         state[folder].bodies.set(uid, body);
       },
     }),
-    getSnapshotDigest: async () => null,
-    putSnapshotDigest: async () => {},
     clear: async () => {
       for (const folder of ['inbox', 'sent', 'archive', 'trash'] as const) {
         state[folder] = emptyFolder();

@@ -108,7 +108,7 @@ export const makeWorld = Effect.fnUntraced(function* () {
       });
     }
     // One record a page, so every listing follows the cursor.
-    const listed = /^\/api\/v1\/vault\/records\/([a-z-]+)$/u.exec(url.pathname)?.[1];
+    const listed = /^\/api\/v1\/vault\/records\/([a-z]+)$/u.exec(url.pathname)?.[1];
     if (call.method === 'GET' && listed !== undefined) {
       const ofType = [...records.values()]
         .map(({ envelope }) => envelope)

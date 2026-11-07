@@ -16,15 +16,14 @@ pnpm -F @yozz.app/vault-contract test   # 34. The wire schemas, incl. the strict
 pnpm -F @yozz.app/worker-api test       # 276. Against an ISOLATED LOCAL D1 with every migration
                                     #   applied; migrations.test.ts pins the vault tables' exact
                                     #   column lists, so a new plaintext column is a red test
-pnpm -F @yozz.app/mail test             # 745. Threading, sync over a fake IMAP client, MIME and the
+pnpm -F @yozz.app/mail test             # 722. Threading, sync over a fake IMAP client, MIME and the
                                     #   HTML-to-text reduction (in Node), draft records under CAS,
                                     #   the send state machine (a lost SMTP answer is recorded unconfirmed),
                                     #   the draft mirror, reply seeding, the record store's marks,
-                                    #   the cache snapshot (restored, laid over an older cache, and synced
-                                    #   on against a fake server),
+                                    #   the cache snapshot (restored and synced on against a fake server),
                                     #   DKIM verification (RFC 8463's vectors, a mailauth-signed message),
                                     #   the sanitizer policy and the served page (under jsdom)
-pnpm -F @yozz.app/web test              # 773. Vault client + unlock (WebAuthn mocked), the IndexedDB
+pnpm -F @yozz.app/web test              # 768. Vault client + unlock (WebAuthn mocked), the IndexedDB
                                     #   cache, the live connection, the WebMCP tools over a fake
                                     #   port + their mount, ceilings, the frame script's pin in
                                     #   public/_headers, image consent, the screens, and architecture.test.ts
@@ -101,11 +100,10 @@ pnpm -F @yozz.app/web attachments:drive  # the real Worker under `wrangler dev` 
                                     #   cross-origin PUT, a reload, a second profile, Send (25 MiB too, under Gmail's `SIZE`), a refusal over `SIZE` and the draft back,
                                     #   the received bytes intact, a send-only Sent chip that downloads,
                                     #   failed and full uploads, collection, `draft --attach`, `send`,
-                                    #   `read --save-attachments`, and a new profile, then one with an older
-                                    #   cache, whose mail server never answers showing the inbox from the
-                                    #   vault's list snapshot.
+                                    #   `read --save-attachments`, and a new profile whose mail server never
+                                    #   answers showing the inbox from the vault's list snapshot.
                                     #   Starts and stops its own servers;
-                                    #   needs 465 and 993 free. 49 checks, all ✓; about a minute.
+                                    #   needs 465 and 993 free. 46 checks, all ✓; about a minute.
                                     #   The mail servers are local, under a test CA, through a WebSocket
                                     #   route in place of the relay. `YOZZ_CAPTURES=<dir>` saves screenshots.
 ```
