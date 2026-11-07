@@ -16,7 +16,12 @@ import {
   withoutMailboxPreviews,
 } from '@yozz.app/mail/threads/body-state';
 import type { MailCache } from '@yozz.app/mail/threads/cache';
-import { createSnapshotWriter, restoreSnapshot } from '@yozz.app/mail/threads/cache-snapshot';
+import {
+  createSnapshotWriter,
+  listSnapshotRecords,
+  restoreSnapshot,
+  type SnapshotRecords,
+} from '@yozz.app/mail/threads/cache-snapshot';
 import { groupThreads, layThreads } from '@yozz.app/mail/threads/hydrate';
 import {
   type FolderWindow,
@@ -272,13 +277,19 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
   const [lookupTxt] = useState(() => createTxtLookup());
   const sessionRef = useRef(session);
   sessionRef.current = session;
-  /** Writes each mailbox's list to the vault after its syncs, for a device that has none yet. */
+  /** Writes each mailbox's list to the vault after its syncs, for a device with none or an older one. */
   const snapshotWriter = useMemo(
     () => (session === null ? null : createSnapshotWriter(session)),
     [session],
   );
   const snapshotWriterRef = useRef(snapshotWriter);
   snapshotWriterRef.current = snapshotWriter;
+  /**
+   * Every mailbox's snapshot record, asked for beside the address list so a restore adds no round
+   * trip. The session's first list serves every restore in it: one that misses a newer record only
+   * syncs from what it has.
+   */
+  const snapshotRecordsRef = useRef<Promise<SnapshotRecords> | null>(null);
   const [olderInFlight, setOlderInFlight] = useState<Readonly<Record<string, boolean>>>({});
   const [isLoadingOlderInList, setIsLoadingOlderInList] = useState(false);
 
@@ -679,10 +690,11 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
           // The cache is the list until the server answers.
           if (!hydratedRef.current.has(address)) {
             hydratedRef.current.add(address);
-            // A device with no cache of this mailbox starts from the vault's copy of its list.
+            // The vault's copy of the list, when this device has none or an older one; one with a
+            // list of its own waits for it at most `SNAPSHOT_WAIT_MS`.
             if (session !== null) {
               await restoreSnapshot({
-                store: session.store,
+                records: snapshotRecordsRef.current ?? listSnapshotRecords(session.store),
                 files: session.files,
                 cache,
                 mailbox,
@@ -782,7 +794,7 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
                 // The server's flags just arrived; an earlier refused write is moot.
                 setMailError(null);
               }
-              if (!isStale()) void snapshots?.save(mailbox, cache);
+              if (!isStale()) void snapshots?.save(mailbox, cache, isStale);
               void prefetchBodies(
                 runOn(mailbox),
                 cache,
@@ -911,6 +923,9 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
     if (store === null || files === null || userId === null) return;
     let cancelled = false;
     setRecordsError(null);
+    // Not awaited with the addresses: a slow answer holds up only the restores, and those at most
+    // `SNAPSHOT_WAIT_MS`.
+    snapshotRecordsRef.current = listSnapshotRecords(store);
     void (async () => {
       try {
         const [live, listed] = await Promise.allSettled([
@@ -979,6 +994,7 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
       inFlightOlderRef.current.clear();
       inFlightBodiesRef.current.clear();
       hydratedRef.current.clear();
+      snapshotRecordsRef.current = null;
       clearCachedFrames();
       const manager = liveManagerRef.current;
       liveManagerRef.current = null;

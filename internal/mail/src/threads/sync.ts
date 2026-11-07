@@ -178,8 +178,12 @@ const syncFolder = async (
   const dropped = known.filter(summary => !keptUids.has(summary.uid));
   // Before the put: a copy `recordMoves` filed above the mark is read again here, by uid.
   if (dropped.length > 0) await folderCache.deleteSummaries(dropped.map(summary => summary.uid));
-  // A later sync keeps what `loadOlder` earned; a folder with no mail has nothing older to offer.
-  const complete = mark === null || startsOver ? exists <= WINDOW : mark.complete || exists === 0;
+  // A later sync keeps what `loadOlder` earned; a folder with no mail has nothing older to offer. A
+  // mark at uid 0 claims nothing (a snapshot merge cut short leaves one), so it is read as from nothing.
+  const complete =
+    mark === null || mark.lastUid === 0 || startsOver
+      ? exists <= WINDOW
+      : mark.complete || exists === 0;
   await folderCache.putSummaries(all);
   await folderCache.putSync({
     name,

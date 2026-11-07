@@ -8,10 +8,11 @@ import { FOLDERS, type Folder } from './thread.ts';
 
 /**
  * A copy of one mailbox's list in the vault, so a device with no cache for it shows the list at once
- * and syncs on from there instead of from nothing. Each folder's sync mark and summaries, no bodies.
- * The list is too big for a record, so it is a vault file of JSON, named by a small record per
- * mailbox; a file is never replaced, so each write is a new file and a compare-and-swap of the
- * record. All of it is derived: a snapshot lost, stale, refused or unreadable costs only the speed-up.
+ * and syncs on from there instead of from nothing, and one whose cache is older shows the newer
+ * list. Each folder's sync mark and summaries, no bodies. The list is too big for a record, so it
+ * is a vault file of JSON, named by a small record per mailbox; a file is never replaced, so each
+ * write is a new file and a compare-and-swap of the record. All of it is derived: a snapshot lost,
+ * stale, refused or unreadable costs only the speed-up.
  */
 export const CACHE_SNAPSHOT_RECORD_TYPE = 'cache-snapshot';
 
@@ -42,6 +43,27 @@ export const parseSnapshotRecord = (plaintext: string): SnapshotRecord | null =>
     return result.success ? result.data : null;
   } catch {
     return null;
+  }
+};
+
+/** The snapshot records by address. */
+export type SnapshotRecords = ReadonlyMap<string, SnapshotRecord>;
+
+/**
+ * Every mailbox's snapshot record in one request, so an open costs one round trip however many
+ * mailboxes it restores. Total: a list that fails names none, and the device shows what it has.
+ */
+export const listSnapshotRecords = async (store: RecordStore): Promise<SnapshotRecords> => {
+  try {
+    const rows = await store.list(CACHE_SNAPSHOT_RECORD_TYPE);
+    return new Map(
+      rows.flatMap(({ naturalKey, plaintext }) => {
+        const record = parseSnapshotRecord(plaintext);
+        return record === null ? [] : [[naturalKey, record] as const];
+      }),
+    );
+  } catch {
+    return new Map();
   }
 };
 
@@ -119,7 +141,8 @@ const readSnapshot = async (cache: MailCache): Promise<Snapshot | null> => {
       const folderCache = cache.folder(folder);
       const sync = await folderCache.getSync();
       if (sync === null) return [];
-      const summaries = await folderCache.listSummaries();
+      // In uid order, so the same list has the same digest whichever store held it.
+      const summaries = (await folderCache.listSummaries()).toSorted((a, b) => a.uid - b.uid);
       const after = await folderCache.getSync();
       if (JSON.stringify(after) !== JSON.stringify(sync)) return null;
       return [{ folder, sync, summaries }];
@@ -129,55 +152,176 @@ const readSnapshot = async (cache: MailCache): Promise<Snapshot | null> => {
   return { folders: folders.flatMap(folder => folder ?? []) };
 };
 
-/** The device has a cache of the mailbox once any folder of it has synced. */
-const hasCache = async (cache: MailCache): Promise<boolean> =>
-  (await Promise.all(FOLDERS.map(folder => cache.folder(folder).getSync()))).some(
-    mark => mark !== null,
-  );
+/** How long a device with a list of its own waits for the vault's snapshot before showing it. */
+export const SNAPSHOT_WAIT_MS = 1000;
+
+/** What `promise` answers within `ms`, or null once they pass; a later answer is dropped. */
+const within = async <T>(ms: number, promise: Promise<T>): Promise<T | null> => {
+  const { promise: timedOut, resolve } = Promise.withResolvers<null>();
+  const timer = setTimeout(() => resolve(null), ms);
+  try {
+    return await Promise.race([promise, timedOut]);
+  } finally {
+    clearTimeout(timer);
+  }
+};
+
+type SnapshotFolder = Snapshot['folders'][number];
+
+/** The empty cache filled from the snapshot. Answers whether any folder was written. */
+const seed = async (
+  cache: MailCache,
+  snapshot: Snapshot,
+  isStale: () => boolean,
+): Promise<boolean> => {
+  // Summaries left with no mark (a seed cut short) would never be dropped by a sync.
+  await cache.clear();
+  for (const { folder, sync, summaries } of snapshot.folders) {
+    if (isStale()) return false;
+    const folderCache = cache.folder(folder);
+    // Summaries before the mark, as a sync writes them; see `readSnapshot`.
+    await folderCache.putSummaries(summaries);
+    // A lock during that write has cleared the cache; a mark written now would claim mail it lacks.
+    if (isStale()) return false;
+    await folderCache.putSync(sync);
+  }
+  return snapshot.folders.length > 0;
+};
 
 /**
- * When the device has no cache of the mailbox, fills it from the vault's snapshot, if there is one
- * of this mailbox that opens. Answers whether it did. The sync after it takes the snapshot as a
- * cache like any other, however old: a renumbered folder is dropped, a gap wider than the window
- * starts the folder over, flags are read again and mail gone since is dropped.
+ * The folder once the snapshot's copy is laid over this device's, or null when the sync is left to
+ * it: the snapshot's mark is not past this device's, or names another UIDVALIDITY, whose uids name
+ * other mail. Within the snapshot's window its summaries are the list, so mail gone since goes here
+ * too. Below it, older pages this device read are kept only when the window reaches down to this
+ * device's mark; otherwise mail between the two is in neither copy, and a mark over it would hide it
+ * for good, so the folder starts over from the snapshot as a sync starts over from a window that
+ * does not reach its mark.
+ */
+const laidOver = (
+  local: { readonly sync: FolderSync | null; readonly summaries: readonly ImapMessageSummary[] },
+  { sync, summaries }: SnapshotFolder,
+): { readonly kept: readonly ImapMessageSummary[]; readonly sync: FolderSync } | null => {
+  if (local.sync === null) return { kept: [], sync };
+  if (sync.uidValidity !== local.sync.uidValidity || sync.lastUid <= local.sync.lastUid) {
+    return null;
+  }
+  // A copy above the snapshot's mark is one this device filed (`recordMoves`), which the next sync
+  // reads again with the rest of the new mail; until then it stays where the move put it.
+  const filed = local.summaries.filter(({ uid }) => uid > sync.lastUid);
+  // An empty window reaches no mark.
+  const lowest = Math.min(...summaries.map(({ uid }) => uid));
+  const isWindowAtMark = !sync.complete && lowest <= local.sync.lastUid;
+  const kept = [
+    ...(isWindowAtMark ? local.summaries.filter(({ uid }) => uid < lowest) : []),
+    ...filed,
+  ];
+  return {
+    kept,
+    sync: {
+      ...sync,
+      complete: sync.complete || (isWindowAtMark && local.sync.complete),
+      // Kept pages read before summaries carried names still want their one backfill.
+      hasAttachmentNames:
+        sync.hasAttachmentNames === true &&
+        (kept.length === 0 || local.sync.hasAttachmentNames === true),
+    },
+  };
+};
+
+/**
+ * Each folder of the snapshot that is newer than this device's copy, laid over it (`laidOver`).
+ * Bodies and previews stay: a uid under one UIDVALIDITY names one message. Answers whether any
+ * folder was written.
+ */
+const merge = async (
+  cache: MailCache,
+  snapshot: Snapshot,
+  isStale: () => boolean,
+): Promise<boolean> => {
+  let isWritten = false;
+  for (const folderSnapshot of snapshot.folders) {
+    if (isStale()) return false;
+    const folderCache = cache.folder(folderSnapshot.folder);
+    const local = {
+      sync: await folderCache.getSync(),
+      summaries: await folderCache.listSummaries(),
+    };
+    const merged = laidOver(local, folderSnapshot);
+    if (merged === null) continue;
+    const staying = new Set([...merged.kept, ...folderSnapshot.summaries].map(({ uid }) => uid));
+    // The mark claims nothing while the summaries change under it, so a merge cut short leaves a
+    // folder the next sync reads afresh, never a mark over mail the cache lacks.
+    if (isStale()) return false;
+    if (local.sync !== null) {
+      await folderCache.putSync({ ...local.sync, lastUid: 0, complete: false });
+    }
+    if (isStale()) return false;
+    await folderCache.deleteSummaries(
+      local.summaries.filter(({ uid }) => !staying.has(uid)).map(({ uid }) => uid),
+    );
+    if (isStale()) return false;
+    await folderCache.putSummaries(folderSnapshot.summaries);
+    // As in `seed`: a lock during that write has cleared the cache.
+    if (isStale()) return false;
+    await folderCache.putSync(merged.sync);
+    isWritten = true;
+  }
+  return isWritten;
+};
+
+/**
+ * Brings the device's cache of the mailbox up to the vault's snapshot, if there is one of this
+ * mailbox that opens. A device with no cache is filled from it; one with a cache takes each folder
+ * the snapshot is newer in (`merge`), and waits for the record and the file at most `waitMs`, since
+ * it has a list to show.
+ * A snapshot this cache already took in or wrote is not downloaded again. Answers whether it wrote
+ * anything. The sync after it takes the cache like any other, however old: a renumbered folder is
+ * dropped, a gap wider than the window starts the folder over, flags are read again and mail gone
+ * since is dropped.
  */
 export const restoreSnapshot = async ({
-  store,
+  records,
   files,
   cache,
   mailbox,
   isStale = () => false,
+  waitMs = SNAPSHOT_WAIT_MS,
 }: {
-  readonly store: RecordStore;
+  /** `listSnapshotRecords`, usually already in flight, so a restore adds no round trip of its own. */
+  readonly records: Promise<SnapshotRecords>;
   readonly files: FileStore;
   readonly cache: MailCache;
   readonly mailbox: SnapshotMailbox;
   /** A lock or a removal meanwhile has cleared the cache, which a write now would refill. */
   readonly isStale?: () => boolean;
+  readonly waitMs?: number;
 }): Promise<boolean> => {
   try {
-    if (await hasCache(cache)) return false;
-    const row = await store.get(CACHE_SNAPSHOT_RECORD_TYPE, mailbox.address);
-    const record = row === null ? null : parseSnapshotRecord(row.plaintext);
-    if (record === null || !isOf(record, mailbox)) return false;
-    const bytes = await files.get(record.fileId);
-    if (bytes === null) return false;
-    const parsed = snapshotSchema.safeParse(JSON.parse(new TextDecoder().decode(bytes)) as unknown);
+    // The device has a cache of the mailbox once any folder of it has synced.
+    const hasCache = (
+      await Promise.all(FOLDERS.map(folder => cache.folder(folder).getSync()))
+    ).some(mark => mark !== null);
+    const download = (async () => {
+      const record = (await records).get(mailbox.address) ?? null;
+      if (record === null || !isOf(record, mailbox)) return null;
+      if (hasCache && (await cache.getSnapshotDigest()) === record.digest) return null;
+      const bytes = await files.get(record.fileId);
+      return bytes === null ? null : { digest: record.digest, bytes };
+    })();
+    const downloaded = hasCache ? await within(waitMs, download) : await download;
+    if (downloaded === null) return false;
+    const parsed = snapshotSchema.safeParse(
+      JSON.parse(new TextDecoder().decode(downloaded.bytes)) as unknown,
+    );
     if (!parsed.success || isStale()) return false;
-    // Summaries left with no mark (a seed cut short) would never be dropped by a sync.
-    await cache.clear();
-    for (const { folder, sync, summaries } of parsed.data.folders) {
-      if (isStale()) return false;
-      const folderCache = cache.folder(folder);
-      // Summaries before the mark, as a sync writes them; see `readSnapshot`.
-      await folderCache.putSummaries(summaries);
-      // A lock during that write has cleared the cache; a mark written now would claim mail it lacks.
-      if (isStale()) return false;
-      await folderCache.putSync(sync);
-    }
-    return parsed.data.folders.length > 0;
+    const isWritten = hasCache
+      ? await merge(cache, parsed.data, isStale)
+      : await seed(cache, parsed.data, isStale);
+    if (isStale()) return false;
+    await cache.putSnapshotDigest(downloaded.digest);
+    return isWritten;
   } catch {
-    // Unreachable, refused, or a file that does not open: the sync reads from scratch.
+    // Unreachable, refused, or a file that does not open: the sync reads on from what is here.
     return false;
   }
 };
@@ -203,7 +347,12 @@ export const createSnapshotWriter = ({
   /** When this writer last looked at each mailbox, so a run of syncs costs one look per interval. */
   const lookedAt = new Map<string, number>();
 
-  const save = async (mailbox: SnapshotMailbox, cache: MailCache): Promise<SaveOutcome> => {
+  const save = async (
+    mailbox: SnapshotMailbox,
+    cache: MailCache,
+    /** A lock or a removal meanwhile has cleared the cache, which a write now would refill. */
+    isStale: () => boolean = () => false,
+  ): Promise<SaveOutcome> => {
     const at = now();
     const before = lookedAt.get(mailbox.address);
     if (before !== undefined && at - before < SNAPSHOT_INTERVAL_MS) return 'skipped';
@@ -251,6 +400,11 @@ export const createSnapshotWriter = ({
       // The file it replaced goes now rather than after `collectFiles`' grace, or a day of writes
       // would pile up against the cap. A device reading it this moment only syncs from scratch.
       if (current !== null) await files.remove(current.fileId).catch(() => undefined);
+      // This cache holds what it wrote, so its next open has nothing to download; but only if it
+      // still does: a clear and part of a rebuild since would be marked as holding all of it.
+      const after = await readSnapshot(cache);
+      const isUnchanged = after !== null && (await sha256(JSON.stringify(after))) === digest;
+      if (isUnchanged && !isStale()) await cache.putSnapshotDigest(digest);
       return 'saved';
     } catch {
       return 'failed';

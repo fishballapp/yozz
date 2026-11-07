@@ -42,6 +42,12 @@ export type FolderCache = {
 
 export type MailCache = {
   readonly folder: (folder: Folder) => FolderCache;
+  /**
+   * The digest of the vault snapshot (`cache-snapshot.ts`) this cache last took in or wrote, so an
+   * unchanged one is not downloaded again. Cleared with the rest.
+   */
+  readonly getSnapshotDigest: () => Promise<string | null>;
+  readonly putSnapshotDigest: (digest: string) => Promise<void>;
   /** Every folder at once, or a reused uid could resolve to a stale body. */
   readonly clear: () => Promise<void>;
 };

@@ -12,6 +12,7 @@ import type { MailCache } from './cache.ts';
 import {
   CACHE_SNAPSHOT_RECORD_TYPE,
   createSnapshotWriter,
+  listSnapshotRecords,
   parseSnapshotRecord,
   restoreSnapshot,
   SNAPSHOT_INTERVAL_MS,
@@ -124,7 +125,7 @@ describe('restoreSnapshot', () => {
 
     expect(
       await restoreSnapshot({
-        store: records.store,
+        records: listSnapshotRecords(records.store),
         files: files.store,
         cache: phone,
         mailbox: MAILBOX,
@@ -144,23 +145,23 @@ describe('restoreSnapshot', () => {
     expect(files.files.has(parseSnapshotRecord(row?.plaintext ?? '')?.fileId ?? '')).toBe(true);
   });
 
-  it('leaves a device that already has a cache alone', async () => {
+  it('fills a folder this device has not synced, and leaves the others alone', async () => {
     const server = fakeServer({ uidValidity: 7, uids: [1, 2, 3] });
     const { records, files } = await savedWorld(server);
     const phone = memoryMailCache();
-    await phone
-      .folder('sent')
-      .putSync({ name: 'Sent', uidValidity: 1, lastUid: 0, complete: true });
+    const sent = { name: 'Sent', uidValidity: 1, lastUid: 0, complete: true };
+    await phone.folder('sent').putSync(sent);
 
     expect(
       await restoreSnapshot({
-        store: records.store,
+        records: listSnapshotRecords(records.store),
         files: files.store,
         cache: phone,
         mailbox: MAILBOX,
       }),
-    ).toBe(false);
-    expect(await uidsOf(phone)).toEqual([]);
+    ).toBe(true);
+    expect(await uidsOf(phone)).toEqual([1, 2, 3]);
+    expect(await phone.folder('sent').getSync()).toEqual(sent);
   });
 
   it('ignores a snapshot of another login, whose uids name other mail', async () => {
@@ -171,7 +172,7 @@ describe('restoreSnapshot', () => {
 
     expect(
       await restoreSnapshot({
-        store: records.store,
+        records: listSnapshotRecords(records.store),
         files: files.store,
         cache: phone,
         mailbox: moved,
@@ -201,7 +202,7 @@ describe('restoreSnapshot', () => {
 
       expect(
         await restoreSnapshot({
-          store: records.store,
+          records: listSnapshotRecords(records.store),
           files: broken(files.store),
           cache: phone,
           mailbox: MAILBOX,
@@ -229,7 +230,7 @@ describe('restoreSnapshot', () => {
 
     expect(
       await restoreSnapshot({
-        store: records.store,
+        records: listSnapshotRecords(records.store),
         files: lockingFiles,
         cache: phone,
         mailbox: MAILBOX,
@@ -262,7 +263,7 @@ describe('restoreSnapshot', () => {
 
     expect(
       await restoreSnapshot({
-        store: records.store,
+        records: listSnapshotRecords(records.store),
         files: files.store,
         cache: locking,
         mailbox: MAILBOX,
@@ -275,18 +276,380 @@ describe('restoreSnapshot', () => {
   it('restores nothing when the vault cannot be reached', async () => {
     const offline: RecordStore = {
       ...fakeRecordStore().store,
-      get: async () => {
+      list: async () => {
         throw new VaultApiError('NETWORK_ERROR', 'offline');
       },
     };
     expect(
       await restoreSnapshot({
-        store: offline,
+        records: listSnapshotRecords(offline),
         files: fakeFileStore().store,
         cache: memoryMailCache(),
         mailbox: MAILBOX,
       }),
     ).toBe(false);
+  });
+});
+
+describe('restoreSnapshot over a cache this device already has', () => {
+  type Server = ReturnType<typeof fakeServer>;
+
+  /**
+   * The phone syncs `server`, then `change` happens on it, then the laptop syncs from scratch and
+   * saves its snapshot, then `later` happens on it. The phone has not synced since.
+   */
+  const staleWorld = async (
+    uids: readonly number[],
+    change: (server: Server) => void,
+    later: (server: Server) => void = () => {},
+  ) => {
+    const server = fakeServer({ uidValidity: 7, uids });
+    const phone = memoryMailCache();
+    await syncMailbox(server.run, phone);
+    change(server);
+    const { records, files } = await savedWorld(server);
+    later(server);
+    const filesGet = vi.spyOn(files.store, 'get');
+    const restore = (overrides: Partial<Parameters<typeof restoreSnapshot>[0]> = {}) =>
+      restoreSnapshot({
+        records: listSnapshotRecords(records.store),
+        files: files.store,
+        cache: phone,
+        mailbox: MAILBOX,
+        ...overrides,
+      });
+    return { server, phone, records, files, filesGet, restore };
+  };
+
+  const deliver = (server: Server, uids: readonly number[]) =>
+    server.inbox.messages.push(...uids.map(uid => ({ uid, flags: [] as readonly string[] })));
+  const expunge = (server: Server, gone: (uid: number) => boolean) => {
+    server.inbox.messages = server.inbox.messages.filter(({ uid }) => !gone(uid));
+  };
+
+  /**
+   * What a mark promises: every message of the server's from the lowest cached uid up to `lastUid`
+   * is cached, and every one below it too once the folder is `complete`. Anything else is mail no
+   * sync or Older mail would ever fetch.
+   */
+  const expectNoHiddenMail = async (cache: MailCache, server: Server) => {
+    const mark = await cache.folder('inbox').getSync();
+    if (mark === null) return;
+    const cached = new Set(await uidsOf(cache));
+    const lowest = Math.min(...cached, mark.lastUid + 1);
+    const owed = server.inbox.messages
+      .map(({ uid }) => uid)
+      .filter(uid => uid <= mark.lastUid && (mark.complete || uid >= lowest));
+    expect(owed.filter(uid => !cached.has(uid))).toEqual([]);
+  };
+
+  it('lays the newer list over the old one: new mail, mail gone since and flags', async () => {
+    const { server, phone, restore } = await staleWorld([1, 2, 3], server => {
+      expunge(server, uid => uid === 2);
+      server.inbox.messages = server.inbox.messages.map(message =>
+        message.uid === 3 ? { ...message, flags: ['\\Seen'] } : message,
+      );
+      deliver(server, [4, 5]);
+    });
+
+    expect(await restore()).toBe(true);
+    // Before any sync of the phone's.
+    expect(await uidsOf(phone)).toEqual([1, 3, 4, 5]);
+    const read = (await phone.folder('inbox').listSummaries()).find(({ uid }) => uid === 3);
+    expect(read?.flags).toEqual(['\\Seen']);
+    expect((await phone.folder('inbox').getSync())?.lastUid).toBe(5);
+    await expectNoHiddenMail(phone, server);
+  });
+
+  it.each<[string, (server: Server) => void]>([
+    ['older', server => deliver(server, [4])],
+    ['no newer', () => {}],
+  ])('leaves the cache alone when the snapshot is %s', async (_label, later) => {
+    const { server, phone, restore } = await staleWorld([1, 2, 3], () => {}, later);
+    // The phone has caught up past the snapshot meanwhile, and filed mail the snapshot still lists.
+    await syncMailbox(server.run, phone);
+    await phone.folder('inbox').deleteSummaries([1]);
+    const before = await phone.folder('inbox').listSummaries();
+
+    expect(await restore()).toBe(false);
+    expect(await phone.folder('inbox').listSummaries()).toEqual(before);
+  });
+
+  it('leaves the cache alone when the snapshot is of another login', async () => {
+    const { phone, restore } = await staleWorld([1, 2], server => deliver(server, [3]));
+    const moved = { ...MAILBOX, imap: { ...MAILBOX.imap, username: 'other@x.co' } };
+    expect(await restore({ mailbox: moved })).toBe(false);
+    expect(await uidsOf(phone)).toEqual([1, 2]);
+  });
+
+  it('leaves a folder renumbered since to the sync, whose uids name other mail', async () => {
+    const { server, phone, restore } = await staleWorld([1, 2], server => {
+      server.inbox.uidValidity = 8;
+      server.inbox.messages = [5, 6, 7].map(uid => ({ uid, flags: [] }));
+    });
+
+    expect(await restore()).toBe(false);
+    expect(await uidsOf(phone)).toEqual([1, 2]);
+    expect((await phone.folder('inbox').getSync())?.uidValidity).toBe(7);
+    await syncMailbox(server.run, phone);
+    expect(await uidsOf(phone)).toEqual([5, 6, 7]);
+  });
+
+  it('keeps the older pages below a window that reaches its mark, and their completeness', async () => {
+    // The phone holds the whole folder; the laptop's window is the newest 200.
+    const { server, phone, restore } = await staleWorld(range(1, 150), server => {
+      expunge(server, uid => uid === 100);
+      deliver(server, range(151, 260));
+    });
+
+    expect(await restore()).toBe(true);
+    expect(await uidsOf(phone)).toEqual(range(1, 260).filter(uid => uid !== 100));
+    expect(await phone.folder('inbox').getSync()).toMatchObject({ lastUid: 260, complete: true });
+    await expectNoHiddenMail(phone, server);
+  });
+
+  it('takes the completeness of a snapshot that reaches the folder start', async () => {
+    const { server, phone, restore } = await staleWorld(range(1, 250), server => {
+      expunge(server, uid => uid <= 100);
+      deliver(server, range(251, 260));
+    });
+    expect((await phone.folder('inbox').getSync())?.complete).toBe(false);
+
+    expect(await restore()).toBe(true);
+    expect(await uidsOf(phone)).toEqual(range(101, 260));
+    expect((await phone.folder('inbox').getSync())?.complete).toBe(true);
+    await expectNoHiddenMail(phone, server);
+  });
+
+  it('starts the folder over from a window that does not reach its mark', async () => {
+    // 250 new: the laptop's window starts above the phone's newest, so neither holds 151 to 200.
+    const { server, phone, restore } = await staleWorld(range(1, 150), server =>
+      deliver(server, range(151, 400)),
+    );
+
+    expect(await restore()).toBe(true);
+    expect(await uidsOf(phone)).toEqual(range(201, 400));
+    expect((await phone.folder('inbox').getSync())?.complete).toBe(false);
+    await expectNoHiddenMail(phone, server);
+  });
+
+  it('leaves no mark over mail it lacks when a merge is cut short', async () => {
+    const { server, phone, restore } = await staleWorld(
+      range(1, 150),
+      server => deliver(server, range(151, 400)),
+      // Most of what arrived goes again, so the sync's window reaches back past the phone's mark.
+      server => expunge(server, uid => uid > 200 && uid <= 380),
+    );
+    const failing: MailCache = {
+      ...phone,
+      folder: folder => ({
+        ...phone.folder(folder),
+        putSummaries: async () => {
+          throw new Error('the disk is full');
+        },
+      }),
+    };
+
+    expect(await restore({ cache: failing })).toBe(false);
+    await syncMailbox(server.run, phone);
+    await expectNoHiddenMail(phone, server);
+  });
+
+  it("writes no mark once a lock clears the cache during a folder's summaries", async () => {
+    const { phone, restore } = await staleWorld([1, 2], server => deliver(server, [3]));
+    let isLocked = false;
+    const locking: MailCache = {
+      ...phone,
+      folder: folder => ({
+        ...phone.folder(folder),
+        putSummaries: async summaries => {
+          await phone.folder(folder).putSummaries(summaries);
+          isLocked = true;
+          await phone.clear();
+        },
+      }),
+    };
+
+    expect(await restore({ cache: locking, isStale: () => isLocked })).toBe(false);
+    expect(await phone.folder('inbox').getSync()).toBeNull();
+  });
+
+  it('downloads a snapshot once: one taken in, or written here, is not fetched again', async () => {
+    const { server, phone, records, files, filesGet, restore } = await staleWorld([1, 2], server =>
+      deliver(server, [3]),
+    );
+    expect(await restore()).toBe(true);
+    expect(await restore()).toBe(false);
+    expect(filesGet).toHaveBeenCalledOnce();
+
+    // The phone writes the next one itself.
+    deliver(server, [4]);
+    await syncMailbox(server.run, phone);
+    const writer = createSnapshotWriter({
+      store: records.store,
+      files: files.store,
+      now: () => Date.now() + SNAPSHOT_INTERVAL_MS,
+    });
+    expect(await writer.save(MAILBOX, phone)).toBe('saved');
+    expect(await restore()).toBe(false);
+    expect(filesGet).toHaveBeenCalledOnce();
+  });
+
+  it('does not write back a list it took in unchanged, whatever order its store keeps', async () => {
+    const { records, files } = await savedWorld(fakeServer({ uidValidity: 7, uids: [1, 2, 3, 4] }));
+    const phone = memoryMailCache();
+    await phone.folder('inbox').putSummaries([summary(3, 3), summary(1, 1), summary(2, 2)]);
+    await phone
+      .folder('inbox')
+      .putSync({ name: 'INBOX', uidValidity: 7, lastUid: 3, complete: true });
+    expect(
+      await restoreSnapshot({
+        records: listSnapshotRecords(records.store),
+        files: files.store,
+        cache: phone,
+        mailbox: MAILBOX,
+      }),
+    ).toBe(true);
+
+    const writer = createSnapshotWriter({
+      store: records.store,
+      files: files.store,
+      now: () => Date.now() + SNAPSHOT_INTERVAL_MS,
+    });
+    expect(await writer.save(MAILBOX, phone)).toBe('skipped');
+  });
+
+  it('shows its own list when the snapshot is slow, and drops the snapshot when it lands', async () => {
+    const { phone, files, restore } = await staleWorld([1, 2], server => deliver(server, [3]));
+    const arrived = Promise.withResolvers<void>();
+    const slow: FileStore = {
+      ...files.store,
+      get: async fileId => {
+        await arrived.promise;
+        return files.store.get(fileId);
+      },
+    };
+
+    expect(await restore({ files: slow, waitMs: 5 })).toBe(false);
+    arrived.resolve();
+    await new Promise(resolve => setTimeout(resolve, 10));
+    expect(await uidsOf(phone)).toEqual([1, 2]);
+  });
+
+  it('waits past that for a device with no cache, which has nothing else to show', async () => {
+    const server = fakeServer({ uidValidity: 7, uids: [1, 2] });
+    const { records, files } = await savedWorld(server);
+    const phone = memoryMailCache();
+    const slow: FileStore = {
+      ...files.store,
+      get: async fileId => {
+        await new Promise(resolve => setTimeout(resolve, 20));
+        return files.store.get(fileId);
+      },
+    };
+    expect(
+      await restoreSnapshot({
+        records: listSnapshotRecords(records.store),
+        files: slow,
+        cache: phone,
+        mailbox: MAILBOX,
+        waitMs: 5,
+      }),
+    ).toBe(true);
+    expect(await uidsOf(phone)).toEqual([1, 2]);
+  });
+
+  it('waits for the record within the same bound as the file', async () => {
+    const { phone, restore } = await staleWorld([1, 2], server => deliver(server, [3]));
+    expect(await restore({ records: new Promise(() => {}), waitMs: 5 })).toBe(false);
+    expect(await uidsOf(phone)).toEqual([1, 2]);
+  });
+
+  it('asks the vault for every record in one list, not one request per mailbox', async () => {
+    const { records } = await staleWorld([1, 2], server => deliver(server, [3]));
+    const get = vi.spyOn(records.store, 'get');
+    const list = vi.spyOn(records.store, 'list');
+    const listed = listSnapshotRecords(records.store);
+    const phones = [memoryMailCache(), memoryMailCache()];
+    await Promise.all(
+      phones.map(cache =>
+        restoreSnapshot({ records: listed, files: fakeFileStore().store, cache, mailbox: MAILBOX }),
+      ),
+    );
+    expect(list).toHaveBeenCalledOnce();
+    expect(get).not.toHaveBeenCalled();
+  });
+
+  it('keeps a copy this device filed above the snapshot’s mark, for the sync to read again', async () => {
+    const { server, phone, restore } = await staleWorld([1, 2, 3], server => deliver(server, [4]));
+    // A move filed a copy here (`recordMoves`) at a uid the snapshot's device has not seen.
+    deliver(server, [5]);
+    await phone.folder('inbox').putSummaries([summary(5, 5)]);
+
+    expect(await restore()).toBe(true);
+    expect(await uidsOf(phone)).toEqual([1, 2, 3, 4, 5]);
+    await syncMailbox(server.run, phone);
+    expect(await uidsOf(phone)).toEqual([1, 2, 3, 4, 5]);
+  });
+
+  it('claims attachment names only for summaries that carry them', async () => {
+    /** A phone whose cache predates attachment names, holding the whole folder. */
+    const withoutNames = async (cache: MailCache) => {
+      const mark = await cache.folder('inbox').getSync();
+      if (mark === null) throw new Error('no mark');
+      const { name, uidValidity, lastUid, complete } = mark;
+      await cache.folder('inbox').putSync({ name, uidValidity, lastUid, complete });
+    };
+    // Its older pages are kept: they still want their names read once.
+    const kept = await staleWorld(range(1, 150), server => deliver(server, range(151, 260)));
+    await withoutNames(kept.phone);
+    expect(await kept.restore()).toBe(true);
+    expect((await kept.phone.folder('inbox').getSync())?.hasAttachmentNames).toBe(false);
+
+    // Nothing of its own is kept: every summary is the snapshot's, names and all.
+    const replaced = await staleWorld(range(1, 150), server => deliver(server, range(151, 400)));
+    await withoutNames(replaced.phone);
+    expect(await replaced.restore()).toBe(true);
+    expect((await replaced.phone.folder('inbox').getSync())?.hasAttachmentNames).toBe(true);
+  });
+
+  it('leaves a small folder whose merge was cut short complete after its next sync', async () => {
+    const { server, phone, restore } = await staleWorld([1, 2, 3], server => deliver(server, [4]));
+    const failing: MailCache = {
+      ...phone,
+      folder: folder => ({
+        ...phone.folder(folder),
+        putSummaries: async () => {
+          throw new Error('the disk is full');
+        },
+      }),
+    };
+
+    expect(await restore({ cache: failing })).toBe(false);
+    await syncMailbox(server.run, phone);
+    expect(await uidsOf(phone)).toEqual([1, 2, 3, 4]);
+    expect((await phone.folder('inbox').getSync())?.complete).toBe(true);
+  });
+
+  it('syncs on from the merge: new mail, mail gone since and the older pages it kept', async () => {
+    const { server, phone, restore } = await staleWorld(
+      range(1, 150),
+      server => deliver(server, range(151, 260)),
+      server => {
+        expunge(server, uid => uid === 20 || uid === 255);
+        deliver(server, [261, 262]);
+      },
+    );
+    expect(await restore()).toBe(true);
+    server.fetchSummariesBySeq.mockClear();
+
+    const { state } = await syncMailbox(server.run, phone);
+    expect(state.status).toBe('synced');
+    expect(await uidsOf(phone)).toEqual(range(1, 262).filter(uid => uid !== 20 && uid !== 255));
+    // Incremental from the snapshot's mark, with the kept pages' flags read and 20 dropped.
+    expect(server.fetchSummariesBySeq).not.toHaveBeenCalled();
+    expect(await phone.folder('inbox').getSync()).toMatchObject({ lastUid: 262, complete: true });
+    await expectNoHiddenMail(phone, server);
   });
 });
 
@@ -302,7 +665,7 @@ describe('the sync after a restore', () => {
     const phone = memoryMailCache();
     expect(
       await restoreSnapshot({
-        store: records.store,
+        records: listSnapshotRecords(records.store),
         files: files.store,
         cache: phone,
         mailbox: MAILBOX,
@@ -397,7 +760,7 @@ describe('the sync after a restore', () => {
 
     const phone = memoryMailCache();
     await restoreSnapshot({
-      store: records.store,
+      records: listSnapshotRecords(records.store),
       files: files.store,
       cache: phone,
       mailbox: MAILBOX,
@@ -453,6 +816,44 @@ describe('createSnapshotWriter', () => {
     expect(await writer().save(MAILBOX, clearing)).toBe('skipped');
     expect(await fileIdNamed()).toBeUndefined();
     expect(files.files.size).toBe(0);
+  });
+
+  it('marks its cache as holding what it wrote', async () => {
+    const { cache, writer } = await world();
+    expect(await writer().save(MAILBOX, cache)).toBe('saved');
+    expect(await cache.getSnapshotDigest()).not.toBeNull();
+  });
+
+  it('marks nothing once a lock has begun while it wrote', async () => {
+    const { cache, records, writer } = await world();
+    // The teardown moves the generation first and clears the cache after, so the cache still reads
+    // as what was written.
+    let isLocked = false;
+    const locking: RecordStore = {
+      ...records.store,
+      put: async input => {
+        await records.store.put(input);
+        isLocked = true;
+      },
+    };
+    expect(await writer(locking).save(MAILBOX, cache, () => isLocked)).toBe('saved');
+    expect(await cache.getSnapshotDigest()).toBeNull();
+  });
+
+  it('marks nothing when the cache no longer holds what it wrote', async () => {
+    const { server, cache, records, writer } = await world();
+    // A clear and part of a rebuild land while the record is written.
+    const rebuilding: RecordStore = {
+      ...records.store,
+      put: async input => {
+        await records.store.put(input);
+        await cache.clear();
+        server.inbox.messages = server.inbox.messages.filter(({ uid }) => uid !== 1);
+        await syncMailbox(server.run, cache);
+      },
+    };
+    expect(await writer(rebuilding).save(MAILBOX, cache)).toBe('saved');
+    expect(await cache.getSnapshotDigest()).toBeNull();
   });
 
   it('writes at most once an interval, from this device or another', async () => {

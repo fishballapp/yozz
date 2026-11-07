@@ -3,7 +3,12 @@ import { listDrafts } from '@yozz.app/mail/compose/draft-vault';
 import { listSentRecords } from '@yozz.app/mail/compose/sent-vault';
 import type { MailConnectionFailure } from '@yozz.app/mail/connection';
 import type { MailCache } from '@yozz.app/mail/threads/cache';
-import { createSnapshotWriter, restoreSnapshot } from '@yozz.app/mail/threads/cache-snapshot';
+import {
+  createSnapshotWriter,
+  listSnapshotRecords,
+  restoreSnapshot,
+  type SnapshotRecords,
+} from '@yozz.app/mail/threads/cache-snapshot';
 import {
   cachedPreviews,
   cachedSummaries,
@@ -107,9 +112,10 @@ export class Cache extends Context.Service<
   }
 >()('@yozz.app/cli/Cache') {
   /**
-   * `$XDG_CACHE_HOME/yozz/<userId>/`, a directory per mailbox, sealed under the vault's cache key. A
-   * mailbox with no cache here starts from the vault's snapshot of its list, and each sync that lands
-   * may write a new one, which the command waits for only once its own answer is out.
+   * `$XDG_CACHE_HOME/yozz/<userId>/`, a directory per mailbox, sealed under the vault's cache key.
+   * Each sync starts from the vault's snapshot of the mailbox's list when the cache here is missing or
+   * older, and each sync that lands may write a new one, which the command waits for only once its
+   * own answer is out.
    */
   static readonly layer = Layer.effect(
     Cache,
@@ -124,6 +130,12 @@ export class Cache extends Context.Service<
         .use(async (records, files) => [records, files] as const)
         .pipe(Effect.orDie);
       const snapshots = createSnapshotWriter({ store, files });
+      /** Every mailbox's snapshot record, asked for once a run, by the first sync that restores. */
+      let snapshotRecords: Promise<SnapshotRecords> | null = null;
+      const snapshotRecordsOnce = () => {
+        snapshotRecords ??= listSnapshotRecords(store);
+        return snapshotRecords;
+      };
       const saving = yield* FiberSet.make();
       // Best effort, so a vault that stops answering costs the snapshot, not the command's exit.
       yield* Effect.addFinalizer(() =>
@@ -172,7 +184,9 @@ export class Cache extends Context.Service<
       const syncNow = Effect.fnUntraced(function* (mailbox: InboundAddress) {
         const startedAt = yield* Clock.currentTimeMillis;
         const cache = cacheOf(mailbox).mail;
-        yield* Effect.promise(() => restoreSnapshot({ store, files, cache, mailbox }));
+        yield* Effect.promise(() =>
+          restoreSnapshot({ records: snapshotRecordsOnce(), files, cache, mailbox }),
+        );
         const { state } = yield* usingCache(() => syncMailbox(mail.runOn(mailbox), cache));
         if (state.status === 'failed') return yield* failed(mailbox, state.failure);
         yield* cacheOf(mailbox).setSyncedAt(startedAt);

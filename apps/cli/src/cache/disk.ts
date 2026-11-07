@@ -13,8 +13,8 @@ import { UsageError } from '../errors.ts';
 import { seal, unseal, writePrivateFile } from '../files.ts';
 
 // One mailbox's mail cache on disk: a file per folder (its sync mark, summaries and previews), a
-// file per cached body named for its folder's UIDVALIDITY, when the mailbox last synced, and where
-// searches found mail outside the window. Each is `iv ‖ AES-GCM(key, JSON)` with the mailbox and the file's name as
+// file per cached body named for its folder's UIDVALIDITY, when the mailbox last synced, where
+// searches found mail outside the window, and which vault snapshot it last took in or wrote. Each is `iv ‖ AES-GCM(key, JSON)` with the mailbox and the file's name as
 // additional data, so a file moved to another slot does not open. One that does not open, or no
 // longer decodes, is deleted and read as absent, and the next sync rebuilds it. A file the disk
 // will not read or write is the person's to fix: a `UsageError`, never a defect.
@@ -103,6 +103,9 @@ const MailboxFileSchema = Schema.Struct({
   syncedAt: Schema.Int,
 });
 
+/** The vault snapshot this cache last took in or wrote, by its digest. */
+const SnapshotFileSchema = Schema.Struct({ digest: Schema.String });
+
 /** Where a search found a message the cached window does not hold. */
 const FoundCopySchema = Schema.Struct({
   messageId: Schema.String,
@@ -118,10 +121,12 @@ const FolderJson = Schema.fromJsonString(FolderFileSchema);
 const BodyJson = Schema.fromJsonString(BodySchema);
 const MailboxJson = Schema.fromJsonString(MailboxFileSchema);
 const FoundJson = Schema.fromJsonString(FoundFileSchema);
+const SnapshotJson = Schema.fromJsonString(SnapshotFileSchema);
 
 // The file keeps its old name, so a cache written before the rename still reads.
 const SYNCED_AT_FILE = 'account.bin';
 const FOUND_FILE = 'found.bin';
+const SNAPSHOT_FILE = 'snapshot.bin';
 
 /** How many found copies a mailbox remembers, the newest found kept: a few searches' worth. */
 const FOUND_KEPT = 2_000;
@@ -194,8 +199,11 @@ export const mailboxCache = Effect.fn('cache.mailboxCache')(function* ({
         ),
       );
       if (Option.isNone(opened)) {
-        // A body is only fetched again, and a found copy searched for; a folder's file held what the sync read.
-        if (!name.startsWith('bodies') && name !== FOUND_FILE) isDamaged = true;
+        // A body is only fetched again, a found copy searched for and a snapshot downloaded; a
+        // folder's file held what the sync read.
+        if (!name.startsWith('bodies') && name !== FOUND_FILE && name !== SNAPSHOT_FILE) {
+          isDamaged = true;
+        }
         yield* fs.remove(file, { force: true }).pipe(Effect.mapError(unusable('written')));
       }
       return opened;
@@ -311,6 +319,13 @@ export const mailboxCache = Effect.fn('cache.mailboxCache')(function* ({
       folders.set(folder, created);
       return created.cache;
     },
+    getSnapshotDigest: () =>
+      run(
+        Effect.map(read(SNAPSHOT_FILE, SnapshotJson), file =>
+          Option.match(file, { onNone: () => null, onSome: ({ digest }) => digest }),
+        ),
+      ),
+    putSnapshotDigest: digest => run(write(SNAPSHOT_FILE, SnapshotJson, { digest })),
     clear: async () => {
       await run(
         fs.remove(dir, { recursive: true, force: true }).pipe(Effect.mapError(unusable('written'))),

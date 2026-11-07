@@ -90,6 +90,28 @@ describe('mail cache', () => {
     expect((await theirs.listSummaries()).map(s => s.uid)).toEqual([1]);
   });
 
+  it('keeps the snapshot digest per user and mailbox, gone with a clear or a lock', async () => {
+    const idb = new IDBFactory();
+    const mine = createMailCache('u1', 'me@x', idb);
+    const other = createMailCache('u1', 'other@x', idb);
+    const theirs = createMailCache('u2', 'me@x', idb);
+    expect(await mine.getSnapshotDigest()).toBeNull();
+    await mine.putSnapshotDigest('d1');
+    await other.putSnapshotDigest('d2');
+    await theirs.putSnapshotDigest('d3');
+    await mine.putSnapshotDigest('d4');
+    expect(await mine.getSnapshotDigest()).toBe('d4');
+    expect(await other.getSnapshotDigest()).toBe('d2');
+
+    await mine.clear();
+    expect(await mine.getSnapshotDigest()).toBeNull();
+    expect(await other.getSnapshotDigest()).toBe('d2');
+
+    await clearMailCache('u1', idb);
+    expect(await other.getSnapshotDigest()).toBeNull();
+    expect(await theirs.getSnapshotDigest()).toBe('d3');
+  });
+
   it('rewrites the summaries it names in place, and invents none it does not hold', async () => {
     const idb = new IDBFactory();
     const inbox = createMailCache('u1', 'me@x', idb).folder('inbox');
