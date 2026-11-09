@@ -74,7 +74,7 @@ export const listCommand = Command.make(
     unread: Flag.Boolean('unread').pipe(Flag.withHidden, Flag.withDefault(false)),
     query: Flag.String('query').pipe(
       Flag.withDescription(
-        `What to list, in Gmail's syntax; the inbox without one, and everything but Trash when empty. Words and "a phrase", all in one message, from: to: (To or Cc) subject: in:inbox|sent|archive|trash|drafts|anywhere mailbox:<address> is:unread is:starred before:YYYY/MM/DD after:YYYY/MM/DD`,
+        `What to list, in Gmail's syntax; the inbox without one, and everything but Trash and Junk when empty. Words and "a phrase", all in one message, from: to: (To or Cc) subject: in:inbox|sent|archive|trash|junk|drafts|anywhere mailbox:<address> is:unread is:starred before:YYYY/MM/DD after:YYYY/MM/DD`,
       ),
       Flag.optional,
     ),
@@ -274,7 +274,7 @@ text. Several terms must all match in the same message:
   invoice "exact phrase"   anywhere in a message: subject, sender, To, Cc, Reply-To, body, and the
                            names of its attachments
   from: to: subject:       one field; to: is the To or Cc line. A value may be quoted
-  in:inbox|sent|archive|trash|drafts|anywhere   where to look; repeat it for several
+  in:inbox|sent|archive|trash|junk|drafts|anywhere   where to look; repeat it for several
   mailbox:you@example.com  everything one login holds, whichever address it was sent to, named by
                            the address it connects under; repeat it for several. An alias or a
                            send-only address has no mailbox: use to: for mail sent to one
@@ -282,8 +282,8 @@ text. Several terms must all match in the same message:
   before:2026/11/01 after:2026-10-01   the day it arrived; after is on or after, before is strictly
                            before
 
-With no in:, a query, even an empty one, looks in the inbox, Sent, Archive and drafts. Only in:trash or in:anywhere reach
-Trash. A query that only says where (in:archive, mailbox:you@example.com) lists from this machine's
+With no in:, a query, even an empty one, looks in the inbox, Sent, Archive and drafts. Only in:trash, in:junk or
+in:anywhere reach Trash and Junk (the provider's spam folder). A query that only says where (in:archive, mailbox:you@example.com) lists from this machine's
 cache, which it first syncs when it is over two minutes old (--sync always does), so it can take as
 long as a sync; --cursor pages back with the nextCursor before, reaching for older mail as yozz.app's Older
 mail does. A query with anything to look for searches each folder on the server, with vault drafts

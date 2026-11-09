@@ -666,6 +666,80 @@ describe('threads that span mailboxes', () => {
   });
 });
 
+describe('Junk', () => {
+  const me = 'me@yozz.app';
+  const invoice = summaryOf({ uid: 1, envelope: envelope({ subject: 'Invoice 42' }) });
+
+  it('never joins a real conversation by its subject or its References', () => {
+    const spam = summaryOf({
+      uid: 9,
+      internalDate: '24-Aug-2026 09:00:00 +0000',
+      references: ['<msg-1@example.com>'],
+      envelope: envelope({
+        subject: 'Re: Invoice 42',
+        messageId: '<spam@bulk.example>',
+        inReplyTo: '<msg-1@example.com>',
+      }),
+    });
+    const threads = threadsFromMailboxes({ [me]: read({ inbox: [invoice], junk: [spam] }) });
+    expect(threads.map(thread => [thread.folders, thread.messages.length])).toEqual([
+      [['junk'], 1],
+      [['inbox'], 1],
+    ]);
+  });
+
+  it('is a conversation of one message each, even between two Junk messages', () => {
+    const first = summaryOf({ uid: 1, envelope: envelope({ messageId: '<a@bulk.example>' }) });
+    const reply = summaryOf({
+      uid: 2,
+      envelope: envelope({
+        subject: 'Re: Important update',
+        messageId: '<b@bulk.example>',
+        inReplyTo: '<a@bulk.example>',
+      }),
+    });
+    expect(threadsFromMailboxes({ [me]: read({ junk: [first, reply] }) })).toHaveLength(2);
+  });
+
+  it('keeps a Junk copy apart from the same message kept elsewhere, and never renames that one', () => {
+    const alone = threadsFromMailboxes({ [me]: read({ inbox: [invoice] }) });
+    const threads = threadsFromMailboxes({
+      [me]: read({ inbox: [invoice], junk: [{ ...invoice, uid: 3 }] }),
+      'other@yozz.app': read({ junk: [{ ...invoice, uid: 5 }] }),
+    });
+    expect(threads.map(thread => thread.folders)).toEqual([['inbox'], ['junk']]);
+    // The real message keeps its `mid/` whatever Junk holds; the Junk copy is named where it sits.
+    expect(threads[0]?.messages[0]?.id).toBe(alone[0]?.messages[0]?.id);
+    expect(threads[0]?.messages[0]?.id).toBe('mid/<msg-1@example.com>');
+    expect(threads[1]?.messages[0]?.id).toBe(`${me}/junk/1/3`);
+  });
+
+  it('keeps one id for a message moved wholly into Junk and back', () => {
+    const [kept] = threadsFromMailboxes({ [me]: read({ inbox: [invoice] }) });
+    const [junked] = threadsFromMailboxes({ [me]: read({ junk: [{ ...invoice, uid: 9 }] }) });
+    expect(junked?.messages[0]?.id).toBe(kept?.messages[0]?.id);
+    expect(junked?.id).toBe(kept?.id);
+  });
+
+  it('names Junk by where it sits when two Junk messages share a Message-ID', () => {
+    const other = { ...invoice, uid: 2, envelope: envelope({ subject: 'Something else' }) };
+    const threads = threadsFromMailboxes({ [me]: read({ junk: [invoice, other] }) });
+    expect(threads.flatMap(thread => thread.messages.map(({ id }) => id)).toSorted()).toEqual([
+      `${me}/junk/1/1`,
+      `${me}/junk/1/2`,
+    ]);
+  });
+
+  it('collapses the copies two mailboxes both filed as Junk into one message', () => {
+    const threads = threadsFromMailboxes({
+      [me]: read({ junk: [invoice] }),
+      'other@yozz.app': read({ junk: [{ ...invoice, uid: 5 }] }),
+    });
+    expect(threads).toHaveLength(1);
+    expect(threads[0]?.messages[0]?.locations).toHaveLength(2);
+  });
+});
+
 describe('message ids', () => {
   it('carries a Message-ID only when it is printable ASCII of a sane length', () => {
     const idOf = (messageId: string) =>

@@ -144,9 +144,9 @@ export type Location = {
 };
 
 /** The IMAP folders a sync reads. A closed set, so an id can carry one. */
-export type Folder = 'inbox' | 'sent' | 'archive' | 'trash' | 'drafts';
+export type Folder = 'inbox' | 'sent' | 'archive' | 'trash' | 'junk' | 'drafts';
 
-export const FOLDERS: readonly Folder[] = ['inbox', 'sent', 'archive', 'trash', 'drafts'];
+export const FOLDERS: readonly Folder[] = ['inbox', 'sent', 'archive', 'trash', 'junk', 'drafts'];
 
 /**
  * `mid/<Message-ID>` when that Message-ID names exactly one displayed message across every mailbox,
@@ -201,13 +201,26 @@ type Foldered = { readonly folders: readonly Folder[] };
 export const isArchived = ({ folders }: Foldered) =>
   folders.includes('archive') && !folders.includes('inbox');
 
-/** What `in:<folder>` asks of a conversation holding `folders`: Archive means filed away, not merely a copy there. */
-export const holdsFolder = (folders: readonly Folder[], folder: Folder) =>
-  folder === 'archive' ? isArchived({ folders }) : folders.includes(folder);
+/**
+ * What `in:<folder>` asks of a conversation holding `folders`: Archive means filed away, not merely a
+ * copy there, and Junk means all of it, so nothing done from there reaches a copy kept elsewhere.
+ */
+export const holdsFolder = (folders: readonly Folder[], folder: Folder) => {
+  if (folder === 'archive') return isArchived({ folders });
+  if (folder === 'junk') return isJunk({ folders });
+  return folders.includes(folder);
+};
 
 /** The whole conversation is in Trash. */
 export const isTrashed = ({ folders }: Foldered) =>
   folders.length > 0 && folders.every(folder => folder === 'trash');
+
+/**
+ * The whole conversation is in Junk, a reply you are drafting aside. A sync makes every Junk message a
+ * conversation of its own, but a move to Junk leaves your Sent copies where they were until it lands.
+ */
+export const isJunk = ({ folders }: Foldered) =>
+  folders.includes('junk') && folders.every(folder => folder === 'junk' || folder === 'drafts');
 
 /** A thread has an attachment when any of its messages does. */
 export const attachmentsOf = (thread: Thread) =>

@@ -40,7 +40,8 @@ describe('threadsIn', () => {
   const trashed = thread('trashed', ['trash'], true);
   // One message deleted, the rest of the conversation still live: in both places, as in Gmail.
   const halfTrashed = thread('half-trashed', ['inbox', 'trash']);
-  const all = [inbox, sentOnly, archived, trashed, halfTrashed];
+  const junk = thread('junk', ['junk'], true);
+  const all = [inbox, sentOnly, archived, trashed, halfTrashed, junk];
 
   const idsIn = (view: string) => threadsIn(all, view).map(t => t.id);
 
@@ -53,6 +54,40 @@ describe('threadsIn', () => {
   it('shows archived mail only in Archive, and everything with a trashed message in Trash', () => {
     expect(idsIn('archive')).toEqual(['archived']);
     expect(idsIn('trash')).toEqual(['trashed', 'half-trashed']);
+  });
+
+  it('keeps a conversation half moved to Junk out of Junk, and in Starred and Sent', () => {
+    // Move to Junk leaves your own Sent copy where it was until the sync splits the two.
+    const halfJunk = thread('half-junk', ['sent', 'junk'], true);
+    const listed = (view: string) => threadsIn([halfJunk], view).map(t => t.id);
+    expect(listed('junk')).toEqual([]);
+    expect(listed('starred')).toEqual(['half-junk']);
+    expect(listed('sent')).toEqual(['half-junk']);
+    expect(
+      listingOf({ threads: [halfJunk], view: 'unified', q: 'in:junk half', mailboxes: [] }).threads,
+    ).toEqual([]);
+  });
+
+  it('lists in Junk only what is wholly there, a draft aside, in one mailbox or across them', () => {
+    const drafting = thread('drafting', ['junk', 'drafts']);
+    expect(threadsIn([drafting], 'junk').map(t => t.id)).toEqual(['drafting']);
+    // One mailbox moved its copy to Junk; the other's is still in its inbox.
+    const spread: ThreadState = {
+      ...thread('spread', ['inbox', 'junk']),
+      mailboxes: ['me@x', 'us@y'],
+      foldersByMailbox: { 'me@x': ['junk'], 'us@y': ['inbox'] },
+    };
+    const mailboxes = [{ address: 'me@x' }, { address: 'us@y' }];
+    const listed = (q: string) =>
+      listingOf({ threads: [spread], view: 'unified', q, mailboxes }).threads.map(t => t.id);
+    expect(listed('in:junk mailbox:me@x')).toEqual([]);
+    expect(listed('in:junk')).toEqual([]);
+    expect(listed('in:inbox mailbox:us@y')).toEqual(['spread']);
+  });
+
+  it('shows Junk only in Junk, starred or not', () => {
+    expect(idsIn('junk')).toEqual(['junk']);
+    expect(['unified', 'starred', 'sent', 'archive', 'trash'].flatMap(idsIn)).not.toContain('junk');
   });
 });
 
@@ -150,8 +185,9 @@ describe('the query behind a list', () => {
   const inbox = words('inbox', ['inbox']);
   const archived = words('archived', ['archive']);
   const trashed = words('trashed', ['trash']);
+  const junk = words('junk', ['junk']);
   const elsewhere = { ...thread('other', ['inbox']), subject: 'lunch' };
-  const threads = [inbox, archived, trashed, elsewhere];
+  const threads = [inbox, archived, trashed, junk, elsewhere];
   const idsOf = (query: string | undefined, view = 'unified') =>
     listingOf({ threads: threads, view: view, q: query, mailboxes }).threads.map(({ id }) => id);
 
@@ -161,6 +197,7 @@ describe('the query behind a list', () => {
     ['archive', 'in:archive'],
     ['sent', 'in:sent'],
     ['trash', 'in:trash'],
+    ['junk', 'in:junk'],
     ['drafts', 'in:drafts'],
     ['me@x', 'in:inbox mailbox:me@x'],
   ])('%s is %s, and that query is that view', (view, query) => {
@@ -220,9 +257,10 @@ describe('the query behind a list', () => {
     });
   });
 
-  it('reaches Trash only when asked', () => {
+  it('reaches Trash and Junk only when asked', () => {
     expect(idsOf('in:trash stripe')).toEqual(['trashed']);
-    expect(idsOf('in:anywhere stripe')).toEqual(['inbox', 'archived', 'trashed']);
+    expect(idsOf('in:junk stripe')).toEqual(['junk']);
+    expect(idsOf('in:anywhere stripe')).toEqual(['inbox', 'archived', 'trashed', 'junk']);
   });
 
   it('narrows inside a folder, and rows of one folder act as that folder’s view', () => {
@@ -371,7 +409,7 @@ describe('the query behind a list', () => {
   });
 
   it('lists a query that only says where, with nothing a server could be asked', () => {
-    expect(idsOf('in:anywhere')).toEqual(['inbox', 'archived', 'trashed', 'other']);
+    expect(idsOf('in:anywhere')).toEqual(['inbox', 'archived', 'trashed', 'junk', 'other']);
   });
 
   it('gives an address with no mailbox an error, not an empty answer', () => {

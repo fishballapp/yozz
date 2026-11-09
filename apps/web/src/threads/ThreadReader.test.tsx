@@ -17,6 +17,8 @@ vi.mock('../store/MailProvider', () => ({
     toggleArchive: vi.fn(),
     trashThread: vi.fn(),
     restoreThread: vi.fn(),
+    moveThreads: vi.fn(),
+    junkFolders: { 'me@example.com': true },
     markUnread: vi.fn(),
     loadBody: vi.fn(),
   }),

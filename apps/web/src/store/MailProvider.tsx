@@ -31,6 +31,7 @@ import {
 import {
   applyOps,
   flagTargets,
+  type JunkFolders,
   MOVE_SOURCES,
   type MoveTarget,
   type PendingChange,
@@ -144,8 +145,10 @@ type MailContextValue = ComposerShared & {
   toggleArchive: (threadId: string, onRefused?: OnRefused) => boolean;
   /** Moves the whole conversation to Trash, own sent copies included. */
   trashThread: (threadId: string, onRefused?: OnRefused) => boolean;
-  /** Brings a thread back to the inbox from Trash or Archive. */
+  /** Brings a thread back to the inbox from Trash, Archive or Junk. */
   restoreThread: (threadId: string, onRefused?: OnRefused) => boolean;
+  /** Whether each mailbox's server lists a Junk folder, once it is known; YOZZ never creates one. */
+  junkFolders: JunkFolders;
   /**
    * The many-thread forms the actions above are the one-id case of: one write per mailbox and
    * folder however many threads, answering the ids they took (a flag already set counts).
@@ -266,6 +269,8 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
   const opsRef = useRef(ops);
   opsRef.current = ops;
   const [syncStates, setSyncStates] = useState<Readonly<Record<string, MailboxSyncState>>>({});
+  /** From each mailbox's last whole pass; demo mode gives every address one. */
+  const [knownJunk, setKnownJunk] = useState<JunkFolders>({});
   const syncStatesRef = useRef(syncStates);
   syncStatesRef.current = syncStates;
   const [mailError, setMailError] = useState<string | null>(null);
@@ -510,6 +515,7 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
       mailboxesRef.current = mailboxesRef.current.filter(mailbox => mailbox.address !== address);
       hydratedRef.current.delete(address);
       setRecords(current => current.filter(record => record.address !== address));
+      setKnownJunk(({ [address]: _, ...rest }) => rest);
       forgetFound(address);
       setBaseByMailbox(current => {
         const { [address]: _, ...rest } = current;
@@ -578,6 +584,7 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
       if (isAnotherMailbox) {
         forgetFound(address);
         hydratedRef.current.delete(address);
+        setKnownJunk(({ [address]: _, ...rest }) => rest);
         for (const key of movedRef.current.keys()) {
           if (key.startsWith(`${address}/`)) movedRef.current.delete(key);
         }
@@ -784,6 +791,13 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
             }
             const { state } = result;
             lastPass = { status: state.status, scope: result.scope, seq };
+            // A whole pass reads every folder its LIST names, so Junk read is Junk there.
+            if (result.scope === 'all' && state.status === 'synced' && !isStale()) {
+              setKnownJunk(current => ({
+                ...current,
+                [address]: result.byFolder.junk !== undefined,
+              }));
+            }
             if (state.status === 'synced') {
               // The new mail an inbox pass read has landed through `onFolder`, and every other folder
               // stays as the last whole pass left it.
@@ -886,6 +900,14 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
     },
     [requestSync],
   );
+
+  const junkFolders = useMemo<JunkFolders>(
+    () => (demo ? Object.fromEntries(records.map(({ address }) => [address, true])) : knownJunk),
+    [demo, records, knownJunk],
+  );
+  /** Read by a move, which runs outside a render. */
+  const junkFoldersRef = useRef(junkFolders);
+  junkFoldersRef.current = junkFolders;
 
   /** Read by the draft writes, which run outside a render. */
   const threadsRef = useRef<readonly ThreadState[]>([]);
@@ -1013,6 +1035,7 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
       setPreviews({});
       setOps([]);
       setSyncStates({});
+      setKnownJunk({});
       setOlderInFlight({});
       reset(userId);
       setMailError(null);
@@ -1260,7 +1283,8 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
     (
       threadIds: readonly string[],
       change: PendingChange,
-      pick: (folder: Folder) => boolean,
+      /** Which copies the write addresses, by the folder and the mailbox each sits in. */
+      pick: (folder: Folder, mailbox: string) => boolean,
       command: (
         run: ReturnType<RunOn>,
         targets: readonly FlagTarget[],
@@ -1281,7 +1305,7 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
         // Demo moves never touch the fixtures' locations, so the folders say who holds a copy.
         const demoOps = targeted.flatMap(thread =>
           Object.entries(thread.foldersByMailbox)
-            .filter(([, folders]) => folders.some(pick))
+            .filter(([mailbox, folders]) => folders.some(folder => pick(folder, mailbox)))
             .map(([mailbox]) => opFor(thread.id, mailbox)),
         );
         setDemoThreads(current => applyOps(current, demoOps));
@@ -1309,7 +1333,9 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
                 .filter(
                   mailbox =>
                     serverCopies.some(location => location.mailbox === mailbox.address) &&
-                    (thread.foldersByMailbox[mailbox.address] ?? []).some(pick),
+                    (thread.foldersByMailbox[mailbox.address] ?? []).some(folder =>
+                      pick(folder, mailbox.address),
+                    ),
                 )
                 .map(mailbox => ({
                   mailbox,
@@ -1353,7 +1379,7 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
               return {
                 op,
                 isPlaced: here.length === now.length,
-                picked: here.filter(location => pick(location.folder)),
+                picked: here.filter(location => pick(location.folder, location.mailbox)),
               };
             });
             const folders = new Set(
@@ -1400,6 +1426,12 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
               if (change.kind === 'move') tearRunningSync(mailbox.address);
               afterFoundWrite(mailbox.address, change, targets, res.value);
               acknowledge(ready.map(({ op }) => op));
+              // Junk is never threaded, so only a sync splits mail moved into it from the rest of its
+              // conversation, or joins it back: ask for one now rather than whenever one comes.
+              const isJunkMove =
+                change.kind === 'move' &&
+                (change.to === 'junk' || targets.some(({ folder }) => folder === 'junk'));
+              if (isJunkMove) void requestSync(mailbox);
               // Clears an earlier write's failure, never this batch's own: a refused thread or
               // mailbox would otherwise vanish from under the box as the rest lands.
               if (!isRefusalShown) setMailError(null);
@@ -1488,8 +1520,16 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
       }
 
       const userId = userIdRef.current;
-      // Any copy will do for a body.
-      const [copy] = message.locations ?? [];
+      // Any copy will do for a body, where it is now: a move this session made has taken it from
+      // where the base, until a sync, still says it is. ponytail: a move still on its way is not
+      // followed, so the fetch, queued behind it, fails with Retry. Un-park when seen.
+      const placed = (message.locations ?? [])
+        .map(location => whereNow(movedRef.current, location))
+        .find(location => location !== null);
+      // Moved, and the server did not say where (no UIDPLUS): only a body cached before the move
+      // can be shown until the sync says where it went.
+      const [original] = message.locations ?? [];
+      const copy = placed ?? original;
       if (copy === undefined || userId === null) return Promise.resolve(failed);
       const { folder, uid, mailbox: mailboxAddress } = copy;
       const mailbox = mailboxesRef.current.find(a => a.address === mailboxAddress);
@@ -1530,6 +1570,13 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
           const cache = createMailCache(userId, mailboxAddress).folder(folder);
           const cached = await cache.getBody(uid);
           if (isRetired()) return failed;
+          if (cached === null && placed === undefined) {
+            setEntry(failed);
+            setMailError(`message not loaded · ${MOVE_PENDING}`);
+            // The sync says where it went, so the Retry this offers can find it.
+            void requestSync(mailbox);
+            return failed;
+          }
           const loadedFrom = (
             body: Omit<FetchedBody, 'dkim'>,
             senderCheck: SenderCheck,
@@ -1613,7 +1660,7 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
       });
       return promise;
     },
-    [bindRunOn, isCurrentMailbox, lookupTxt, threads],
+    [bindRunOn, isCurrentMailbox, lookupTxt, requestSync, threads],
   );
 
   const markRead = useCallback(
@@ -1646,8 +1693,10 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
       return runThreadOps(
         threadIds,
         { kind: 'move', to },
-        // Only the copies this move consumes, in every mailbox that holds one.
-        folder => sources.includes(folder),
+        // Only the copies this move consumes, in every mailbox that holds one and, for Junk, has
+        // a Junk folder to take them.
+        (folder, mailbox) =>
+          sources.includes(folder) && (to !== 'junk' || junkFoldersRef.current[mailbox] === true),
         async (run, targets) => {
           const { moveMessages } = await import('@yozz.app/mail/threads/sync');
           return moveMessages(run, targets, to);
@@ -1713,6 +1762,7 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
       toggleArchive,
       trashThread,
       restoreThread,
+      junkFolders,
       moveThreads,
       flagThreads,
     }),
@@ -1747,6 +1797,7 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
       toggleArchive,
       trashThread,
       restoreThread,
+      junkFolders,
       moveThreads,
       flagThreads,
       shared,

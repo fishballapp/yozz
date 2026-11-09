@@ -53,6 +53,7 @@ export const AgentTools = () => {
     setStar: (threadIds, isStarred) =>
       flushSync(() => mail.flagThreads(threadIds, 'isStarred', isStarred)),
     move: (threadIds, to) => flushSync(() => mail.moveThreads(threadIds, to)),
+    junkFolders: mail.junkFolders,
     writeDraft: input => mailRef.current.writeDraft(input),
     removeDraft: draftId => mailRef.current.removeDraft(draftId),
     openThread: async thread => {

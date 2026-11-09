@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { applyOps, type MoveTarget, type PendingOp } from './reconcile.ts';
+import { threadsFromMailboxes } from './summaries.ts';
 import type { Folder, Message, ThreadState } from './thread.ts';
 import { threadsIn, unreadCount } from './views.ts';
 
@@ -72,5 +73,58 @@ describe('a pending move in an address view', () => {
     expect(idsIn(both, 'unified')).toEqual([]);
     expect(idsIn(both, 'archive')).toEqual(['t']);
     expect(unreadCount(both, 'unified')).toBe(0);
+  });
+});
+
+describe('a move into Junk and out again, through the syncs that confirm it', () => {
+  const summary = (folder: Folder) => ({
+    seq: 1,
+    uid: folder === 'junk' ? 40 : 7,
+    flags: ['\\Seen'],
+    internalDate: '23-Aug-2026 09:00:00 +0000',
+    size: 100,
+    envelope: {
+      date: 'Sun, 23 Aug 2026 09:00:00 +0000',
+      subject: 'Invoice 42',
+      subjectRaw: null,
+      from: [{ name: null, mailbox: 'billing', host: 'example.com' }],
+      sender: [],
+      replyTo: [],
+      to: [],
+      cc: [],
+      bcc: [],
+      inReplyTo: null,
+      messageId: '<inv-42@example.com>',
+    },
+    references: [],
+    gmailThreadId: null,
+    attachmentNames: [],
+  });
+  const synced = (folder: Folder) =>
+    threadsFromMailboxes({
+      'me@x': { [folder]: { uidValidity: 1, summaries: [summary(folder)] } },
+    });
+  const op = (threadId: string, to: MoveTarget): PendingOp => ({
+    id: `${threadId}:${to}`,
+    mailbox: 'me@x',
+    threadId,
+    change: { kind: 'move', to },
+    retireAtSyncSeq: 1,
+  });
+
+  it('keeps the id the reader and the next write name, before the sync and after it', () => {
+    const [before] = synced('inbox');
+    if (before === undefined) throw new Error('no thread');
+    // Moved to Junk: the pending op over the old base, then the base the confirming sync reads.
+    const [pending] = applyOps([before], [op(before.id, 'junk')]);
+    const [landed] = synced('junk');
+    expect([pending?.id, landed?.id]).toEqual([before.id, before.id]);
+    expect(landed?.messages[0]?.id).toBe(before.messages[0]?.id);
+    // Not junk, then Archive before that sync lands: both ops still name the thread.
+    const [archived] = applyOps(
+      [landed ?? before],
+      [op(before.id, 'inbox'), op(before.id, 'archive')],
+    );
+    expect(archived?.folders).toEqual(['archive']);
   });
 });

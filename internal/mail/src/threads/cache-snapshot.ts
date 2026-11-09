@@ -128,8 +128,11 @@ type Snapshot = {
 const sha256 = async (text: string): Promise<string> =>
   new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text))).toHex();
 
+/** The snapshot is for a device to show its mail at once; seeding spam would only spend vault space. */
+const SNAPSHOT_FOLDERS = FOLDERS.filter(folder => folder !== 'junk');
+
 /**
- * Each folder that has synced, its mark read before its summaries: a sync writes summaries before
+ * Each folder that has synced but Junk, its mark read before its summaries: a sync writes summaries before
  * the mark, so a summary newer than the mark is read again by the next sync, while a mark newer
  * than its summaries would leave the mail between them unread for good. Then the mark is read again:
  * a clear or a start-over meanwhile deletes summaries the first mark still claims, and a snapshot of
@@ -137,7 +140,7 @@ const sha256 = async (text: string): Promise<string> =>
  */
 const readSnapshot = async (cache: MailCache): Promise<Snapshot | null> => {
   const folders = await Promise.all(
-    FOLDERS.map(async folder => {
+    SNAPSHOT_FOLDERS.map(async folder => {
       const folderCache = cache.folder(folder);
       const sync = await folderCache.getSync();
       if (sync === null) return [];

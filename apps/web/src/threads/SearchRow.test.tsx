@@ -172,6 +172,7 @@ vi.mock('../store/MailProvider', () => ({
       sentCopyError: null,
       search,
       sync: vi.fn(),
+      junkFolders: {},
       followSearch,
     };
   },

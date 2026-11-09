@@ -5,6 +5,8 @@ import {
   canMoveTo,
   flagTargets,
   foldersAfterMove,
+  junkReadiness,
+  movesOffered,
   type PendingOp,
   retireOps,
 } from './reconcile.ts';
@@ -51,6 +53,13 @@ describe('canMoveTo', () => {
     [['trash'], 'inbox', true],
     [['inbox'], 'inbox', false],
     [['sent'], 'inbox', false],
+    [['junk'], 'inbox', true],
+    [['inbox'], 'junk', true],
+    [['archive'], 'junk', true],
+    [['sent'], 'junk', false],
+    [['trash'], 'junk', false],
+    [['junk'], 'junk', false],
+    [['junk'], 'trash', true],
     [[], 'archive', false],
   ] as const)('%j can move to %s: %s', (folders, to, expected) => {
     expect(canMoveTo(folders, to)).toBe(expected);
@@ -64,8 +73,48 @@ describe('foldersAfterMove', () => {
     [['archive'], 'inbox', ['inbox']],
     [['trash'], 'inbox', ['inbox']],
     [['sent'], 'archive', ['sent', 'archive']],
+    [['inbox', 'sent', 'archive'], 'junk', ['sent', 'junk']],
+    [['junk'], 'inbox', ['inbox']],
   ] as const)('%j → %s = %j', (folders, to, expected) => {
     expect(foldersAfterMove(folders, to)).toEqual(expected);
+  });
+});
+
+describe('movesOffered', () => {
+  const junkOn = { 'me@x': true };
+
+  it('offers Junk on what arrived, only where its mailbox has a Junk folder', () => {
+    expect(movesOffered(thread('t', ['inbox', 'sent']), junkOn).canMoveToJunk).toBe(true);
+    expect(movesOffered(thread('t', ['archive']), junkOn).canMoveToJunk).toBe(true);
+    expect(movesOffered(thread('t', ['inbox']), { 'me@x': false }).canMoveToJunk).toBe(false);
+    expect(movesOffered(thread('t', ['sent']), junkOn).canMoveToJunk).toBe(false);
+    // Two mailboxes hold it: the one with a Junk folder holds only what Junk would not take.
+    const spread = thread('t', ['inbox', 'sent'], { 'me@x': ['sent'], 'you@y': ['inbox'] });
+    expect(movesOffered(spread, { ...junkOn, 'you@y': false }).canMoveToJunk).toBe(false);
+  });
+
+  it('waits for every mailbox holding a copy to answer LIST, so no copy stays behind unseen', () => {
+    const spread = thread('t', ['inbox'], { 'me@x': ['inbox'], 'you@y': ['inbox'] });
+    expect(junkReadiness(spread, junkOn)).toBe('unknown');
+    expect(movesOffered(spread, junkOn).canMoveToJunk).toBe(false);
+    // One answered that it has none: its copy stays, and the other's moves.
+    expect(junkReadiness(spread, { ...junkOn, 'you@y': false })).toBe('ready');
+    expect(junkReadiness(spread, { 'me@x': false, 'you@y': false })).toBe('none');
+  });
+
+  it('offers Not junk and Delete on Junk, and Restore alone replaces Not junk', () => {
+    expect(movesOffered(thread('t', ['junk']), junkOn)).toEqual({
+      canRestore: false,
+      canArchive: false,
+      canMoveToInbox: false,
+      canMoveToJunk: false,
+      canMoveOutOfJunk: true,
+      canDelete: true,
+    });
+    expect(movesOffered(thread('t', ['trash', 'junk']), junkOn).canMoveOutOfJunk).toBe(false);
+    // One inbox button: Move to inbox takes Junk's copies back with Archive's.
+    const filed = movesOffered(thread('t', ['archive', 'junk']), junkOn);
+    expect([filed.canMoveToInbox, filed.canMoveOutOfJunk]).toEqual([true, false]);
   });
 });
 

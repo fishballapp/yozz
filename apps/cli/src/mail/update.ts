@@ -1,3 +1,4 @@
+import { NO_JUNK_FOLDER } from '@yozz.app/mail/addresses/folder-names';
 import type { InboundAddress } from '@yozz.app/mail/addresses/record';
 import type { MailConnectionFailure, Result } from '@yozz.app/mail/connection';
 import type { FolderSync } from '@yozz.app/mail/threads/cache';
@@ -14,6 +15,7 @@ import { type MovedCopy, moveMessages, recordMoves, setFlag } from '@yozz.app/ma
 import {
   type Folder,
   isArchived,
+  isJunk,
   isServerCopy,
   isTrashed,
   type Location,
@@ -58,7 +60,11 @@ const unmovedBy =
   (thread: ThreadState): string | null => {
     if (to === 'archive' && isArchived(thread)) return 'already archived';
     if (to === 'trash' && isTrashed(thread)) return 'already in the trash';
-    if (to === 'inbox' && !isArchived(thread) && !isTrashed(thread)) return 'already in the inbox';
+    if (to === 'junk' && isJunk(thread) && !canMoveTo(thread.folders, 'junk')) {
+      return 'already in Junk';
+    }
+    // Nothing the inbox takes back: a half-moved conversation still has a copy to bring.
+    if (to === 'inbox' && !canMoveTo(thread.folders, 'inbox')) return 'already in the inbox';
     if (!canMoveTo(thread.folders, to)) return `nothing to move to ${to}`;
     return null;
   };
@@ -93,8 +99,10 @@ export const updateCommand = Command.make(
       Flag.withDescription('Remove the star'),
       Flag.withDefault(false),
     ),
-    move: Flag.Literals('move', ['inbox', 'archive', 'trash']).pipe(
-      Flag.withDescription('Move every copy of the conversation'),
+    move: Flag.Literals('move', ['inbox', 'archive', 'trash', 'junk']).pipe(
+      Flag.withDescription(
+        "Move every copy of the conversation; junk takes what arrived into the mailbox's own Junk folder, where it has one",
+      ),
       Flag.optional,
     ),
   },
@@ -131,6 +139,8 @@ export const updateCommand = Command.make(
     /** A conversation a write refused, with why; the writes after it leave it out. */
     const refused = new Map<string, { readonly code: string; readonly message: string }>();
     const offServer = new Set<string>();
+    /** A conversation a mailbox with no Junk folder held, with why: refused if nothing else moved. */
+    const keptOutOfJunk = new Map<string, { readonly code: string; readonly message: string }>();
 
     /** One command per mailbox and folder over every conversation `write` changes. */
     const apply = Effect.fnUntraced(function* (write: Write) {
@@ -167,8 +177,14 @@ export const updateCommand = Command.make(
               { address: mailbox.address, host: mailbox.imap.host },
               res.error,
             );
+            // A mailbox with no Junk folder keeps its copies, as yozz.app's move leaves them; the
+            // conversation fails only when no mailbox could move any.
+            const isNoJunk = res.error.kind === 'error' && res.error.detail === NO_JUNK_FOLDER;
             for (const { thread } of work) {
-              refused.set(thread.id, { code: error._tag, message: error.message });
+              (isNoJunk ? keptOutOfJunk : refused).set(thread.id, {
+                code: error._tag,
+                message: error.message,
+              });
             }
             return;
           }
@@ -189,6 +205,11 @@ export const updateCommand = Command.make(
         }),
         { concurrency: 'unbounded', discard: true },
       );
+      // Refused only when no mailbox moved a copy, and never over another mailbox's own refusal.
+      for (const [threadId, why] of keptOutOfJunk) {
+        const isMoved = ops.some(op => op.threadId === threadId && op.change.kind === 'move');
+        if (!isMoved && !refused.has(threadId)) refused.set(threadId, why);
+      }
     });
 
     /** The write itself, written into the cache as it lands, so the next list shows it. */

@@ -12,6 +12,7 @@ const mail = vi.hoisted(() => ({
   mailboxes: [{ address: 'me@example.com' }],
   threads: [],
   sync: vi.fn(),
+  junkFolders: {} as Record<string, boolean>,
 }));
 
 vi.mock('@tanstack/react-router', () => ({
@@ -46,6 +47,7 @@ const click = (name: string) => {
 afterEach(async () => {
   await act(async () => root.render(null));
   mail.sync.mockClear();
+  mail.junkFolders = {};
 });
 
 describe('AddressRail', () => {
@@ -68,5 +70,15 @@ describe('AddressRail', () => {
     await show();
     await click('me@example.com');
     expect(mail.sync).not.toHaveBeenCalled();
+  });
+
+  it('shows Junk only once a server has listed one, since YOZZ never creates it', async () => {
+    route.view = 'unified';
+    const labels = () => [...host.querySelectorAll('a')].map(link => link.textContent);
+    await show();
+    expect(labels()).not.toContain('Junk');
+    mail.junkFolders = { 'me@example.com': true };
+    await show();
+    expect(labels()).toContain('Junk');
   });
 });

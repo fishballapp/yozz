@@ -145,6 +145,30 @@ describe('restoreSnapshot', () => {
     expect(files.files.has(parseSnapshotRecord(row?.plaintext ?? '')?.fileId ?? '')).toBe(true);
   });
 
+  it('leaves Junk out, so spam seeds no other device', async () => {
+    const records = fakeRecordStore();
+    const files = fakeFileStore();
+    const laptop = memoryMailCache();
+    await syncMailbox(fakeServer({ uidValidity: 7, uids: [1] }).run, laptop);
+    await laptop
+      .folder('junk')
+      .putSync({ name: 'Spam', uidValidity: 3, lastUid: 9, complete: true });
+    await laptop.folder('junk').putSummaries([summary(9, 1)]);
+    const writer = createSnapshotWriter({ store: records.store, files: files.store });
+    expect(await writer.save(MAILBOX, laptop)).toBe('saved');
+    const phone = memoryMailCache();
+
+    await restoreSnapshot({
+      records: listSnapshotRecords(records.store),
+      files: files.store,
+      cache: phone,
+      mailbox: MAILBOX,
+    });
+    expect(await uidsOf(phone)).toEqual([1]);
+    expect(await phone.folder('junk').getSync()).toBeNull();
+    expect(await phone.folder('junk').listSummaries()).toEqual([]);
+  });
+
   it('fills a folder this device has not synced, and leaves the others alone', async () => {
     const server = fakeServer({ uidValidity: 7, uids: [1, 2, 3] });
     const { records, files } = await savedWorld(server);

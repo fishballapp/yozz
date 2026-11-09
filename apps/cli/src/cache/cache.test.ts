@@ -46,6 +46,7 @@ layer(NodeServices.layer)(it => {
           'archive.bin',
           'inbox-100-1.bin',
           'inbox.bin',
+          'junk.bin',
           'sent.bin',
           'snapshot.bin',
           'trash.bin',

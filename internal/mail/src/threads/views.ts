@@ -4,13 +4,28 @@ import { threadMatches } from './match.ts';
 import { type FolderWindow, type OlderFrontier, olderFrontier } from './paging.ts';
 import { hasCriteria, isThreadInScope, parseQuery, resolveScope, viewOfFolders } from './query.ts';
 import type { MailboxSyncState } from './sync.ts';
-import { type Folder, isArchived, isTrashed, type Thread, type ThreadState } from './thread.ts';
+import {
+  type Folder,
+  isArchived,
+  isJunk,
+  isTrashed,
+  type Thread,
+  type ThreadState,
+} from './thread.ts';
 
 /**
  * A view id is a URL segment: a named view is one of a closed set, an address is any email string,
  * and an unconnected address is an in-pane state.
  */
-const namedViewSchema = z.enum(['unified', 'starred', 'archive', 'sent', 'trash', 'drafts']);
+const namedViewSchema = z.enum([
+  'unified',
+  'starred',
+  'archive',
+  'sent',
+  'trash',
+  'junk',
+  'drafts',
+]);
 type NamedView = z.infer<typeof namedViewSchema>;
 
 export const isNamedView = (value: string): value is NamedView =>
@@ -38,11 +53,12 @@ export const previewOf = (thread: Thread) => {
 /** One question per view about a thread's `folders`; adding a view does not compile until it answers. */
 const VIEW_SHOWS: Record<NamedView, (thread: ThreadState) => boolean> = {
   unified: thread => thread.folders.includes('inbox'),
-  starred: thread => thread.isStarred && !isTrashed(thread),
+  starred: thread => thread.isStarred && !isTrashed(thread) && !isJunk(thread),
   archive: isArchived,
   // What you sent, wherever the conversation now sits.
   sent: thread => thread.folders.includes('sent') && !isTrashed(thread),
   trash: thread => thread.folders.includes('trash'),
+  junk: isJunk,
   // The vault's drafts, in whatever conversation each belongs to.
   drafts: thread => thread.folders.includes('drafts'),
 };
@@ -54,6 +70,7 @@ const VIEW_PAGES: Record<NamedView, Folder> = {
   archive: 'archive',
   sent: 'sent',
   trash: 'trash',
+  junk: 'junk',
   // Drafts are vault records, not a folder.
   drafts: 'drafts',
 };
@@ -145,6 +162,7 @@ const QUERY_OF_NAMED_VIEW: Record<NamedView, string> = {
   archive: 'in:archive',
   sent: 'in:sent',
   trash: 'in:trash',
+  junk: 'in:junk',
   drafts: 'in:drafts',
 };
 

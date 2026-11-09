@@ -8,7 +8,7 @@ import {
   type ImapResult,
   uidSets,
 } from '@yozz.app/imap';
-import { ensureFolderName, resolveFolders } from '../addresses/folder-names.ts';
+import { ensureFolderName, junkFolderName, resolveFolders } from '../addresses/folder-names.ts';
 import type { MailConnectionFailure, Result, RunTask } from '../connection.ts';
 import { type FetchedBody, parseBody } from './bodies.ts';
 import type { FolderCache, FolderSync, MailCache } from './cache.ts';
@@ -473,17 +473,18 @@ const destinationOf = (copy: CopyUid | null, folder: Folder, uid: number) => {
 export const moveMessages = async (
   run: RunTask,
   sources: readonly FlagTarget[],
-  to: 'inbox' | 'archive' | 'trash',
+  to: 'inbox' | 'archive' | 'trash' | 'junk',
 ): Promise<Result<readonly MovedCopy[], MailConnectionFailure>> =>
   run({
     priority: 'user',
     effect: 'write',
     retry: false,
     run: async client => {
-      const destination =
-        to === 'inbox'
-          ? ({ ok: true, value: 'INBOX' } as const)
-          : await ensureFolderName(client, to);
+      const destination = await (async () => {
+        if (to === 'inbox') return { ok: true, value: 'INBOX' } as const;
+        if (to === 'junk') return junkFolderName(client);
+        return ensureFolderName(client, to);
+      })();
       if (!destination.ok) return destination;
       const moved: MovedCopy[] = [];
       for (const source of sources) {
@@ -549,7 +550,7 @@ export const recordMoves = async (
   return { isComplete: unfiled === 0 };
 };
 
-/** What a prefetch reads, the inbox first: Trash is seldom read again, and Drafts are not threaded. */
+/** What a prefetch reads, the inbox first: Trash and Junk are seldom read, and Drafts are not threaded. */
 const PREFETCH_FOLDERS = ['inbox', 'sent', 'archive'] as const satisfies readonly Folder[];
 
 /**

@@ -259,6 +259,7 @@ export const makeFakeImapServer = ({
     { name: 'Sent', attributes: ['\\Sent'] },
     { name: 'Archive', attributes: ['\\Archive'] },
     { name: 'Trash', attributes: ['\\Trash'] },
+    { name: 'Spam', attributes: ['\\Junk'] },
   ],
 }: {
   readonly username: string;

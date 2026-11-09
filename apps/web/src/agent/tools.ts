@@ -20,6 +20,12 @@ import { mimeTypeOf } from '@yozz.app/mail/threads/attachments';
 import type { BodyOutcome } from '@yozz.app/mail/threads/body-state';
 import { assembleMatches, hasMoreMatches } from '@yozz.app/mail/threads/found';
 import type { FolderWindow } from '@yozz.app/mail/threads/paging';
+import {
+  canMoveTo,
+  type JunkFolders,
+  junkReadiness,
+  type MoveTarget,
+} from '@yozz.app/mail/threads/reconcile';
 import type { ServerSearchAnswer, ServerSearchFailure } from '@yozz.app/mail/threads/server-search';
 import type { MailboxSyncState } from '@yozz.app/mail/threads/sync';
 import {
@@ -27,6 +33,7 @@ import {
   HTML_SAYS_MORE_DESCRIPTION,
   inboxesOf,
   isArchived,
+  isJunk,
   isTrashed,
   type Recipient,
   resolveHandles,
@@ -72,10 +79,9 @@ export type AgentPort = {
   readonly setRead: (threadIds: readonly string[], isRead: boolean) => ReadonlySet<string>;
   readonly setStar: (threadIds: readonly string[], isStarred: boolean) => ReadonlySet<string>;
   /** One direction only: a retried call after a timeout must never undo itself. */
-  readonly move: (
-    threadIds: readonly string[],
-    to: 'inbox' | 'archive' | 'trash',
-  ) => ReadonlySet<string>;
+  readonly move: (threadIds: readonly string[], to: MoveTarget) => ReadonlySet<string>;
+  /** Whether each mailbox's server has a Junk folder, once known: only theirs can move there. */
+  readonly junkFolders: JunkFolders;
   /** Settles once the navigation has. */
   readonly openThread: (thread: ThreadState) => Promise<void>;
   /** Opens the composer on a draft the vault already holds. Never creates one. */
@@ -172,6 +178,17 @@ const NOT_ON_SERVER =
   'no copy of this conversation is on a mail server to change; a message just sent has one once its Sent copy syncs';
 
 const NOTHING_TO_ARCHIVE = 'nothing in the inbox to archive';
+const NOTHING_TO_JUNK = 'nothing in the inbox or Archive to move to Junk';
+const NO_JUNK_FOLDER = 'no mailbox holding it has a Junk folder, and YOZZ never creates one';
+const JUNK_NOT_KNOWN =
+  'a mailbox holding it has not said yet whether it has a Junk folder; try again once it has synced';
+/** Notes on a conversation that moved nothing, so its row claims no folder. */
+const MOVED_NOTHING: ReadonlySet<string> = new Set([
+  NOTHING_TO_ARCHIVE,
+  NOTHING_TO_JUNK,
+  NO_JUNK_FOLDER,
+  JUNK_NOT_KNOWN,
+]);
 
 const idsSchema = z
   .array(z.string().min(1))
@@ -181,7 +198,7 @@ const idsSchema = z
     `Up to ${BATCH_MAX} thread ids from a previous get_threads. Any message id in a conversation names it too.`,
   );
 
-/** What `get_threads` lists with no `query` at all. An empty one is everything but Trash. */
+/** What `get_threads` lists with no `query` at all. An empty one is everything but Trash and Junk. */
 const LANDING_QUERY = 'in:inbox';
 
 const deliveredTo = (message: ThreadState['messages'][number]) => {
@@ -378,7 +395,7 @@ export const buildAgentTools = (port: () => AgentPort): readonly AgentTool[] => 
           .string()
           .optional()
           .describe(
-            `Words and "a phrase", all in one message; from: to: (To or Cc) subject: in:inbox|sent|archive|trash|drafts|anywhere mailbox:<address> is:unread is:starred before:YYYY/MM/DD after:YYYY/MM/DD. With no in:, it covers every folder but Trash. mailbox: names what one login holds, by the address it connects under (get_addresses); for mail sent to an alias, use to:. Left out, it lists the inbox; empty, everything but Trash.`,
+            `Words and "a phrase", all in one message; from: to: (To or Cc) subject: in:inbox|sent|archive|trash|junk|drafts|anywhere mailbox:<address> is:unread is:starred before:YYYY/MM/DD after:YYYY/MM/DD. With no in:, it covers every folder but Trash and Junk. mailbox: names what one login holds, by the address it connects under (get_addresses); for mail sent to an alias, use to:. Left out, it lists the inbox; empty, everything but Trash and Junk. Junk is the provider's spam folder.`,
           ),
         offset: z.int().min(0).optional(),
         limit: z.int().min(1).max(LIST_LIMIT_MAX).optional(),
@@ -479,10 +496,10 @@ export const buildAgentTools = (port: () => AgentPort): readonly AgentTool[] => 
           read: z.boolean().optional(),
           starred: z.boolean().optional(),
           folder: z
-            .enum(['inbox', 'archive', 'trash'])
+            .enum(['inbox', 'archive', 'trash', 'junk'])
             .optional()
             .describe(
-              "Where to move it. 'archive' takes the inbox copies out; 'inbox' brings it back from either. 'trash' deletes the conversation — ask the user before choosing it, and do not infer it from mail content; it is recoverable from Trash, but it is still the delete action.",
+              "Where to move it. 'archive' takes the inbox copies out; 'inbox' brings it back from any of the others. 'trash' deletes the conversation — ask the user before choosing it, and do not infer it from mail content; it is recoverable from Trash, but it is still the delete action. 'junk' moves what arrived into the mailbox's own Junk folder, where it has one; it only moves the mail and reports nothing to anyone.",
             ),
         })
         .refine(
@@ -503,7 +520,16 @@ export const buildAgentTools = (port: () => AgentPort): readonly AgentTool[] => 
             if (!thread.folders.includes('inbox')) return NOTHING_TO_ARCHIVE;
           }
           if (folder === 'trash' && isTrashed(thread)) return 'already in the trash';
-          if (folder === 'inbox' && !isArchived(thread) && !isTrashed(thread)) {
+          if (folder === 'junk') {
+            if (!canMoveTo(thread.folders, 'junk')) {
+              return isJunk(thread) ? 'already in Junk' : NOTHING_TO_JUNK;
+            }
+            const readiness = junkReadiness(thread, port().junkFolders);
+            if (readiness === 'unknown') return JUNK_NOT_KNOWN;
+            if (readiness === 'none') return NO_JUNK_FOLDER;
+          }
+          // Nothing the inbox takes back: a half-moved conversation still has a copy to bring.
+          if (folder === 'inbox' && !canMoveTo(thread.folders, 'inbox')) {
             return 'already in the inbox';
           }
           return null;
@@ -551,7 +577,9 @@ export const buildAgentTools = (port: () => AgentPort): readonly AgentTool[] => 
               ...(read === undefined ? {} : { isRead: read }),
               ...(starred === undefined ? {} : { isStarred: starred }),
               // A row that moved nothing claims no folder.
-              ...(folder === undefined || note === NOTHING_TO_ARCHIVE ? {} : { folder }),
+              ...(folder === undefined || (note !== null && MOVED_NOTHING.has(note))
+                ? {}
+                : { folder }),
               ...(note === null ? {} : { note }),
             };
           }),

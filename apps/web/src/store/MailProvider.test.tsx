@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import 'fake-indexeddb/auto';
+import { movesOffered } from '@yozz.app/mail/threads/reconcile';
 import type { FlagTarget } from '@yozz.app/mail/threads/sync';
 import type { Folder, ThreadState } from '@yozz.app/mail/threads/thread';
 import { act } from 'react';
@@ -9,59 +10,69 @@ import { createMailCache } from '../threads/cache';
 import { toast } from '../ui/Toast';
 import { MailProvider, useMail } from './MailProvider';
 
-const { session, live, moveMessages, prefetchBodies, setFlag, syncMailbox, thread, shown } =
-  vi.hoisted(() => {
-    const addresses = ['a@example.com', 'b@example.com'];
-    const records = addresses.map(address => {
-      const host = { host: `imap.${address}`, port: 993, username: address, password: 'secret' };
-      return {
-        naturalKey: address,
-        plaintext: JSON.stringify({ address, smtp: host, imap: host }),
-      };
-    });
+const {
+  session,
+  live,
+  moveMessages,
+  prefetchBodies,
+  setFlag,
+  syncMailbox,
+  fetchOpenBodyAt,
+  thread,
+  shown,
+} = vi.hoisted(() => {
+  const addresses = ['a@example.com', 'b@example.com'];
+  const records = addresses.map(address => {
+    const host = { host: `imap.${address}`, port: 993, username: address, password: 'secret' };
     return {
-      session: {
-        userId: 'user',
-        files: {},
-        store: { list: async (type: string) => (type === 'address' ? records : []) },
-      },
-      /** What the store told the live manager to call when INBOX changes. */
-      live: { onMailboxChanged: (_address: string) => {} },
-      moveMessages: vi.fn(),
-      prefetchBodies: vi.fn(),
-      setFlag: vi.fn(),
-      syncMailbox: vi.fn(),
-      // One conversation in both mailboxes' inboxes, so a move is one command per mailbox.
-      thread: {
-        id: 't1',
-        mailboxes: addresses,
-        subject: 'Lunch',
-        isUnread: false,
-        isReplied: false,
-        isStarred: false,
-        folders: ['inbox'],
-        foldersByMailbox: Object.fromEntries(addresses.map(address => [address, ['inbox']])),
-        messages: [
-          {
-            id: 'm1',
-            fromName: 'Ada',
-            fromAddress: 'ada@example.org',
-            toAddress: 'a@example.com',
-            at: 1,
-            body: [],
-            locations: addresses.map(mailbox => ({
-              mailbox,
-              folder: 'inbox',
-              uidValidity: 1,
-              uid: 7,
-            })),
-          },
-        ],
-      } satisfies ThreadState,
-      /** What the base threads into: `thread` unless a test names another. */
-      shown: { threads: [] as ThreadState[] },
+      naturalKey: address,
+      plaintext: JSON.stringify({ address, smtp: host, imap: host }),
     };
   });
+  return {
+    session: {
+      userId: 'user',
+      files: {},
+      store: { list: async (type: string) => (type === 'address' ? records : []) },
+    },
+    /** What the store told the live manager to call when INBOX changes. */
+    live: { onMailboxChanged: (_address: string) => {} },
+    moveMessages: vi.fn(),
+    prefetchBodies: vi.fn(),
+    setFlag: vi.fn(),
+    syncMailbox: vi.fn(),
+    fetchOpenBodyAt: vi.fn(),
+    // One conversation in both mailboxes' inboxes, so a move is one command per mailbox.
+    thread: {
+      id: 't1',
+      mailboxes: addresses,
+      subject: 'Lunch',
+      isUnread: false,
+      isReplied: false,
+      isStarred: false,
+      folders: ['inbox'],
+      foldersByMailbox: Object.fromEntries(addresses.map(address => [address, ['inbox']])),
+      messages: [
+        {
+          id: 'm1',
+          fromName: 'Ada',
+          fromAddress: 'ada@example.org',
+          toAddress: 'a@example.com',
+          at: 1,
+          body: [],
+          locations: addresses.map(mailbox => ({
+            mailbox,
+            folder: 'inbox',
+            uidValidity: 1,
+            uid: 7,
+          })),
+        },
+      ],
+    } satisfies ThreadState,
+    /** What the base threads into: `thread` unless a test names another. */
+    shown: { threads: [] as ThreadState[] },
+  };
+});
 
 vi.mock('../vault/session', () => ({ useVault: () => ({ session }) }));
 vi.mock('../ui/chrome', () => ({ isDemo: () => false }));
@@ -77,6 +88,10 @@ vi.mock('@yozz.app/mail/threads/sync', () => ({
   prefetchBodies,
   moveMessages,
   setFlag,
+}));
+vi.mock('@yozz.app/mail/threads/bodies', async importOriginal => ({
+  ...(await importOriginal<typeof import('@yozz.app/mail/threads/bodies')>()),
+  fetchOpenBodyAt,
 }));
 vi.mock('@yozz.app/mail/threads/summaries', () => ({
   threadsFromMailboxes: () => (shown.threads.length > 0 ? shown.threads : [thread]),
@@ -101,6 +116,7 @@ afterEach(async () => {
   moveMessages.mockReset();
   prefetchBodies.mockReset();
   setFlag.mockReset();
+  fetchOpenBodyAt.mockReset();
   shown.threads = [];
   // A sync that never lands, so nothing but the write under test changes the threads.
   syncMailbox.mockReset().mockReturnValue(new Promise(() => {}));
@@ -721,6 +737,141 @@ describe('MailProvider bulk writes', () => {
     await vi.waitFor(() => expect(setFlag).toHaveBeenCalledTimes(1));
     await vi.waitFor(() => expect(syncs.count()).toBe(1));
     expect(mail().mailError).toMatch(/^flag not saved · /);
+  });
+});
+
+describe('MailProvider Junk', () => {
+  /** A whole pass that read a Junk folder, or found none to read. */
+  const passWith = (hasJunk: boolean) => ({
+    ...SYNCED,
+    byFolder: hasJunk ? { junk: { uidValidity: 9, summaries: [] } } : {},
+  });
+
+  it('offers Junk only once every mailbox holding a copy has said whether it has a Junk folder', async () => {
+    const landings: Array<(result: object) => void> = [];
+    syncMailbox.mockImplementation(
+      () => new Promise(resolve => landings.push(result => resolve(result))),
+    );
+    await mount();
+    await vi.waitFor(() => expect(landings).toHaveLength(2));
+    const offered = () => movesOffered(mail().threads[0] ?? thread, mail().junkFolders);
+
+    await act(async () => landings[0]?.(passWith(true)));
+    await vi.waitFor(() => expect(Object.values(mail().junkFolders)).toEqual([true]));
+    // The other mailbox has not answered: a move now would leave its copy in the inbox unseen.
+    expect(offered().canMoveToJunk).toBe(false);
+
+    await act(async () => landings[1]?.(passWith(false)));
+    await vi.waitFor(() =>
+      expect(Object.values(mail().junkFolders).toSorted()).toEqual([false, true]),
+    );
+    expect(offered().canMoveToJunk).toBe(true);
+  });
+
+  it('moves only the copies a Junk folder can take, then syncs to split the conversation', async () => {
+    syncMailbox
+      .mockResolvedValueOnce(passWith(true))
+      .mockResolvedValueOnce(passWith(false))
+      .mockReturnValue(new Promise(() => {}));
+    moveMessages.mockImplementation((_run, targets: readonly FlagTarget[], to: Folder) =>
+      Promise.resolve(placed(targets, to)),
+    );
+    await mount();
+    await vi.waitFor(() => expect(Object.keys(mail().junkFolders)).toHaveLength(2));
+    const [withJunk] = Object.entries(mail().junkFolders).find(([, has]) => has) ?? [];
+    const without = thread.mailboxes.find(address => address !== withJunk);
+
+    await act(async () => {
+      expect(mail().moveThreads(['t1'], 'junk')).toEqual(new Set(['t1']));
+    });
+    await vi.waitFor(() => expect(moveMessages).toHaveBeenCalledTimes(1));
+    expect(mail().threads[0]?.foldersByMailbox).toEqual({
+      [withJunk ?? '']: ['junk'],
+      [without ?? '']: ['inbox'],
+    });
+    // The two first passes, then the one the move asked for.
+    await vi.waitFor(() => expect(syncMailbox).toHaveBeenCalledTimes(3));
+  });
+});
+
+describe('MailProvider opening a moved message', () => {
+  it('fetches the body where a move put it, before any sync says so', async () => {
+    fetchOpenBodyAt.mockResolvedValue({ ok: false, error: { kind: 'error', detail: 'held' } });
+    moveMessages.mockImplementation((_run, targets: readonly FlagTarget[], to: Folder) =>
+      Promise.resolve(placed(targets, to)),
+    );
+    shown.threads = [
+      { ...thread, messages: thread.messages.map(m => ({ ...m, bodyStatus: 'pending' as const })) },
+    ];
+    await mount();
+
+    await act(async () => {
+      mail().moveThreads(['t1'], 'archive');
+    });
+    await vi.waitFor(() => expect(moveMessages).toHaveBeenCalledTimes(2));
+    await act(async () => {
+      await mail().loadBody('t1', 'm1');
+    });
+    expect(fetchOpenBodyAt).toHaveBeenCalledTimes(1);
+    // `placed` answers each uid as uid + 100 under the destination's UIDVALIDITY 3.
+    expect(fetchOpenBodyAt.mock.calls[0]?.[2]).toMatchObject({
+      folder: 'archive',
+      uidValidity: 3,
+      uid: 107,
+    });
+  });
+});
+
+describe('MailProvider opening a message a move took somewhere unsaid', () => {
+  const pending = () => {
+    shown.threads = [
+      { ...thread, messages: thread.messages.map(m => ({ ...m, bodyStatus: 'pending' as const })) },
+    ];
+  };
+
+  it('says it failed, with a retry, rather than showing nothing', async () => {
+    moveMessages.mockImplementation((_run, targets: readonly FlagTarget[]) =>
+      Promise.resolve(unplaced(targets)),
+    );
+    pending();
+    await mount();
+    await act(async () => {
+      mail().moveThreads(['t1'], 'archive');
+    });
+    await vi.waitFor(() => expect(moveMessages).toHaveBeenCalledTimes(2));
+
+    const outcome = await act(async () => mail().loadBody('t1', 'm1'));
+    expect(outcome.status).toBe('failed');
+    expect(fetchOpenBodyAt).not.toHaveBeenCalled();
+    expect(mail().threads[0]?.messages[0]?.bodyStatus).toBe('failed');
+    expect(mail().mailError).toContain('message not loaded');
+  });
+
+  it('shows the body cached where it was before the move', async () => {
+    moveMessages.mockImplementation((_run, targets: readonly FlagTarget[]) =>
+      Promise.resolve(unplaced(targets)),
+    );
+    pending();
+    await mount();
+    for (const mailbox of thread.mailboxes) {
+      await createMailCache(session.userId, mailbox)
+        .folder('inbox')
+        .putBody(7, {
+          paragraphs: ['Lunch at one?'],
+          hasTextPart: true,
+          htmlSaysMore: false,
+          inlineImagesTruncated: false,
+          attachments: [],
+          dkim: null,
+        });
+    }
+    await act(async () => {
+      mail().moveThreads(['t1'], 'archive');
+    });
+    await vi.waitFor(() => expect(moveMessages).toHaveBeenCalledTimes(2));
+
+    const outcome = await act(async () => mail().loadBody('t1', 'm1'));
+    expect(outcome).toMatchObject({ status: 'loaded', body: ['Lunch at one?'] });
   });
 });
 

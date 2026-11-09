@@ -24,8 +24,8 @@ export type FolderRead = {
 
 export type FolderSummaries = Partial<Record<Folder, FolderRead>>;
 
-/** The folders whose messages are threaded as mail. Drafts are synced but are not mail. */
-const THREADED_FOLDERS = FOLDERS.filter(folder => folder !== 'drafts');
+/** The folders whose messages are mail. Drafts are synced but are not mail. */
+const MAIL_FOLDERS = FOLDERS.filter(folder => folder !== 'drafts');
 
 /** Sent mail the vault holds because no mailbox does, or this tab's copy until a mailbox's syncs. */
 export type VaultSentMessage = {
@@ -255,7 +255,7 @@ export const threadsFromMailboxes = (
     ...Object.entries(byMailbox).flatMap(([mailbox, byFolder]) =>
       // Drafts are synced for the mirror but are not mail: threaded in, a server-side draft would be
       // counted unread and eligible for flag writes and body loads.
-      THREADED_FOLDERS.flatMap(folder => {
+      MAIL_FOLDERS.flatMap(folder => {
         const read = byFolder[folder];
         return read === undefined
           ? []
@@ -269,11 +269,15 @@ export const threadsFromMailboxes = (
     ),
   ];
 
-  /** A copy with no Message-ID is its own message. */
-  const fingerprint = ({ summary }: (typeof copies)[number]) => {
+  /**
+   * A copy with no Message-ID is its own message. A copy in Junk joins only other Junk copies: spam
+   * that shares a real message's Message-ID must not take its place.
+   */
+  const fingerprint = ({ summary, folder }: (typeof copies)[number]) => {
     const messageId = summary.envelope?.messageId;
     if (!messageId) return null;
     return [
+      folder === 'junk' ? 'junk' : 'mail',
       messageId,
       addressOf(summary.envelope?.from?.[0]) ?? '',
       summary.envelope?.date ?? '',
@@ -321,31 +325,52 @@ export const threadsFromMailboxes = (
     if (copy.print !== null) byPrint.set(copy.print, entry);
   }
 
-  // `mid/` is only a name when it names one message.
-  const midCounts = new Map<string, number>();
-  for (const entry of merged) {
-    const messageId = entry.summary.envelope?.messageId;
-    if (messageId) midCounts.set(messageId, (midCounts.get(messageId) ?? 0) + 1);
-  }
+  // `mid/` is only a name when it names one message. Mail is counted apart from Junk, so whether spam
+  // carrying a real Message-ID is loaded never renames that message; a Junk message takes `mid/` only
+  // where no mail does, so one moved wholly into or out of Junk keeps its id.
+  const isJunkEntry = (entry: Merged) => entry.folder === 'junk';
+  const countsOf = (entries: readonly Merged[]) => {
+    const counts = new Map<string, number>();
+    for (const entry of entries) {
+      const messageId = entry.summary.envelope?.messageId;
+      if (messageId) counts.set(messageId, (counts.get(messageId) ?? 0) + 1);
+    }
+    return counts;
+  };
+  const mailCounts = countsOf(merged.filter(entry => !isJunkEntry(entry)));
+  const junkCounts = countsOf(merged.filter(isJunkEntry));
   const idOf = (entry: Merged) => {
     const messageId = entry.summary.envelope?.messageId;
-    return messageId && midCounts.get(messageId) === 1 && isPrintableMessageId(messageId)
+    const isOnlyOne = (() => {
+      if (!messageId) return false;
+      if (!isJunkEntry(entry)) return mailCounts.get(messageId) === 1;
+      return !mailCounts.has(messageId) && junkCounts.get(messageId) === 1;
+    })();
+    return messageId && isOnlyOne && isPrintableMessageId(messageId)
       ? messageIdOf(messageId)
       : physicalIdOf(entry.locations[0] ?? entry.location);
   };
 
   const byId = new Map(merged.map(entry => [idOf(entry), entry] as const));
-  const groups = groupIntoThreads(
-    [...byId].map(([id, entry]) => ({
-      id,
-      messageId: entry.summary.envelope?.messageId ?? null,
-      inReplyTo: entry.summary.envelope?.inReplyTo ?? null,
-      references: entry.summary.references,
-      subject: entry.summary.envelope?.subject ?? null,
-      gmailThreadId: entry.summary.gmailThreadId,
-      gmailMailbox: entry.mailbox,
-    })),
+  // Junk is each message on its own: a spam "Re: invoice" must not join a real conversation by its
+  // subject or its References. Its copies were kept apart above, so an entry is Junk's whole.
+  const { junk = [], mail = [] } = Object.groupBy([...byId], ([, entry]) =>
+    isJunkEntry(entry) ? 'junk' : 'mail',
   );
+  const groups = [
+    ...groupIntoThreads(
+      mail.map(([id, entry]) => ({
+        id,
+        messageId: entry.summary.envelope?.messageId ?? null,
+        inReplyTo: entry.summary.envelope?.inReplyTo ?? null,
+        references: entry.summary.references,
+        subject: entry.summary.envelope?.subject ?? null,
+        gmailThreadId: entry.summary.gmailThreadId,
+        gmailMailbox: entry.mailbox,
+      })),
+    ),
+    ...junk.map(([id]) => [id, [id]] as const),
+  ];
 
   const vaultHeld = new Map(vaultSent.map(message => [message.messageId, message]));
   const threads: ThreadState[] = [];
@@ -434,6 +459,8 @@ export const withDrafts = (
     // Named by the record, else found by the message its `In-Reply-To` points at.
     const parent =
       (record.threadId === undefined ? undefined : byId.get(record.threadId)) ??
+      // ponytail: a Junk message forging the Message-ID a draft replies to can take that draft into
+      // Junk with it; rare, and the draft is still listed in Drafts. Un-park when seen.
       (record.inReplyTo === undefined
         ? undefined
         : threads.find(thread =>

@@ -13,6 +13,8 @@ const mail = vi.hoisted(() => ({
   toggleArchive: vi.fn(),
   trashThread: vi.fn(),
   restoreThread: vi.fn(),
+  moveThreads: vi.fn((threadIds: readonly string[]) => new Set(threadIds)),
+  junkFolders: { 'me@example.com': true } as Record<string, boolean>,
   removeDraft: vi.fn(),
   toggleStar: vi.fn(),
 }));
@@ -71,16 +73,18 @@ const showRow = async (view: ViewId, folders: readonly Folder[], uidValidity = 1
 afterEach(async () => {
   await act(async () => root.render(null));
   vi.restoreAllMocks();
+  mail.junkFolders = { 'me@example.com': true };
   mail.toggleArchive.mockReset();
 });
 
 describe('RowTriage', () => {
   it.each([
-    ['unified', ['inbox'], ['Archive Lunch', 'Delete Lunch']],
-    ['archive', ['archive'], ['Move Lunch to inbox', 'Delete Lunch']],
-    // Your own message with no inbox copy: there is nothing to archive.
+    ['unified', ['inbox'], ['Archive Lunch', 'Move to Junk: Lunch', 'Delete Lunch']],
+    ['archive', ['archive'], ['Move Lunch to inbox', 'Move to Junk: Lunch', 'Delete Lunch']],
+    // Your own message with no inbox copy: there is nothing to archive, and it is not spam.
     ['sent', ['sent'], ['Delete Lunch']],
     ['trash', ['trash'], ['Restore Lunch']],
+    ['junk', ['junk'], ['Not junk: Lunch', 'Delete Lunch']],
   ] as const)('in %s, a thread in %j offers %j', async (view, folders, offered) => {
     const labels = await showRow(view, folders);
     expect(labels.filter(label => label !== 'Star Lunch')).toEqual(offered);
@@ -110,6 +114,15 @@ describe('a row with no copy on a server', () => {
   it('offers no star, archive or delete while its only copy is the one this tab just sent', async () => {
     // Its Sent copy failed, so this stays until lock: every mark would act on nothing.
     expect(await showRow('sent', ['sent'], VAULT_UID_VALIDITY)).toEqual([]);
+  });
+
+  it('offers no Junk where no mailbox holding it has a Junk folder', async () => {
+    mail.junkFolders = {};
+    expect(await showRow('unified', ['inbox'])).toEqual([
+      'Star Lunch',
+      'Archive Lunch',
+      'Delete Lunch',
+    ]);
   });
 
   it('offers them once the server copy is there', async () => {

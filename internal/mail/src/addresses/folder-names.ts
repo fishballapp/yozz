@@ -14,13 +14,30 @@ const TRASH_FOLDER_NAMES = new Set([
   'deleted messages',
   'bin',
 ]);
+/** Gmail's is under its own namespace; `Junk Email` is Outlook's, and Yahoo files spam in `Bulk`. */
+const JUNK_FOLDER_NAMES = new Set([
+  'junk',
+  'spam',
+  'junk email',
+  'junk e-mail',
+  'bulk mail',
+  'bulk',
+  '[gmail]/spam',
+]);
 
-/** The folders a move can create. `INBOX` is reserved; Sent only ever receives copies. */
+/**
+ * The folders a move can create. `INBOX` is reserved; Sent only ever receives copies; Junk is never
+ * made, since RFC 6154 warns that a new `\Junk` mailbox may set the server filing spam into it.
+ */
 type MovableFolder = Extract<Folder, 'archive' | 'trash'>;
 
 /** What one is called when the server has none and a move has to make it. */
 const CREATED_NAME: Record<MovableFolder, string> = { archive: 'Archive', trash: 'Trash' };
 
+/**
+ * The first folder `LIST` marks with `attribute`, else the first with a usual name. First, because a
+ * server may mark two: older Forward Email mailboxes list both `Spam` and `Junk` as `\Junk`.
+ */
 const specialUseOf = (
   listed: readonly ImapMailbox[],
   attribute: string,
@@ -30,9 +47,9 @@ const specialUseOf = (
   listed.find(entry => names.has(entry.name.toLowerCase()));
 
 /**
- * `INBOX` is reserved by the protocol; Sent, Archive and Trash are whichever folder `LIST` marks
- * with the matching special-use attribute, else the usual names, else absent. A sync never creates
- * them; only a move does, and only the one it needs.
+ * `INBOX` is reserved by the protocol; Sent, Archive, Trash, Junk and Drafts are whichever folder
+ * `LIST` marks with the matching special-use attribute, else the usual names, else absent. A sync
+ * never creates them; only a move does, and only Archive or Trash.
  */
 export const resolveFolders = async (
   client: ImapClient,
@@ -42,6 +59,7 @@ export const resolveFolders = async (
   const sent = specialUseOf(listed.value, '\\sent', SENT_FOLDER_NAMES);
   const archive = specialUseOf(listed.value, '\\archive', ARCHIVE_FOLDER_NAMES);
   const trash = specialUseOf(listed.value, '\\trash', TRASH_FOLDER_NAMES);
+  const junk = specialUseOf(listed.value, '\\junk', JUNK_FOLDER_NAMES);
   const drafts = specialUseOf(listed.value, '\\drafts', DRAFTS_FOLDER_NAMES);
   return {
     ok: true,
@@ -50,6 +68,7 @@ export const resolveFolders = async (
       ...(sent === undefined ? {} : { sent: sent.name }),
       ...(archive === undefined ? {} : { archive: archive.name }),
       ...(trash === undefined ? {} : { trash: trash.name }),
+      ...(junk === undefined ? {} : { junk: junk.name }),
       ...(drafts === undefined ? {} : { drafts: drafts.name }),
     },
   };
@@ -75,4 +94,18 @@ export const ensureFolderName = async (
   const found = again.ok ? again.value[folder] : undefined;
   if (found !== undefined) return { ok: true, value: found };
   return { ok: false, error: { kind: 'imap', reason: created.reason } };
+};
+
+/** Why nothing moves to Junk on a server that lists none. */
+export const NO_JUNK_FOLDER = 'this mailbox has no Junk folder';
+
+/** Junk exists or it does not: a move there never creates it (`MovableFolder`). */
+export const junkFolderName = async (
+  client: ImapClient,
+): Promise<Result<string, MailConnectionFailure>> => {
+  const folders = await resolveFolders(client);
+  if (!folders.ok) return folders;
+  const { junk } = folders.value;
+  if (junk === undefined) return { ok: false, error: { kind: 'error', detail: NO_JUNK_FOLDER } };
+  return { ok: true, value: junk };
 };

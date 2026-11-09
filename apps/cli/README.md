@@ -60,7 +60,7 @@ yozz logout     # revoke this key, delete its credentials, revision marks, draft
 ```sh
 yozz list [--query <query>] [--limit <1..50>] [--cursor <c>] [--wait <seconds>] [--sync]
 yozz read <id>… [--save-attachments <dir>] [--sync] [--serve-html [--remote-images]]
-yozz update <id>… [--read | --unread] [--star | --unstar] [--move inbox|archive|trash]
+yozz update <id>… [--read | --unread] [--star | --unstar] [--move inbox|archive|trash|junk]
 ```
 
 - Conversations are threaded exactly as yozz.app threads them, so an id (`mid/<Message-ID>`) means
@@ -77,8 +77,9 @@ yozz update <id>… [--read | --unread] [--star | --unstar] [--move inbox|archiv
   - `invoice "exact phrase"`: several terms must all match in the same message, in its subject, sender,
     To, Cc, Reply-To, Bcc, body or attachment names.
   - `from:` `to:` (the To or Cc line) `subject:`, with a value that may be quoted.
-  - `in:inbox|sent|archive|trash|drafts|anywhere`; repeat it for several. With no `in:` a query looks in
-    the inbox, Sent, Archive and drafts. Only `in:trash` or `in:anywhere` reach Trash.
+  - `in:inbox|sent|archive|trash|junk|drafts|anywhere`; repeat it for several. With no `in:` a query looks
+    in the inbox, Sent, Archive and drafts. Only `in:trash`, `in:junk` or `in:anywhere` reach Trash and
+    Junk (the provider's spam folder).
   - `mailbox:you@example.com`: everything one login holds, whichever address it was sent to; repeat it
     for several. An alias or a send-only address has no mailbox: use `to:` for mail sent to one.
   - `is:unread` `is:starred`, and `before:2026/11/01` `after:2026-10-01` (after is on or after, before is

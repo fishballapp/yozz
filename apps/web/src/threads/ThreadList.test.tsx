@@ -27,6 +27,7 @@ const mail = vi.hoisted(() => ({
   trashThread: vi.fn(),
   restoreThread: vi.fn((_threadId: string) => true),
   moveThreads: vi.fn((threadIds: readonly string[], _to: string) => new Set(threadIds)),
+  junkFolders: { 'me@example.com': true } as Record<string, boolean>,
   flagThreads: vi.fn(
     (threadIds: readonly string[], _key: string, _value: boolean) => new Set(threadIds),
   ),
@@ -336,7 +337,11 @@ describe('ThreadList', () => {
     ): ThreadState => {
       const thread = FEW[index];
       if (thread === undefined) throw new Error(`No thread at ${index}`);
-      return { ...thread, folders };
+      return {
+        ...thread,
+        folders,
+        foldersByMailbox: Object.fromEntries(thread.mailboxes.map(mailbox => [mailbox, folders])),
+      };
     };
     const withDraft = (thread: ThreadState, hasServerCopy: boolean): ThreadState => {
       const [message] = thread.messages;
@@ -374,6 +379,20 @@ describe('ThreadList', () => {
       await click(boxOf('Subject 0'));
       await click(boxOf('Subject 1'));
       await click(button('Move to inbox'));
+      expect(movedTo()).toEqual([[['thread-1'], 'inbox']]);
+    });
+
+    it('moves ticked mail to Junk, and ticked Junk back to the inbox', async () => {
+      await show([holding(['inbox']), holding(['junk'], 1)], 'stripe', 'unified', true);
+      await click(boxOf('Subject 0'));
+      await click(boxOf('Subject 1'));
+      await click(button('Move to Junk'));
+      expect(movedTo()).toEqual([[['thread-0'], 'junk']]);
+
+      mail.moveThreads.mockClear();
+      await click(boxOf('Subject 0'));
+      await click(boxOf('Subject 1'));
+      await click(button('Not junk'));
       expect(movedTo()).toEqual([[['thread-1'], 'inbox']]);
     });
 

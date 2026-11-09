@@ -15,6 +15,9 @@ import {
   SECOND_HOST,
 } from './mail-world.ts';
 
+const idsOf = (stdout: string): string[] =>
+  JSON.parse(stdout).threads.map(({ id }: { readonly id: string }) => id);
+
 const flagsIn = (server: ReturnType<typeof makeFakeImapServer>, folderName: string) =>
   (server.folders.get(folderName)?.messages ?? []).map(({ uid, flags }) => [uid, [...flags]]);
 
@@ -61,6 +64,133 @@ layer(NodeServices.layer)(it => {
           { isUnread: false, isStarred: true },
         ]);
         assert.strictEqual(server.connections(), opened);
+      }),
+    );
+
+    it.effect('moves to the Junk folder LIST names and back, under one id throughout', () =>
+      Effect.gen(function* () {
+        const { world, homes, server, servers } = yield* makeMailWorld();
+        const run = (...args: string[]) => runCli(args, { fetch: world.fetch, homes, servers });
+        server.deliver('INBOX', mail(1));
+        server.deliver('Spam', mail(2));
+
+        // Junk is synced, and kept out of a query with no in:.
+        const listed = yield* run('list', '--query', '');
+        expect(idsOf(listed.stdout)).toEqual(['mid/<m1@stripe.com>']);
+        expect(server.commands).toContain('SELECT "Spam"');
+
+        const moved = yield* run('update', 'mid/<m1@stripe.com>', '--move', 'junk');
+        expect(JSON.parse(moved.stdout).threads).toEqual([
+          { id: 'mid/<m1@stripe.com>', isUnread: true, isStarred: false, folders: ['junk'] },
+        ]);
+        expect(server.commands).toContain('UID MOVE 1 "Spam"');
+
+        // The id the move answered still names it, now that it sits in Junk.
+        const read = yield* run('read', 'mid/<m1@stripe.com>');
+        assert.isTrue(Exit.isSuccess(read.exit), read.stderr);
+        const junk = yield* run('list', '--query', 'in:junk');
+        expect(idsOf(junk.stdout).toSorted()).toEqual([
+          'mid/<m1@stripe.com>',
+          'mid/<m2@stripe.com>',
+        ]);
+
+        const back = yield* run('update', 'mid/<m1@stripe.com>', '--move', 'inbox');
+        assert.isTrue(Exit.isSuccess(back.exit), back.stderr);
+        expect(JSON.parse(back.stdout).threads).toEqual([
+          { id: 'mid/<m1@stripe.com>', isUnread: true, isStarred: false, folders: ['inbox'] },
+        ]);
+      }),
+    );
+
+    it.effect(
+      'moves to Junk what a mailbox with a Junk folder holds, and leaves the rest where it is',
+      () =>
+        Effect.gen(function* () {
+          const { world, homes, server, addSecond, servers } = yield* makeMailWorld();
+          yield* addSecond();
+          const noJunk = makeFakeImapServer({
+            username: SECOND,
+            password: 'secret',
+            folders: [
+              { name: 'INBOX', attributes: [] },
+              { name: 'Trash', attributes: ['\\Trash'] },
+            ],
+          });
+          // One message to both addresses: one conversation across the two mailboxes.
+          server.deliver('INBOX', mail(1));
+          noJunk.deliver('INBOX', mail(1));
+
+          const { exit, stdout, stderr } = yield* runCli(
+            ['update', 'mid/<m1@stripe.com>', '--move', 'junk'],
+            { fetch: world.fetch, homes, servers: { ...servers, [SECOND_HOST]: noJunk } },
+          );
+
+          assert.isTrue(Exit.isSuccess(exit), stderr);
+          expect(JSON.parse(stdout).threads).toEqual([
+            {
+              id: 'mid/<m1@stripe.com>',
+              isUnread: true,
+              isStarred: false,
+              folders: ['inbox', 'junk'],
+            },
+          ]);
+          expect(server.commands).toContain('UID MOVE 1 "Spam"');
+          expect(noJunk.commands.some(command => /^(CREATE|UID MOVE)/u.test(command))).toBe(false);
+        }),
+    );
+
+    it.effect(
+      'never creates a Junk folder: a server with none refuses the move, and keeps the mail',
+      () =>
+        Effect.gen(function* () {
+          const { world, homes, servers } = yield* makeMailWorld();
+          const noJunk = makeFakeImapServer({
+            username: ADDRESS,
+            password: 'secret',
+            folders: [
+              { name: 'INBOX', attributes: [] },
+              { name: 'Trash', attributes: ['\\Trash'] },
+            ],
+          });
+          noJunk.deliver('INBOX', mail(1));
+
+          // A flag written in the same call is not a move: nothing moved, so the call fails.
+          const { exit, stdout } = yield* runCli(
+            ['update', 'mid/<m1@stripe.com>', '--read', '--move', 'junk'],
+            { fetch: world.fetch, homes, servers: { ...servers, [IMAP_HOST]: noJunk } },
+          );
+
+          assert.isTrue(Exit.isFailure(exit));
+          expect(stdout).toContain('no Junk folder');
+          expect(noJunk.commands.some(command => command.startsWith('CREATE'))).toBe(false);
+          expect(noJunk.commands.some(command => command.startsWith('UID MOVE'))).toBe(false);
+          expect(noJunk.folders.get('INBOX')?.messages).toHaveLength(1);
+        }),
+    );
+
+    it.effect("reports another mailbox's own refusal over a mailbox that has no Junk folder", () =>
+      Effect.gen(function* () {
+        const { world, homes, second, addSecond, expireSecond, servers } = yield* makeMailWorld();
+        const noJunk = makeFakeImapServer({
+          username: ADDRESS,
+          password: 'secret',
+          folders: [{ name: 'INBOX', attributes: [] }],
+        });
+        const all = { ...servers, [IMAP_HOST]: noJunk };
+        const run = (...args: string[]) =>
+          runCli(args, { fetch: world.fetch, homes, servers: all });
+        yield* addSecond();
+        noJunk.deliver('INBOX', mail(1));
+        second.deliver('INBOX', mail(1));
+        yield* run('list');
+        yield* expireSecond();
+
+        const { exit, stdout } = yield* run('update', 'mid/<m1@stripe.com>', '--move', 'junk');
+
+        assert.isTrue(Exit.isFailure(exit));
+        expect(JSON.parse(stdout).threads[0].error.message).toBe(
+          `${SECOND}: ${SECOND_HOST} rejected the username or password`,
+        );
       }),
     );
 

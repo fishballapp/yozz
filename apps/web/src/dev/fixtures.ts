@@ -709,9 +709,98 @@ const AUTHORED: readonly Thread[] = [
       },
     ],
   },
+  // What the providers filed as spam, and one real message they got wrong.
+  {
+    id: 't-junk-invoice',
+    mailboxes: ['jason@northlane.example'],
+    subject: 'RE: Invoice INV-20931 overdue — final notice',
+    isUnread: true,
+    isReplied: false,
+    isStarred: false,
+    messages: [
+      {
+        id: 'm-junk-invoice-1',
+        fromName: 'Accounts Receivable',
+        fromAddress: 'ar-dept@payables-notice.example',
+        toAddress: 'jason@northlane.example',
+        to: [{ address: 'jason@northlane.example' }],
+        at: ago(3 * HOUR),
+        body: [
+          'Dear customer, your invoice INV-20931 for $4,812.00 is now 14 days overdue.',
+          'To avoid suspension of services, review the attached statement and settle the balance through the secure portal within 24 hours.',
+        ],
+      },
+    ],
+  },
+  {
+    id: 't-junk-storage',
+    mailboxes: ['jason@jyu.example'],
+    subject: 'Your mailbox is 98% full — action required',
+    isUnread: true,
+    isReplied: false,
+    isStarred: false,
+    messages: [
+      {
+        id: 'm-junk-storage-1',
+        fromName: 'Mail Administrator',
+        fromAddress: 'no-reply@mailbox-quota.example',
+        toAddress: 'jason@jyu.example',
+        to: [{ address: 'jason@jyu.example' }],
+        at: ago(9 * HOUR),
+        body: [
+          'Your mailbox has reached 98% of its storage limit. Incoming messages will be held until you verify your account.',
+          'Verify now to keep receiving mail. This link expires in 12 hours.',
+        ],
+      },
+    ],
+  },
+  {
+    id: 't-junk-residents',
+    mailboxes: ['jason@jyu.example'],
+    subject: "Minutes from Thursday's residents' meeting",
+    isUnread: false,
+    isReplied: false,
+    isStarred: false,
+    messages: [
+      {
+        id: 'm-junk-residents-1',
+        fromName: 'Priya Nair',
+        fromAddress: 'priya@hollisroad.example',
+        toAddress: 'jason@jyu.example',
+        to: [{ name: 'Hollis Road residents', address: 'residents@hollisroad.example' }],
+        at: ago(2 * DAY),
+        body: [
+          'Hi all — minutes from Thursday are below. The short version: the bin store gets a new lock on the 14th, and the gardening rota starts next month.',
+          'If you want a key for the bin store, reply to me by Friday and I will get one cut for you.',
+        ],
+      },
+    ],
+  },
+  {
+    id: 't-junk-giftcard',
+    mailboxes: ['hello@stillwater.example'],
+    subject: 'Congratulations! You were selected for a $500 gift card',
+    isUnread: false,
+    isReplied: false,
+    isStarred: false,
+    messages: [
+      {
+        id: 'm-junk-giftcard-1',
+        fromName: 'Customer Rewards',
+        fromAddress: 'rewards@winner-survey.example',
+        toAddress: 'hello@stillwater.example',
+        to: [{ address: 'hello@stillwater.example' }],
+        at: ago(4 * DAY),
+        body: [
+          'You have been chosen to take part in our two-minute customer survey. Complete it today and claim a $500 gift card.',
+          'Only 3 rewards remain in your area.',
+        ],
+      },
+    ],
+  },
 ];
 
-/** Conversations already filed away, so Archive, Trash and a search across them have something to show. */
+/** Conversations already filed away, so Archive, Trash, Junk and a search across them have something to show. */
 const FILED_AWAY: Readonly<Record<string, Folder>> = {
   't-fastmail': 'archive',
   't-cloudflare': 'archive',
@@ -719,6 +808,10 @@ const FILED_AWAY: Readonly<Record<string, Folder>> = {
   't-stripe-september': 'archive',
   't-dune': 'trash',
   't-stripe-trial': 'trash',
+  't-junk-invoice': 'junk',
+  't-junk-storage': 'junk',
+  't-junk-residents': 'junk',
+  't-junk-giftcard': 'junk',
 };
 
 /**

@@ -1,5 +1,6 @@
 import type { ImapMessageSummary } from '@yozz.app/imap';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { NO_JUNK_FOLDER } from '../addresses/folder-names.ts';
 import type { MailClient, MailConnectionFailure, MailTask, Result } from '../connection.ts';
 import { signMessage } from '../testing/dkim-signer.ts';
 import type { FetchedBody } from './bodies.ts';
@@ -44,6 +45,7 @@ const { syncMailbox, loadOlder, prefetchBodies, moveMessages, setFlag } = await 
 const SENT = { name: 'Sent', delimiter: '/', attributes: ['\\Sent'] };
 const ARCHIVE = { name: 'Archive', delimiter: '/', attributes: ['\\Archive'] };
 const TRASH = { name: 'Deleted Items', delimiter: '/', attributes: [] };
+const JUNK = { name: 'Spam', delimiter: '/', attributes: ['\\Junk'] };
 const INBOX_ONLY = [{ name: 'INBOX', delimiter: '/', attributes: [] }];
 
 const summary = (
@@ -280,7 +282,7 @@ describe('syncMailbox', () => {
     // A folder the server lacks has nothing older; only the inbox is larger than a window.
     expect(state).toMatchObject({
       status: 'synced',
-      complete: ['sent', 'archive', 'trash', 'drafts'],
+      complete: ['sent', 'archive', 'trash', 'junk', 'drafts'],
     });
     // UIDNEXT 300 says every uid below it has been handed out: the mark is caught up to 299.
     expect(cache.read('inbox').sync).toEqual({
@@ -321,7 +323,7 @@ describe('syncMailbox', () => {
     expect(fetchSummariesBySeq).toHaveBeenCalledWith('1:*');
     expect(state).toMatchObject({
       status: 'synced',
-      complete: ['inbox', 'sent', 'archive', 'trash', 'drafts'],
+      complete: ['inbox', 'sent', 'archive', 'trash', 'junk', 'drafts'],
     });
     expect(small.read('inbox').sync?.complete).toBe(true);
 
@@ -332,7 +334,7 @@ describe('syncMailbox', () => {
     expect(fetchSummariesBySeq).not.toHaveBeenCalled();
     expect(emptyState).toMatchObject({
       status: 'synced',
-      complete: ['inbox', 'sent', 'archive', 'trash', 'drafts'],
+      complete: ['inbox', 'sent', 'archive', 'trash', 'junk', 'drafts'],
     });
   });
 
@@ -409,7 +411,7 @@ describe('syncMailbox', () => {
     // Both folders were read whole.
     expect(state).toMatchObject({
       status: 'synced',
-      complete: ['inbox', 'sent', 'archive', 'trash', 'drafts'],
+      complete: ['inbox', 'sent', 'archive', 'trash', 'junk', 'drafts'],
     });
     // One conversation across the inbox message and the reply.
     expect(threads.map(t => t.messages.map(m => m.id))).toEqual([['mid/<m2@x>', 'mid/<reply@x>']]);
@@ -441,6 +443,63 @@ describe('syncMailbox', () => {
     const { state } = await syncMailbox(run, cache, () => true);
     expect(state.status).toBe('failed');
     expect(cache.read('inbox')).toEqual({ sync: null, summaries: [], bodies: new Map() });
+  });
+});
+
+describe('Junk', () => {
+  it('is read on every whole pass, like Trash, and is absent where LIST names none', async () => {
+    list.mockResolvedValue({ ok: true, value: [...INBOX_ONLY, JUNK] });
+    selectAnswers({
+      INBOX: { uidValidity: 1, uidNext: 1, exists: 0 },
+      Spam: { uidValidity: 7, uidNext: 2, exists: 1 },
+    });
+    fetchSummariesBySeq.mockResolvedValue({ ok: true, value: [summary(1)] });
+    const cache = fakeCache();
+    const res = await syncMailbox(run, cache);
+    expect(select.mock.calls.map(([name]) => name)).toEqual(['INBOX', 'Spam']);
+    expect(cache.read('junk').sync).toMatchObject({ name: 'Spam', uidValidity: 7, lastUid: 1 });
+    expect(res.byFolder.junk?.summaries.map(({ uid }) => uid)).toEqual([1]);
+
+    list.mockResolvedValue({ ok: true, value: INBOX_ONLY });
+    expect((await syncMailbox(run, fakeCache())).byFolder.junk).toBeUndefined();
+  });
+
+  it('takes moves into the folder LIST names, and back to the inbox', async () => {
+    list.mockResolvedValue({ ok: true, value: [...INBOX_ONLY, ARCHIVE, JUNK] });
+    ensureSelected.mockResolvedValue({ ok: true, value: { uidValidity: 1 } });
+    move.mockResolvedValue({ ok: true, value: null });
+    const res = await moveMessages(
+      run,
+      [
+        { folder: 'inbox', folderName: 'INBOX', uidValidity: 1, uids: [1] },
+        { folder: 'archive', folderName: 'Archive', uidValidity: 1, uids: [2] },
+      ],
+      'junk',
+    );
+    expect(res.ok).toBe(true);
+    expect(move.mock.calls).toEqual([
+      ['1', 'Spam'],
+      ['2', 'Spam'],
+    ]);
+    await moveMessages(
+      run,
+      [{ folder: 'junk', folderName: 'Spam', uidValidity: 1, uids: [3] }],
+      'inbox',
+    );
+    expect(move).toHaveBeenLastCalledWith('3', 'INBOX');
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it('is never created: a move to a server with none is refused before anything moves', async () => {
+    list.mockResolvedValue({ ok: true, value: INBOX_ONLY });
+    const res = await moveMessages(
+      run,
+      [{ folder: 'inbox', folderName: 'INBOX', uidValidity: 1, uids: [1] }],
+      'junk',
+    );
+    expect(res).toEqual({ ok: false, error: { kind: 'error', detail: NO_JUNK_FOLDER } });
+    expect(create).not.toHaveBeenCalled();
+    expect(move).not.toHaveBeenCalled();
   });
 });
 
@@ -629,7 +688,7 @@ describe('catching up a stale device', () => {
     // Older mail pages back to it; its body is still good under the same UIDVALIDITY.
     expect(state).toMatchObject({
       status: 'synced',
-      complete: ['sent', 'archive', 'trash', 'drafts'],
+      complete: ['sent', 'archive', 'trash', 'junk', 'drafts'],
     });
     expect(bodies.has(100)).toBe(true);
   });
@@ -1084,7 +1143,7 @@ describe('prefetchBodies', () => {
     expect(fetchRawMessages.mock.calls).toEqual([['2:4'], ['1']]);
   });
 
-  it('queues the inbox first and leaves Trash and Drafts alone', async () => {
+  it('queues the inbox first and leaves Trash, Junk and Drafts alone', async () => {
     ensureSelected.mockImplementation(async (name: string) => ({
       ok: true,
       value: { name, uidValidity: 1 },
@@ -1099,6 +1158,7 @@ describe('prefetchBodies', () => {
       sent: folder('Sent'),
       archive: folder('Archive'),
       trash: folder('Trash'),
+      junk: folder('Junk'),
       drafts: folder('Drafts'),
     });
     const order: string[] = [];

@@ -149,9 +149,18 @@ describe('resolveScope', () => {
     }
   });
 
-  it('reaches Trash only through in:trash or in:anywhere', () => {
+  it('reaches Trash and Junk only through their own in: or in:anywhere', () => {
+    expect(scopeOf('').folders).toEqual(['inbox', 'sent', 'archive', 'drafts']);
     expect(scopeOf('invoice in:trash').folders).toEqual(['trash']);
-    expect(scopeOf('in:anywhere').folders).toEqual(['inbox', 'sent', 'archive', 'trash', 'drafts']);
+    expect(scopeOf('invoice in:junk').folders).toEqual(['junk']);
+    expect(scopeOf('in:anywhere').folders).toEqual([
+      'inbox',
+      'sent',
+      'archive',
+      'trash',
+      'junk',
+      'drafts',
+    ]);
     expect(scopeOf('invoice in:inbox').folders).toEqual(['inbox']);
   });
 

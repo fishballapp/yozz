@@ -101,12 +101,12 @@ layer(NodeServices.layer)(it => {
       for (const [command, args, expected] of [
         // The summary, and the body the read and the reply's quote need.
         ['read', ['read', 'mid/<m1@stripe.com>'], { SELECT: 1, 'UID FETCH': 2 }],
-        // A write syncs the mailbox it writes first, however fresh: LIST, its five folders and their
+        // A write syncs the mailbox it writes first, however fresh: LIST, its six folders and their
         // flags, then the SELECT and the summary of the hit.
         [
           'update',
           ['update', 'mid/<m1@stripe.com>', '--star'],
-          { LIST: 1, SELECT: 6, 'UID FETCH': 2, 'UID STORE': 1 },
+          { LIST: 1, SELECT: 7, 'UID FETCH': 2, 'UID STORE': 1 },
         ],
         [
           'draft --reply',
@@ -182,8 +182,8 @@ layer(NodeServices.layer)(it => {
           expect(JSON.parse(result.stdout).threads[0].messages[0].untrusted.text).toBe(
             'The needle.',
           );
-          // Its Message-ID in each of the four folders, once what was remembered no longer held.
-          expect(counts['UID SEARCH']).toBe(4);
+          // Its Message-ID in each of the five folders, once what was remembered no longer held.
+          expect(counts['UID SEARCH']).toBe(5);
 
           // Found again, it is remembered where it is now.
           const again = yield* tally(server, run(['read', 'mid/<m1@stripe.com>']));
@@ -228,7 +228,7 @@ layer(NodeServices.layer)(it => {
 
           const { result, counts } = yield* tally(server, run(['read', 'mid/<nope@x>']));
           expect(failureOf(result.stderr)).toMatchObject({ code: 'NotFound' });
-          expect(counts['UID SEARCH']).toBe(4);
+          expect(counts['UID SEARCH']).toBe(5);
         }),
       );
     });

@@ -6,6 +6,7 @@ import {
   PaperclipIcon,
   StarIcon,
   TrashIcon,
+  WarningOctagonIcon,
 } from '@phosphor-icons/react';
 import { Link } from '@tanstack/react-router';
 import { movesOffered } from '@yozz.app/mail/threads/reconcile';
@@ -20,6 +21,7 @@ import { ConfirmDialog } from '../ui/ConfirmDialog';
 import { reportProblem } from '../ui/Toast';
 import { listTime } from '../ui/time';
 import { discardableDraftIds, discardDrafts, discardTitle } from './discard-drafts';
+import { JUNK_COPY } from './junk-copy';
 import { useAdvancePast } from './use-advance';
 
 /** One record in columns: a 34px line above `lg`, two lines below. Contrast figures and rationale are in DESIGN.md. */
@@ -34,9 +36,11 @@ const REVEALED = {
     'group-hover:opacity-100 group-has-[:focus-visible]:opacity-100 group-has-[[aria-expanded=true]]:opacity-100',
   /** The time, which gives its place to the triage. */
   gone: 'lg:group-hover:hidden lg:group-has-[:focus-visible]:hidden lg:group-has-[[aria-expanded=true]]:hidden',
-  /** The triage: no width until revealed, yet still in the tab order. */
-  opened:
-    'w-0 overflow-hidden group-hover:w-12 group-has-[:focus-visible]:w-12 group-has-[[aria-expanded=true]]:w-12',
+  /** The triage: no width until revealed, yet still in the tab order; then two marks wide, or three. */
+  opened: (marks: number) =>
+    marks > 2
+      ? 'w-0 overflow-hidden group-hover:w-18 group-has-[:focus-visible]:w-18 group-has-[[aria-expanded=true]]:w-18'
+      : 'w-0 overflow-hidden group-hover:w-12 group-has-[:focus-visible]:w-12 group-has-[[aria-expanded=true]]:w-12',
 };
 
 export type RowProps = { thread: ThreadState; view: ViewId; isSelected: boolean };
@@ -137,9 +141,13 @@ type RowAction = {
   };
 };
 
-/** Archive and delete for server messages; undo in Trash; discard in Drafts or for drafts alone; nothing otherwise. */
+/**
+ * Archive, Junk and delete for server messages; undo in Trash and Junk; discard in Drafts or for
+ * drafts alone; nothing otherwise.
+ */
 const useRowActions = ({ thread, view, isSelected }: RowProps): readonly RowAction[] => {
-  const { toggleArchive, trashThread, restoreThread, removeDraft } = useMail();
+  const { toggleArchive, trashThread, restoreThread, moveThreads, junkFolders, removeDraft } =
+    useMail();
   const advancePast = useAdvancePast();
   // Filing the open thread from its row moves the reader on, as the reader's own buttons do; a
   // move the store refused moves nothing and says why, now or when the server answers.
@@ -171,7 +179,8 @@ const useRowActions = ({ thread, view, isSelected }: RowProps): readonly RowActi
     }
     // A just-sent message or vault-held sent mail alone: no server holds a copy to file.
     if (!isOnServer(thread)) return [];
-    const { canRestore, canArchive, canMoveToInbox, canDelete } = movesOffered(thread.folders);
+    const { canRestore, canArchive, canMoveToInbox, canMoveToJunk, canMoveOutOfJunk, canDelete } =
+      movesOffered(thread, junkFolders);
     return [
       ...(canRestore
         ? [
@@ -197,6 +206,27 @@ const useRowActions = ({ thread, view, isSelected }: RowProps): readonly RowActi
               icon: MailboxIcon,
               label: `Move ${thread.subject} to inbox`,
               act: file(toggleArchive, 'Thread not moved to inbox'),
+            },
+          ]
+        : []),
+      ...(canMoveToJunk
+        ? [
+            {
+              icon: WarningOctagonIcon,
+              label: `${JUNK_COPY.moveToJunk}: ${thread.subject}`,
+              act: file(
+                (threadId, onRefused) => moveThreads([threadId], 'junk', onRefused).has(threadId),
+                JUNK_COPY.notMovedToJunk,
+              ),
+            },
+          ]
+        : []),
+      ...(canMoveOutOfJunk
+        ? [
+            {
+              icon: MailboxIcon,
+              label: `${JUNK_COPY.notJunk}: ${thread.subject}`,
+              act: file(restoreThread, JUNK_COPY.notMovedOutOfJunk),
             },
           ]
         : []),
@@ -403,7 +433,7 @@ export const ThreadRow = ({
       <RowTriage
         actions={actions}
         isSelected={isBarred}
-        className={cn('col-start-7 row-start-1', REVEALED.opened)}
+        className={cn('col-start-7 row-start-1', REVEALED.opened(actions.length))}
       />
     </div>
   );

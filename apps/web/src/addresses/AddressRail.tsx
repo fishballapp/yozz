@@ -7,6 +7,7 @@ import {
   PlusIcon,
   StarIcon,
   TrashIcon,
+  WarningOctagonIcon,
 } from '@phosphor-icons/react';
 import { Link, useLocation, useParams, useSearch } from '@tanstack/react-router';
 import { isNamedView, unreadCount, type ViewId, viewShown } from '@yozz.app/mail/threads/views';
@@ -14,6 +15,7 @@ import { cn } from 'cn';
 import type { ReactNode } from 'react';
 import { keepCompose, withCompose } from '../compose/intent';
 import { useMail } from '../store/MailProvider';
+import { JUNK_COPY } from '../threads/junk-copy';
 import { buttonClass } from '../ui/Button';
 import { Wordmark } from '../ui/Wordmark';
 
@@ -137,7 +139,7 @@ const SectionLabel = ({ children }: { children: ReactNode }) => (
 );
 
 export const AddressRail = ({ onNavigate }: { onNavigate?: () => void }) => {
-  const { mailboxes, threads, isDemo } = useMail();
+  const { mailboxes, threads, isDemo, junkFolders } = useMail();
   const isSettings = useLocation({ select: location => location.pathname.startsWith('/settings') });
 
   return (
@@ -213,6 +215,15 @@ export const AddressRail = ({ onNavigate }: { onNavigate?: () => void }) => {
           label="Trash"
           onNavigate={onNavigate}
         />
+        {/* Only where a server lists one: YOZZ never creates it. No count: spam asks nothing of you. */}
+        {Object.values(junkFolders).includes(true) && (
+          <RailRow
+            view="junk"
+            mark={<WarningOctagonIcon size={13} />}
+            label={JUNK_COPY.view}
+            onNavigate={onNavigate}
+          />
+        )}
       </div>
 
       {isDemo && <p className="label-rule px-3 pb-2">Demo data · dev only</p>}

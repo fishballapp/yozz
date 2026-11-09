@@ -118,6 +118,7 @@ const fakePort = (threads: ThreadState[], overrides: Partial<AgentPort> = {}) =>
     setRead: vi.fn((threadIds: readonly string[]) => new Set(threadIds)),
     setStar: vi.fn((threadIds: readonly string[]) => new Set(threadIds)),
     move: vi.fn((threadIds: readonly string[]) => new Set(threadIds)),
+    junkFolders: { 'me@yozz.app': true },
     openThread: vi.fn(async () => {}),
     openDraft: vi.fn(async () => {}),
     writeDraft: vi.fn(async input => {
@@ -735,6 +736,48 @@ describe('update_threads', () => {
     ).resolves.toMatchObject({
       results: [{ id: 'a', status: 'pending', note: expect.stringContaining('mail server') }],
     });
+  });
+
+  it('moves what arrived to Junk and back, and says why a conversation it cannot move stays', async () => {
+    const elsewhere = thread('c', ['inbox'], { foldersByMailbox: { 'you@yozz.app': ['inbox'] } });
+    const unknown = thread('u', ['inbox'], { foldersByMailbox: { 'new@yozz.app': ['inbox'] } });
+    const { tools, port } = fakePort(
+      [thread('a', ['inbox']), thread('b', ['junk']), thread('s', ['sent']), elsewhere, unknown],
+      { junkFolders: { 'me@yozz.app': true, 'you@yozz.app': false } },
+    );
+    const result = await call(tools, 'update_threads', {
+      ids: ['a', 'b', 's', 'c', 'u'],
+      folder: 'junk',
+    });
+    expect(result).toEqual({
+      results: [
+        { id: 'a', status: 'ok', folder: 'junk' },
+        { id: 'b', status: 'ok', folder: 'junk', note: 'already in Junk' },
+        { id: 's', status: 'ok', note: 'nothing in the inbox or Archive to move to Junk' },
+        { id: 'c', status: 'ok', note: expect.stringContaining('never creates one') },
+        { id: 'u', status: 'ok', note: expect.stringContaining('has not said yet') },
+      ],
+    });
+    expect(port.move).toHaveBeenCalledWith(['a'], 'junk');
+    await call(tools, 'update_threads', { ids: ['b'], folder: 'inbox' });
+    expect(port.move).toHaveBeenLastCalledWith(['b'], 'inbox');
+  });
+
+  it('brings back the copy a half-moved conversation left in Junk or Trash', async () => {
+    const { tools, port } = fakePort([
+      thread('j', ['sent', 'junk']),
+      thread('t', ['sent', 'trash']),
+      thread('i', ['inbox', 'sent']),
+    ]);
+    const result = await call(tools, 'update_threads', { ids: ['j', 't', 'i'], folder: 'inbox' });
+    expect(result).toEqual({
+      results: [
+        { id: 'j', status: 'ok', folder: 'inbox' },
+        { id: 't', status: 'ok', folder: 'inbox' },
+        { id: 'i', status: 'ok', folder: 'inbox', note: 'already in the inbox' },
+      ],
+    });
+    expect(port.move).toHaveBeenCalledWith(['j', 't'], 'inbox');
   });
 
   it('refuses a call that asks for no change at all', async () => {

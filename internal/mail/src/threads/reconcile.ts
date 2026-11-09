@@ -9,13 +9,18 @@ import { FOLDERS, type Folder, type Location, renumberedText } from './thread.ts
  */
 
 /** Sent is not one: nothing moves mail into the Sent folder. */
-export type MoveTarget = 'inbox' | 'archive' | 'trash';
+export type MoveTarget = 'inbox' | 'archive' | 'trash' | 'junk';
 
-/** Archiving takes the inbox only; Trash takes everything. */
+/**
+ * Archiving takes the inbox only; Trash takes everything; the inbox takes back what any other move
+ * filed. Junk takes what arrived and is still kept: your own Sent copies are not spam, and what is in
+ * Trash is restored first.
+ */
 export const MOVE_SOURCES: Record<MoveTarget, readonly Folder[]> = {
   archive: ['inbox'],
-  trash: ['inbox', 'sent', 'archive'],
-  inbox: ['archive', 'trash'],
+  trash: ['inbox', 'sent', 'archive', 'junk'],
+  inbox: ['archive', 'trash', 'junk'],
+  junk: ['inbox', 'archive'],
 };
 
 /** A move can only act when the conversation holds a copy in one of that target's source folders. */
@@ -23,17 +28,50 @@ export const canMoveTo = (folders: readonly Folder[], to: MoveTarget): boolean =
   MOVE_SOURCES[to].some(source => folders.includes(source));
 
 /**
- * The moves a conversation offers, by what it holds, not by where it is seen from: any copy in Trash
- * offers Restore, which also brings Archive's back, so it replaces Move to inbox. All in Trash, that
- * is all it offers.
+ * Whether each mailbox's server lists a Junk folder, by address; absent until its `LIST` has answered
+ * this session. YOZZ never creates one.
  */
-export const movesOffered = (folders: readonly Folder[]) => {
+export type JunkFolders = Readonly<Record<string, boolean>>;
+
+/**
+ * Whether Junk can take a conversation: `ready` when every mailbox holding a copy Junk would take has
+ * answered and one of them has a Junk folder (the others' copies stay), `unknown` while one has not
+ * answered, so a move never leaves its copy behind unseen, and `none` when no such mailbox has one.
+ */
+export const junkReadiness = (
+  { foldersByMailbox }: { readonly foldersByMailbox: Readonly<Record<string, readonly Folder[]>> },
+  junkFolders: JunkFolders,
+): 'ready' | 'unknown' | 'none' => {
+  const holding = Object.entries(foldersByMailbox)
+    .filter(([, folders]) => canMoveTo(folders, 'junk'))
+    .map(([mailbox]) => junkFolders[mailbox]);
+  if (holding.includes(undefined)) return 'unknown';
+  return holding.includes(true) ? 'ready' : 'none';
+};
+
+/**
+ * The moves a conversation offers, by what it holds, not by where it is seen from: any copy in Trash
+ * offers Restore, which also brings Archive's and Junk's back, so it replaces Move to inbox and Not
+ * junk, as Move to inbox, which brings Junk's back too, replaces Not junk. All in Trash, that is all
+ * it offers.
+ */
+export const movesOffered = (
+  thread: {
+    readonly folders: readonly Folder[];
+    readonly foldersByMailbox: Readonly<Record<string, readonly Folder[]>>;
+  },
+  junkFolders: JunkFolders,
+) => {
+  const { folders } = thread;
   const canRestore = folders.includes('trash');
   const isFiled = folders.includes('archive') && !folders.includes('inbox');
+  const canMoveToInbox = isFiled && !canRestore;
   return {
     canRestore,
     canArchive: folders.includes('inbox'),
-    canMoveToInbox: isFiled && !canRestore,
+    canMoveToInbox,
+    canMoveToJunk: junkReadiness(thread, junkFolders) === 'ready',
+    canMoveOutOfJunk: folders.includes('junk') && !canRestore && !canMoveToInbox,
     canDelete: canMoveTo(folders, 'trash'),
   };
 };

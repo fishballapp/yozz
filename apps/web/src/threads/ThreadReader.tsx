@@ -14,6 +14,7 @@ import {
   StarIcon,
   TextAlignLeftIcon,
   TrashIcon,
+  WarningOctagonIcon,
   XIcon,
 } from '@phosphor-icons/react';
 import { Link } from '@tanstack/react-router';
@@ -39,6 +40,7 @@ import { IconSwitch } from '../ui/IconSwitch';
 import { reportProblem } from '../ui/Toast';
 import { AttachmentList } from './AttachmentList';
 import { HtmlBody } from './HtmlBody';
+import { JUNK_COPY } from './junk-copy';
 import { linkify } from './linkify';
 
 /**
@@ -412,6 +414,8 @@ export const ThreadReader = ({
     toggleArchive,
     trashThread,
     restoreThread,
+    moveThreads,
+    junkFolders,
     markUnread,
     loadBody,
     readStoredFile,
@@ -426,7 +430,7 @@ export const ThreadReader = ({
   const inbound = newestInbound(thread, ownedAddresses) ?? newest;
   // Read from the same place `seedFor` reads, or a button would appear that seeds nothing.
   const canReplyAll = replyAllCc(inbound, ownedAddresses).length > 0;
-  const moves = movesOffered(thread.folders);
+  const moves = movesOffered(thread, junkFolders);
   const [pane, setPane] = useState<HTMLDivElement | null>(null);
   // A move the store refused leaves the reader where it is and says why, now or when the server answers.
   const file =
@@ -486,6 +490,32 @@ export const ThreadReader = ({
                     aria-label={moves.canArchive ? 'Archive thread' : 'Move to inbox'}
                   >
                     {moves.canArchive ? <ArchiveIcon size={15} /> : <MailboxIcon size={15} />}
+                  </Button>
+                )}
+                {moves.canMoveToJunk && (
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="size-11 lg:size-7"
+                    onClick={file(
+                      (threadId, onRefused) =>
+                        moveThreads([threadId], 'junk', onRefused).has(threadId),
+                      JUNK_COPY.notMovedToJunk,
+                    )}
+                    aria-label={JUNK_COPY.moveToJunk}
+                  >
+                    <WarningOctagonIcon size={15} />
+                  </Button>
+                )}
+                {moves.canMoveOutOfJunk && (
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="size-11 lg:size-7"
+                    onClick={file(restoreThread, JUNK_COPY.notMovedOutOfJunk)}
+                    aria-label={JUNK_COPY.notJunk}
+                  >
+                    <MailboxIcon size={15} />
                   </Button>
                 )}
                 {moves.canDelete && (

@@ -3,6 +3,7 @@ import {
   FOLDERS,
   type Folder,
   holdsFolder,
+  isJunk,
   isServerCopy,
   type Message,
   type ThreadState,
@@ -125,8 +126,8 @@ export type SearchScope<T> = {
 };
 
 /**
- * Where a query looks. With no `in:`, empty or not, it is every folder but Trash, which only
- * `in:trash` or `in:anywhere` reach. `mailbox:` names one login's mailbox by the address it connects
+ * Where a query looks. With no `in:`, empty or not, it is every folder but Trash and Junk, which only
+ * their own `in:` or `in:anywhere` reach. `mailbox:` names one login's mailbox by the address it connects
  * under; anything else is an error rather than an empty answer, since an empty answer would read as
  * having no such mail.
  */
@@ -147,7 +148,7 @@ export const resolveScope = <T extends { readonly address: string }>(
     };
   }
   const wanted = (folder: Folder) => {
-    if (query.in.length === 0) return folder !== 'trash';
+    if (query.in.length === 0) return folder !== 'trash' && folder !== 'junk';
     return query.in.includes(folder) || query.in.includes('anywhere');
   };
   return {
@@ -164,12 +165,13 @@ export const resolveScope = <T extends { readonly address: string }>(
 };
 
 const VIEW_OF_FOLDER: Readonly<
-  Record<Folder, 'unified' | 'sent' | 'archive' | 'trash' | 'drafts'>
+  Record<Folder, 'unified' | 'sent' | 'archive' | 'trash' | 'junk' | 'drafts'>
 > = {
   inbox: 'unified',
   sent: 'sent',
   archive: 'archive',
   trash: 'trash',
+  junk: 'junk',
   drafts: 'drafts',
 };
 
@@ -208,8 +210,14 @@ export const isThreadInScope =
     isEveryMailbox,
   }: SearchScope<T>) =>
   ({ folders: held, foldersByMailbox, messages }: ThreadState): boolean => {
+    // Junk asks of the whole conversation even in one mailbox: a Delete from there must not reach a
+    // copy another mailbox kept.
     const holds = (candidates: readonly Folder[]) =>
-      folders.some(folder => holdsFolder(candidates, folder));
+      folders.some(folder =>
+        folder === 'junk'
+          ? isJunk({ folders: held }) && candidates.includes('junk')
+          : holdsFolder(candidates, folder),
+      );
     if (isEveryMailbox) return holds(held);
     return (
       mailboxes.some(({ address }) => holds(foldersByMailbox[address] ?? [])) ||

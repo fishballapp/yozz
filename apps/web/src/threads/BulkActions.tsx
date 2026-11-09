@@ -7,6 +7,7 @@ import {
   MailboxIcon,
   StarIcon,
   TrashIcon,
+  WarningOctagonIcon,
 } from '@phosphor-icons/react';
 import { useNavigate } from '@tanstack/react-router';
 import { type MoveTarget, movesOffered } from '@yozz.app/mail/threads/reconcile';
@@ -20,6 +21,7 @@ import { Button } from '../ui/Button';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
 import { reportProblem } from '../ui/Toast';
 import { discardableDraftIds, discardDrafts, discardTitle } from './discard-drafts';
+import { JUNK_COPY } from './junk-copy';
 import { useAdvancePast } from './use-advance';
 
 /** What the bar over the list does to every ticked thread; a group is set off by a rule. */
@@ -43,7 +45,7 @@ const useBulkActions = (
   openId: string | undefined,
   onDone: () => void,
 ): readonly { readonly key: string; readonly actions: readonly BulkAction[] }[] => {
-  const { moveThreads, flagThreads, removeDraft } = useMail();
+  const { moveThreads, flagThreads, junkFolders, removeDraft } = useMail();
   const advancePast = useAdvancePast();
   const navigate = useNavigate();
 
@@ -88,7 +90,7 @@ const useBulkActions = (
   const onServer = threads.filter(isOnServer);
   // By what each thread holds, wherever the list is: a search can tick mail in Trash beside mail not.
   const offering = (move: keyof ReturnType<typeof movesOffered>) =>
-    onServer.filter(({ folders }) => movesOffered(folders)[move]);
+    onServer.filter(thread => movesOffered(thread, junkFolders)[move]);
 
   const restorable = offering('canRestore');
   const restore: BulkAction[] =
@@ -108,6 +110,8 @@ const useBulkActions = (
 
   const archivable = offering('canArchive');
   const filed = offering('canMoveToInbox');
+  const junkable = offering('canMoveToJunk');
+  const unjunkable = offering('canMoveOutOfJunk');
   const trashable = offering('canDelete');
   const unread = onServer.filter(thread => thread.isUnread);
   const unstarred = onServer.filter(thread => !thread.isStarred);
@@ -138,6 +142,24 @@ const useBulkActions = (
             icon: MailboxIcon,
             label: 'Move to inbox',
             act: file(filed, 'inbox', 'Not every thread moved to inbox'),
+          },
+        ]
+      : []),
+    ...(junkable.length > 0
+      ? [
+          {
+            icon: WarningOctagonIcon,
+            label: JUNK_COPY.moveToJunk,
+            act: file(junkable, 'junk', JUNK_COPY.notEveryMovedToJunk),
+          },
+        ]
+      : []),
+    ...(unjunkable.length > 0
+      ? [
+          {
+            icon: MailboxIcon,
+            label: JUNK_COPY.notJunk,
+            act: file(unjunkable, 'inbox', JUNK_COPY.notEveryMovedOutOfJunk),
           },
         ]
       : []),
