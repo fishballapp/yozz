@@ -555,8 +555,8 @@ export const ThreadReader = ({
                     variant="ghost"
                     size="icon"
                     className="size-11 lg:size-7"
-                    onClick={file(restoreThread, JUNK_COPY.notMovedOutOfJunk)}
-                    aria-label={JUNK_COPY.notJunk}
+                    onClick={file(restoreThread, 'Thread not moved to inbox')}
+                    aria-label="Move to inbox"
                   >
                     <MailboxIcon size={15} />
                   </Button>

@@ -84,7 +84,7 @@ describe('RowTriage', () => {
     // Your own message with no inbox copy: there is nothing to archive, and it is not spam.
     ['sent', ['sent'], ['Delete Lunch']],
     ['trash', ['trash'], ['Restore Lunch']],
-    ['junk', ['junk'], ['Not junk: Lunch', 'Delete Lunch']],
+    ['junk', ['junk'], ['Move Lunch to inbox', 'Delete Lunch']],
   ] as const)('in %s, a thread in %j offers %j', async (view, folders, offered) => {
     const labels = await showRow(view, folders);
     expect(labels.filter(label => label !== 'Star Lunch')).toEqual(offered);

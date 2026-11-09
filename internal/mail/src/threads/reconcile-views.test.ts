@@ -120,7 +120,7 @@ describe('a move into Junk and out again, through the syncs that confirm it', ()
     const [landed] = synced('junk');
     expect([pending?.id, landed?.id]).toEqual([before.id, before.id]);
     expect(landed?.messages[0]?.id).toBe(before.messages[0]?.id);
-    // Not junk, then Archive before that sync lands: both ops still name the thread.
+    // Out of Junk, then Archive before that sync lands: both ops still name the thread.
     const [archived] = applyOps(
       [landed ?? before],
       [op(before.id, 'inbox'), op(before.id, 'archive')],

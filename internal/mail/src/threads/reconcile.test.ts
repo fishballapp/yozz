@@ -102,7 +102,7 @@ describe('movesOffered', () => {
     expect(junkReadiness(spread, { 'me@x': false, 'you@y': false })).toBe('none');
   });
 
-  it('offers Not junk and Delete on Junk, and Restore alone replaces Not junk', () => {
+  it('offers out of Junk and Delete on Junk, and Restore alone replaces out of Junk', () => {
     expect(movesOffered(thread('t', ['junk']), junkOn)).toEqual({
       canRestore: false,
       canArchive: false,

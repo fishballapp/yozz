@@ -392,7 +392,7 @@ describe('ThreadList', () => {
       mail.moveThreads.mockClear();
       await click(boxOf('Subject 0'));
       await click(boxOf('Subject 1'));
-      await click(button('Not junk'));
+      await click(button('Move to inbox'));
       expect(movedTo()).toEqual([[['thread-1'], 'inbox']]);
     });
 

@@ -225,8 +225,8 @@ const useRowActions = ({ thread, view, isSelected }: RowProps): readonly RowActi
         ? [
             {
               icon: MailboxIcon,
-              label: `${JUNK_COPY.notJunk}: ${thread.subject}`,
-              act: file(restoreThread, JUNK_COPY.notMovedOutOfJunk),
+              label: `Move ${thread.subject} to inbox`,
+              act: file(restoreThread, 'Thread not moved to inbox'),
             },
           ]
         : []),

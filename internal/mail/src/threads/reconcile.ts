@@ -51,9 +51,9 @@ export const junkReadiness = (
 
 /**
  * The moves a conversation offers, by what it holds, not by where it is seen from: any copy in Trash
- * offers Restore, which also brings Archive's and Junk's back, so it replaces Move to inbox and Not
- * junk, as Move to inbox, which brings Junk's back too, replaces Not junk. All in Trash, that is all
- * it offers.
+ * offers Restore, which also brings Archive's and Junk's back, so it replaces both moves to the inbox
+ * (out of Archive, out of Junk), and out of Archive replaces out of Junk where both apply. All in
+ * Trash, that is all it offers.
  */
 export const movesOffered = (
   thread: {

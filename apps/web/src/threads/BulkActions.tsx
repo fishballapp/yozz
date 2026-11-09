@@ -109,9 +109,9 @@ const useBulkActions = (
   }
 
   const archivable = offering('canArchive');
-  const filed = offering('canMoveToInbox');
+  // Out of Archive or out of Junk, it is one move to the inbox, so one action.
+  const filed = [...offering('canMoveToInbox'), ...offering('canMoveOutOfJunk')];
   const junkable = offering('canMoveToJunk');
-  const unjunkable = offering('canMoveOutOfJunk');
   const trashable = offering('canDelete');
   const unread = onServer.filter(thread => thread.isUnread);
   const unstarred = onServer.filter(thread => !thread.isStarred);
@@ -151,15 +151,6 @@ const useBulkActions = (
             icon: WarningOctagonIcon,
             label: JUNK_COPY.moveToJunk,
             act: file(junkable, 'junk', JUNK_COPY.notEveryMovedToJunk),
-          },
-        ]
-      : []),
-    ...(unjunkable.length > 0
-      ? [
-          {
-            icon: MailboxIcon,
-            label: JUNK_COPY.notJunk,
-            act: file(unjunkable, 'inbox', JUNK_COPY.notEveryMovedOutOfJunk),
           },
         ]
       : []),
