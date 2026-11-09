@@ -291,6 +291,93 @@ describe('seedFor — Reply-To', () => {
   });
 });
 
+/** A newsletter that arrived on the second address, offering a mailto: to leave its list. */
+const NEWSLETTER: Thread = {
+  id: 't-news',
+  mailboxes: ['jason@northlane.example'],
+  subject: 'Weekly picks',
+  isUnread: true,
+  isReplied: false,
+  isStarred: false,
+  messages: [
+    {
+      id: 'm-news-1',
+      fromName: 'Picks',
+      fromAddress: 'news@picks.example',
+      toAddress: 'jason@northlane.example',
+      to: [{ address: 'jason@northlane.example' }],
+      at: 1,
+      body: ['This week.'],
+      unsubscribe: {
+        https: 'https://picks.example/u/1',
+        mailto: 'mailto:leave-1@picks.example?subject=Unsubscribe&body=Remove%20me.',
+      },
+    },
+  ],
+};
+
+const unsubscribeSeed = (thread: Thread, messageId: string) =>
+  seedFor({ kind: 'unsubscribe', messageId }, [thread], ADDRESSES, ownedAddresses);
+
+describe('seedFor — unsubscribe', () => {
+  it('writes to the mailto: address with its subject and body, quoting nothing', () => {
+    expect(unsubscribeSeed(NEWSLETTER, 'm-news-1')).toEqual({
+      identityId: 'jason@northlane.example',
+      to: 'leave-1@picks.example',
+      subject: 'Unsubscribe',
+      body: 'Remove me.',
+    });
+  });
+
+  it('is sent from the address the message was delivered to, not the first address', () => {
+    // jyu is the first identity; the newsletter arrived on northlane.
+    expect(unsubscribeSeed(NEWSLETTER, 'm-news-1').identityId).toBe('jason@northlane.example');
+  });
+
+  it('falls back to the first address as a reply does when the delivery address is not one of yours', () => {
+    const [message] = NEWSLETTER.messages;
+    if (message === undefined) throw new Error('fixture has no message');
+    const bcc: Thread = {
+      ...NEWSLETTER,
+      messages: [{ ...message, toAddress: 'list@picks.example' }],
+    };
+    expect(unsubscribeSeed(bcc, 'm-news-1').identityId).toBe('jason@jyu.example');
+    expect(
+      seedFor({ kind: 'reply', messageId: 'm-news-1' }, [bcc], ADDRESSES, ownedAddresses)
+        .identityId,
+    ).toBe('jason@jyu.example');
+  });
+
+  it('is the message it is pressed on, not the thread’s newest arrival', () => {
+    const [first] = NEWSLETTER.messages;
+    if (first === undefined) throw new Error('fixture has no message');
+    const later = {
+      ...first,
+      id: 'm-news-2',
+      toAddress: 'jason@jyu.example',
+      unsubscribe: { mailto: 'mailto:other@picks.example' },
+    };
+    const thread: Thread = { ...NEWSLETTER, messages: [first, later] };
+    expect(unsubscribeSeed(thread, 'm-news-1')).toMatchObject({
+      identityId: 'jason@northlane.example',
+      to: 'leave-1@picks.example',
+    });
+    expect(unsubscribeSeed(thread, 'm-news-2')).toEqual({
+      identityId: 'jason@jyu.example',
+      to: 'other@picks.example',
+    });
+  });
+
+  it('seeds nothing for a message with no mailto: offer, so no button can promise one', () => {
+    const [message] = NEWSLETTER.messages;
+    if (message === undefined) throw new Error('fixture has no message');
+    for (const unsubscribe of [undefined, null, { https: 'https://picks.example/u/1' }]) {
+      const thread: Thread = { ...NEWSLETTER, messages: [{ ...message, unsubscribe }] };
+      expect(unsubscribeSeed(thread, 'm-news-1')).toEqual({});
+    }
+  });
+});
+
 describe('seedFor — degenerate requests', () => {
   it('degrades a stale message reference to a blank draft rather than erroring', () => {
     // Reachable only from a pasted or bookmarked URL.

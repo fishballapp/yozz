@@ -1,5 +1,6 @@
 import type { AddressRecord } from '../addresses/record.ts';
 import { type Message, newestInbound, type Thread } from '../threads/thread.ts';
+import { mailtoDraftOf } from '../threads/unsubscribe.ts';
 import { fullTime } from '../time.ts';
 import type { ComposeSeed } from './draft.ts';
 
@@ -32,16 +33,20 @@ export const replyAllCc = (
   return [...new Set(addressed)].filter(address => !drop.has(address));
 };
 
-/** A message to answer or pass on, named by its id in the thread graph. */
+/** The identity that answers a message: the address it was delivered to, else the first you own. */
+const identityOf = (message: Message, identities: readonly AddressRecord[]): string | undefined =>
+  (identities.find(identity => identity.address === message.toAddress) ?? identities[0])?.address;
+
+/** A message to answer, pass on or unsubscribe from, named by its id in the thread graph. */
 export type SeedRequest = {
-  readonly kind: 'reply' | 'reply-all' | 'forward';
+  readonly kind: 'reply' | 'reply-all' | 'forward' | 'unsubscribe';
   readonly messageId: string;
 };
 
 /**
  * Rebuilt from the mail, since the request may arrive from a pasted URL or a command line. What is quoted is
  * per-message; who it is addressed to and which identity sends is per-thread, from the newest
- * message that arrived. Forward is per-message throughout.
+ * message that arrived. Forward and Unsubscribe are per-message throughout.
  */
 export const seedFor = (
   { kind, messageId }: SeedRequest,
@@ -55,12 +60,24 @@ export const seedFor = (
   const message = thread?.messages.find(candidate => candidate.id === messageId);
   if (thread === undefined || message === undefined) return {};
 
+  // Per message, not per thread: the subscription is to the address this message came to, and the
+  // `mailto:` is the one this message offers. Nothing is quoted, and nothing is sent.
+  if (kind === 'unsubscribe') {
+    const mailto = message.unsubscribe?.mailto;
+    const draft = mailto === undefined ? null : mailtoDraftOf(mailto);
+    if (draft === null) return {};
+    return {
+      identityId: identityOf(message, identities),
+      to: draft.to,
+      ...(draft.subject === undefined ? {} : { subject: draft.subject }),
+      ...(draft.body === undefined ? {} : { body: draft.body }),
+    };
+  }
+
   // Fixed for the whole thread whichever message you pressed. The `??` is unreachable, but
   // `newestInbound` indexes an array.
   const inbound = newestInbound(thread, ownedAddresses) ?? message;
-  const identityId = (
-    identities.find(identity => identity.address === inbound.toAddress) ?? identities[0]
-  )?.address;
+  const identityId = identityOf(inbound, identities);
 
   if (kind === 'reply' || kind === 'reply-all') {
     // The group is a fact about the thread; your own sent copy lists whoever you reached that time.

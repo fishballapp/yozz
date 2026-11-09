@@ -16,6 +16,7 @@ export type BodyOutcome =
       | 'htmlSaysMore'
       | 'inlineImagesTruncated'
       | 'attachments'
+      | 'unsubscribe'
       | 'senderCheck'
     >);
 

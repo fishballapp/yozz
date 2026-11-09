@@ -269,6 +269,56 @@ layer(NodeServices.layer)(it => {
         }),
     );
 
+    it.effect(
+      'reads a body cached before the unsubscribe offer was kept as absent, so it is not read as having none',
+      () =>
+        Effect.gen(function* () {
+          const fs = yield* FileSystem.FileSystem;
+          const path = yield* Path.Path;
+          const dir = yield* fs.makeTempDirectoryScoped();
+          const key = yield* Effect.promise(() =>
+            crypto.subtle.generateKey({ name: 'AES-GCM', length: 256 }, false, [
+              'encrypt',
+              'decrypt',
+            ]),
+          );
+          const cache = yield* mailboxCache({ dir, key, mailbox: ADDRESS });
+          const inbox = cache.mail.folder('inbox');
+          yield* Effect.promise(() =>
+            inbox.putSync({ name: 'INBOX', uidValidity: 100, lastUid: 1, complete: true }),
+          );
+          const name = path.join('bodies', 'inbox-100-1.bin');
+          yield* fs.makeDirectory(path.join(dir, 'bodies'), { recursive: true });
+          const store = (body: object) =>
+            Effect.gen(function* () {
+              const content = yield* seal({
+                key,
+                additionalData: new TextEncoder().encode(
+                  JSON.stringify(['yozz-cli-cache', ADDRESS, name]),
+                ),
+                plaintext: new TextEncoder().encode(JSON.stringify(body)),
+              });
+              yield* writePrivateFile(path.join(dir, name), content);
+            });
+          // Everything the body held before `unsubscribe` was added.
+          const before = {
+            paragraphs: ['Old.'],
+            hasTextPart: true,
+            htmlSaysMore: false,
+            inlineImagesTruncated: false,
+            attachments: [],
+            dkim: null,
+          };
+          yield* store(before);
+          expect(yield* Effect.promise(() => inbox.getBody(1))).toBeNull();
+
+          yield* store({ ...before, unsubscribe: { https: 'https://news.example/u' } });
+          expect(yield* Effect.promise(() => inbox.getBody(1))).toMatchObject({
+            unsubscribe: { https: 'https://news.example/u' },
+          });
+        }),
+    );
+
     it.effect('reads a body cached before the DKIM check as absent, and fetches it again', () =>
       Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem;
@@ -316,11 +366,13 @@ layer(NodeServices.layer)(it => {
             htmlSaysMore: false,
             inlineImagesTruncated: false,
             attachments: [],
+            unsubscribe: null,
             dkim: null,
           }),
         );
         expect(yield* Effect.promise(() => inbox.getBody(1))).toMatchObject({
           paragraphs: ['New.'],
+          unsubscribe: null,
           dkim: null,
         });
       }),

@@ -11,7 +11,7 @@ export class DeviceDbError extends Error {
 }
 
 const DB_NAME = 'yozz-device-state';
-const DB_VERSION = 12;
+const DB_VERSION = 13;
 
 type StoreSpec = { readonly name: string; readonly keyPath: string | string[] };
 
@@ -41,6 +41,8 @@ const REKEYED: readonly { readonly since: number; readonly names: readonly strin
   { since: 10, names: [STORES.mailBodies.name] },
   // A body that kept no sign of what its HTML part says beyond its text part could not tell the reader; refetched, it can.
   { since: 11, names: [STORES.mailBodies.name] },
+  // A body that kept no sign of its List-Unsubscribe could not offer Unsubscribe, and would read as having none; refetched, it can.
+  { since: 13, names: [STORES.mailBodies.name] },
 ];
 
 type StoreName = (typeof STORES)[keyof typeof STORES]['name'];

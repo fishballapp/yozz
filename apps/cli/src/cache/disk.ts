@@ -94,6 +94,13 @@ const BodySchema = Schema.Struct({
       content: Schema.optionalKey(Schema.Uint8ArrayFromBase64),
     }),
   ),
+  /** A body cached before the unsubscribe offer was kept has none, so it no longer decodes and is fetched again. */
+  unsubscribe: Schema.NullOr(
+    Schema.Struct({
+      https: Schema.optionalKey(Schema.String),
+      mailto: Schema.optionalKey(Schema.String),
+    }),
+  ),
   /** A body cached before the signing domain was kept has none, so it no longer decodes and is fetched again. */
   dkim: Schema.NullOr(Schema.Struct({ from: Schema.String, domain: Schema.String })),
 });

@@ -29,6 +29,8 @@ export type FakeMessage = {
   }[];
   /** A whole `DKIM-Signature` field, placed above the others. */
   readonly dkimSignature?: string;
+  /** The value of a `List-Unsubscribe` field. */
+  readonly listUnsubscribe?: string;
 };
 
 type Stored = {
@@ -85,6 +87,9 @@ export const rawOf = (message: FakeMessage): Uint8Array => {
       ? []
       : [`Bcc: ${message.bcc.map(address => `<${address}>`).join(', ')}`]),
     ...(message.replyTo === undefined ? [] : [`Reply-To: <${message.replyTo}>`]),
+    ...(message.listUnsubscribe === undefined
+      ? []
+      : [`List-Unsubscribe: ${message.listUnsubscribe}`]),
     `Subject: ${encodedWord(message.subject)}`,
     `Message-ID: ${message.messageId}`,
     `Date: ${message.date}`,

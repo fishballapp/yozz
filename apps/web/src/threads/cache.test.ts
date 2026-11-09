@@ -35,6 +35,7 @@ describe('mail cache', () => {
       htmlSaysMore: false,
       inlineImagesTruncated: false,
       attachments: [],
+      unsubscribe: null,
       dkim: null,
     });
 
@@ -139,6 +140,7 @@ describe('mail cache', () => {
       htmlSaysMore: false,
       inlineImagesTruncated: false,
       attachments: [],
+      unsubscribe: null,
       dkim: null,
     };
     expect(await inbox.listBodyUids()).toEqual(new Set());

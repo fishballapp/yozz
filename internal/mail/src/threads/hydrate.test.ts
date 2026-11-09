@@ -21,6 +21,7 @@ const body = (paragraphs: string[]) => ({
   htmlSaysMore: false,
   inlineImagesTruncated: false,
   attachments: [],
+  unsubscribe: null,
   dkim: null,
 });
 

@@ -8,6 +8,8 @@ export const composeIntentSchema = z.union([
   z.templateLiteral(['reply:', z.string().min(1)]),
   z.templateLiteral(['reply-all:', z.string().min(1)]),
   z.templateLiteral(['forward:', z.string().min(1)]),
+  /** The `mailto:` a message's List-Unsubscribe offers, as a new draft for the person to send. */
+  z.templateLiteral(['unsubscribe:', z.string().min(1)]),
   /** Named by the stable key, not a versioned `draftId`. Opening is a read, never a create. */
   z.templateLiteral(['draft:', z.string().min(1)]),
 ]);
@@ -34,6 +36,7 @@ const SEED_KINDS = [
   'reply',
   'reply-all',
   'forward',
+  'unsubscribe',
 ] as const satisfies readonly SeedRequest['kind'][];
 
 /**

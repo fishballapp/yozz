@@ -862,6 +862,7 @@ describe('MailProvider opening a message a move took somewhere unsaid', () => {
           htmlSaysMore: false,
           inlineImagesTruncated: false,
           attachments: [],
+          unsubscribe: null,
           dkim: null,
         });
     }

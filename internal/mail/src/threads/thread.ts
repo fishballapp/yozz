@@ -1,5 +1,6 @@
-/** The shape of mail as the UI sees it. Dev fixtures are `data/mail.ts`; real mail arrives with IMAP. */
+import type { Unsubscribe } from './unsubscribe.ts';
 
+/** The shape of mail as the UI sees it. Dev fixtures are `data/mail.ts`; real mail arrives with IMAP. */
 export type Attachment = {
   name: string;
   /** Bytes; formatted by `formatBytes`. */
@@ -93,6 +94,8 @@ export type Message = {
   htmlSaysMore?: boolean;
   /** A CID allocation ceiling left one or more inline images unavailable. */
   inlineImagesTruncated?: boolean;
+  /** What its `List-Unsubscribe` offers. Read with the body: null is no offer, absent is not read yet. */
+  unsubscribe?: Unsubscribe | null;
   /** Whether DKIM vouches for From. Read with the body. */
   senderCheck?: SenderCheck;
   bodyStatus?: BodyStatus;
@@ -221,6 +224,16 @@ export const isTrashed = ({ folders }: Foldered) =>
  */
 export const isJunk = ({ folders }: Foldered) =>
   folders.includes('junk') && folders.every(folder => folder === 'junk' || folder === 'drafts');
+
+/**
+ * What a message's `List-Unsubscribe` offers a person or an agent to act on, or null. Nothing in
+ * Junk: unsubscribing from spam confirms a live address. Every surface asks this, so none offers
+ * what another withholds.
+ */
+export const offeredUnsubscribe = (
+  { unsubscribe, isDraft }: Pick<Message, 'unsubscribe' | 'isDraft'>,
+  thread: Foldered,
+): Unsubscribe | null => (isDraft === true || isJunk(thread) ? null : (unsubscribe ?? null));
 
 /** A thread has an attachment when any of its messages does. */
 export const attachmentsOf = (thread: Thread) =>

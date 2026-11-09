@@ -8,6 +8,7 @@ import { type TxtLookup, verifySender } from './dkim.ts';
 import { SAFE_INLINE_IMAGE_MIME_TYPES } from './image-types.ts';
 import type { Location } from './thread.ts';
 import { type Attachment, renumberedText, toParagraphs } from './thread.ts';
+import { type Unsubscribe, unsubscribeOf } from './unsubscribe.ts';
 
 export type FetchedBody = {
   readonly paragraphs: string[];
@@ -20,6 +21,11 @@ export type FetchedBody = {
   /** A CID allocation ceiling left one or more inline images unavailable. */
   readonly inlineImagesTruncated: boolean;
   readonly attachments: Attachment[];
+  /**
+   * What the message's `List-Unsubscribe` offers, or null when it offers nothing we act on. Always
+   * present, so a body cached before it was kept is refetched rather than read as "no offer".
+   */
+  readonly unsubscribe: Unsubscribe | null;
   /**
    * The From address a DKIM signature vouches for and the domain that signed it, or null. A property
    * of the message, not of the mailbox that received the copy; `senderCheckOf` compares `from` with
@@ -265,6 +271,8 @@ const contentOf = async (raw: Uint8Array): Promise<Omit<FetchedBody, 'dkim'>> =>
     ...(inlinedHtml === null ? {} : { html: inlinedHtml.html }),
     inlineImagesTruncated: inlinedHtml?.truncated ?? false,
     attachments,
+    // The first header wins: RFC 2369 allows one, and a duplicate is the sender's mistake.
+    unsubscribe: unsubscribeOf(mail.headers.find(({ key }) => key === 'list-unsubscribe')?.value),
   };
 };
 

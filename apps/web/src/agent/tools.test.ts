@@ -74,6 +74,7 @@ const fakePort = (threads: ThreadState[], overrides: Partial<AgentPort> = {}) =>
     senderCheck: Message['senderCheck'],
     attachments: Message['attachments'],
     htmlSaysMore: Message['htmlSaysMore'],
+    unsubscribe: Message['unsubscribe'],
   ): BodyOutcome => ({
     status: 'loaded',
     body,
@@ -81,6 +82,7 @@ const fakePort = (threads: ThreadState[], overrides: Partial<AgentPort> = {}) =>
     htmlSaysMore,
     inlineImagesTruncated: false,
     attachments,
+    unsubscribe,
     senderCheck,
   });
   const port: AgentPort = {
@@ -113,6 +115,7 @@ const fakePort = (threads: ThreadState[], overrides: Partial<AgentPort> = {}) =>
         found.senderCheck,
         found.attachments,
         found.htmlSaysMore,
+        found.unsubscribe,
       );
     }),
     setRead: vi.fn((threadIds: readonly string[]) => new Set(threadIds)),
@@ -346,6 +349,34 @@ describe('get_threads', () => {
       (result as { threads: { messages: Record<string, unknown>[] }[] }).threads[0]?.messages ?? [];
     expect(newest).not.toHaveProperty('htmlSaysMore');
     expect(oldest).toMatchObject({ id: 'h/1', htmlSaysMore: true });
+  });
+
+  describe('unsubscribe', () => {
+    const OFFER = { https: 'https://news.example/u/7', mailto: 'mailto:leave@news.example' };
+
+    it('gives what the sender offers beside the body, and nothing for a message offering none', async () => {
+      const mail = thread('n', ['inbox'], {
+        messages: [message('n/1', { unsubscribe: OFFER }), message('n/2', { unsubscribe: null })],
+      });
+      const { tools } = fakePort([mail]);
+      const result = await call(tools, 'get_threads', { ids: ['n'], body: 'full' });
+      const [none, offering] =
+        (result as { threads: { messages: Record<string, unknown>[] }[] }).threads[0]?.messages ??
+        [];
+      expect(offering).toMatchObject({ id: 'n/1', unsubscribe: OFFER });
+      expect(none).not.toHaveProperty('unsubscribe');
+    });
+
+    it('gives nothing for mail in Junk, where unsubscribing confirms a live address', async () => {
+      const spam = thread('j', ['junk'], { messages: [message('j/1', { unsubscribe: OFFER })] });
+      const { tools } = fakePort([spam]);
+      const result = await call(tools, 'get_threads', { ids: ['j'], body: 'latest' });
+      const [row] =
+        (result as { threads: { messages: Record<string, unknown>[] }[] }).threads[0]?.messages ??
+        [];
+      expect(row).toMatchObject({ id: 'j/1' });
+      expect(row).not.toHaveProperty('unsubscribe');
+    });
   });
 
   it('lists what a message carries beside its body, and never the bytes', async () => {

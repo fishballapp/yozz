@@ -13,6 +13,13 @@ describe('seedRequestOf', () => {
     });
   });
 
+  it('names the message whose mailto: an unsubscribe writes to', () => {
+    expect(seedRequestOf('unsubscribe:mid/<a:b@x>')).toEqual({
+      kind: 'unsubscribe',
+      messageId: 'mid/<a:b@x>',
+    });
+  });
+
   it('names nothing for a new message or an existing draft, which open blank or as stored', () => {
     expect(seedRequestOf('new')).toBeNull();
     expect(seedRequestOf('draft:k-1')).toBeNull();
@@ -20,8 +27,15 @@ describe('seedRequestOf', () => {
 });
 
 describe('composeIntentSchema', () => {
-  it('accepts the five shapes and rejects everything else', () => {
-    for (const ok of ['new', 'reply:m-1', 'reply-all:m-1', 'forward:m-1', 'draft:k-1']) {
+  it('accepts the six shapes and rejects everything else', () => {
+    for (const ok of [
+      'new',
+      'reply:m-1',
+      'reply-all:m-1',
+      'forward:m-1',
+      'unsubscribe:m-1',
+      'draft:k-1',
+    ]) {
       expect(composeIntentSchema.safeParse(ok).success).toBe(true);
     }
     // A junk `?compose=` reads as closed.
@@ -29,6 +43,7 @@ describe('composeIntentSchema', () => {
       'reply:',
       'reply-all:',
       'forward:',
+      'unsubscribe:',
       'reply',
       'draft:',
       '',

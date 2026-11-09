@@ -5,6 +5,7 @@ import {
   ArrowLeftIcon,
   ArrowUUpLeftIcon,
   ArrowUUpRightIcon,
+  BellSlashIcon,
   CaretDownIcon,
   CodeIcon,
   EnvelopeSimpleIcon,
@@ -42,6 +43,8 @@ import { AttachmentList } from './AttachmentList';
 import { HtmlBody } from './HtmlBody';
 import { JUNK_COPY } from './junk-copy';
 import { linkify } from './linkify';
+import { unsubscribeActionOf } from './unsubscribe-action';
+import { UNSUBSCRIBE_COPY } from './unsubscribe-copy';
 
 /**
  * Every message says who it was written to under its From line, the way Gmail does: one "to me,
@@ -275,22 +278,37 @@ const MessageDetails = ({
  * `sm` on a pointer, full 44px on touch. The accessible name says what each quotes, not who it
  * reaches. Reply all appears only when it would reach someone Reply would not (`replyAllCc`).
  */
-const MessageActions = ({ message, canReplyAll }: { message: Message; canReplyAll: boolean }) =>
+const MessageActions = ({
+  message,
+  thread,
+  canReplyAll,
+}: {
+  message: Message;
+  thread: ThreadState;
+  canReplyAll: boolean;
+}) => {
   // An unsent draft is finished in the composer, not replied to.
-  message.isDraft === true ? (
-    <div className="mt-4 flex gap-2">
-      <Link
-        to="."
-        search={withCompose(`draft:${message.draftKey ?? ''}`)}
-        className={cn(buttonClass({ variant: 'secondary', size: 'sm' }), 'h-11 lg:h-7')}
-      >
-        <NotePencilIcon size={13} />
-        Edit draft
-      </Link>
-    </div>
-  ) : (
+  if (message.isDraft === true) {
+    return (
+      <div className="mt-4 flex gap-2">
+        <Link
+          to="."
+          search={withCompose(`draft:${message.draftKey ?? ''}`)}
+          className={cn(buttonClass({ variant: 'secondary', size: 'sm' }), 'h-11 lg:h-7')}
+        >
+          <NotePencilIcon size={13} />
+          Edit draft
+        </Link>
+      </div>
+    );
+  }
+  const unsubscribe = unsubscribeActionOf(message, thread);
+  const unsubscribeClass = cn(buttonClass({ variant: 'ghost', size: 'sm' }), 'h-11 lg:h-7');
+  return (
     // Both quote the body, so neither is offered until it has arrived.
-    <div className={cn('mt-4 flex gap-2', message.bodyStatus !== undefined && 'invisible')}>
+    <div
+      className={cn('mt-4 flex flex-wrap gap-2', message.bodyStatus !== undefined && 'invisible')}
+    >
       <Link
         to="."
         search={withCompose(`reply:${message.id}`)}
@@ -320,8 +338,33 @@ const MessageActions = ({ message, canReplyAll }: { message: Message; canReplyAl
         <ArrowUUpRightIcon size={13} />
         Forward
       </Link>
+      {unsubscribe?.kind === 'open-link' && (
+        // The sender's page, not ours: nothing about this tab goes with the click.
+        <a
+          href={unsubscribe.href}
+          target="_blank"
+          rel="noopener noreferrer"
+          className={unsubscribeClass}
+          aria-label={UNSUBSCRIBE_COPY.action}
+        >
+          <BellSlashIcon size={13} />
+          {UNSUBSCRIBE_COPY.action}
+        </a>
+      )}
+      {unsubscribe?.kind === 'write-draft' && (
+        <Link
+          to="."
+          search={withCompose(`unsubscribe:${message.id}`)}
+          className={unsubscribeClass}
+          aria-label={UNSUBSCRIBE_COPY.action}
+        >
+          <BellSlashIcon size={13} />
+          {UNSUBSCRIBE_COPY.action}
+        </Link>
+      )}
     </div>
   );
+};
 
 /** `html` is the sender's document; `text` is the sender's own `text/plain` part. Nothing is derived. */
 type ReadingMode = 'html' | 'text';
@@ -651,7 +694,7 @@ export const ThreadReader = ({
               <AttachmentList attachments={message.attachments} loadFile={readStoredFile} />
             )}
 
-            <MessageActions message={message} canReplyAll={canReplyAll} />
+            <MessageActions message={message} thread={thread} canReplyAll={canReplyAll} />
           </div>
         ))}
       </div>

@@ -275,6 +275,11 @@ const AUTHORED: readonly Thread[] = [
         hasTextPart: true,
         htmlSaysMore: true,
         senderCheck: { status: 'unverified' },
+        // A mailing service that takes unsubscribes by mail only.
+        unsubscribe: {
+          mailto:
+            'mailto:u-93b2e1@lists.hollisroasters.example?subject=Unsubscribe&body=Please%20remove%20me%20from%20this%20list.',
+        },
         body: [
           'Order #H-20931 is roasted and packed. 250 g Kiambu AA, whole bean, ships tomorrow by Royal Mail Tracked 48.',
         ],
@@ -400,6 +405,11 @@ const AUTHORED: readonly Thread[] = [
         toAddress: 'jason@jyu.example',
         to: [{ address: 'jason@jyu.example' }],
         at: ago(2 * DAY),
+        // Both forms offered: the link wins, being the fewest steps.
+        unsubscribe: {
+          https: 'https://notion.example/email/unsubscribe?u=4f1c9a',
+          mailto: 'mailto:unsubscribe@notion.example?subject=unsubscribe',
+        },
         body: [
           'Your workspace had 14 updates this week.',
           'Most active page: Q3 planning board, with 9 edits. You were mentioned twice and have 1 unresolved comment.',

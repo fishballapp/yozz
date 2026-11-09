@@ -1505,6 +1505,7 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
           htmlSaysMore,
           inlineImagesTruncated,
           attachments,
+          unsubscribe,
           senderCheck,
         } = message;
         return Promise.resolve({
@@ -1515,6 +1516,7 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
           htmlSaysMore,
           inlineImagesTruncated,
           attachments,
+          unsubscribe,
           senderCheck,
         });
       }
@@ -1588,6 +1590,7 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
             htmlSaysMore: body.htmlSaysMore,
             inlineImagesTruncated: body.inlineImagesTruncated,
             attachments: body.attachments,
+            unsubscribe: body.unsubscribe,
             senderCheck,
           });
           // A body on the device was kept with its check settled: nothing is pending.

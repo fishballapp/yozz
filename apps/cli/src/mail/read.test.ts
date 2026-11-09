@@ -218,6 +218,49 @@ layer(NodeServices.layer)(it => {
       );
     });
 
+    describe('unsubscribe', () => {
+      const LIST_UNSUBSCRIBE =
+        '<https://news.example/u?id=7>, <mailto:leave-7@news.example?subject=Unsubscribe>, <http://news.example/insecure>';
+
+      it.effect('gives the offered https: and mailto: links under untrusted, and never http:', () =>
+        Effect.gen(function* () {
+          const { world, homes, server, servers } = yield* makeMailWorld();
+          server.deliver('INBOX', mail(1, { listUnsubscribe: LIST_UNSUBSCRIBE }));
+          server.deliver('INBOX', reply(2, 1, 'No header here.'));
+
+          const { stdout } = yield* runCli(['read', 'mid/<m1@stripe.com>'], {
+            fetch: world.fetch,
+            homes,
+            servers,
+          });
+
+          const [offering, silent] = JSON.parse(stdout).threads[0].messages;
+          expect(offering.untrusted.unsubscribe).toEqual({
+            https: 'https://news.example/u?id=7',
+            mailto: 'mailto:leave-7@news.example?subject=Unsubscribe',
+          });
+          expect(silent.untrusted).not.toHaveProperty('unsubscribe');
+        }),
+      );
+
+      it.effect('gives none for mail in Junk, where unsubscribing confirms a live address', () =>
+        Effect.gen(function* () {
+          const { world, homes, server, servers } = yield* makeMailWorld();
+          server.deliver('Spam', mail(1, { listUnsubscribe: LIST_UNSUBSCRIBE }));
+
+          const { stdout } = yield* runCli(['read', 'mid/<m1@stripe.com>'], {
+            fetch: world.fetch,
+            homes,
+            servers,
+          });
+
+          const [message] = JSON.parse(stdout).threads[0].messages;
+          expect(message.untrusted.text).toBeDefined();
+          expect(message.untrusted).not.toHaveProperty('unsubscribe');
+        }),
+      );
+    });
+
     it.effect('reads what synced while another address fails, and names that one', () =>
       Effect.gen(function* () {
         const { world, homes, server, addSecond, expireSecond, servers } = yield* makeMailWorld();
