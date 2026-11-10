@@ -20,7 +20,7 @@ pnpm -F @yozz.app/x509 test             # what guards the corpus itself
 
 A hand-written certificate encodes what we already believe a certificate looks like, which is
 exactly the belief under test. These come off 34 live mail hosts — the
-[nine from stage 3](../../../ARCHITECTURE.md#stage-3-result-passed) widened across Europe, China,
+[nine from stage 3](../../../ARCHITECTURE.md#the-spike-passed) widened across Europe, China,
 Korea, Russia and Australia to widen the **CAs**, which is the axis that actually varies — plus
 the 120-root Mozilla store Node ships.
 
