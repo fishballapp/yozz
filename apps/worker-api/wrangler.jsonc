@@ -5,6 +5,10 @@
   "compatibility_date": "2026-06-21",
   "compatibility_flags": ["nodejs_compat"],
   "account_id": "ef1db00eff7bafcb12e7acb5754d1377",
+  // Its domain, api.yozz.app, is not declared here: a route would make `wrangler dev` answer every
+  // local request as that host. `scripts/deploy-worker.ts` passes it at deploy (`--domains`).
+  // Served on that domain only, not on workers.dev.
+  "workers_dev": false,
   "observability": {
     "enabled": true
   },

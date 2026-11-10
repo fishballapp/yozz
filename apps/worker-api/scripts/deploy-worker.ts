@@ -44,9 +44,21 @@ try {
   execFileSync('node', [join(scriptsDir, 'resolve-secrets.ts'), secretsFile], { stdio: 'inherit' });
 
   // MODE is a `--var`, not a named wrangler env: named envs do not inherit `d1_databases`.
-  execFileSync('wrangler', ['deploy', '--secrets-file', secretsFile, '--var', 'MODE:production'], {
-    stdio: 'inherit',
-  });
+  // `--domains` makes api.yozz.app the Worker's one custom domain; as a route in wrangler.jsonc it
+  // would also set the host `wrangler dev` answers as.
+  execFileSync(
+    'wrangler',
+    [
+      'deploy',
+      '--secrets-file',
+      secretsFile,
+      '--var',
+      'MODE:production',
+      '--domains',
+      'api.yozz.app',
+    ],
+    { stdio: 'inherit' },
+  );
 
   const remote = await cfSecrets('GET');
   const stale = remote.map(secret => secret.name).filter(name => !SECRET_KEYS.includes(name));
