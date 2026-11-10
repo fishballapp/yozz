@@ -6,8 +6,9 @@
   // The SPA's only hostname, the apex. A deploy makes the Worker's custom domains match this list,
   // and Cloudflare keeps the DNS record and the certificate.
   "routes": [{ "pattern": "yozz.app", "custom_domain": true }],
-  // Served on its own domain only, not on workers.dev.
+  // Served on its own domain only: not on workers.dev, and with no preview URLs.
   "workers_dev": false,
+  "preview_urls": false,
   // Assets-only Worker — no `main`/worker code, so static hits are served by Cloudflare's asset
   // layer and NOT billed as Worker invocations (cost-equivalent to Pages). `not_found_handling`
   // serves index.html for client-side routing. Build the SPA first: `pnpm -F @yozz.app/web build`
