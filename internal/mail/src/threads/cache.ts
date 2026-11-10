@@ -3,7 +3,7 @@ import type { FetchedBody } from './bodies.ts';
 import type { Folder } from './thread.ts';
 
 /**
- * The mail cache: derived from IMAP, rebuilt whenever lost (ARCHITECTURE.md, "State placement").
+ * The mail cache: derived from IMAP, rebuilt whenever lost (docs/architecture/state-placement.md).
  * Per mailbox and folder; each client stores it its own way.
  */
 

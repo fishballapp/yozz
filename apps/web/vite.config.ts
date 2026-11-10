@@ -4,8 +4,8 @@ import { tanstackRouter } from '@tanstack/router-plugin/vite';
 import react from '@vitejs/plugin-react';
 import { defineConfig } from 'vite';
 
-// The SPA builds to ./dist, to be served in production as Workers Static Assets (see AGENTS.md —
-// no worker-web yet). tanstackRouter() must precede react() — it generates src/routeTree.gen.ts
+// The SPA builds to ./dist, to be served in production as Workers Static Assets (see
+// docs/deployment.md, apps/worker-web). tanstackRouter() must precede react() — it generates src/routeTree.gen.ts
 // from src/routes/*.
 export default defineConfig({
   plugins: [
