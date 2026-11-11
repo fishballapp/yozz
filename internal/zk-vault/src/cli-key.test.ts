@@ -10,16 +10,15 @@ import {
 } from 'node:crypto';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { VaultError } from './bytes.ts';
-import {
-  deriveApprovalKeys,
-  deriveCliKeys,
-  generateCliKeyPair,
-  openCliLogin,
-  pairingCode,
-  sealCliLogin,
-} from './cli-key.ts';
-import { type AccountKeys, deriveAccountKeys } from './keys.ts';
-import { createVault, openVault, rewrapDek } from './vault.ts';
+import { cliKeys, openCliLogin, sealCliLogin } from './cli-key.ts';
+import { type AccountKeys, vaultKeys } from './keys.ts';
+import { vaults } from './vault.ts';
+import { generateKeyPair as generateCliKeyPair, pairingCode } from './x25519.ts';
+
+// The labels the tests pin are YOZZ's, the first product's: `<ns>` is `yozz` here.
+const { deriveApprovalKeys, deriveCliKeys } = cliKeys('yozz');
+const { deriveAccountKeys } = vaultKeys('yozz');
+const { createVault, openVault, rewrapDek } = vaults({ namespace: 'yozz' });
 
 /** RFC 7748 §6.1. */
 const RFC7748 = {
@@ -220,7 +219,7 @@ describe('the CLI key schedule', () => {
     ).rejects.toMatchObject({ code: 'malformed' });
   });
 
-  it('refuses a login that authenticates but is not a login', async () => {
+  it('refuses a login that authenticates but is not JSON', async () => {
     const shared = Buffer.from(RFC7748.shared, 'hex');
     const control = controlKeys(
       shared,
@@ -232,21 +231,14 @@ describe('the CLI key schedule', () => {
       ephemeralPublicKey: base64Url(RFC7748.bobPublic),
     });
 
-    for (const plaintext of [
-      'not json',
-      JSON.stringify(LOGIN.token),
-      JSON.stringify({ ...LOGIN, token: 'plain' }),
-      JSON.stringify({ token: LOGIN.token, userId: LOGIN.userId }),
-    ]) {
-      await expect(
-        openCliLogin(keys.tokenKey, {
-          state: STATE,
-          sealedLogin: controlSeal(plaintext, control.tokenKey, STATE),
-        }),
-      ).rejects.toThrow(
-        new VaultError('unreadable', 'the sealed login authenticated but is not a login'),
-      );
-    }
+    await expect(
+      openCliLogin(keys.tokenKey, {
+        state: STATE,
+        sealedLogin: controlSeal('not json', control.tokenKey, STATE),
+      }),
+    ).rejects.toThrow(
+      new VaultError('unreadable', 'the sealed login authenticated but is not JSON'),
+    );
   });
 
   it('seals each login under a fresh IV', async () => {

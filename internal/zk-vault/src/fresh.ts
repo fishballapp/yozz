@@ -11,7 +11,10 @@ export type RevisionMarks = {
   readonly raiseTo: (id: string, revision: number) => Promise<void>;
 };
 
-export const freshVault = (vault: Vault, marks: RevisionMarks): Vault => {
+export const freshVault = <Purpose extends string>(
+  vault: Vault<Purpose>,
+  marks: RevisionMarks,
+): Vault<Purpose> => {
   // Equal passes: a tab behind its sibling seals the revision the sibling just confirmed, and hears the conflict from the store.
   const refuseBehindMark = async (id: string, revision: number): Promise<number | undefined> => {
     const mark = await marks.highWaterMark(id);

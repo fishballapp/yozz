@@ -2,8 +2,12 @@
 
 import { createDecipheriv, createHmac, hkdfSync, pbkdf2Sync } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
-import { deriveAccountKeys, derivePasskeyEncKey, foldEmail } from './keys.ts';
-import { createVault, openVault } from './vault.ts';
+import { foldEmail, hkdfBytes, vaultKeys } from './keys.ts';
+import { vaults } from './vault.ts';
+
+// The labels the tests pin are YOZZ's, the first product's: `<ns>` is `yozz` here.
+const { deriveAccountKeys, derivePasskeyEncKey, deriveRecoveryEncKey } = vaultKeys('yozz');
+const { createVault, openVault } = vaults({ namespace: 'yozz' });
 
 const EMAIL = 'Jason@Example.com ';
 const PASSWORD = 'correct horse battery staple';
@@ -171,5 +175,60 @@ describe('derivePasskeyEncKey', () => {
   it('foldEmail trims and folds ASCII only', () => {
     expect(foldEmail('  Alice.Smith@Example.COM  ')).toBe('alice.smith@example.com');
     expect(foldEmail('İ@x.com')).toBe('İ@x.com');
+  });
+});
+
+describe('deriveRecoveryEncKey', () => {
+  it('wraps the same DEK a passkey does, under its own label', async () => {
+    const recoveryKey = new Uint8Array(32).fill(7);
+    const passkey = { encKey: await derivePasskeyEncKey(new Uint8Array(32).fill(42)) };
+    const { rewrapDek } = vaults({ namespace: 'yozz' });
+    const { vault, wrappedDek } = await createVault(passkey);
+
+    const recoveryWrap = await rewrapDek(
+      passkey,
+      { encKey: await deriveRecoveryEncKey(recoveryKey) },
+      wrappedDek,
+    );
+    const control = Buffer.from(
+      hkdfSync('sha256', recoveryKey, Buffer.alloc(0), Buffer.from('yozz-vault-recovery'), 32),
+    );
+    const sealed = Buffer.from(recoveryWrap, 'base64');
+    const decipher = createDecipheriv('aes-256-gcm', control, sealed.subarray(0, 12));
+    decipher.setAuthTag(sealed.subarray(-16));
+    const dek = Buffer.concat([decipher.update(sealed.subarray(12, -16)), decipher.final()]);
+
+    expect(dek).toHaveLength(32);
+    const reopened = await openVault(
+      { encKey: await deriveRecoveryEncKey(recoveryKey) },
+      recoveryWrap,
+    );
+    expect(await reopened.recordId('a', 'b')).toBe(await vault.recordId('a', 'b'));
+  });
+
+  it('is not the passkey key for the same bytes, and refuses anything but 32 bytes', async () => {
+    const bytes = new Uint8Array(32).fill(9);
+    const { wrappedDek } = await createVault({ encKey: await derivePasskeyEncKey(bytes) });
+
+    await expect(
+      openVault({ encKey: await deriveRecoveryEncKey(bytes) }, wrappedDek),
+    ).rejects.toMatchObject({ code: 'unreadable' });
+    await expect(deriveRecoveryEncKey(new Uint8Array(31))).rejects.toMatchObject({
+      code: 'malformed',
+    });
+  });
+});
+
+describe('hkdfBytes', () => {
+  it('is HKDF-SHA256 to 32 bytes, with and without a salt', async () => {
+    const material = new Uint8Array(32).fill(3);
+    const salt = new Uint8Array(16).fill(5);
+
+    expect(Buffer.from(await hkdfBytes(material, 'a-label'))).toEqual(
+      Buffer.from(hkdfSync('sha256', material, Buffer.alloc(0), 'a-label', 32)),
+    );
+    expect(Buffer.from(await hkdfBytes(material, 'a-label', salt))).toEqual(
+      Buffer.from(hkdfSync('sha256', material, salt, 'a-label', 32)),
+    );
   });
 });

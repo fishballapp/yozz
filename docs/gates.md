@@ -7,10 +7,12 @@ a number moves, something changed underneath — find out what before updating i
 ## In `pnpm test`
 
 ```bash
-pnpm -F @yozz.app/vault test            # 66. The key schedule, record crypto and the CLI key. No network,
-                                    #   no storage. The OpenSSL control lives here: node:crypto re-derives
-                                    #   the whole schedule and opens a real record, and the CLI key's
-                                    #   from RFC 7748's vector
+pnpm -F @internal/zk-vault test         # 79. The key schedule, record crypto, the CLI key and the sealed
+                                    #   box. No network, no storage. The OpenSSL control lives here:
+                                    #   node:crypto re-derives the whole schedule and opens a real
+                                    #   record, and the CLI key's from RFC 7748's vector
+pnpm -F @yozz.app/vault test            # 4. YOZZ's namespace over it: a vault, a record, a file and a CLI
+                                    #   login sealed by an earlier build still open (compat.fixture.json)
 pnpm -F @yozz.app/vault-contract test   # 34. The wire schemas, incl. the strict refusal of
                                     #   `revision`, `deviceId`, plaintext and secrets
 pnpm -F @yozz.app/worker-api test       # 276. Against an ISOLATED LOCAL D1 with every migration

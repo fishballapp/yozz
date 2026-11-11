@@ -1,28 +1,61 @@
-export { VaultError, type VaultFailureCode } from './bytes.ts';
-export {
-  type CliKeyPair,
-  type CliKeys,
-  deriveApprovalKeys,
-  deriveCliKeys,
-  generateCliKeyPair,
-  openCliLogin,
-  pairingCode,
-  sealCliLogin,
-} from './cli-key.ts';
-export { freshVault, inMemoryRevisionMarks, type RevisionMarks } from './fresh.ts';
+/**
+ * YOZZ's vault: `@internal/zk-vault` under YOZZ's namespace. The namespace is in every
+ * key-derivation label, so it never changes (`compat.test.ts`).
+ */
+
+import {
+  openCliLogin as openSealedLogin,
+  type Vault as SchemeVault,
+  sealCliLogin as sealLogin,
+  VaultError,
+  zkVault,
+} from '@internal/zk-vault';
+import { type CliLoginPayload, CliLoginPayloadSchema } from '@yozz.app/vault-contract';
+
 export {
   type AccountKeys,
-  deriveAccountKeys,
-  derivePasskeyEncKey,
-  foldEmail,
-  type VaultKey,
-} from './keys.ts';
-export {
-  createVault,
+  type CliKeys,
+  type EncodedKeyPair as CliKeyPair,
   type EncryptedRecord,
-  type LocalKeyPurpose,
+  foldEmail,
+  freshVault,
+  generateKeyPair as generateCliKeyPair,
+  inMemoryRevisionMarks,
   type OpenedRecord,
+  pairingCode,
+  type RevisionMarks,
+  VaultError,
+  type VaultFailureCode,
+  type VaultKey,
+} from '@internal/zk-vault';
+
+/** What a client keeps on its own device, each under its own key. */
+export type LocalKeyPurpose = 'yozz-cli-cache';
+
+export type Vault = SchemeVault<LocalKeyPurpose>;
+
+export const {
+  createVault,
+  deriveAccountKeys,
+  deriveApprovalKeys,
+  deriveCliKeys,
+  derivePasskeyEncKey,
   openVault,
   rewrapDek,
-  type Vault,
-} from './vault.ts';
+} = zkVault({ namespace: 'yozz', localKeyPurposes: ['yozz-cli-cache'] });
+
+export const sealCliLogin = (
+  tokenKey: CryptoKey,
+  login: { readonly state: string; readonly payload: CliLoginPayload },
+): Promise<string> => sealLogin(tokenKey, login);
+
+export const openCliLogin = async (
+  tokenKey: CryptoKey,
+  sealed: { readonly state: string; readonly sealedLogin: string },
+): Promise<CliLoginPayload> => {
+  const payload = CliLoginPayloadSchema.safeParse(await openSealedLogin(tokenKey, sealed));
+  if (!payload.success) {
+    throw new VaultError('unreadable', 'the sealed login authenticated but is not a login');
+  }
+  return payload.data;
+};

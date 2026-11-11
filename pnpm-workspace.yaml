@@ -10,6 +10,7 @@ packages:
   - internal/vault
   - internal/vault-contract
   - internal/vite-plugins
+  - internal/zk-vault
   - packages/imap
   - packages/smtp
   - packages/tls

@@ -1,7 +1,10 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { freshVault, inMemoryRevisionMarks, type RevisionMarks } from './fresh.ts';
-import { deriveAccountKeys } from './keys.ts';
-import { createVault, type Vault } from './vault.ts';
+import { vaultKeys } from './keys.ts';
+import { type Vault, vaults } from './vault.ts';
+
+const { deriveAccountKeys } = vaultKeys('yozz');
+const { createVault } = vaults({ namespace: 'yozz' });
 
 const ACCOUNT = {
   email: 'jason@example.com',

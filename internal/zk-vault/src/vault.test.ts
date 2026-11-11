@@ -1,7 +1,15 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 import { VaultError } from './bytes.ts';
-import { type AccountKeys, deriveAccountKeys } from './keys.ts';
-import { createVault, openVault, rewrapDek, type Vault } from './vault.ts';
+import { type AccountKeys, vaultKeys } from './keys.ts';
+import { type Vault as SchemeVault, vaults } from './vault.ts';
+
+type Vault = SchemeVault<'yozz-cli-cache'>;
+
+const { deriveAccountKeys } = vaultKeys('yozz');
+const { createVault, openVault, rewrapDek } = vaults({
+  namespace: 'yozz',
+  localKeyPurposes: ['yozz-cli-cache'],
+});
 
 const EMAIL = 'jason@example.com';
 const PASSWORD = 'correct horse battery staple';

@@ -1,0 +1,35 @@
+{
+  "prfOutput": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=",
+  "passkeyWrappedDek": "kxH6nYBZ991gKED520mZjH//0WgzFcNkge54JQ3d3FLne9Wz59/KiC5dkaeAXKEJWbSL22gGNCmGldJ7",
+  "account": {
+    "email": "Compat@Example.com",
+    "password": "correct horse battery staple"
+  },
+  "authValue": "VN+3Pl/HKrU5EEP1sPUHdbekksX7g1GEpiBolcuE6Cw=",
+  "passwordWrappedDek": "r30X2J1nyxcti1eGuETefAPFJXH6JprRWOB9jKZCQxh9ra0TZbbIjdCyT/iL+WQol7Weibp7IWR8iXl1",
+  "record": {
+    "id": "H_jh1omBD4xQ0bEzQAd4Aanrl7GcLFePuqmu-lM-o-k",
+    "type": "mailbox",
+    "ciphertext": "Tc1GanjiIfR4c6pi1z1lA1FkKSHG4s9MzTYIj40uprimWsMOgvqzFcADfWWjiHkkfZI/ec23RnLBc5IZH368G4P+heZHkEmPK7DA0TUn6b8wQPhsJI03nl35URwQeA=="
+  },
+  "recordPlain": {
+    "type": "mailbox",
+    "naturalKey": "someone@example.com",
+    "revision": 7,
+    "plaintext": "{\"appPassword\":\"not-a-real-one\"}"
+  },
+  "fileId": "0b0e1c7e-58a1-4d0c-9d0f-0a6d1f2b3c4d",
+  "file": "H5dEVqlg3yGD17DUhQ3c8XJIPQFgJM0E0OloVuGVJPwg03LZ0W9kLJvdbMo=",
+  "filePlain": "attachment bytes",
+  "cliPrivateKey": "MC4CAQAwBQYDK2VuBCIEIKjEC65cu0TtGIizHt5m0xl1L5iY5yj3ZRBLruKPHOJl",
+  "cliPublicKey": "DEgTQ6FICWTG-SDDkh6KuHg2tKt3iepqGlCl78G8w1I",
+  "ephemeralPublicKey": "Dh7aqE3Jtqw8oqucJ_GwXsSuD6R8gNYN2dJ52p4RVnE",
+  "cliWrappedDek": "e5kIu/Y44s9grR4fr9S3YlmWa5QbnZ61xdsoCcY7I/D0G5cxUN7b8NiAN9VJf63XcopdeEw77rIerKJZ",
+  "state": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+  "login": {
+    "token": "yozzcli_0b0e1c7e-58a1-4d0c-9d0f-0a6d1f2b3c4d_BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+    "userId": "user-1",
+    "email": "someone@example.com"
+  },
+  "sealedLogin": "VzgXQLi9HWSGPBFdyplh0I/0wc6iSFcn5I4BvReUzlTVpc2RIvQ1+8WRlKmeFCAdXvi5/QFTk/2zLX4K2yGBVgbDmADtEdzjqDqw0Y4SBYlE4HXV8SjO3u316PZkcJ+QIxZIdWWAztQRkr7EZWz+2mGGgkBAMS69Z0GPzt0Misk1iltHSExkGMCfF0N/T1RLoVu7YdAJSa1+n9Dcw35RrPgs7Oa8xUBU8JGGeaoTEF8="
+}

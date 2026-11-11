@@ -10,10 +10,12 @@
     ".": "./src/index.ts"
   },
   "dependencies": {
+    "@internal/zk-vault": "workspace:*",
     "@yozz.app/vault-contract": "workspace:*"
   },
   "devDependencies": {
-    "@types/node": "catalog:"
+    "@types/node": "catalog:",
+    "vitest": "catalog:"
   },
   "scripts": {
     "test": "vitest run"

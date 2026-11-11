@@ -15,6 +15,7 @@
     { "path": "./internal/cli-login" },
     { "path": "./internal/email" },
     { "path": "./internal/vite-plugins" },
+    { "path": "./internal/zk-vault" },
     { "path": "./internal/html-screenshot" }
   ]
 }
