@@ -1,4 +1,4 @@
-import { stripHtmlComments } from '@fishballapps/vite-plugins/strip-html-comments';
+import { stripHtmlComments } from '@internal/vite-plugins/strip-html-comments';
 import tailwindcss from '@tailwindcss/vite';
 import { tanstackRouter } from '@tanstack/router-plugin/vite';
 import react from '@vitejs/plugin-react';

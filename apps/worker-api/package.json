@@ -17,7 +17,7 @@
   },
   "dependencies": {
     "@better-auth/passkey": "catalog:",
-    "@fishballapps/email": "workspace:*",
+    "@internal/email": "workspace:*",
     "@yozz.app/vault-contract": "workspace:*",
     "better-auth": "catalog:",
     "better-auth-cloudflare": "catalog:",

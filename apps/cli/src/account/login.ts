@@ -1,5 +1,5 @@
 import { hostname } from 'node:os';
-import { approveInBrowser } from '@fishballapps/cli-login';
+import { approveInBrowser } from '@internal/cli-login';
 import { deriveCliKeys, generateCliKeyPair, openCliLogin, pairingCode } from '@yozz.app/vault';
 import {
   CliKeyNameSchema,

@@ -1,6 +1,6 @@
 {
   "private": true,
-  "name": "@fishballapps/vite-plugins",
+  "name": "@internal/vite-plugins",
   "version": "1.0.0",
   "type": "module",
   "description": "Vite plugins every web app in the repo applies. One implementation, imported by each vite.config.ts.",

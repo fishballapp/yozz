@@ -18,7 +18,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { screenshotHtml } from '@fishballapps/html-screenshot';
+import { screenshotHtml } from '@internal/html-screenshot';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const assets = path.resolve(here, '../../../assets');

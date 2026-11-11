@@ -1,4 +1,4 @@
-import { createForwardEmailClient } from '@fishballapps/email';
+import { createForwardEmailClient } from '@internal/email';
 import type { RuntimeEnv } from './env.ts';
 
 export const EMAIL_SENDER = 'no-reply@yozz.app';

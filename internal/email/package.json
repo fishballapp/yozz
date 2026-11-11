@@ -1,5 +1,5 @@
 {
-  "name": "@fishballapps/email",
+  "name": "@internal/email",
   "version": "0.0.0",
   "private": true,
   "type": "module",

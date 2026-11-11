@@ -1,4 +1,4 @@
-import { CliLoginError } from '@fishballapps/cli-login';
+import { CliLoginError } from '@internal/cli-login';
 import * as Config from 'effect/Config';
 import * as CliError from 'effect/cli/CliError';
 import * as Effect from 'effect/Effect';

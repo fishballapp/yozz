@@ -34,7 +34,7 @@
   "devDependencies": {
     "@effect/platform-node": "catalog:",
     "@effect/vitest": "catalog:",
-    "@fishballapps/cli-login": "workspace:*",
+    "@internal/cli-login": "workspace:*",
     "@playwright/test": "catalog:",
     "@types/node": "catalog:",
     "@yozz.app/imap": "workspace:*",

@@ -40,8 +40,8 @@
     "zod": "catalog:"
   },
   "devDependencies": {
-    "@fishballapps/html-screenshot": "workspace:*",
-    "@fishballapps/vite-plugins": "workspace:*",
+    "@internal/html-screenshot": "workspace:*",
+    "@internal/vite-plugins": "workspace:*",
     "@playwright/test": "catalog:",
     "@tailwindcss/vite": "catalog:",
     "@tanstack/router-plugin": "catalog:",

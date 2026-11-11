@@ -1,5 +1,5 @@
 {
-  "name": "@fishballapps/cli-login",
+  "name": "@internal/cli-login",
   "version": "0.0.0",
   "private": true,
   "type": "module",
