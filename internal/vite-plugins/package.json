@@ -5,6 +5,7 @@
   "type": "module",
   "description": "Vite plugins every web app in the repo applies. One implementation, imported by each vite.config.ts.",
   "exports": {
+    "./preload-dynamic-import": "./src/preload-dynamic-import.ts",
     "./strip-html-comments": "./src/strip-html-comments.ts"
   },
   "scripts": {
