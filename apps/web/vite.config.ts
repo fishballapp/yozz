@@ -1,3 +1,4 @@
+import { preloadDynamicImport } from '@internal/vite-plugins/preload-dynamic-import';
 import { stripHtmlComments } from '@internal/vite-plugins/strip-html-comments';
 import tailwindcss from '@tailwindcss/vite';
 import { tanstackRouter } from '@tanstack/router-plugin/vite';
@@ -12,6 +13,7 @@ export default defineConfig({
     tanstackRouter({ target: 'react', autoCodeSplitting: true }),
     react(),
     tailwindcss(),
+    preloadDynamicImport('/src/app.tsx'),
     stripHtmlComments(),
   ],
   server: { port: 5177 },

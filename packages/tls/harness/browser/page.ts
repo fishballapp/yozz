@@ -123,7 +123,7 @@ const handshake = async (
       transport,
       serverName: host,
       trustAnchors: anchors.source,
-      validationTime: new Date(),
+      validationTime: Temporal.Now.instant(),
       validator: YOZZ_VALIDATOR,
     });
     const said = transport.diagnostic();

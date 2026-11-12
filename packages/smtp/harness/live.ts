@@ -65,7 +65,7 @@ for (const host of targets) {
       transport: { read: transport.read, write: transport.write },
       serverName: host,
       trustAnchors: anchors.source,
-      validationTime: new Date(),
+      validationTime: Temporal.Now.instant(),
       validator: YOZZ_VALIDATOR,
     });
     if (!tlsResult.ok) {
@@ -102,8 +102,8 @@ for (const host of targets) {
           data: buildMessage({
             from: { address: authUser, name: 'YOZZ live harness' },
             to: [sendTo],
-            subject: `yozz smtp live ${new Date().toISOString()}`,
-            date: new Date(),
+            subject: `yozz smtp live ${Temporal.Now.instant()}`,
+            date: Temporal.Now.zonedDateTimeISO(),
             messageId: `<${crypto.randomUUID()}@yozz.app>`,
             text: 'Sent by @yozz.app/smtp over @yozz.app/tls from Node.',
             html: '<p>Sent by <code>@yozz.app/smtp</code> over <code>@yozz.app/tls</code> from Node.</p>',

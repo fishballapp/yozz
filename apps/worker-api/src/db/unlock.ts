@@ -160,8 +160,8 @@ export const finalizePasswordUnlock = async (
         userId,
         userId,
         passwordHash,
-        new Date(now).toISOString(),
-        new Date(now).toISOString(),
+        Temporal.Instant.fromEpochMilliseconds(now).toString({ fractionalSecondDigits: 3 }),
+        Temporal.Instant.fromEpochMilliseconds(now).toString({ fractionalSecondDigits: 3 }),
         ...expected,
       ),
     isNewVault
@@ -228,7 +228,14 @@ export const changePasswordUnlock = async (
         `UPDATE account SET password = ?, updatedAt = ?
          WHERE userId = ? AND providerId = 'credential' AND password = ? AND ${SESSION_EXISTS}`,
       )
-      .bind(newHash, new Date(now).toISOString(), userId, currentHash, keepSessionId, userId),
+      .bind(
+        newHash,
+        Temporal.Instant.fromEpochMilliseconds(now).toString({ fractionalSecondDigits: 3 }),
+        userId,
+        currentHash,
+        keepSessionId,
+        userId,
+      ),
     // A salted hash equals `newHash` only if the statement above wrote it.
     db
       .prepare(

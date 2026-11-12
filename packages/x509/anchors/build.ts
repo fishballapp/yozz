@@ -103,7 +103,7 @@ writeFileSync(
         `    serverDistrustAfter: ${
           entry.serverDistrustAfter === null
             ? 'null'
-            : `new Date(${JSON.stringify(entry.serverDistrustAfter.toISOString())})`
+            : `Temporal.Instant.from(${JSON.stringify(entry.serverDistrustAfter.toString())})`
         },`,
         '  },',
       ].join('\n'),
@@ -116,6 +116,6 @@ console.log(`${entries.length} roots -> ${ARTIFACT}`);
 for (const entry of withCutoff) {
   const label = distrust.get(derKey(entry.der))?.label ?? entry.id;
   console.log(
-    `  distrust-after ${entry.serverDistrustAfter?.toISOString().slice(0, 10)}  ${label}`,
+    `  distrust-after ${entry.serverDistrustAfter?.toZonedDateTimeISO('UTC').toPlainDate()}  ${label}`,
   );
 }

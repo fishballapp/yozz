@@ -25,7 +25,7 @@ const result = await startTls({
   transport,
   serverName: 'imap.example.com',
   trustAnchors: compileAnchors(ROOT_BUNDLE).source,
-  validationTime: new Date(),
+  validationTime: Temporal.Now.instant(),
   validator: YOZZ_VALIDATOR,
 });
 if (result.ok) {
@@ -35,7 +35,14 @@ if (result.ok) {
 
 `HandshakeResult` is a discriminated union, never a throw for a refused certificate; the refusal
 says which check failed. A session handed to `onSession` can be offered once on a later
-connection to resume.
+connection to resume. Its `receivedAt` and `authenticatedAt` are `Temporal.Instant`s, which neither
+structured clone nor JSON keeps, so a store encodes them. Before 0.3 they were `Date`s: a store
+written by 0.2 must convert them, or `startTls` throws on the session before a byte goes out.
+
+**Requires a global `Temporal`.** Times are `Temporal.Instant`s (`validationTime`, the optional `now` clock, a session's
+instants). Node 26, Chrome and Firefox ship it; where the runtime has none (Safari, Node 24), install
+[`temporal-polyfill`](https://www.npmjs.com/package/temporal-polyfill) and load it before this package is
+imported (`import 'temporal-polyfill/global'`). The package imports no polyfill itself.
 
 `src/index.ts` is the whole public API and says why each export exists. The source is in
 [fishballapp/yozz](https://github.com/fishballapp/yozz), which takes issues but no pull requests.

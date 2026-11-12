@@ -82,7 +82,7 @@ export type StartTlsOptions = {
   readonly transport: ByteDuplex;
   readonly serverName: string;
   readonly trustAnchors: TrustAnchorSource;
-  readonly validationTime: Date;
+  readonly validationTime: Temporal.Instant;
   readonly validator: Validator;
   readonly expectedPeerName?: PeerName | null;
   /** In preference order; the first carries the key share. */
@@ -104,7 +104,7 @@ export type StartTlsOptions = {
   /** Tickets arrive after the handshake, so this fires from `read()`. Without it, tickets are dropped. */
   readonly onSession?: (session: TlsSession) => void | Promise<void>;
   /** The running clock for ticket ages, distinct from `validationTime` (a policy input a caller may freeze). Injectable for BoGo. */
-  readonly now?: () => Date;
+  readonly now?: () => Temporal.Instant;
 };
 
 export type HandshakeResult =
@@ -249,7 +249,7 @@ const suiteFromCode = (code: number): CipherSuite | undefined => {
 /** The caller passes the instant: a retried ClientHello wants a fresh reading (RFC 9846 §4.2.2). */
 const pskOffer = (
   session: TlsSession | undefined,
-  now: Date,
+  now: Temporal.Instant,
 ): { identity: Uint8Array; obfuscatedTicketAge: number; binderLength: number } | undefined =>
   session === undefined
     ? undefined
@@ -288,7 +288,8 @@ export const runHandshake = async (
   replay?: InternalReplayHooks,
 ): Promise<HandshakeResult> => {
   const { transport, serverName } = options;
-  const now = options.now ?? (() => new Date());
+  // `Date.now()`, not `Temporal.Now`: a Worker's `Temporal.Now` reads the epoch inside a Durable Object.
+  const now = options.now ?? (() => Temporal.Instant.fromEpochMilliseconds(Date.now()));
   const expectedPeerName =
     options.expectedPeerName !== undefined
       ? options.expectedPeerName

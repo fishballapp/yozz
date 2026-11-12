@@ -15,7 +15,7 @@
  *   pnpm exec varlock run -- node projects/yozz/packages/imap/harness/relay-load.ts
  */
 import { connect, type Socket } from 'node:net';
-import { createSmtpClient } from '@yozz.app/smtp';
+import { createSmtpClient, formatDate } from '@yozz.app/smtp';
 import { type ByteDuplex, startTls, type TlsConnection } from '@yozz.app/tls';
 import { socketTransport } from '@yozz.app/tls/harness';
 import { compileAnchors, ROOT_BUNDLE, YOZZ_VALIDATOR } from '@yozz.app/x509';
@@ -45,7 +45,8 @@ const feHeaders = {
   'content-type': 'application/json',
 };
 
-const log = (line: string) => console.log(`${new Date().toISOString().slice(11, 19)} ${line}`);
+const log = (line: string) =>
+  console.log(`${Temporal.Now.plainTimeISO('UTC').toString({ smallestUnit: 'second' })} ${line}`);
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 const anchors = compileAnchors(ROOT_BUNDLE);
 
@@ -188,7 +189,7 @@ const messageOf = (address: string, sizeMib: number): Uint8Array => {
       `From: ${address}`,
       `To: ${address}`,
       `Subject: yozz relay test ${sizeMib} MiB`,
-      `Date: ${new Date().toUTCString()}`,
+      `Date: ${formatDate(Temporal.Now.zonedDateTimeISO('UTC'))}`,
       `Message-ID: <${crypto.randomUUID()}@yozz.app>`,
       'MIME-Version: 1.0',
       `Content-Type: multipart/mixed; boundary="${boundary}"`,
@@ -220,7 +221,7 @@ const tlsOverRelay = async (relay: Relay, serverName: string): Promise<ByteDuple
     transport: { read: relay.read, write: relay.write },
     serverName,
     trustAnchors: anchors.source,
-    validationTime: new Date(),
+    validationTime: Temporal.Now.instant(),
     validator: YOZZ_VALIDATOR,
   });
   if (!tls.ok) throw new Error(`TLS handshake: ${tls.reason.kind}`);
@@ -345,7 +346,7 @@ const withImap = async <T>(
       transport: { read: transport.read, write: transport.write },
       serverName: IMAP_HOST,
       trustAnchors: anchors.source,
-      validationTime: new Date(),
+      validationTime: Temporal.Now.instant(),
       validator: YOZZ_VALIDATOR,
     });
     if (!tls.ok) throw new Error(`IMAP TLS: ${tls.reason.kind}`);

@@ -37,6 +37,7 @@
     "class-variance-authority": "catalog:",
     "react": "catalog:web",
     "react-dom": "catalog:web",
+    "temporal-polyfill": "catalog:",
     "zod": "catalog:"
   },
   "devDependencies": {

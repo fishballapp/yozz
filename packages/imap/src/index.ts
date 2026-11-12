@@ -15,7 +15,7 @@ export {
   type ImapSelected,
   type ImapUntagged,
 } from './client.ts';
-export type { ImapSearchDate, UidSearchCriteria, UidSearchCriterion } from './commands.ts';
+export type { UidSearchCriteria, UidSearchCriterion } from './commands.ts';
 export type { ImapFetchItem } from './envelope.ts';
 export {
   type ImapContinuation,

@@ -3,7 +3,7 @@
 import { describe, expect, it } from 'vitest';
 import { pemFromDer } from '../harness/pem.ts';
 import { ROOT_BUNDLE } from '../src/root-bundle-generated.ts';
-import { diffTrustStore, subjectLabel } from './upstream.ts';
+import { describeChange, diffTrustStore, subjectLabel } from './upstream.ts';
 
 type Anchor = (typeof ROOT_BUNDLE)[number];
 
@@ -83,7 +83,7 @@ describe('the upstream trust-store diff', () => {
         id: second.id,
         subject: subjectLabel(second.der),
         was: null,
-        now: new Date('2026-04-15T00:00:00.000Z'),
+        now: Temporal.Instant.from('2026-04-15T00:00:00Z'),
         label: expect.any(String),
       },
     ]);
@@ -170,5 +170,20 @@ describe('the upstream trust-store diff', () => {
         upstreamCertdata: certdataFor(sample),
       }),
     ).toThrow(/duplicate roots/);
+  });
+
+  it('logs a cutoff change with millisecond ISO instants', () => {
+    expect(
+      describeChange({
+        kind: 'cutoff-changed',
+        id: 'cacert.pem#4',
+        subject: 'Izenpe.com',
+        was: null,
+        now: Temporal.Instant.from('2026-04-15T23:59:59Z'),
+        label: 'Izenpe.com',
+      }),
+    ).toBe(
+      'CUTOFF   cacert.pem#4  Izenpe.com\n           none -> 2026-04-15T23:59:59.000Z  (Izenpe.com)',
+    );
   });
 });

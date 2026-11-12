@@ -25,6 +25,7 @@ import type { MailConnectionFailure, Result } from '@yozz.app/mail/connection';
 import type { FolderMatches } from '@yozz.app/mail/threads/found';
 import type { FolderWindow } from '@yozz.app/mail/threads/paging';
 import type { Attachment, Folder, Thread, ThreadState } from '@yozz.app/mail/threads/thread';
+import { formatDate } from '@yozz.app/smtp';
 
 /** Vite inlines a binary sample file as a data URL. */
 const bytesOf = (dataUrl: string) =>
@@ -886,29 +887,34 @@ export const DEMO_WINDOWS: readonly FolderWindow[] = [
   },
 ];
 
-const foundReceipt = (uid: number, month: string, daysAgo: number): ImapMessageSummary => ({
-  seq: uid,
-  uid,
-  flags: ['\\Seen'],
-  internalDate: new Date(ago(daysAgo * DAY)).toUTCString(),
-  size: 4000,
-  envelope: {
-    date: new Date(ago(daysAgo * DAY)).toUTCString(),
-    subject: `Your receipt from Acme — ${month}`,
-    subjectRaw: null,
-    from: [{ name: 'Stripe', mailbox: 'billing', host: 'stripe.com' }],
-    sender: [],
-    replyTo: [],
-    to: [{ name: null, mailbox: 'jason', host: 'northlane.example' }],
-    cc: [],
-    bcc: [],
-    inReplyTo: null,
-    messageId: `<found-${uid}@stripe.com>`,
-  },
-  references: [],
-  gmailThreadId: null,
-  attachmentNames: [],
-});
+const foundReceipt = (uid: number, month: string, daysAgo: number): ImapMessageSummary => {
+  const sent = formatDate(
+    Temporal.Instant.fromEpochMilliseconds(ago(daysAgo * DAY)).toZonedDateTimeISO('UTC'),
+  );
+  return {
+    seq: uid,
+    uid,
+    flags: ['\\Seen'],
+    internalDate: sent,
+    size: 4000,
+    envelope: {
+      date: sent,
+      subject: `Your receipt from Acme — ${month}`,
+      subjectRaw: null,
+      from: [{ name: 'Stripe', mailbox: 'billing', host: 'stripe.com' }],
+      sender: [],
+      replyTo: [],
+      to: [{ name: null, mailbox: 'jason', host: 'northlane.example' }],
+      cc: [],
+      bcc: [],
+      inReplyTo: null,
+      messageId: `<found-${uid}@stripe.com>`,
+    },
+    references: [],
+    gmailThreadId: null,
+    attachmentNames: [],
+  };
+};
 
 /**
  * Stands in for the servers, so a search's states can be seen. `yozz:demo-search` picks one:

@@ -398,7 +398,11 @@ layer(NodeServices.layer)(it => {
           'mid/<m1@stripe.com>',
         ]);
         // What it shows is as old as its last sync: three minutes behind the address that synced.
-        expect(Date.parse(out.syncedAt[ADDRESS]) - Date.parse(out.syncedAt[SECOND])).toBe(180_000);
+        expect(
+          Temporal.Instant.from(out.syncedAt[ADDRESS])
+            .since(Temporal.Instant.from(out.syncedAt[SECOND]))
+            .total('seconds'),
+        ).toBe(180);
         expect(out.failed).toEqual([
           {
             address: SECOND,
@@ -635,7 +639,10 @@ layer(NodeServices.layer)(it => {
           server.deliver('INBOX', mail(n, { date: minuteOf2026(n), text: 'Nothing to see.' }));
         }
         const cursor = Buffer.from(
-          JSON.stringify({ at: Date.parse(minuteOf2026(2)), id: '' }),
+          JSON.stringify({
+            at: Temporal.Instant.from('2026-01-01T00:02:00Z').epochMilliseconds,
+            id: '',
+          }),
         ).toString('base64url');
 
         const empty = JSON.parse((yield* list('--cursor', cursor)).stdout);

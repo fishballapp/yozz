@@ -99,7 +99,7 @@ export const OPENSSL_VALIDATOR: Validator = {
         await writeFile(inter, request.untrustedIntermediateDer.map(pemFromDer).join(''));
         args.push('-untrusted', inter);
       }
-      args.push('-attime', String(Math.floor(request.validationTime.getTime() / 1000)));
+      args.push('-attime', String(Math.floor(request.validationTime.epochMilliseconds / 1000)));
       const name = request.expectedPeerName;
       if (name !== null) {
         args.push(name.kind === 'ip' ? '-verify_ip' : '-verify_hostname', name.value);

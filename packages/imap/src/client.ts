@@ -141,7 +141,7 @@ export type ImapClient = {
     mailbox: string,
     message: Uint8Array,
     flags: readonly string[],
-    internalDate?: Date,
+    internalDate?: Temporal.ZonedDateTime,
   ) => Promise<ImapResult<AppendUid | null>>;
   readonly expunge: () => Promise<ImapResult<void>>;
   /** RFC 4315. Refuses without UIDPLUS rather than falling back to EXPUNGE, which erases more than asked. */

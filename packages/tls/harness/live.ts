@@ -65,7 +65,7 @@ for (const host of targets) {
       },
       serverName: host,
       trustAnchors: anchors.source,
-      validationTime: new Date(),
+      validationTime: Temporal.Now.instant(),
       validator: YOZZ_VALIDATOR,
     });
 

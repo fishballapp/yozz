@@ -148,18 +148,32 @@ const appendedOf = (raw: string): FakeMessage => {
 };
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-const internalDateOf = ({ date }: FakeMessage) => {
-  const at = new Date(Date.parse(date));
-  const two = (n: number) => String(n).padStart(2, '0');
-  return `${two(at.getUTCDate())}-${MONTHS[at.getUTCMonth()]}-${at.getUTCFullYear()} ${two(at.getUTCHours())}:${two(at.getUTCMinutes())}:${two(at.getUTCSeconds())} +0000`;
+/**
+ * When a message arrived, in UTC: its Date header, so a test can order its mail, or the clock where
+ * the header names no real time (`mail(0)` is the 0th of October), as a real server stamps it.
+ * RFC 5322's forms only `Date.parse` reads.
+ */
+const arrivedAt = ({ date }: FakeMessage) => {
+  const parsed = Date.parse(date);
+  return Temporal.Instant.fromEpochMilliseconds(
+    Number.isNaN(parsed) ? Date.now() : parsed,
+  ).toZonedDateTimeISO('UTC');
 };
 
-const dayOf = (at: Date) => Date.UTC(at.getUTCFullYear(), at.getUTCMonth(), at.getUTCDate());
+const internalDateOf = (message: FakeMessage) => {
+  const at = arrivedAt(message);
+  const two = (n: number) => String(n).padStart(2, '0');
+  return `${two(at.day)}-${MONTHS[at.month - 1]}-${at.year} ${two(at.hour)}:${two(at.minute)}:${two(at.second)} +0000`;
+};
 
 /** RFC 9051's `1-Feb-2026`, as the day it names. */
 const searchDayOf = (text: string) => {
   const [day = '', month = '', year = ''] = text.split('-');
-  return Date.UTC(Number(year), MONTHS.indexOf(month), Number(day));
+  return Temporal.PlainDate.from({
+    year: Number(year),
+    month: MONTHS.indexOf(month) + 1,
+    day: Number(day),
+  });
 };
 
 /** What RFC 9051's `BODYSTRUCTURE` says of the message: its parts, and each attachment's name. */
@@ -557,9 +571,11 @@ export const makeFakeImapServer = ({
                   if (flagKey === 'UNSEEN') return !message.flags.has('\\Seen');
                   if (flagKey === 'FLAGGED') return message.flags.has('\\Flagged');
                   if (dateKey !== undefined) {
-                    const day = dayOf(new Date(Date.parse(message.message.date)));
-                    const asked = searchDayOf(dateValue ?? '');
-                    return dateKey === 'SINCE' ? day >= asked : day < asked;
+                    const order = Temporal.PlainDate.compare(
+                      arrivedAt(message.message).toPlainDate(),
+                      searchDayOf(dateValue ?? ''),
+                    );
+                    return dateKey === 'SINCE' ? order >= 0 : order < 0;
                   }
                   const name = headerName ?? textKey ?? '';
                   const needle = (headerValue ?? textValue ?? '')

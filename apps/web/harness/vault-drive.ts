@@ -393,7 +393,9 @@ const browser = await chromium.launch();
 
 /** The Worker only accepts a change to how the vault opens from a sign-in under a day old. */
 const ageSessions = () => {
-  const twoDaysAgo = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString();
+  const twoDaysAgo = Temporal.Now.instant()
+    .subtract({ hours: 48 })
+    .toString({ fractionalSecondDigits: 3 });
   execFileSync(
     'pnpm',
     [

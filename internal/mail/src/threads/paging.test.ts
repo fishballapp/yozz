@@ -23,7 +23,7 @@ describe('olderFrontier', () => {
     expect(frontier).toEqual({
       mailbox: 'me@x.co',
       folder: 'inbox',
-      reachedAt: Date.UTC(2026, 2, 1, 9),
+      reachedAt: Temporal.Instant.from('2026-03-01T09:00:00Z').epochMilliseconds,
     });
   });
 

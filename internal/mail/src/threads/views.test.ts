@@ -314,12 +314,18 @@ describe('the query behind a list', () => {
   it('shows no search row at or below where the matches read stop, and offers the rest when all have answered', () => {
     const at = (id: string, day: number): ThreadState => ({
       ...words(id, ['archive']),
-      messages: [{ ...message(`${id}/1`), at: Date.UTC(2026, 0, day) }],
+      messages: [
+        {
+          ...message(`${id}/1`),
+          at: Temporal.PlainDate.from({ year: 2026, month: 1, day }).toZonedDateTime('UTC')
+            .epochMilliseconds,
+        },
+      ],
     });
     const matchFrontier = {
       mailbox: 'me@x',
       folder: 'archive' as const,
-      reachedAt: Date.UTC(2026, 0, 10),
+      reachedAt: Temporal.Instant.from('2026-01-10T00:00:00Z').epochMilliseconds,
     };
     const listing = (isAnswering: boolean) =>
       listingOf({
@@ -339,7 +345,13 @@ describe('the query behind a list', () => {
   it('shows nothing at or below where the soonest-stopping folder has reached', () => {
     const at = (id: string, day: number): ThreadState => ({
       ...thread(id, ['archive']),
-      messages: [{ ...message(`${id}/1`), at: Date.UTC(2026, 0, day) }],
+      messages: [
+        {
+          ...message(`${id}/1`),
+          at: Temporal.PlainDate.from({ year: 2026, month: 1, day }).toZonedDateTime('UTC')
+            .epochMilliseconds,
+        },
+      ],
     });
     const summary = (uid: number, internalDate: string) => ({
       seq: uid,

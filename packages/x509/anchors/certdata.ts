@@ -46,14 +46,20 @@ const parseObjects = (text: string): readonly Attributes[] => {
 };
 
 /** RFC 5280 §4.1.2.5.1 UTCTime: YY >= 50 is 19YY. */
-const parseUtcTime = (text: string): Date => {
+const parseUtcTime = (text: string): Temporal.Instant => {
   const match = /^(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})Z$/.exec(text);
   if (match === null) throw new Error(`not a UTCTime: ${JSON.stringify(text)}`);
   const [, yy = '', month = '', day = '', hour = '', minute = '', second = ''] = match;
   const year = Number(yy) >= 50 ? 1900 + Number(yy) : 2000 + Number(yy);
-  return new Date(
-    Date.UTC(year, Number(month) - 1, Number(day), Number(hour), Number(minute), Number(second)),
-  );
+  return Temporal.ZonedDateTime.from({
+    timeZone: 'UTC',
+    year,
+    month: Number(month),
+    day: Number(day),
+    hour: Number(hour),
+    minute: Number(minute),
+    second: Number(second),
+  }).toInstant();
 };
 
 /** Issuer and serial name one certificate (RFC 5280 §4.1.2.2). Latin-1 so distinct DER cannot collide. */
@@ -62,7 +68,7 @@ export const issuerSerialKey = (issuerDer: Uint8Array, serialDer: Uint8Array): s
 
 export type ServerDistrust = {
   readonly label: string;
-  readonly notAfter: Date;
+  readonly notAfter: Temporal.Instant;
 };
 
 /**

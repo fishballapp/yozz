@@ -84,7 +84,7 @@ type Link = {
   readonly certificate: Certificate;
   readonly ref: CertificateRef;
   /** Only ever set on an anchor. */
-  readonly serverDistrustAfter?: Date | null;
+  readonly serverDistrustAfter?: Temporal.Instant | null;
 };
 
 /** What name constraints apply to. */
@@ -100,7 +100,7 @@ const validatePathCandidate = async (
   chain: readonly Link[],
   request: PathValidationRequest,
 ): Promise<ValidationFailure | null> => {
-  const time = Math.floor(request.validationTime.getTime() / 1000) * 1000;
+  const time = request.validationTime.round({ smallestUnit: 'second', roundingMode: 'floor' });
 
   // RFC 5280 §6.1 treats an anchor as a name and a key; x509-limbo expects an expired or
   // non-CA root to fail, and this validator follows limbo.
@@ -139,10 +139,10 @@ const validatePathCandidate = async (
   if (anchor.certificate.extensions.unrecognisedCritical.length > 0) {
     return { code: 'unknown-critical-extension', certificate: anchor.ref };
   }
-  if (anchor.certificate.notBefore.getTime() > time) {
+  if (Temporal.Instant.compare(anchor.certificate.notBefore, time) > 0) {
     return { code: 'certificate-not-yet-valid', certificate: anchor.ref };
   }
-  if (anchor.certificate.notAfter.getTime() < time) {
+  if (Temporal.Instant.compare(anchor.certificate.notAfter, time) < 0) {
     return { code: 'certificate-expired', certificate: anchor.ref };
   }
 
@@ -174,10 +174,10 @@ const validatePathCandidate = async (
       return { code: 'malformed-certificate', certificate: ref };
     }
     // Validity is encoded to the second, so `time` is truncated to one.
-    if (certificate.notBefore.getTime() > time) {
+    if (Temporal.Instant.compare(certificate.notBefore, time) > 0) {
       return { code: 'certificate-not-yet-valid', certificate: ref };
     }
-    if (certificate.notAfter.getTime() < time) {
+    if (Temporal.Instant.compare(certificate.notAfter, time) < 0) {
       return { code: 'certificate-expired', certificate: ref };
     }
     if (certificate.extensions.unrecognisedCritical.length > 0) {
@@ -250,7 +250,7 @@ const validatePathCandidate = async (
   // its own diagnosis.
   if (
     anchor.serverDistrustAfter != null &&
-    leaf.certificate.notBefore.getTime() > anchor.serverDistrustAfter.getTime()
+    Temporal.Instant.compare(leaf.certificate.notBefore, anchor.serverDistrustAfter) > 0
   ) {
     return { code: 'certificate-authority-distrusted', certificate: anchor.ref };
   }

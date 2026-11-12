@@ -53,15 +53,16 @@ const distinguishedName = (commonName: string): Uint8Array =>
   sequence(set(sequence(oid(COMMON_NAME), ascii(0x13, commonName))));
 
 /** RFC 5280 UTCTime. */
-const utcTime = (when: Date): Uint8Array => {
+const utcTime = (when: Temporal.Instant): Uint8Array => {
   const pad = (value: number): string => String(value).padStart(2, '0');
+  const utc = when.toZonedDateTimeISO('UTC');
   const text =
-    pad(when.getUTCFullYear() % 100) +
-    pad(when.getUTCMonth() + 1) +
-    pad(when.getUTCDate()) +
-    pad(when.getUTCHours()) +
-    pad(when.getUTCMinutes()) +
-    pad(when.getUTCSeconds()) +
+    pad(utc.year % 100) +
+    pad(utc.month) +
+    pad(utc.day) +
+    pad(utc.hour) +
+    pad(utc.minute) +
+    pad(utc.second) +
     'Z';
   return ascii(0x17, text);
 };
@@ -94,8 +95,8 @@ export type IssueOptions = {
   readonly issuer?: IssuedCertificate;
   readonly isCa?: boolean;
   readonly pathLength?: number;
-  readonly notBefore?: Date;
-  readonly notAfter?: Date;
+  readonly notBefore?: Temporal.Instant;
+  readonly notAfter?: Temporal.Instant;
   readonly dnsNames?: readonly string[];
   /** OIDs. */
   readonly extendedKeyUsages?: readonly string[];
@@ -107,15 +108,17 @@ export type IssueOptions = {
   readonly keyPair?: CryptoKeyPair;
 };
 
-const YEAR = 365 * 24 * 60 * 60 * 1000;
+const YEAR: Temporal.DurationLike = { hours: 365 * 24 };
+
+// The defaults read `Date.now()`, not `Temporal.Now`: a Worker's `Temporal.Now` reads the epoch inside a Durable Object.
 
 export const issueCertificate = async ({
   commonName,
   issuer,
   isCa = false,
   pathLength,
-  notBefore = new Date(Date.now() - YEAR),
-  notAfter = new Date(Date.now() + YEAR),
+  notBefore = Temporal.Instant.fromEpochMilliseconds(Date.now()).subtract(YEAR),
+  notAfter = Temporal.Instant.fromEpochMilliseconds(Date.now()).add(YEAR),
   dnsNames = [],
   extendedKeyUsages = [],
   permittedDnsNames,

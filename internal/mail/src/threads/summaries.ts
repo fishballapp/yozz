@@ -61,67 +61,53 @@ const isPrintableMessageId = (messageId: string) =>
 /** Every mailbox's folders, keyed by address: what one grouping pass reads. */
 export type MailboxSummaries = Readonly<Record<string, FolderSummaries>>;
 
-const MONTHS: Record<string, number> = {
-  jan: 0,
-  feb: 1,
-  mar: 2,
-  apr: 3,
-  may: 4,
-  jun: 5,
-  jul: 6,
-  aug: 7,
-  sep: 8,
-  oct: 9,
-  nov: 10,
-  dec: 11,
-};
+const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
 
-/** IMAP INTERNALDATE (`23-Aug-2026 09:00:00 +0000`); `Date.parse` does not accept it reliably across engines. */
+const INTERNAL_DATE =
+  /^(\d{1,2})-([A-Za-z]{3})-(\d{4})\s+(\d{2}):(\d{2}):(\d{2})\s+([+-]\d{2})(\d{2})$/;
+
+/** IMAP INTERNALDATE (`23-Aug-2026 09:00:00 +0000`) as epoch milliseconds; null for a day or time that does not exist. */
 export const parseInternalDate = (dateStr: string | null | undefined): number | null => {
-  if (dateStr === null || dateStr === undefined) return null;
-  const trimmed = dateStr.trim();
-  const match = trimmed.match(
-    /^(\d{1,2})-([A-Za-z]{3})-(\d{4})\s+(\d{2}):(\d{2}):(\d{2})\s+([+-])(\d{2})(\d{2})$/,
-  );
-  if (!match) return null;
-
-  const [_, dayStr, monStr, yearStr, hourStr, minStr, secStr, sign, tzHourStr, tzMinStr] = match;
-  if (
-    dayStr === undefined ||
-    monStr === undefined ||
-    yearStr === undefined ||
-    hourStr === undefined ||
-    minStr === undefined ||
-    secStr === undefined ||
-    sign === undefined ||
-    tzHourStr === undefined ||
-    tzMinStr === undefined
-  ) {
-    return null;
+  const match = INTERNAL_DATE.exec(dateStr?.trim() ?? '');
+  if (match === null) return null;
+  const [
+    ,
+    day = '',
+    monthName = '',
+    year = '',
+    hour = '',
+    minute = '',
+    second = '',
+    zoneHours = '',
+    zoneMinutes = '',
+  ] = match;
+  const month = MONTHS.indexOf(monthName.toLowerCase()) + 1;
+  if (month === 0) return null;
+  try {
+    return Temporal.ZonedDateTime.from(
+      {
+        timeZone: `${zoneHours}:${zoneMinutes}`,
+        year: Number(year),
+        month,
+        day: Number(day),
+        hour: Number(hour),
+        minute: Number(minute),
+        second: Number(second),
+      },
+      { overflow: 'reject' },
+    ).epochMilliseconds;
+  } catch (error) {
+    if (error instanceof RangeError) return null;
+    throw error;
   }
-
-  const month = MONTHS[monStr.toLowerCase()];
-  if (month === undefined) return null;
-
-  const day = Number.parseInt(dayStr, 10);
-  const year = Number.parseInt(yearStr, 10);
-  const hour = Number.parseInt(hourStr, 10);
-  const min = Number.parseInt(minStr, 10);
-  const sec = Number.parseInt(secStr, 10);
-
-  const tzHours = Number.parseInt(tzHourStr, 10);
-  const tzMins = Number.parseInt(tzMinStr, 10);
-  const tzOffsetMinutes = (tzHours * 60 + tzMins) * (sign === '-' ? -1 : 1);
-
-  const utcMillis = Date.UTC(year, month, day, hour, min, sec);
-  const epochMillis = utcMillis - tzOffsetMinutes * 60 * 1000;
-  return Number.isNaN(epochMillis) ? null : epochMillis;
 };
 
 const parseDate = (summary: ImapMessageSummary): number => {
   const internal = parseInternalDate(summary.internalDate);
   if (internal !== null) return internal;
   if (summary.envelope?.date) {
+    // RFC 5322 dates arrive in every obsolete form (named zones, comments, two-digit years), which
+    // only `Date.parse` reads; Temporal parses ISO 8601 alone.
     const parsed = Date.parse(summary.envelope.date);
     if (!Number.isNaN(parsed)) return parsed;
   }

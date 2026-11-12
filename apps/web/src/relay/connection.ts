@@ -121,7 +121,7 @@ export const openTlsDuplex = async (
         transport,
         serverName: host,
         trustAnchors: anchors,
-        validationTime: new Date(),
+        validationTime: Temporal.Now.instant(),
         validator: YOZZ_VALIDATOR,
         session: offered ?? undefined,
         onSession: next => saveSession(peer, next),

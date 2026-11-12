@@ -4,7 +4,8 @@ export type MessageInput = {
   /** Named in a `Cc` header. Blind copies are the envelope's business, never a header. */
   readonly cc?: readonly string[];
   readonly subject: string;
-  readonly date: Date;
+  /** Written as this wall-clock time and offset; the zone is the caller's choice. */
+  readonly date: Temporal.ZonedDateTime;
   /** `<local@domain>`; the caller mints it so it can keep the id for its own Sent copy. */
   readonly messageId: string;
   readonly text: string;
@@ -212,16 +213,22 @@ export const formatMailbox = ({ address, name }: MessageInput['from']): string =
   return `${display} <${address}>`;
 };
 
-const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+/** In `dayOfWeek` order: ISO 8601 starts the week on Monday. */
+const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const two = (n: number) => String(n).padStart(2, '0');
 
-/** RFC 5322 §3.3, in the local zone. */
-export const formatDate = (date: Date): string => {
-  const offset = -date.getTimezoneOffset();
-  const sign = offset < 0 ? '-' : '+';
-  const zone = `${sign}${two(Math.floor(Math.abs(offset) / 60))}${two(Math.abs(offset) % 60)}`;
-  return `${DAYS[date.getDay()]}, ${date.getDate()} ${MONTHS[date.getMonth()]} ${date.getFullYear()} ${two(date.getHours())}:${two(date.getMinutes())}:${two(date.getSeconds())} ${zone}`;
+/** `+hhmm` in whole minutes: an offset with seconds (a zone's local mean time before 1900) would break the grammar. */
+const zoneOf = ({ offsetNanoseconds }: Temporal.ZonedDateTime): string => {
+  const minutes = Math.trunc(offsetNanoseconds / 60_000_000_000);
+  const sign = minutes < 0 ? '-' : '+';
+  return `${sign}${two(Math.floor(Math.abs(minutes) / 60))}${two(Math.abs(minutes) % 60)}`;
+};
+
+/** RFC 5322 §3.3, in the date's own zone and always in the ISO calendar, whatever the caller's. */
+export const formatDate = (zoned: Temporal.ZonedDateTime): string => {
+  const date = zoned.withCalendar('iso8601');
+  return `${DAYS[date.dayOfWeek - 1]}, ${date.day} ${MONTHS[date.month - 1]} ${date.year} ${two(date.hour)}:${two(date.minute)}:${two(date.second)} ${zoneOf(date)}`;
 };
 
 const assertNoLineBreak = (field: string, value: string) => {

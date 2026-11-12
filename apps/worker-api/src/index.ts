@@ -1,3 +1,4 @@
+import './temporal.ts';
 import { createApp } from './app.ts';
 import type { RuntimeEnv } from './env.ts';
 

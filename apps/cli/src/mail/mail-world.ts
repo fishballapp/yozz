@@ -1,5 +1,6 @@
 import type { AddressRecord } from '@yozz.app/mail/addresses/record';
 import { signMessage } from '@yozz.app/mail/testing/dkim-signer';
+import { formatDate } from '@yozz.app/smtp';
 import * as Effect from 'effect/Effect';
 import { makeHomes, makeWorld, writeCredentials } from '../test-world.ts';
 import { type FakeMessage, makeFakeImapServer, rawOf } from './fake-imap-server.ts';
@@ -51,7 +52,8 @@ export const signedByStripe = async (message: FakeMessage) => {
 };
 
 /** An RFC 5322 date `n` minutes into 2026, for a mailbox of hundreds in order. */
-export const minuteOf2026 = (n: number) => new Date(Date.UTC(2026, 0, 1, 0, n)).toUTCString();
+export const minuteOf2026 = (n: number) =>
+  formatDate(Temporal.ZonedDateTime.from('2026-01-01T00:00[UTC]').add({ minutes: n }));
 
 export const SECOND = 'jason@posteo.test';
 export const SECOND_HOST = 'imap.posteo.test';

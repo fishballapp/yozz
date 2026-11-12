@@ -418,8 +418,8 @@ export type Certificate = {
   readonly serialNumberOctets: number;
   readonly signatureAlgorithm: AlgorithmIdentifier;
   readonly issuer: Name;
-  readonly notBefore: Date;
-  readonly notAfter: Date;
+  readonly notBefore: Temporal.Instant;
+  readonly notAfter: Temporal.Instant;
   readonly subject: Name;
   readonly subjectPublicKeyInfo: SubjectPublicKeyInfo;
   readonly extensions: Extensions;

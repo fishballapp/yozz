@@ -47,7 +47,7 @@ const KEY: AccountCliKey = {
   name: 'jasons-mbp',
   publicKey: 'unused',
   pairingCode: 'K7Q2-M9XD',
-  createdAt: Date.UTC(2026, 9, 30),
+  createdAt: Temporal.Instant.from('2026-10-30T00:00:00Z').epochMilliseconds,
   lastUsedAt: null,
 };
 
@@ -111,7 +111,12 @@ describe('CliKeysSection', () => {
   it('lists each key by name, with the code its terminal showed, when it was added and last used', async () => {
     vi.mocked(listCliKeys).mockResolvedValue([
       KEY,
-      { ...KEY, keyId: crypto.randomUUID(), name: 'ci', lastUsedAt: Date.UTC(2026, 9, 31) },
+      {
+        ...KEY,
+        keyId: crypto.randomUUID(),
+        name: 'ci',
+        lastUsedAt: Temporal.Instant.from('2026-10-31T00:00:00Z').epochMilliseconds,
+      },
     ]);
     await mount();
     const rows = [...document.querySelectorAll('li')].map(row => row.textContent);

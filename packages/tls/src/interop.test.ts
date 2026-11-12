@@ -56,7 +56,7 @@ describe('a fatal alert reaches a real peer', () => {
         },
         serverName: LOCAL_SERVER_NAME,
         trustAnchors: { findCandidates: () => [] },
-        validationTime: new Date(),
+        validationTime: Temporal.Now.instant(),
         validator: YOZZ_VALIDATOR,
       });
 
@@ -90,7 +90,7 @@ describe('a real TLS 1.3 server, every group and suite', () => {
           transport: socketTransport(socket),
           serverName: LOCAL_SERVER_NAME,
           trustAnchors: server.trustAnchors,
-          validationTime: new Date(),
+          validationTime: Temporal.Now.instant(),
           validator: YOZZ_VALIDATOR,
         });
 
@@ -139,7 +139,7 @@ describe('resumption against a real TLS 1.3 server', () => {
             transport: socketTransport(socket),
             serverName: LOCAL_SERVER_NAME,
             trustAnchors: server.trustAnchors,
-            validationTime: new Date(),
+            validationTime: Temporal.Now.instant(),
             validator: YOZZ_VALIDATOR,
             session,
             onSession: next => {
@@ -192,10 +192,13 @@ describe('a resumed handshake re-checks the stored chain', () => {
 
   const resumeAfterTheLeafExpires = async (reverifyOnResume: boolean | undefined) => {
     const server = await startLocalServer({ suite: 'TLS_AES_128_GCM_SHA256', curve: 'X25519' });
-    const issuedAt = new Date();
+    const issuedAt = Temporal.Now.instant();
     const sessions: TlsSession[] = [];
 
-    const connectOnce = async (session: TlsSession | undefined, validationTime: Date) => {
+    const connectOnce = async (
+      session: TlsSession | undefined,
+      validationTime: Temporal.Instant,
+    ) => {
       const socket = await openSocket(server.port);
       try {
         const result = await startTls({
@@ -232,7 +235,7 @@ describe('a resumed handshake re-checks the stored chain', () => {
       if (offered === undefined) throw new Error('the server issued no ticket');
 
       // `issueCertificate` gives its leaves a year either side.
-      return await connectOnce(offered, new Date(issuedAt.getTime() + 2 * YEAR));
+      return await connectOnce(offered, issuedAt.add({ milliseconds: 2 * YEAR }));
     } finally {
       await server.stop();
     }
@@ -273,7 +276,7 @@ describe('a resumed handshake re-checks the stored chain', () => {
           transport: socketTransport(socket),
           serverName: LOCAL_SERVER_NAME,
           trustAnchors: server.trustAnchors,
-          validationTime: new Date(),
+          validationTime: Temporal.Now.instant(),
           validator: YOZZ_VALIDATOR,
           session,
           onSession: next => {
@@ -327,7 +330,7 @@ describe('trust on first use, pinned to the leaf public key', () => {
         transport: socketTransport(socket),
         serverName: LOCAL_SERVER_NAME,
         trustAnchors: server.trustAnchors,
-        validationTime: new Date(),
+        validationTime: Temporal.Now.instant(),
         validator:
           pin === undefined ? YOZZ_VALIDATOR : pinnedValidator({ validator: YOZZ_VALIDATOR, pin }),
       });
@@ -433,7 +436,7 @@ describe('trust on first use, pinned to the leaf public key', () => {
           transport: socketTransport(socket),
           serverName: LOCAL_SERVER_NAME,
           trustAnchors: server.trustAnchors,
-          validationTime: new Date(),
+          validationTime: Temporal.Now.instant(),
           validator:
             pin === undefined
               ? YOZZ_VALIDATOR

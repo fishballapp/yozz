@@ -52,7 +52,7 @@ export const urlOf = (webUrl: string, view: ViewId, thread: ThreadState) => {
 /** What `read` says of every message before its content: its id, its time, whether it is a draft. */
 export const messageHeadOf = (message: Message) => ({
   id: message.id,
-  at: new Date(message.at).toISOString(),
+  at: Temporal.Instant.fromEpochMilliseconds(message.at).toString({ fractionalSecondDigits: 3 }),
   ...(message.isDraft === true ? { isDraft: true, draftId: message.draftId } : {}),
 });
 
@@ -78,7 +78,7 @@ export const rowOf = (thread: ThreadState, { webUrl, view }: { webUrl: string; v
   return {
     id: thread.id,
     url: urlOf(webUrl, view, thread),
-    at: new Date(latest.at).toISOString(),
+    at: Temporal.Instant.fromEpochMilliseconds(latest.at).toString({ fractionalSecondDigits: 3 }),
     mailboxes: thread.mailboxes,
     folders: thread.folders,
     isUnread: thread.isUnread,

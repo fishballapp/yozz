@@ -1,4 +1,4 @@
-import type { CalendarDay, SearchQuery, TermField } from './query.ts';
+import type { SearchQuery, TermField } from './query.ts';
 import type { Message, Recipient, ThreadState } from './thread.ts';
 
 /** Both halves of the comparison folded, so servers' case-insensitive SEARCH and this one agree. */
@@ -49,7 +49,7 @@ const SEARCHED_BY: Readonly<Record<TermField, (fields: SearchableFields) => read
   subject: ({ subject }) => [subject],
 };
 
-const startOfDay = ({ year, month, day }: CalendarDay) => Date.UTC(year, month - 1, day);
+const startOfDay = (day: Temporal.PlainDate) => day.toZonedDateTime('UTC').epochMilliseconds;
 
 /** Every term and flag in this one message, and its time inside every date. */
 export const messageMatches = (

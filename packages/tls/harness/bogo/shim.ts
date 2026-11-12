@@ -424,7 +424,7 @@ const runConnection = async (
     onVerification,
   }: {
     readonly isResume: boolean;
-    readonly now: Date;
+    readonly now: Temporal.Instant;
     readonly session: TlsSession | undefined;
     readonly onSession: (session: TlsSession) => void;
     /** The minting connection's verdict; a resumed handshake carries no Certificate. */
@@ -560,7 +560,7 @@ const main = async (): Promise<number> => {
   let session: TlsSession | undefined;
   let refusal = false;
   /** Mock clock: BoGo checks the ticket age against `-resumption-delay` exactly. Starts from real time because 1970 expires every chain BoGo issues. */
-  let now = new Date();
+  let now = Temporal.Now.instant();
 
   for (let exchange = 0; exchange <= initial.resumeCount; exchange += 1) {
     const isResume = exchange > 0;
@@ -577,7 +577,7 @@ const main = async (): Promise<number> => {
       },
     });
     if (code !== 0) return code;
-    now = new Date(now.getTime() + initial.resumptionDelaySeconds * 1000);
+    now = now.add({ seconds: initial.resumptionDelaySeconds });
   }
 
   log('passed', null);

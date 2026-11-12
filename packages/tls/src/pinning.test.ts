@@ -17,7 +17,7 @@ const REQUEST: PathValidationRequest = {
   peerCertificateDer: Uint8Array.of(),
   untrustedIntermediateDer: [],
   trustAnchors: { findCandidates: () => [] },
-  validationTime: new Date(),
+  validationTime: Temporal.Now.instant(),
   expectedPeerName: null,
   requiredKeyUsages: [],
   requiredExtendedKeyUsages: [],
@@ -68,7 +68,7 @@ describe('publicKeyPin', () => {
       dnsNames: ['mail.example'],
       extendedKeyUsages: [SERVER_AUTH],
       keyPair: first.keyPair,
-      notAfter: new Date(Date.now() + 90 * 24 * 3600 * 1000),
+      notAfter: Temporal.Now.instant().add({ hours: 90 * 24 }),
     });
     const rotated = await issueCertificate({
       commonName: 'mail.example',

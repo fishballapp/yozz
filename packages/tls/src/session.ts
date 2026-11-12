@@ -31,14 +31,14 @@ export type TlsSession = {
   readonly preSharedKey: Uint8Array;
   /** §4.3.11.1's `ticket_age_add`, the server's random offset. */
   readonly ticketAgeAdd: number;
-  /** A real `Date`; a persisted session must revive it. */
-  readonly receivedAt: Date;
+  /** Neither structured clone nor JSON keeps a `Temporal.Instant`: a store encodes it. */
+  readonly receivedAt: Temporal.Instant;
   readonly lifetimeSeconds: number;
   /**
    * When the peer's certificate was last verified, carried forward unchanged through every renewal:
-   * RFC 9846 §4.7.1 asks for a limit on the total lifetime of renewed keying material. A real `Date`.
+   * RFC 9846 §4.7.1 asks for a limit on the total lifetime of renewed keying material.
    */
-  readonly authenticatedAt: Date;
+  readonly authenticatedAt: Temporal.Instant;
   /** Carried forward through renewals. A name rather than a code point, so it survives the caller's store. */
   readonly peerSignatureScheme: SignatureScheme;
   /** Carried forward, so a resumed handshake can re-validate the chain against today's clock and anchors (`reverifyOnResume`). */
@@ -73,8 +73,8 @@ export const sessionFromTicket = async ({
   readonly expectedPeerName: PeerName | null;
   readonly suite: CipherSuite;
   readonly resumptionSecret: Uint8Array;
-  readonly receivedAt: Date;
-  readonly authenticatedAt: Date;
+  readonly receivedAt: Temporal.Instant;
+  readonly authenticatedAt: Temporal.Instant;
   readonly peerSignatureScheme: SignatureScheme;
   readonly peerCertificateChain: PeerCertificateChain;
   readonly ticket: Uint8Array;
@@ -129,10 +129,17 @@ export const assertUsableSession = (session: TlsSession): void => {
   if (!isDerChain(session.peerCertificateChain)) {
     throw new Error('the stored session carries no usable peer certificate chain');
   }
+  // A string after JSON, or a `Date` a 0.2 store kept: either would make every age NaN, and the
+  // session would never be offered, silently.
+  for (const field of ['receivedAt', 'authenticatedAt'] as const) {
+    if (!(session[field] instanceof Temporal.Instant)) {
+      throw new Error(`the stored session's ${field} is not a Temporal.Instant`);
+    }
+  }
 };
 
 export type PeerAuthentication = {
-  readonly authenticatedAt: Date;
+  readonly authenticatedAt: Temporal.Instant;
   readonly peerSignatureScheme: SignatureScheme;
   readonly peerCertificateChain: PeerCertificateChain;
 };
@@ -157,16 +164,19 @@ export const inheritedAuthentication = (
   return verifiedNow;
 };
 
-const isWithinAuthenticationCeiling = (authenticatedAt: Date, now: Date): boolean => {
-  const age = now.getTime() - authenticatedAt.getTime();
+const isWithinAuthenticationCeiling = (
+  authenticatedAt: Temporal.Instant,
+  now: Temporal.Instant,
+): boolean => {
+  const age = now.epochMilliseconds - authenticatedAt.epochMilliseconds;
   return age >= 0 && age < MAX_AUTHENTICATION_AGE_SECONDS * 1000;
 };
 
-const ticketAgeMs = (session: TlsSession, now: Date): number =>
-  now.getTime() - session.receivedAt.getTime();
+const ticketAgeMs = (session: TlsSession, now: Temporal.Instant): number =>
+  now.epochMilliseconds - session.receivedAt.epochMilliseconds;
 
 /** RFC 9846 §4.3.11.1: age in milliseconds plus the server's offset, modulo 2^32. */
-export const obfuscatedTicketAge = (session: TlsSession, now: Date): number =>
+export const obfuscatedTicketAge = (session: TlsSession, now: Temporal.Instant): number =>
   (ticketAgeMs(session, now) + session.ticketAgeAdd) % 0x1_0000_0000;
 
 /** `asciiLower`, not `toLowerCase`: KELVIN SIGN folds to `k` under Unicode, which would widen a security check. */
@@ -185,7 +195,7 @@ export const isSessionOfferable = (
   session: TlsSession,
   serverName: string,
   expectedPeerName: PeerName | null,
-  now: Date,
+  now: Temporal.Instant,
 ): boolean => {
   const age = ticketAgeMs(session, now);
   return (

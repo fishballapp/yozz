@@ -47,9 +47,9 @@ describe('parseQuery', () => {
     ['mailbox:a@x.co mailbox:b@y.co', { mailboxes: ['a@x.co', 'b@y.co'] }],
     ['is:unread', { isUnread: true }],
     ['is:starred', { isStarred: true }],
-    ['before:2026/11/01', { before: [{ year: 2026, month: 11, day: 1 }] }],
-    ['after:2026-02-28', { after: [{ year: 2026, month: 2, day: 28 }] }],
-    ['after:2024/02/29', { after: [{ year: 2024, month: 2, day: 29 }] }],
+    ['before:2026/11/01', { before: [Temporal.PlainDate.from('2026-11-01')] }],
+    ['after:2026-02-28', { after: [Temporal.PlainDate.from('2026-02-28')] }],
+    ['after:2024/02/29', { after: [Temporal.PlainDate.from('2024-02-29')] }],
     [
       'FROM:Stripe IN:Archive Is:UNREAD',
       {

@@ -127,7 +127,8 @@ describe('the entry chunk', () => {
       reached.set(file, next);
       for (const target of next) visit(target);
     };
-    visit(join(SRC, 'main.tsx'));
+    // `main.tsx` only gates the Temporal polyfill and the reload; the app it imports is what the page loads with.
+    visit(join(SRC, 'app.tsx'));
     const named = (file: string) => (file.startsWith('/') ? rel(file) : file);
     const leaks = [...reached]
       .filter(([file]) => file !== CONNECTION)
@@ -137,5 +138,10 @@ describe('the entry chunk', () => {
           .map(target => `${named(file)} -> ${named(target)}`),
       );
     expect(leaks).toEqual([]);
+  });
+
+  // A static import would run before the polyfill in Safari, and every other gate runs where Temporal is native.
+  it('imports nothing statically from main.tsx', () => {
+    expect(staticImportsOf(join(SRC, 'main.tsx'))).toEqual([]);
   });
 });

@@ -35,8 +35,8 @@ export type TrustStoreChange =
       readonly id: string;
       readonly subject: string;
       /** `null` when the root carried no cutoff before, which is the usual case. */
-      readonly was: Date | null;
-      readonly now: Date | null;
+      readonly was: Temporal.Instant | null;
+      readonly now: Temporal.Instant | null;
       readonly label: string;
     };
 
@@ -133,16 +133,19 @@ export const diffTrustStore = ({
       changes.push({ kind: 'root-removed', id: entry.id, subject });
       continue;
     }
-    const now = upstreamDistrust.get(key);
+    const upstream = upstreamDistrust.get(key);
+    const now = upstream?.notAfter ?? null;
+    const was = entry.serverDistrustAfter;
     // Same certificate on both sides; only what NSS says it may vouch for changed.
-    if ((now?.notAfter ?? null)?.getTime() !== (entry.serverDistrustAfter ?? null)?.getTime()) {
+    const isSameCutoff = now === null || was === null ? now === was : now.equals(was);
+    if (!isSameCutoff) {
       changes.push({
         kind: 'cutoff-changed',
         id: entry.id,
         subject,
-        was: entry.serverDistrustAfter,
-        now: now?.notAfter ?? null,
-        label: now?.label ?? 'none',
+        was,
+        now,
+        label: upstream?.label ?? 'none',
       });
     }
   }
@@ -158,7 +161,8 @@ export const diffTrustStore = ({
 
 /** One line per change, for a cron log a human reads once and acts on. */
 export const describeChange = (change: TrustStoreChange): string => {
-  const iso = (date: Date | null): string => (date === null ? 'none' : date.toISOString());
+  const iso = (instant: Temporal.Instant | null): string =>
+    instant === null ? 'none' : instant.toString({ fractionalSecondDigits: 3 });
   switch (change.kind) {
     case 'root-added':
       return `ADDED    ${change.subject}`;

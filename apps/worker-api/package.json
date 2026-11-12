@@ -22,6 +22,7 @@
     "better-auth": "catalog:",
     "better-auth-cloudflare": "catalog:",
     "hono": "catalog:",
+    "temporal-polyfill": "catalog:",
     "zod": "catalog:"
   },
   "devDependencies": {

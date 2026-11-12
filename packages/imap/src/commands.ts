@@ -194,13 +194,21 @@ export const buildStoreFlagsCommand = (
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const two = (value: number) => String(value).padStart(2, '0');
 
-/** RFC 9051 date-time. The day is space-padded, which the grammar requires and several servers enforce. */
-export const formatImapDateTime = (date: Date): string => {
-  const offset = -date.getTimezoneOffset();
-  const sign = offset < 0 ? '-' : '+';
-  const zone = `${sign}${two(Math.floor(Math.abs(offset) / 60))}${two(Math.abs(offset) % 60)}`;
-  const day = String(date.getDate()).padStart(2, ' ');
-  return `"${day}-${MONTHS[date.getMonth()]}-${date.getFullYear()} ${two(date.getHours())}:${two(date.getMinutes())}:${two(date.getSeconds())} ${zone}"`;
+/** `+hhmm` in whole minutes: an offset with seconds (a zone's local mean time before 1900) would break the grammar. */
+const zoneOf = ({ offsetNanoseconds }: Temporal.ZonedDateTime): string => {
+  const minutes = Math.trunc(offsetNanoseconds / 60_000_000_000);
+  const sign = minutes < 0 ? '-' : '+';
+  return `${sign}${two(Math.floor(Math.abs(minutes) / 60))}${two(Math.abs(minutes) % 60)}`;
+};
+
+/**
+ * RFC 9051 date-time, in the date's own zone and always in the ISO calendar, whatever the caller's.
+ * The day is space-padded, which the grammar requires and several servers enforce.
+ */
+export const formatImapDateTime = (zoned: Temporal.ZonedDateTime): string => {
+  const date = zoned.withCalendar('iso8601');
+  const day = String(date.day).padStart(2, ' ');
+  return `"${day}-${MONTHS[date.month - 1]}-${date.year} ${two(date.hour)}:${two(date.minute)}:${two(date.second)} ${zoneOf(date)}"`;
 };
 
 export const buildAppendCommand = (
@@ -208,7 +216,7 @@ export const buildAppendCommand = (
   mailbox: string,
   flags: readonly string[],
   message: Uint8Array,
-  internalDate?: Date,
+  internalDate?: Temporal.ZonedDateTime,
 ): OutgoingCommand => {
   const mboxUtf7 = encodeModifiedUtf7(mailbox);
   const stamp = internalDate === undefined ? '' : `${formatImapDateTime(internalDate)} `;
@@ -244,18 +252,11 @@ export type UidSearchCriterion =
   | { readonly key: 'UNSEEN' }
   | { readonly key: 'FLAGGED' }
   /** By INTERNALDATE's day: `SINCE` is on or after it, `BEFORE` strictly before it. */
-  | { readonly key: 'BEFORE'; readonly date: ImapSearchDate }
-  | { readonly key: 'SINCE'; readonly date: ImapSearchDate };
+  | { readonly key: 'BEFORE'; readonly date: Temporal.PlainDate }
+  | { readonly key: 'SINCE'; readonly date: Temporal.PlainDate };
 
 /** One key, or several that a message must all meet. */
 export type UidSearchCriteria = UidSearchCriterion | readonly UidSearchCriterion[];
-
-/** A calendar day; `month` runs 1 to 12. */
-export type ImapSearchDate = {
-  readonly year: number;
-  readonly month: number;
-  readonly day: number;
-};
 
 /** A key as command text, which stops at its literal when it has one. */
 type SearchPiece = { readonly text: string; readonly literal?: Uint8Array };
@@ -263,7 +264,7 @@ type SearchPiece = { readonly text: string; readonly literal?: Uint8Array };
 const searchPieceOf = (criterion: UidSearchCriterion): SearchPiece => {
   if (criterion.key === 'UNSEEN' || criterion.key === 'FLAGGED') return { text: criterion.key };
   if (criterion.key === 'BEFORE' || criterion.key === 'SINCE') {
-    const { year, month, day } = criterion.date;
+    const { year, month, day } = criterion.date.withCalendar('iso8601');
     return {
       text: `${criterion.key} ${day}-${MONTHS[month - 1]}-${String(year).padStart(4, '0')}`,
     };

@@ -2,6 +2,7 @@ import 'fake-indexeddb/auto';
 import type { TlsSession } from '@yozz.app/tls';
 import { IDBFactory } from 'fake-indexeddb';
 import { describe, expect, it } from 'vitest';
+import { openDeviceDb, runTransaction, STORES } from '../vault/device-db';
 import { loadUnlockKeys } from '../vault/unlock-keys';
 import { peerKey, saveSession, takeSession } from './session-store';
 
@@ -12,9 +13,9 @@ const session = (ticket: number): TlsSession => ({
   ticket: new Uint8Array([ticket]),
   preSharedKey: new Uint8Array(32),
   ticketAgeAdd: 7,
-  receivedAt: new Date('2026-08-24T00:00:00Z'),
+  receivedAt: Temporal.Instant.from('2026-08-24T00:00:00Z'),
   lifetimeSeconds: 3600,
-  authenticatedAt: new Date('2026-08-24T00:00:00Z'),
+  authenticatedAt: Temporal.Instant.from('2026-08-24T00:00:00Z'),
   peerSignatureScheme: 'ecdsa_secp256r1_sha256',
   peerCertificateChain: { leafDer: new Uint8Array([0x30]), intermediateDer: [] },
 });
@@ -22,13 +23,14 @@ const session = (ticket: number): TlsSession => ({
 describe('session store', () => {
   const peer = peerKey('imap.example.net', 993);
 
-  it('hands a session out exactly once, Dates and bytes intact', async () => {
+  it('hands a session out exactly once, instants and bytes intact', async () => {
     const idb = new IDBFactory();
     await saveSession(peer, session(1), idb);
     await saveSession(peer, session(2), idb);
     const taken = await takeSession(peer, idb);
     expect(taken?.ticket).toEqual(new Uint8Array([2]));
-    expect(taken?.receivedAt).toBeInstanceOf(Date);
+    expect(taken?.receivedAt).toEqual(Temporal.Instant.from('2026-08-24T00:00:00Z'));
+    expect(taken?.authenticatedAt).toEqual(Temporal.Instant.from('2026-08-24T00:00:00Z'));
     expect(taken?.peerCertificateChain.leafDer).toEqual(new Uint8Array([0x30]));
     expect(await takeSession(peer, idb)).toBeNull();
   });
@@ -45,5 +47,27 @@ describe('session store', () => {
     await saveSession(peer, session(1), idb);
     expect(await loadUnlockKeys('u1', idb)).toBeNull();
     expect((await takeSession(peer, idb))?.ticket).toEqual(new Uint8Array([1]));
+  });
+
+  it('stores the instants as Dates, so a session a shipped build saved still reads', async () => {
+    const idb = new IDBFactory();
+    await saveSession(peer, session(1), idb);
+    const db = await openDeviceDb(idb);
+    const row = await runTransaction<unknown>(
+      db,
+      STORES.tlsSessions.name,
+      'readonly',
+      (store, done) => {
+        const req = store.get(peer);
+        req.onsuccess = () => done(req.result);
+      },
+    );
+    db.close();
+    expect(row).toMatchObject({
+      session: {
+        receivedAt: new Date('2026-08-24T00:00:00Z'),
+        authenticatedAt: new Date('2026-08-24T00:00:00Z'),
+      },
+    });
   });
 });

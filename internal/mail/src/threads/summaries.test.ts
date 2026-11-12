@@ -63,22 +63,32 @@ const read = (byFolder: Partial<Record<Folder, readonly ImapMessageSummary[]>>):
 describe('parseInternalDate', () => {
   it('parses internalDate with UTC timezone (+0000)', () => {
     const timestamp = parseInternalDate('23-Aug-2026 09:00:00 +0000');
-    expect(timestamp).toBe(Date.UTC(2026, 7, 23, 9, 0, 0));
+    expect(timestamp).toBe(Temporal.Instant.from('2026-08-23T09:00:00Z').epochMilliseconds);
   });
 
   it('parses internalDate with positive offset timezone (+0200)', () => {
     const timestamp = parseInternalDate('23-Aug-2026 09:00:00 +0200');
-    expect(timestamp).toBe(Date.UTC(2026, 7, 23, 7, 0, 0));
+    expect(timestamp).toBe(Temporal.Instant.from('2026-08-23T07:00:00Z').epochMilliseconds);
   });
 
   it('parses internalDate with negative offset timezone (-0400)', () => {
     const timestamp = parseInternalDate('23-Aug-2026 09:00:00 -0400');
-    expect(timestamp).toBe(Date.UTC(2026, 7, 23, 13, 0, 0));
+    expect(timestamp).toBe(Temporal.Instant.from('2026-08-23T13:00:00Z').epochMilliseconds);
   });
 
   it('parses internalDate with leading space in day', () => {
     const timestamp = parseInternalDate(' 3-Aug-2026 09:00:00 +0000');
-    expect(timestamp).toBe(Date.UTC(2026, 7, 3, 9, 0, 0));
+    expect(timestamp).toBe(Temporal.Instant.from('2026-08-03T09:00:00Z').epochMilliseconds);
+  });
+
+  it('parses a half-hour offset', () => {
+    expect(parseInternalDate('23-Aug-2026 09:00:00 +0530')).toBe(
+      Temporal.Instant.from('2026-08-23T03:30:00Z').epochMilliseconds,
+    );
+  });
+
+  it('refuses a day that does not exist rather than rolling it into the next month', () => {
+    expect(parseInternalDate('30-Feb-2026 09:00:00 +0000')).toBeNull();
   });
 
   it('returns null on invalid string or null', () => {
@@ -159,7 +169,7 @@ describe('threadFromSummary', () => {
     expect(message.rawSize).toBe(1024);
     expect(message.messageId).toBe('<msg-1@example.com>');
     expect(message.toAddress).toBe('user@yozz.app');
-    expect(message.at).toBe(Date.UTC(2026, 7, 23, 9, 0, 0));
+    expect(message.at).toBe(Temporal.Instant.from('2026-08-23T09:00:00Z').epochMilliseconds);
     expect(message.body).toEqual([]);
   });
 

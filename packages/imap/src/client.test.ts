@@ -235,12 +235,16 @@ describe('IMAP Client transcripts and state machine', () => {
       expect(await found({ ...reply, value: 'Grüße' })).toEqual([5]);
       expect(await found({ key: 'UNSEEN' })).toEqual([1, 2]);
       expect(await found({ key: 'FLAGGED' })).toEqual([2]);
-      expect(await found({ key: 'SINCE', date: { year: 2026, month: 2, day: 1 } })).toEqual([8]);
-      expect(await found({ key: 'BEFORE', date: { year: 2026, month: 10, day: 28 } })).toEqual([6]);
+      expect(await found({ key: 'SINCE', date: Temporal.PlainDate.from('2026-02-01') })).toEqual([
+        8,
+      ]);
+      expect(await found({ key: 'BEFORE', date: Temporal.PlainDate.from('2026-10-28') })).toEqual([
+        6,
+      ]);
       expect(
         await found([
           { key: 'UNSEEN' },
-          { key: 'SINCE', date: { year: 2026, month: 2, day: 1 } },
+          { key: 'SINCE', date: Temporal.PlainDate.from('2026-02-01') },
           { key: 'FROM', value: 'stripe' },
         ]),
       ).toEqual([8]);

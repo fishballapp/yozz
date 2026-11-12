@@ -3,7 +3,7 @@ import { type ByteDuplex, startTls, type TlsConnection, type TlsFailure } from '
 import { endGracefully, HOSTS, IMAP_PORT, socketTransport } from '@yozz.app/tls/harness';
 import { compileAnchors, ROOT_BUNDLE, YOZZ_VALIDATOR } from '@yozz.app/x509';
 import { createImapClient, type ImapMessageSummary } from '../src/client.ts';
-import type { ImapSearchDate, UidSearchCriterion } from '../src/commands.ts';
+import type { UidSearchCriterion } from '../src/commands.ts';
 
 const describeFailure = (failure: TlsFailure): string => {
   switch (failure.kind) {
@@ -74,13 +74,13 @@ const MONTH_NAMES = [
 ];
 
 /** The day of an INTERNALDATE such as `23-Aug-2026 09:00:00 +0000`. */
-const dayOf = (internalDate: string | null): ImapSearchDate | null => {
+const dayOf = (internalDate: string | null): Temporal.PlainDate | null => {
   const [, day, month, year] =
     /^\s*(\d{1,2})-([A-Za-z]{3})-(\d{4})/u.exec(internalDate ?? '') ?? [];
   const index = MONTH_NAMES.indexOf(month ?? '');
   return day === undefined || year === undefined || index < 0
     ? null
-    : { year: Number(year), month: index + 1, day: Number(day) };
+    : Temporal.PlainDate.from({ year: Number(year), month: index + 1, day: Number(day) });
 };
 
 /**
@@ -164,7 +164,7 @@ for (const host of targets) {
       },
       serverName: host,
       trustAnchors: anchors.source,
-      validationTime: new Date(),
+      validationTime: Temporal.Now.instant(),
       validator: YOZZ_VALIDATOR,
     });
 

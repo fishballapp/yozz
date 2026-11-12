@@ -259,7 +259,10 @@ export class Cache extends Context.Service<
                     mailbox.address,
                     Option.match(at, {
                       onNone: () => null,
-                      onSome: ms => new Date(ms).toISOString(),
+                      onSome: ms =>
+                        Temporal.Instant.fromEpochMilliseconds(ms).toString({
+                          fractionalSecondDigits: 3,
+                        }),
                     }),
                   ] as const,
               ),

@@ -70,7 +70,9 @@ const requestFrom = (testcase: Testcase): PathValidationRequest => ({
   untrustedIntermediateDer: testcase.untrusted_intermediates.flatMap(derFromPem),
   trustAnchors: anchorSourceFor(testcase),
   validationTime:
-    testcase.validation_time === null ? new Date() : new Date(testcase.validation_time),
+    testcase.validation_time === null
+      ? Temporal.Now.instant()
+      : Temporal.Instant.from(testcase.validation_time),
   expectedPeerName: peerNameFrom(testcase.expected_peer_name),
   requiredKeyUsages: testcase.key_usage,
   requiredExtendedKeyUsages: testcase.extended_key_usage,

@@ -16,7 +16,7 @@ describe('the shipped root bundle', () => {
     const distrusted = ROOT_BUNDLE.filter(entry => entry.serverDistrustAfter !== null);
     expect(distrusted.length).toBe(1);
     const [entry] = distrusted;
-    expect(entry?.serverDistrustAfter?.toISOString()).toBe('2026-04-15T23:59:59.000Z');
+    expect(entry?.serverDistrustAfter?.toString()).toBe('2026-04-15T23:59:59Z');
     const subject = String.fromCharCode(...(entry?.subjectDer ?? new Uint8Array()));
     expect(subject).toContain('Izenpe');
   });
@@ -29,6 +29,6 @@ describe('the shipped root bundle', () => {
       issuerNameDer: distrusted.subjectDer,
       authorityKeyIdentifier: null,
     });
-    expect(candidate?.serverDistrustAfter?.toISOString()).toBe('2026-04-15T23:59:59.000Z');
+    expect(candidate?.serverDistrustAfter?.toString()).toBe('2026-04-15T23:59:59Z');
   });
 });

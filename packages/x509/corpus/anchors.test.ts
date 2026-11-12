@@ -124,7 +124,9 @@ describe.skipIf(!existsSync(LIMBO_CACHE))('a distrusted root', () => {
         untrustedIntermediateDer: testcase.untrusted_intermediates.flatMap(derFromPem),
         trustAnchors: compileAnchors(indexAnchors(anchors)).source,
         validationTime:
-          testcase.validation_time === null ? new Date() : new Date(testcase.validation_time),
+          testcase.validation_time === null
+            ? Temporal.Now.instant()
+            : Temporal.Instant.from(testcase.validation_time),
         expectedPeerName: { kind: 'dns', value: peerName.value },
         requiredKeyUsages: [],
         requiredExtendedKeyUsages: [],

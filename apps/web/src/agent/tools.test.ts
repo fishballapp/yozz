@@ -24,7 +24,7 @@ const message = (id: string, overrides: Partial<Message> = {}): Message => ({
   fromName: 'Ada',
   fromAddress: 'ada@example.com',
   toAddress: 'me@yozz.app',
-  at: Date.UTC(2026, 7, 26, 12),
+  at: Temporal.Instant.from('2026-08-26T12:00:00Z').epochMilliseconds,
   body: ['Hello there.'],
   messageId: `<${id}@example.com>`,
   ...overrides,
@@ -55,7 +55,7 @@ const draftRecord = (over: Partial<DraftRecord> = {}): DraftRecord => ({
   subject: 'Half written',
   body: 'A start',
   contentVersion: 2,
-  updatedAt: Date.UTC(2026, 7, 26, 13),
+  updatedAt: Temporal.Instant.from('2026-08-26T13:00:00Z').epochMilliseconds,
   ...over,
 });
 

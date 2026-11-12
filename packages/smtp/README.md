@@ -36,6 +36,11 @@ declares no limit; `ehlo` reports the value as `maxMessageBytes`.
 belong, for a caller that keeps the files elsewhere: `spliceMessage(parts, bodies.map(encodeAttachmentBody))`
 puts it together, byte for byte what `buildMessage` writes.
 
+**Requires a global `Temporal`.** A message's `date` is a `Temporal.ZonedDateTime`, written as that wall-clock time and offset
+(`Temporal.Now.zonedDateTimeISO()` for the local zone). Node 26, Chrome and Firefox ship it; where the runtime has none (Safari, Node 24), install
+[`temporal-polyfill`](https://www.npmjs.com/package/temporal-polyfill) and load it before this package is
+imported (`import 'temporal-polyfill/global'`). The package imports no polyfill itself.
+
 ## Tests
 
 ```bash

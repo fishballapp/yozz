@@ -477,6 +477,7 @@ export const listPasskeys = async (userId: string): Promise<readonly AccountPass
       id,
       credentialId: credentialID,
       name: name?.trim() || null,
+      // Typed `Date` by Better Auth, but a JSON response carries a string; `new Date` reads either.
       addedAt: new Date(createdAt).getTime(),
     }))
     .toSorted((a, b) => a.addedAt - b.addedAt);

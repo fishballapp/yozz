@@ -1,6 +1,7 @@
 /** Real signed chains, in `pnpm test`; x509-limbo cannot run here. */
 import { describe, expect, it } from 'vitest';
 import { compileAnchors, indexAnchors } from './anchors.ts';
+import { decodeCertificate } from './certificate.ts';
 import { type IssuedCertificate, issueCertificate, SERVER_AUTH } from './certificate-builder.ts';
 import { YOZZ_VALIDATOR } from './validate.ts';
 import type { PathValidationResult } from './validator.ts';
@@ -10,15 +11,15 @@ const validate = async ({
   intermediates = [],
   root,
   host = 'mail.example.com',
-  at = new Date(),
+  at = Temporal.Now.instant(),
   serverDistrustAfter = null,
 }: {
   leaf: IssuedCertificate;
   intermediates?: readonly IssuedCertificate[];
   root: IssuedCertificate;
   host?: string;
-  at?: Date;
-  serverDistrustAfter?: Date | null;
+  at?: Temporal.Instant;
+  serverDistrustAfter?: Temporal.Instant | null;
 }): Promise<PathValidationResult> =>
   YOZZ_VALIDATOR.validatePath({
     peerCertificateDer: leaf.der,
@@ -87,10 +88,26 @@ describe('the checks that make it a validator', () => {
   it('rejects an expired leaf', async () => {
     const root = await newRoot();
     const leaf = await newLeaf(root, {
-      notBefore: new Date('2020-01-01T00:00:00Z'),
-      notAfter: new Date('2021-01-01T00:00:00Z'),
+      notBefore: Temporal.Instant.from('2020-01-01T00:00:00Z'),
+      notAfter: Temporal.Instant.from('2021-01-01T00:00:00Z'),
     });
     expect(failureOf(await validate({ leaf, root }))).toBe('certificate-expired');
+  });
+
+  it('compares validity to the second, as it is encoded', async () => {
+    const root = await newRoot();
+    // Inside the root's own validity, which is a year either side of now.
+    const notAfter = Temporal.Now.instant()
+      .round({ smallestUnit: 'second', roundingMode: 'floor' })
+      .add({ hours: 1 });
+    const leaf = await newLeaf(root, { notAfter });
+    expect(decodeCertificate(leaf.der).notAfter.equals(notAfter)).toBe(true);
+    expect(failureOf(await validate({ leaf, root, at: notAfter.add({ milliseconds: 999 }) }))).toBe(
+      'ACCEPTED',
+    );
+    expect(failureOf(await validate({ leaf, root, at: notAfter.add({ seconds: 1 }) }))).toBe(
+      'certificate-expired',
+    );
   });
 
   it('rejects a host the certificate does not name', async () => {
@@ -159,9 +176,9 @@ describe('the constrained-issuer bypasses', () => {
 
 /** Both halves: refuse leaves issued after the cutoff, keep anchoring those issued before it. */
 describe('a root past its server distrust-after', () => {
-  const CUTOFF = new Date('2026-04-15T23:59:59Z');
-  const BEFORE = new Date('2026-03-01T00:00:00Z');
-  const AFTER = new Date('2026-05-01T00:00:00Z');
+  const CUTOFF = Temporal.Instant.from('2026-04-15T23:59:59Z');
+  const BEFORE = Temporal.Instant.from('2026-03-01T00:00:00Z');
+  const AFTER = Temporal.Instant.from('2026-05-01T00:00:00Z');
 
   it('still anchors a leaf issued before the cutoff', async () => {
     const root = await newRoot();
@@ -187,13 +204,13 @@ describe('a root past its server distrust-after', () => {
     const result = await validate({
       leaf,
       root,
-      at: new Date('2026-05-02T00:00:00Z'),
+      at: Temporal.Instant.from('2026-05-02T00:00:00Z'),
       serverDistrustAfter: CUTOFF,
     });
     expect(failureOf(result)).toBe('certificate-authority-distrusted');
-    expect(failureOf(await validate({ leaf, root, at: new Date('2026-05-02T00:00:00Z') }))).toBe(
-      'ACCEPTED',
-    );
+    expect(
+      failureOf(await validate({ leaf, root, at: Temporal.Instant.from('2026-05-02T00:00:00Z') })),
+    ).toBe('ACCEPTED');
   });
 
   it('leaves a root with no cutoff alone', async () => {

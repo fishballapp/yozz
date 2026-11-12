@@ -349,21 +349,16 @@ describe('decodeTime', () => {
   const generalized = (text: string): Uint8Array => tlv(0x18, ascii(text));
 
   it('reads UTCTime, with the RFC 5280 pivot at 50', () => {
-    expect(decodeTime(decodeDer(utc('991231235959Z'))).toISOString()).toBe(
-      '1999-12-31T23:59:59.000Z',
-    );
-    expect(decodeTime(decodeDer(utc('240101000000Z'))).toISOString()).toBe(
-      '2024-01-01T00:00:00.000Z',
-    );
+    expect(decodeTime(decodeDer(utc('991231235959Z'))).toString()).toBe('1999-12-31T23:59:59Z');
+    expect(decodeTime(decodeDer(utc('240101000000Z'))).toString()).toBe('2024-01-01T00:00:00Z');
   });
 
   it('reads GeneralizedTime', () => {
-    expect(decodeTime(decodeDer(generalized('20240101000000Z'))).toISOString()).toBe(
-      '2024-01-01T00:00:00.000Z',
+    expect(decodeTime(decodeDer(generalized('20240101000000Z'))).toString()).toBe(
+      '2024-01-01T00:00:00Z',
     );
   });
 
-  /** `new Date('2024-02-30T00:00:00Z')` returns March 1st. */
   it('rejects a day-of-month that does not exist, rather than rolling it forward', () => {
     expect(rejectionOf(() => decodeTime(decodeDer(utc('240230235959Z')))).code).toBe(
       'malformed-value',

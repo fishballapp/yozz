@@ -244,7 +244,7 @@ const messageOf = (
   ...omittedFrom(message.to, message.cc, message.replyTo),
   // The inbox it landed in, which To need not name (a Bcc, a list, an alias forwarding in).
   ...deliveredTo(message),
-  at: new Date(message.at).toISOString(),
+  at: Temporal.Instant.fromEpochMilliseconds(message.at).toString({ fractionalSecondDigits: 3 }),
   ...(message.isDraft === true
     ? { isDraft: true, draftKey: message.draftKey, draftId: message.draftId }
     : {}),

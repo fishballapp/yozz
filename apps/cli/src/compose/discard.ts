@@ -13,7 +13,11 @@ import { conflictOf } from './drafts.ts';
 const discardedJson = (draftId: string, discardedAt: number) => ({
   discarded: true,
   draftId,
-  restorableUntil: new Date(discardedAt + DRAFT_TOMBSTONE_MS).toISOString(),
+  restorableUntil: Temporal.Instant.fromEpochMilliseconds(
+    discardedAt + DRAFT_TOMBSTONE_MS,
+  ).toString({
+    fractionalSecondDigits: 3,
+  }),
 });
 
 export const discardCommand = Command.make(

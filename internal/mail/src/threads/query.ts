@@ -14,13 +14,6 @@ export type TermField = 'any' | 'from' | 'to' | 'subject';
 
 export type SearchTerm = { readonly field: TermField; readonly text: string };
 
-/** A calendar day; `month` runs 1 to 12. */
-export type CalendarDay = {
-  readonly year: number;
-  readonly month: number;
-  readonly day: number;
-};
-
 type InValue = Folder | 'anywhere';
 
 export type SearchQuery = {
@@ -33,9 +26,9 @@ export type SearchQuery = {
   readonly isUnread: boolean;
   readonly isStarred: boolean;
   /** Strictly before each of these days. */
-  readonly before: readonly CalendarDay[];
+  readonly before: readonly Temporal.PlainDate[];
   /** On or after each of these days. */
-  readonly after: readonly CalendarDay[];
+  readonly after: readonly Temporal.PlainDate[];
 };
 
 type Clause =
@@ -43,17 +36,18 @@ type Clause =
   | { readonly kind: 'in'; readonly value: InValue }
   | { readonly kind: 'mailbox'; readonly address: string }
   | { readonly kind: 'unread' | 'starred' }
-  | { readonly kind: 'before' | 'after'; readonly day: CalendarDay };
+  | { readonly kind: 'before' | 'after'; readonly day: Temporal.PlainDate };
 
-const dayIn = (text: string): CalendarDay | null => {
+const dayIn = (text: string): Temporal.PlainDate | null => {
   const match = /^(\d{4})([/-])(\d{2})\2(\d{2})$/u.exec(text);
   if (match === null) return null;
   const [year, month, day] = [Number(match[1]), Number(match[3]), Number(match[4])];
-  const date = new Date(Date.UTC(year, month - 1, day));
-  // `Date` rolls an impossible day over to the next month, so it comes back different.
-  return date.getUTCMonth() === month - 1 && date.getUTCDate() === day
-    ? { year, month, day }
-    : null;
+  try {
+    return Temporal.PlainDate.from({ year, month, day }, { overflow: 'reject' });
+  } catch (error) {
+    if (error instanceof RangeError) return null;
+    throw error;
+  }
 };
 
 const IN_VALUES: readonly InValue[] = [...FOLDERS, 'anywhere'];

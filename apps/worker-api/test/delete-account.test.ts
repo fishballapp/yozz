@@ -161,9 +161,9 @@ describe('DELETE /api/v1/account', () => {
     });
 
   const makeSessionsStale = async (userId: string) => {
-    const twoDaysAgo = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000);
+    const twoDaysAgo = Temporal.Instant.fromEpochMilliseconds(Date.now()).subtract({ hours: 48 });
     await env.DB.prepare('UPDATE session SET createdAt = ? WHERE userId = ?')
-      .bind(twoDaysAgo.toISOString(), userId)
+      .bind(twoDaysAgo.toString({ fractionalSecondDigits: 3 }), userId)
       .run();
   };
 

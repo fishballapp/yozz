@@ -56,9 +56,9 @@ const session = (): TlsSession => ({
   ticket: new Uint8Array([1]),
   preSharedKey: new Uint8Array(32),
   ticketAgeAdd: 0,
-  receivedAt: new Date(),
+  receivedAt: Temporal.Now.instant(),
   lifetimeSeconds: 3600,
-  authenticatedAt: new Date(),
+  authenticatedAt: Temporal.Now.instant(),
   peerSignatureScheme: 'ecdsa_secp256r1_sha256',
   peerCertificateChain: { leafDer: new Uint8Array([0x30]), intermediateDer: [] },
 });

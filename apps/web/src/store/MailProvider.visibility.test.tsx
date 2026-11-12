@@ -81,7 +81,7 @@ beforeEach(() => {
   hidden = false;
   Object.defineProperty(document, 'hidden', { configurable: true, get: () => hidden });
   vi.useFakeTimers({ toFake: ['Date'] });
-  vi.setSystemTime(new Date('2026-10-12T10:00:00Z'));
+  vi.setSystemTime('2026-10-12T10:00:00Z');
 });
 
 afterEach(() => {
@@ -109,12 +109,12 @@ it('a tab return syncs an address whose last sync is stale, and skips one that s
   await vi.waitFor(() => expect(Object.keys(mail?.syncStates ?? {}).sort()).toEqual([ALICE, BOB]));
 
   // Alice's sync started at 10:00; Bob's starts at 10:02, so at 10:03 only Alice is stale.
-  vi.setSystemTime(new Date('2026-10-12T10:02:00Z'));
+  vi.setSystemTime('2026-10-12T10:02:00Z');
   mocks.runs = [];
   await act(() => mail?.sync(BOB) ?? Promise.resolve());
   await vi.waitFor(() => expect(mocks.runs).toEqual([BOB]));
 
-  vi.setSystemTime(new Date('2026-10-12T10:03:00Z'));
+  vi.setSystemTime('2026-10-12T10:03:00Z');
   mocks.runs = [];
   await setHidden(true);
   await setHidden(false);

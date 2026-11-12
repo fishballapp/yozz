@@ -15,7 +15,7 @@ export type AnchorIndexEntry = {
   readonly der: Uint8Array;
   readonly subjectDer: Uint8Array;
   /** From `certdata.txt` at build time; `cacert.pem` cannot carry it. */
-  readonly serverDistrustAfter: Date | null;
+  readonly serverDistrustAfter: Temporal.Instant | null;
 };
 
 /** Build time. A certificate that does not decode is dropped here rather than failing a lookup later. */
@@ -23,7 +23,7 @@ export const indexAnchors = (
   bundle: readonly {
     readonly id: string;
     readonly der: Uint8Array;
-    readonly serverDistrustAfter?: Date | null;
+    readonly serverDistrustAfter?: Temporal.Instant | null;
   }[],
 ): readonly AnchorIndexEntry[] =>
   bundle.flatMap(entry => {

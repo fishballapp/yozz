@@ -375,16 +375,7 @@ export const decodeBitString = (
 const UTC_TIME_SHAPE = /^\d{12}Z$/;
 const GENERALIZED_TIME_SHAPE = /^\d{14}Z$/;
 
-const isLeapYear = (year: number): boolean =>
-  year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
-
-const daysInMonth = (year: number, month: number): number => {
-  if (month === 2) return isLeapYear(year) ? 29 : 28;
-  return month === 4 || month === 6 || month === 9 || month === 11 ? 30 : 31;
-};
-
-/** Calendar fields are range-checked before a `Date` is built: `new Date('2024-02-30T00:00:00Z')` silently returns March 1st. */
-export const decodeTime = (node: DerNode): Date => {
+export const decodeTime = (node: DerNode): Temporal.Instant => {
   const isUtcTime = node.tagNumber === UNIVERSAL_TYPES.UTC_TIME.tag;
   if (
     node.tagClass !== 'universal' ||
@@ -418,9 +409,19 @@ export const decodeTime = (node: DerNode): Date => {
   const malformed = (detail: string): DerError =>
     new DerError('malformed-value', node.offset, `${detail} in ${JSON.stringify(text)}`);
   if (month < 1 || month > 12) throw malformed(`month ${month}`);
-  if (day < 1 || day > daysInMonth(year, month)) throw malformed(`day ${day} of month ${month}`);
+  if (day < 1 || day > Temporal.PlainYearMonth.from({ year, month }).daysInMonth) {
+    throw malformed(`day ${day} of month ${month}`);
+  }
   // RFC 5280 admits no leap second.
   if (hour > 23 || minute > 59 || second > 59) throw malformed('time of day');
 
-  return new Date(Date.UTC(year, month - 1, day, hour, minute, second));
+  return Temporal.ZonedDateTime.from({
+    timeZone: 'UTC',
+    year,
+    month,
+    day,
+    hour,
+    minute,
+    second,
+  }).toInstant();
 };

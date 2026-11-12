@@ -46,7 +46,7 @@ export type OutgoingMessage = {
   readonly splices: FrozenMessage['splices'];
 };
 
-/** Built once and stored: a rebuild would mint a fresh Date and boundary, and the recipient would see two messages. */
+/** Built once and stored: a rebuild would mint a fresh Date header and boundary, and the recipient would see two messages. */
 export const buildOutgoing = (
   record: AddressRecord,
   mail: OutgoingMail,
@@ -60,7 +60,7 @@ export const buildOutgoing = (
     to: mail.to,
     cc: mail.cc,
     subject: mail.subject,
-    date: new Date(),
+    date: Temporal.Now.zonedDateTimeISO(),
     messageId: mail.messageId,
     text: mail.text,
     // A whole document: a bare fragment is what filters see from templating tools

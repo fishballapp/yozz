@@ -41,6 +41,11 @@ With credentials it also checks, read-only (`UID SEARCH` and `FETCH` only), that
 answers the uids its keys answer apart, intersected: `ok` or `MISMATCH` per command. A slow server
 (Forward Email takes 25 s or more a search) makes it take minutes.
 
+**Requires a global `Temporal`.** `append` stamps a `Temporal.ZonedDateTime` (written in its own zone), and
+`UID SEARCH` takes `BEFORE` / `SINCE` days as `Temporal.PlainDate`s. Node 26, Chrome and Firefox ship it; where the runtime has none (Safari, Node 24), install
+[`temporal-polyfill`](https://www.npmjs.com/package/temporal-polyfill) and load it before this package is
+imported (`import 'temporal-polyfill/global'`). The package imports no polyfill itself.
+
 A literal over 64 MiB (`DEFAULT_MAX_LITERAL_BYTES`, or `maxLiteralBytes` in the options) is a protocol failure.
 
 `harness/relay-load.ts` pushes large messages through the hosted yozz.app relay, up over SMTP and

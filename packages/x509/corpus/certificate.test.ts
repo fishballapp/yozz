@@ -75,11 +75,12 @@ describe.skipIf(!hasOpenssl)('field-for-field against OpenSSL', () => {
     const serialHex = openssl(file, '-serial').trim().replace('serial=', '');
     expect(certificate.serialNumber).toBe(BigInt(`0x${serialHex}`));
 
-    expect(certificate.notBefore.getTime()).toBe(
-      new Date(openssl(file, '-startdate').trim().replace('notBefore=', '')).getTime(),
+    // OpenSSL prints `Jan  1 00:00:00 2024 GMT`, which only `Date.parse` reads.
+    expect(certificate.notBefore.epochMilliseconds).toBe(
+      Date.parse(openssl(file, '-startdate').trim().replace('notBefore=', '')),
     );
-    expect(certificate.notAfter.getTime()).toBe(
-      new Date(openssl(file, '-enddate').trim().replace('notAfter=', '')).getTime(),
+    expect(certificate.notAfter.epochMilliseconds).toBe(
+      Date.parse(openssl(file, '-enddate').trim().replace('notAfter=', '')),
     );
 
     expect(renderRfc2253(certificate.issuer)).toBe(

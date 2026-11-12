@@ -9,20 +9,32 @@ import {
 } from './commands.ts';
 
 describe('formatImapDateTime', () => {
-  it('space-pads the day and names the month, in the local zone', () => {
-    // Local zone, so only the shape is asserted.
-    expect(formatImapDateTime(new Date(2026, 7, 8, 9, 48, 3))).toMatch(
-      /^" 8-Aug-2026 09:48:03 [+-]\d{4}"$/,
-    );
-    expect(formatImapDateTime(new Date(2026, 11, 25, 23, 5, 0))).toMatch(
-      /^"25-Dec-2026 23:05:00 [+-]\d{4}"$/,
-    );
+  it("space-pads the day and names the month, in the date's own zone", () => {
+    expect(
+      formatImapDateTime(Temporal.ZonedDateTime.from('2026-08-08T09:48:03[Europe/London]')),
+    ).toBe('" 8-Aug-2026 09:48:03 +0100"');
+    expect(
+      formatImapDateTime(Temporal.ZonedDateTime.from('2026-12-25T23:05:00[America/St_Johns]')),
+    ).toBe('"25-Dec-2026 23:05:00 -0330"');
+  });
+});
+
+describe('formatImapDateTime, from a caller in another calendar or an old zone', () => {
+  it('writes the ISO calendar whatever the caller passes', () => {
+    const hebrew = Temporal.ZonedDateTime.from('2026-08-25T09:42:00[UTC]').withCalendar('hebrew');
+    expect(formatImapDateTime(hebrew)).toBe('"25-Aug-2026 09:42:00 +0000"');
+  });
+
+  it('writes an offset with seconds in whole minutes', () => {
+    expect(
+      formatImapDateTime(Temporal.ZonedDateTime.from('1900-01-01T00:00:00[Europe/Paris]')),
+    ).toBe('" 1-Jan-1900 00:00:00 +0009"');
   });
 });
 
 describe('buildAppendCommand', () => {
   const message = new TextEncoder().encode('Subject: hi');
-  const text = (internalDate?: Date) => {
+  const text = (internalDate?: Temporal.ZonedDateTime) => {
     const [line] = buildAppendCommand('a1', 'Sent', ['\\Seen'], message, internalDate).lines;
     if (line === undefined) throw new Error('APPEND built no lines');
     return asciiToString(line.text);
@@ -33,8 +45,8 @@ describe('buildAppendCommand', () => {
   });
 
   it('places the date-time between the flags and the literal', () => {
-    expect(text(new Date(2026, 7, 8, 9, 48, 3))).toMatch(
-      /^a1 APPEND "Sent" \(\\Seen\) " 8-Aug-2026 09:48:03 [+-]\d{4}" $/,
+    expect(text(Temporal.ZonedDateTime.from('2026-08-08T09:48:03[Asia/Kolkata]'))).toBe(
+      'a1 APPEND "Sent" (\\Seen) " 8-Aug-2026 09:48:03 +0530" ',
     );
   });
 });
@@ -69,12 +81,17 @@ describe('buildUidSearchCommand', () => {
   });
 
   it('writes a date as RFC 9051 has it', () => {
-    expect(sent({ key: 'SINCE', date: { year: 2026, month: 2, day: 1 } })).toBe(
+    expect(sent({ key: 'SINCE', date: Temporal.PlainDate.from('2026-02-01') })).toBe(
       'a1 UID SEARCH SINCE 1-Feb-2026\r\n',
     );
-    expect(sent({ key: 'BEFORE', date: { year: 2026, month: 12, day: 31 } })).toBe(
+    expect(sent({ key: 'BEFORE', date: Temporal.PlainDate.from('2026-12-31') })).toBe(
       'a1 UID SEARCH BEFORE 31-Dec-2026\r\n',
     );
+  });
+
+  it('writes a day in another calendar as its ISO date', () => {
+    const hebrew = Temporal.PlainDate.from('2024-09-10').withCalendar('hebrew');
+    expect(sent({ key: 'SINCE', date: hebrew })).toBe('a1 UID SEARCH SINCE 10-Sep-2024\r\n');
   });
 
   it('escapes quotes and backslashes', () => {
@@ -92,7 +109,7 @@ describe('buildUidSearchCommand', () => {
     expect(
       sent([
         { key: 'UNSEEN' },
-        { key: 'SINCE', date: { year: 2026, month: 2, day: 1 } },
+        { key: 'SINCE', date: Temporal.PlainDate.from('2026-02-01') },
         { key: 'FROM', value: 'stripe' },
       ]),
     ).toBe('a1 UID SEARCH UNSEEN SINCE 1-Feb-2026 FROM "stripe"\r\n');

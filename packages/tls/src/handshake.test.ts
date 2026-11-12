@@ -292,7 +292,7 @@ describe('Stage 7: Handshake state machine & scripted peer', () => {
         transport: duplex.client,
         serverName: 'server',
         trustAnchors: dummyTrustAnchors,
-        validationTime: new Date('2026-01-01T00:00:00Z'),
+        validationTime: Temporal.Instant.from('2026-01-01T00:00:00Z'),
         validator: createTestValidator(inputs.serverLeafDer),
         replay,
       };
@@ -360,7 +360,7 @@ describe('Stage 7: Handshake state machine & scripted peer', () => {
           transport: duplex.client,
           serverName: 'server',
           trustAnchors: dummyTrustAnchors,
-          validationTime: new Date('2026-01-01T00:00:00Z'),
+          validationTime: Temporal.Instant.from('2026-01-01T00:00:00Z'),
           validator: createTestValidator(inputs.serverLeafDer),
           replay,
         }),
@@ -394,7 +394,7 @@ describe('Stage 7: Handshake state machine & scripted peer', () => {
           transport: duplex.client,
           serverName: 'server',
           trustAnchors: dummyTrustAnchors,
-          validationTime: new Date('2026-01-01T00:00:00Z'),
+          validationTime: Temporal.Instant.from('2026-01-01T00:00:00Z'),
           validator: createTestValidator(inputs.serverLeafDer),
           replay,
         }),
@@ -440,7 +440,7 @@ describe('Stage 7: Handshake state machine & scripted peer', () => {
           transport: duplex.client,
           serverName: 'server',
           trustAnchors: dummyTrustAnchors,
-          validationTime: new Date('2026-01-01T00:00:00Z'),
+          validationTime: Temporal.Instant.from('2026-01-01T00:00:00Z'),
           validator: createTestValidator(inputs.serverLeafDer),
           replay,
         }),
@@ -513,7 +513,7 @@ describe('Stage 7: Handshake state machine & scripted peer', () => {
         transport: duplex.client,
         serverName: 'server',
         trustAnchors: dummyTrustAnchors,
-        validationTime: new Date('2026-01-01T00:00:00Z'),
+        validationTime: Temporal.Instant.from('2026-01-01T00:00:00Z'),
         validator: validator ?? createTestValidator(inputs.serverLeafDer),
         ...(signatureSchemes === undefined ? {} : { signatureSchemes }),
         replay: {
@@ -696,7 +696,7 @@ describe('Stage 7: Handshake state machine & scripted peer', () => {
         transport: duplex.client,
         serverName: 'mail.example.com',
         trustAnchors: dummyTrustAnchors,
-        validationTime: new Date(),
+        validationTime: Temporal.Now.instant(),
         validator: {
           name: 'dummy',
           validatePath: async () => ({ ok: false, reason: { code: 'no-path-to-trust-anchor' } }),
@@ -750,7 +750,7 @@ describe('Stage 7: Handshake state machine & scripted peer', () => {
           transport: duplex.client,
           serverName: 'mail.example.com',
           trustAnchors: dummyTrustAnchors,
-          validationTime: new Date(),
+          validationTime: Temporal.Now.instant(),
           validator: {
             name: 'dummy',
             validatePath: async () => ({ ok: false, reason: { code: 'no-path-to-trust-anchor' } }),
@@ -808,7 +808,7 @@ describe('Stage 7: Handshake state machine & scripted peer', () => {
           transport: duplex.client,
           serverName: 'mail.example.com',
           trustAnchors: dummyTrustAnchors,
-          validationTime: new Date(),
+          validationTime: Temporal.Now.instant(),
           validator: {
             name: 'dummy',
             validatePath: async () => ({ ok: false, reason: { code: 'no-path-to-trust-anchor' } }),
@@ -843,7 +843,7 @@ describe('Stage 7: Handshake state machine & scripted peer', () => {
             transport: createMemoryDuplex().client,
             serverName: 'mail.example.com',
             trustAnchors: dummyTrustAnchors,
-            validationTime: new Date(),
+            validationTime: Temporal.Now.instant(),
             validator: {
               name: 'dummy',
               validatePath: async () => ({
@@ -900,7 +900,7 @@ describe('Stage 7: Handshake state machine & scripted peer', () => {
         transport: duplex.client,
         serverName: 'server',
         trustAnchors: dummyTrustAnchors,
-        validationTime: new Date('2026-01-01T00:00:00Z'),
+        validationTime: Temporal.Instant.from('2026-01-01T00:00:00Z'),
         validator: createTestValidator(inputs.serverLeafDer),
         replay: {
           clientHelloMessages: inputs.clientHellos,
@@ -1160,7 +1160,7 @@ describe('Stage 7: Handshake state machine & scripted peer', () => {
         transport: duplex.client,
         serverName: 'server',
         trustAnchors: dummyTrustAnchors,
-        validationTime: new Date('2026-01-01T00:00:00Z'),
+        validationTime: Temporal.Instant.from('2026-01-01T00:00:00Z'),
         validator: createTestValidator(inputs.serverLeafDer),
         signatureSchemes: ['rsa_pss_rsae_sha256'],
         replay: {
@@ -1204,7 +1204,7 @@ describe('Stage 7: Handshake state machine & scripted peer', () => {
         transport: duplex.client,
         serverName: 'mail.example.com',
         trustAnchors: dummyTrustAnchors,
-        validationTime: new Date(),
+        validationTime: Temporal.Now.instant(),
         validator: {
           name: 'dummy',
           validatePath: async () => ({ ok: false, reason: { code: 'no-path-to-trust-anchor' } }),
@@ -1364,7 +1364,7 @@ describe('Stage 7: Handshake state machine & scripted peer', () => {
         transport: duplex.client,
         serverName: 'mail.example.com',
         trustAnchors: dummyTrustAnchors,
-        validationTime: new Date(),
+        validationTime: Temporal.Now.instant(),
         validator: {
           name: 'dummy',
           validatePath: async () => ({ ok: false, reason: { code: 'no-path-to-trust-anchor' } }),
@@ -1445,7 +1445,7 @@ describe('Stage 7: Handshake state machine & scripted peer', () => {
         transport: duplex.client,
         serverName: 'mail.example.com',
         trustAnchors: dummyTrustAnchors,
-        validationTime: new Date(),
+        validationTime: Temporal.Now.instant(),
         validator: {
           name: 'dummy',
           validatePath: async () => ({ ok: false, reason: { code: 'no-path-to-trust-anchor' } }),
@@ -1537,7 +1537,7 @@ describe('Stage 7: Handshake state machine & scripted peer', () => {
           transport: duplex.client,
           serverName: 'server',
           trustAnchors: dummyTrustAnchors,
-          validationTime: new Date('2026-01-01T00:00:00Z'),
+          validationTime: Temporal.Instant.from('2026-01-01T00:00:00Z'),
           validator: createTestValidator(inputs.serverLeafDer),
           replay: {
             clientHelloMessages: inputs.clientHellos,
@@ -1570,7 +1570,7 @@ describe('Stage 7: Handshake state machine & scripted peer', () => {
         transport: duplex.client,
         serverName: 'server',
         trustAnchors: dummyTrustAnchors,
-        validationTime: new Date('2026-01-01T00:00:00Z'),
+        validationTime: Temporal.Instant.from('2026-01-01T00:00:00Z'),
         validator: createTestValidator(
           extractTraceInputs(RFC_8448_TRACES.find(t => t.section === '3')!).serverLeafDer,
         ),
@@ -1651,7 +1651,7 @@ describe('Stage 7: Handshake state machine & scripted peer', () => {
         transport: duplex.client,
         serverName: 'server',
         trustAnchors: dummyTrustAnchors,
-        validationTime: new Date('2026-01-01T00:00:00Z'),
+        validationTime: Temporal.Instant.from('2026-01-01T00:00:00Z'),
         validator: createTestValidator(inputs.serverLeafDer),
         replay: {
           clientHelloMessages: [clientHello],
@@ -1690,7 +1690,7 @@ describe('Stage 7: Handshake state machine & scripted peer', () => {
         transport: duplex.client,
         serverName: 'mail.example.com',
         trustAnchors: dummyTrustAnchors,
-        validationTime: new Date(),
+        validationTime: Temporal.Now.instant(),
         validator: {
           name: 'dummy',
           validatePath: async () => ({ ok: false, reason: { code: 'no-path-to-trust-anchor' } }),
@@ -1751,7 +1751,7 @@ describe('Stage 7: Handshake state machine & scripted peer', () => {
         transport: duplex.client,
         serverName: 'mail.example.com',
         trustAnchors: dummyTrustAnchors,
-        validationTime: new Date(),
+        validationTime: Temporal.Now.instant(),
         validator: {
           name: 'dummy',
           validatePath: async () => ({ ok: false, reason: { code: 'no-path-to-trust-anchor' } }),
@@ -1763,8 +1763,8 @@ describe('Stage 7: Handshake state machine & scripted peer', () => {
           ticket,
           preSharedKey: new Uint8Array(32),
           ticketAgeAdd: 0,
-          receivedAt: new Date(),
-          authenticatedAt: new Date(),
+          receivedAt: Temporal.Now.instant(),
+          authenticatedAt: Temporal.Now.instant(),
           peerSignatureScheme: 'ecdsa_secp256r1_sha256',
           peerCertificateChain: { leafDer: Uint8Array.of(0x30, 0x00), intermediateDer: [] },
           lifetimeSeconds: 600,
@@ -1807,8 +1807,8 @@ describe('Stage 7: Handshake state machine & scripted peer', () => {
       ticket: Uint8Array.of(1, 2, 3, 4),
       preSharedKey: new Uint8Array(32),
       ticketAgeAdd: 0,
-      receivedAt: new Date(),
-      authenticatedAt: new Date(),
+      receivedAt: Temporal.Now.instant(),
+      authenticatedAt: Temporal.Now.instant(),
       peerSignatureScheme: 'ecdsa_secp256r1_sha256',
       peerCertificateChain: { leafDer: Uint8Array.of(0x30, 0x00), intermediateDer: [] },
       lifetimeSeconds: 600,
@@ -1823,7 +1823,7 @@ describe('Stage 7: Handshake state machine & scripted peer', () => {
         transport: duplex.client,
         serverName: 'mail.example.com',
         trustAnchors: dummyTrustAnchors,
-        validationTime: new Date(),
+        validationTime: Temporal.Now.instant(),
         validator: {
           name: 'dummy',
           validatePath: async () => ({ ok: false, reason: { code: 'no-path-to-trust-anchor' } }),
@@ -1936,7 +1936,7 @@ describe('Stage 7: Handshake state machine & scripted peer', () => {
         transport: duplex.client,
         serverName: 'mail.example.com',
         trustAnchors: dummyTrustAnchors,
-        validationTime: new Date(),
+        validationTime: Temporal.Now.instant(),
         validator: {
           name: 'dummy',
           validatePath: async () => ({ ok: false, reason: { code: 'no-path-to-trust-anchor' } }),
@@ -1994,7 +1994,7 @@ describe('Stage 7: Handshake state machine & scripted peer', () => {
         transport: duplex.client,
         serverName: 'mail.example.com',
         trustAnchors: dummyTrustAnchors,
-        validationTime: new Date(),
+        validationTime: Temporal.Now.instant(),
         validator: {
           name: 'dummy',
           validatePath: async () => ({ ok: false, reason: { code: 'no-path-to-trust-anchor' } }),
@@ -2058,7 +2058,7 @@ describe('Stage 7: Handshake state machine & scripted peer', () => {
         transport: duplex.client,
         serverName: 'mail.example.com',
         trustAnchors: dummyTrustAnchors,
-        validationTime: new Date(),
+        validationTime: Temporal.Now.instant(),
         validator: {
           name: 'dummy',
           validatePath: async () => ({ ok: false, reason: { code: 'no-path-to-trust-anchor' } }),
@@ -2115,7 +2115,7 @@ describe('Stage 7: Handshake state machine & scripted peer', () => {
         transport: duplex.client,
         serverName: 'mail.example.com',
         trustAnchors: dummyTrustAnchors,
-        validationTime: new Date(),
+        validationTime: Temporal.Now.instant(),
         validator: {
           name: 'dummy',
           validatePath: async () => ({ ok: false, reason: { code: 'no-path-to-trust-anchor' } }),
@@ -2196,7 +2196,7 @@ describe('Stage 7: Handshake state machine & scripted peer', () => {
           transport: duplex.client,
           serverName: 'server',
           trustAnchors: dummyTrustAnchors,
-          validationTime: new Date('2026-01-01T00:00:00Z'),
+          validationTime: Temporal.Instant.from('2026-01-01T00:00:00Z'),
           validator: createTestValidator(inputs.serverLeafDer),
           replay: {
             clientHelloMessages: inputs.clientHellos,
@@ -2309,7 +2309,7 @@ describe('Stage 7: Handshake state machine & scripted peer', () => {
           transport: duplex.client,
           serverName: 'server',
           trustAnchors: dummyTrustAnchors,
-          validationTime: new Date('2026-01-01T00:00:00Z'),
+          validationTime: Temporal.Instant.from('2026-01-01T00:00:00Z'),
           validator: createTestValidator(inputs.serverLeafDer),
           replay: {
             clientHelloMessages: inputs.clientHellos,
@@ -2547,8 +2547,8 @@ describe('Stage 7: Handshake state machine & scripted peer', () => {
         ticket: Uint8Array.of(1, 2, 3, 4),
         preSharedKey: new Uint8Array(32),
         ticketAgeAdd: 0,
-        receivedAt: new Date(),
-        authenticatedAt: new Date(),
+        receivedAt: Temporal.Now.instant(),
+        authenticatedAt: Temporal.Now.instant(),
         peerSignatureScheme: 'ecdsa_secp256r1_sha256',
         peerCertificateChain: { leafDer: Uint8Array.of(0x30, 0x00), intermediateDer: [] },
         lifetimeSeconds: 600,
@@ -2570,7 +2570,7 @@ describe('Stage 7: Handshake state machine & scripted peer', () => {
         },
         serverName: 'mail.example.com',
         trustAnchors: dummyTrustAnchors,
-        validationTime: new Date(),
+        validationTime: Temporal.Now.instant(),
         validator: {
           name: 'dummy',
           validatePath: async () => ({ ok: false, reason: { code: 'no-path-to-trust-anchor' } }),
@@ -2587,6 +2587,11 @@ describe('Stage 7: Handshake state machine & scripted peer', () => {
         { peerCertificateChain: { leafDer: { 0: 0x30 }, intermediateDer: [] } },
       ],
       ['lost the signature scheme', { peerSignatureScheme: undefined }],
+      ['revived receivedAt as the string JSON wrote', { receivedAt: '2026-08-24T00:00:00Z' }],
+      [
+        'kept authenticatedAt as the Date a 0.2 store held',
+        { authenticatedAt: new Date('2026-08-24T00:00:00Z') },
+      ],
     ])('throws before writing anything when a store %s', async (_case, overrides) => {
       const { result, written, duplex } = await startWith(
         storedSession(overrides as Partial<TlsSession>),
@@ -2624,7 +2629,7 @@ describe('Stage 7: Handshake state machine & scripted peer', () => {
         transport: duplex.client,
         serverName: 'server',
         trustAnchors: dummyTrustAnchors,
-        validationTime: new Date('2026-01-01T00:00:00Z'),
+        validationTime: Temporal.Instant.from('2026-01-01T00:00:00Z'),
         validator: createTestValidator(inputs.serverLeafDer),
         replay: {
           clientHelloMessages: inputs.clientHellos,
@@ -2715,7 +2720,7 @@ describe('Stage 7: Handshake state machine & scripted peer', () => {
           transport: duplex.client,
           serverName: 'server',
           trustAnchors: dummyTrustAnchors,
-          validationTime: new Date('2026-01-01T00:00:00Z'),
+          validationTime: Temporal.Instant.from('2026-01-01T00:00:00Z'),
           validator: createTestValidator(inputs3.serverLeafDer),
           replay: {
             clientHelloMessages: inputs3.clientHellos,
@@ -2756,7 +2761,7 @@ describe('Stage 7: Handshake state machine & scripted peer', () => {
             transport: duplex.client,
             serverName: 'server',
             trustAnchors: dummyTrustAnchors,
-            validationTime: new Date('2026-01-01T00:00:00Z'),
+            validationTime: Temporal.Instant.from('2026-01-01T00:00:00Z'),
             validator: createTestValidator(inputs.serverLeafDer),
             replay: {
               clientHelloMessages: inputs.clientHellos,
@@ -2845,7 +2850,7 @@ describe('Stage 7: Handshake state machine & scripted peer', () => {
           transport: duplex.client,
           serverName: 'server',
           trustAnchors: dummyTrustAnchors,
-          validationTime: new Date('2026-01-01T00:00:00Z'),
+          validationTime: Temporal.Instant.from('2026-01-01T00:00:00Z'),
           validator: createTestValidator(inputs.serverLeafDer),
           replay: {
             clientHelloMessages: inputs.clientHellos,

@@ -246,8 +246,10 @@ describe('Worker auth policies and magic link', () => {
 
   it('refuses a day-old session every change to how the vault opens', async () => {
     const { app, cookieHeader, userId } = await signedIn('stale@example.com');
-    const twoDaysAgo = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000);
-    await env.DB.prepare('UPDATE session SET createdAt = ?').bind(twoDaysAgo.toISOString()).run();
+    const twoDaysAgo = Temporal.Instant.fromEpochMilliseconds(Date.now()).subtract({ hours: 48 });
+    await env.DB.prepare('UPDATE session SET createdAt = ?')
+      .bind(twoDaysAgo.toString({ fractionalSecondDigits: 3 }))
+      .run();
     const headers = {
       'Content-Type': 'application/json',
       Cookie: cookieHeader,

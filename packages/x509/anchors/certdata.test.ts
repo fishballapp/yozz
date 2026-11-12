@@ -80,7 +80,7 @@ describe('the NSS distrust-after reader', () => {
   it('keys on issuer and serial, so a caller can look up by certificate', () => {
     const entry = cutoffs.get(issuerSerialKey(bytesOf(ISSUER), bytesOf('\\002\\001\\002')));
     expect(entry?.label).toBe('Trust-Object Root');
-    expect(entry?.notAfter.toISOString()).toBe('2026-04-15T23:59:59.000Z');
+    expect(entry?.notAfter.toString()).toBe('2026-04-15T23:59:59Z');
   });
 
   /** RFC 5280 §4.1.2.5.1: YY >= 50 is 19YY. */
@@ -91,8 +91,8 @@ describe('the NSS distrust-after reader', () => {
     const future = serverDistrustAfter(
       object('CKO_CERTIFICATE', '\\002\\001\\012', '490101000000Z', 'Forties'),
     );
-    expect([...past.values()][0]?.notAfter.getUTCFullYear()).toBe(1999);
-    expect([...future.values()][0]?.notAfter.getUTCFullYear()).toBe(2049);
+    expect([...past.values()][0]?.notAfter.toZonedDateTimeISO('UTC').year).toBe(1999);
+    expect([...future.values()][0]?.notAfter.toZonedDateTimeISO('UTC').year).toBe(2049);
   });
 
   /** Runs only when `anchors:fetch` has cached the pinned file. */
@@ -114,7 +114,7 @@ describe('cutoffs keyed by certificate, the way the build step reads them', () =
     const byDer = serverDistrustByCertificate(SPLIT_PAIR);
     const entry = byDer.get(derKey(bytesOf(SPLIT_DER)));
     expect(entry?.label).toBe('Split Root');
-    expect(entry?.notAfter.toISOString()).toBe('2026-04-15T23:59:59.000Z');
+    expect(entry?.notAfter.toString()).toBe('2026-04-15T23:59:59Z');
   });
 
   it('leaves a certificate whose trust object says CK_FALSE alone', () => {

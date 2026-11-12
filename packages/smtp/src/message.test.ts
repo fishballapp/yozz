@@ -44,9 +44,23 @@ describe('message builder', () => {
     expect(folded.replace(/\r\n /g, ' ')).toBe(longAscii);
   });
 
+  it('writes the ISO calendar whatever the caller passes', () => {
+    const hebrew = Temporal.ZonedDateTime.from('2026-08-25T09:42:00[UTC]').withCalendar('hebrew');
+    expect(formatDate(hebrew)).toBe('Tue, 25 Aug 2026 09:42:00 +0000');
+  });
+
+  it('writes an offset with seconds in whole minutes', () => {
+    expect(formatDate(Temporal.ZonedDateTime.from('1900-01-01T00:00:00[Europe/Paris]'))).toBe(
+      'Mon, 1 Jan 1900 00:00:00 +0009',
+    );
+  });
+
   it('formats an RFC 5322 date', () => {
-    expect(formatDate(new Date(2026, 7, 23, 9, 5, 7))).toMatch(
-      /^Sun, 23 Aug 2026 09:05:07 [+-]\d{4}$/,
+    expect(formatDate(Temporal.ZonedDateTime.from('2026-08-23T09:05:07[Europe/London]'))).toBe(
+      'Sun, 23 Aug 2026 09:05:07 +0100',
+    );
+    expect(formatDate(Temporal.ZonedDateTime.from('2026-01-05T23:00:00[America/St_Johns]'))).toBe(
+      'Mon, 5 Jan 2026 23:00:00 -0330',
     );
   });
 
@@ -56,7 +70,7 @@ describe('message builder', () => {
         from: { address: 'me@x.test' },
         to: ['you@y.test', 'them@z.test'],
         subject: 'hi',
-        date: new Date(2026, 0, 1),
+        date: Temporal.ZonedDateTime.from('2026-01-01T00:00:00[Europe/London]'),
         messageId: '<id@x.test>',
         text: 'hello\nworld',
       }),
@@ -66,7 +80,7 @@ describe('message builder', () => {
       'From: me@x.test',
       'To: you@y.test, them@z.test',
       'Subject: hi',
-      expect.stringMatching(/^Date: /),
+      'Date: Thu, 1 Jan 2026 00:00:00 +0000',
       'Message-ID: <id@x.test>',
       'MIME-Version: 1.0',
       'Content-Type: text/plain; charset=utf-8',
@@ -90,7 +104,7 @@ describe('message builder', () => {
         from: { address: 'me@x.test' },
         to: ['you@y.test'],
         subject: 's',
-        date: new Date(),
+        date: Temporal.Now.zonedDateTimeISO(),
         messageId: '<i@x>',
         text: 'Café',
       }),
@@ -104,7 +118,7 @@ describe('message builder', () => {
         from: { address: 'me@x.test', name: 'Me' },
         to: ['you@y.test'],
         subject: 'Re: hi',
-        date: new Date(),
+        date: Temporal.Now.zonedDateTimeISO(),
         messageId: '<b@x.test>',
         inReplyTo: '<a@y.test>',
         text: '**bold**',
@@ -125,7 +139,7 @@ describe('message builder', () => {
         from: { address: 'me@x.test' },
         to: ['you@y.test'],
         subject: 'files',
-        date: new Date(),
+        date: Temporal.Now.zonedDateTimeISO(),
         messageId: '<c@x.test>',
         text: 'see attached',
         html: '<p>see attached</p>',
@@ -179,7 +193,7 @@ describe('message builder', () => {
       from: { address: 'me@x.test' },
       to: ['you@y.test'],
       subject: 'files',
-      date: new Date(2026, 10, 2, 9, 0, 0),
+      date: Temporal.ZonedDateTime.from('2026-11-02T09:00:00[Europe/London]'),
       messageId: '<c@x.test>',
       text: 'see attached',
       html: '<p>see attached</p>',
@@ -228,7 +242,7 @@ describe('message builder', () => {
       from: { address: 'me@x.test' },
       to: ['you@y.test'],
       subject: 's',
-      date: new Date(2026, 7, 25, 9, 0, 0),
+      date: Temporal.ZonedDateTime.from('2026-08-25T09:00:00[Europe/London]'),
       messageId: '<i@x>',
       text: 'body',
     };
@@ -251,7 +265,7 @@ describe('message builder', () => {
         from: { address: 'me@x.test' },
         to: ['you@y.test\r\nBcc: spy@z.test'],
         subject: 's',
-        date: new Date(),
+        date: Temporal.Now.zonedDateTimeISO(),
         messageId: '<i@x>',
         text: '',
       }),
@@ -266,7 +280,7 @@ describe('a message with nobody in To', () => {
       to: [],
       cc: ['cc@example.com'],
       subject: 'copy only',
-      date: new Date('2026-08-25T10:00:00Z'),
+      date: Temporal.ZonedDateTime.from('2026-08-25T10:00:00[UTC]'),
       messageId: '<1@example.com>',
       text: 'hi',
     });
@@ -281,7 +295,7 @@ describe('References', () => {
     from: { address: 'me@example.com' },
     to: ['you@example.com'],
     subject: 'Re: hi',
-    date: new Date(Date.UTC(2026, 7, 28, 9, 0, 0)),
+    date: Temporal.ZonedDateTime.from('2026-08-28T09:00:00[UTC]'),
     messageId: '<new@example.com>',
     text: 'body',
   };

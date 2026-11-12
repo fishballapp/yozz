@@ -1115,19 +1115,19 @@ describe('this account’s passkeys', () => {
         id: 'row-cred-old',
         credentialId: 'cred-old',
         name: null,
-        addedAt: Date.parse('2026-09-01T09:00:00.000Z'),
+        addedAt: Temporal.Instant.from('2026-09-01T09:00:00Z').epochMilliseconds,
       },
       {
         id: 'row-cred-blank',
         credentialId: 'cred-blank',
         name: null,
-        addedAt: Date.parse('2026-10-01T09:00:00.000Z'),
+        addedAt: Temporal.Instant.from('2026-10-01T09:00:00Z').epochMilliseconds,
       },
       {
         id: 'row-cred-new',
         credentialId: 'cred-new',
         name: 'YubiKey',
-        addedAt: Date.parse('2026-10-11T09:00:00.000Z'),
+        addedAt: Temporal.Instant.from('2026-10-11T09:00:00Z').epochMilliseconds,
       },
     ]);
     expect(mocks.listPasskeys).toHaveBeenCalledWith(ALICE.userId);

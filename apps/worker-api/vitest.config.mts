@@ -1,7 +1,10 @@
 import { cloudflareTest } from '@cloudflare/vitest-pool-workers';
 import { defineConfig } from 'vitest/config';
 
+// `src/temporal.ts` forces the Temporal polyfill over the runtime's own, and a test file has no
+// entry to import it first: a setup file runs before the test's module graph loads.
 export default defineConfig({
+  test: { setupFiles: ['./src/temporal.ts'] },
   plugins: [
     cloudflareTest({
       wrangler: { configPath: './wrangler.jsonc' },

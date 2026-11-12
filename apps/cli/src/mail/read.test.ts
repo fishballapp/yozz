@@ -531,7 +531,7 @@ layer(NodeServices.layer)(it => {
             revision: 1,
             plaintext: JSON.stringify({
               messageId,
-              at: Date.UTC(2026, 9, 1),
+              at: Temporal.Instant.from('2026-10-01T00:00:00Z').epochMilliseconds,
               date: 'Thu, 01 Oct 2026 08:00:00 +0000',
               from: sendOnly,
               to: 'kate@example.com',

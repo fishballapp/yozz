@@ -20,7 +20,7 @@ export type TrustAnchor = {
   /** The whole certificate: a root's own constraints and validity are path validation inputs. */
   readonly certificateDer: Uint8Array;
   /** Mozilla's server distrust-after cutoff, compared against the leaf's `notBefore`. Required, so a source cannot forget it. */
-  readonly serverDistrustAfter: Date | null;
+  readonly serverDistrustAfter: Temporal.Instant | null;
 };
 
 export type PathValidationRequest = {
@@ -28,7 +28,7 @@ export type PathValidationRequest = {
   readonly untrustedIntermediateDer: readonly Uint8Array[];
   readonly trustAnchors: TrustAnchorSource;
   /** Never the clock. */
-  readonly validationTime: Date;
+  readonly validationTime: Temporal.Instant;
   readonly expectedPeerName: PeerName | null;
   readonly requiredKeyUsages: readonly string[];
   readonly requiredExtendedKeyUsages: readonly string[];

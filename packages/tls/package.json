@@ -1,6 +1,6 @@
 {
   "name": "@yozz.app/tls",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "A TLS 1.3 client in TypeScript over any byte duplex: record layer, handshake, key schedule, PSK resumption, KeyUpdate, TOFU pinning. Runs in Node and browsers, no native code.",
   "license": "MIT",
   "homepage": "https://github.com/fishballapp/yozz",
@@ -51,6 +51,7 @@
   "devDependencies": {
     "@playwright/test": "catalog:",
     "@types/node": "catalog:",
+    "temporal-polyfill": "catalog:",
     "tsdown": "catalog:",
     "vite": "catalog:",
     "wrangler": "catalog:"

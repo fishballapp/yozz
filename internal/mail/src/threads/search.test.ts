@@ -240,7 +240,7 @@ describe('searchMailbox', () => {
       return found.value[0]?.reachedAt;
     };
     // The newest 200 of 250: the lowest hit is uid 51.
-    const asDate = Date.UTC(2020, 0, 5);
+    const asDate = Temporal.Instant.from('2020-01-05T00:00:00Z').epochMilliseconds;
 
     it('takes the next one up when it was expunged before the read', async () => {
       expect(await pageWith(uid => (uid === 51 ? null : { internalDate: JANUARY }))).toBe(asDate);

@@ -5,10 +5,17 @@ import { getIdbFactory, openDeviceDb, runTransaction, STORES } from '../vault/de
  * The resumption session `@yozz.app/tls` leaves to its caller, keyed by `host:port` and per device.
  * `host:port` rather than `host`: a ticket is bound to the `serverName` that issued it, which is the
  * same on a server's IMAP and SMTP ports, and the port keeps one from being offered to the other.
- * IndexedDB structured-clones a session as it is, so nothing here revives anything.
+ * IndexedDB structured-clones a `Date` but not a `Temporal.Instant`, so a session's two instants
+ * are stored as `Date`s, the shape every build has written.
  */
 
-type StoredSession = { readonly peer: string; readonly session: TlsSession };
+type StoredSession = {
+  readonly peer: string;
+  readonly session: Omit<TlsSession, 'receivedAt' | 'authenticatedAt'> & {
+    readonly receivedAt: Date;
+    readonly authenticatedAt: Date;
+  };
+};
 
 export const peerKey = (host: string, port: number): string => `${host}:${port}`;
 
@@ -33,8 +40,17 @@ export const takeSession = (peer: string, idbFactory?: IDBFactory): Promise<TlsS
       const req = store.get(peer);
       req.onsuccess = () => {
         const stored = req.result as StoredSession | undefined;
-        if (stored !== undefined) store.delete(peer);
-        done(stored?.session ?? null);
+        if (stored === undefined) {
+          done(null);
+          return;
+        }
+        store.delete(peer);
+        const { receivedAt, authenticatedAt } = stored.session;
+        done({
+          ...stored.session,
+          receivedAt: Temporal.Instant.fromEpochMilliseconds(receivedAt.getTime()),
+          authenticatedAt: Temporal.Instant.fromEpochMilliseconds(authenticatedAt.getTime()),
+        });
       };
     },
     idbFactory,
@@ -49,7 +65,14 @@ export const saveSession = (
   withSessions<void>(
     'readwrite',
     (store, done) => {
-      store.put({ peer, session } satisfies StoredSession);
+      store.put({
+        peer,
+        session: {
+          ...session,
+          receivedAt: new Date(session.receivedAt.epochMilliseconds),
+          authenticatedAt: new Date(session.authenticatedAt.epochMilliseconds),
+        },
+      } satisfies StoredSession);
       done();
     },
     idbFactory,

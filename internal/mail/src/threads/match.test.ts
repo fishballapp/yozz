@@ -4,7 +4,7 @@ import { parseQuery } from './query.ts';
 import type { Message, ThreadState } from './thread.ts';
 import { visibleThreads } from './views.ts';
 
-const NOV_3 = Date.UTC(2026, 10, 3, 12);
+const NOV_3 = Temporal.Instant.from('2026-11-03T12:00:00Z').epochMilliseconds;
 
 const message = (over: Partial<Message> = {}): Message => ({
   id: 'm',

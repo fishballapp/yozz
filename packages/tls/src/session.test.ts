@@ -14,6 +14,7 @@ import { type CipherSuite, transcriptHash } from './key-schedule.ts';
 import { sealAead } from './record.ts';
 import { startTlsForReplay } from './replay.ts';
 import {
+  assertUsableSession,
   bindClientHello,
   inheritedAuthentication,
   isSessionOfferable,
@@ -76,12 +77,12 @@ const sessionFromTheDocument = async (): Promise<TlsSession> => {
   const session = await sessionFromTicket({
     serverName: 'server',
     expectedPeerName: { kind: 'dns', value: 'server' },
-    authenticatedAt: new Date(0),
+    authenticatedAt: Temporal.Instant.fromEpochMilliseconds(0),
     peerSignatureScheme: 'rsa_pss_rsae_sha256',
     peerCertificateChain: chainFromTheDocument(trace3),
     suite: SUITE,
     resumptionSecret: bytesOf(stepOf(trace3, 'derive secret "tls13 res master"'), 'expanded'),
-    receivedAt: new Date(0),
+    receivedAt: Temporal.Instant.fromEpochMilliseconds(0),
     ticket: decoded.value.ticket,
     ticketNonce: decoded.value.ticketNonce,
     ticketAgeAdd: decoded.value.ticketAgeAdd,
@@ -216,9 +217,9 @@ describe('§4 resumed through the state machine, and the ticket it renews', () =
       transport: duplex.client,
       serverName: 'server',
       trustAnchors: { findCandidates: () => [] },
-      validationTime: new Date(0),
-      // An instant after the document's clock: §3's ticket is dated `new Date(0)` and lives 30 seconds.
-      now: () => new Date(1_000),
+      validationTime: Temporal.Instant.fromEpochMilliseconds(0),
+      // An instant after the document's clock: §3's ticket is dated `Temporal.Instant.fromEpochMilliseconds(0)` and lives 30 seconds.
+      now: () => Temporal.Instant.fromEpochMilliseconds(1_000),
       // `reverifyOnResume` defaults on, so §4 runs through the re-check too; `revalidated` proves it ran.
       validator: {
         name: 'accept-the-document',
@@ -295,7 +296,7 @@ describe('§4 resumed through the state machine, and the ticket it renews', () =
 
     // A new session, not the one offered: same peer, different secret.
     expect(next.preSharedKey).not.toEqual(offered.preSharedKey);
-    expect(next.receivedAt).toEqual(new Date(1_000));
+    expect(next.receivedAt).toEqual(Temporal.Instant.fromEpochMilliseconds(1_000));
   });
 });
 
@@ -314,14 +315,14 @@ const FRESH_CHAIN: PeerCertificateChain = {
 const sessionAt = (overrides: Partial<TlsSession> = {}): TlsSession => ({
   serverName: 'mail.example.com',
   expectedPeerName: HOST,
-  authenticatedAt: new Date(1_000_000),
+  authenticatedAt: Temporal.Instant.fromEpochMilliseconds(1_000_000),
   peerSignatureScheme: 'rsa_pss_rsae_sha256',
   peerCertificateChain: STORED_CHAIN,
   suite: SUITE,
   ticket: Uint8Array.of(1, 2, 3),
   preSharedKey: new Uint8Array(32),
   ticketAgeAdd: 0,
-  receivedAt: new Date(1_000_000),
+  receivedAt: Temporal.Instant.fromEpochMilliseconds(1_000_000),
   lifetimeSeconds: 60,
   ...overrides,
 });
@@ -330,19 +331,19 @@ const ticketOf = (
   overrides: Partial<{
     ticket: Uint8Array;
     ticketLifetime: number;
-    authenticatedAt: Date;
-    receivedAt: Date;
+    authenticatedAt: Temporal.Instant;
+    receivedAt: Temporal.Instant;
   }> = {},
 ): Promise<TlsSession | undefined> =>
   sessionFromTicket({
     serverName: 'mail.example.com',
     expectedPeerName: HOST,
-    authenticatedAt: new Date(0),
+    authenticatedAt: Temporal.Instant.fromEpochMilliseconds(0),
     peerSignatureScheme: 'rsa_pss_rsae_sha256',
     peerCertificateChain: STORED_CHAIN,
     suite: SUITE,
     resumptionSecret: new Uint8Array(32),
-    receivedAt: new Date(0),
+    receivedAt: Temporal.Instant.fromEpochMilliseconds(0),
     ticket: Uint8Array.of(9),
     ticketNonce: new Uint8Array(0),
     ticketAgeAdd: 0,
@@ -350,11 +351,24 @@ const ticketOf = (
     ...overrides,
   });
 
+describe('a stored session whose instants did not survive the store', () => {
+  it.each([
+    ['receivedAt', 'the string JSON wrote', '2026-08-24T00:00:00Z'],
+    ['authenticatedAt', 'the Date a 0.2 store held', new Date('2026-08-24T00:00:00Z')],
+  ] as const)('throws naming %s when it is %s', (field, _form, value) => {
+    // `as`: a revived value lies about its type, which TypeScript cannot see.
+    const session = { ...sessionAt(), [field]: value } as unknown as TlsSession;
+    expect(() => assertUsableSession(session)).toThrow(
+      `the stored session's ${field} is not a Temporal.Instant`,
+    );
+  });
+});
+
 describe('when a stored session may still be offered', () => {
   /** DNS is case-insensitive; the fold is x509's ASCII-only one, not `toLowerCase()`. */
   it('matches a host that differs only in ASCII case, and nothing wider', () => {
     const session = sessionAt();
-    const now = new Date(1_000_000);
+    const now = Temporal.Instant.fromEpochMilliseconds(1_000_000);
     expect(isSessionOfferable(session, 'MAIL.Example.COM', HOST, now)).toBe(true);
     expect(
       isSessionOfferable(
@@ -376,19 +390,29 @@ describe('when a stored session may still be offered', () => {
   });
 
   it('drops one issued by a different host', () => {
-    expect(isSessionOfferable(sessionAt(), 'imap.example.net', HOST, new Date(1_000_000))).toBe(
-      false,
-    );
-    expect(isSessionOfferable(sessionAt(), 'mail.example.com', HOST, new Date(1_000_000))).toBe(
-      true,
-    );
+    expect(
+      isSessionOfferable(
+        sessionAt(),
+        'imap.example.net',
+        HOST,
+        Temporal.Instant.fromEpochMilliseconds(1_000_000),
+      ),
+    ).toBe(false);
+    expect(
+      isSessionOfferable(
+        sessionAt(),
+        'mail.example.com',
+        HOST,
+        Temporal.Instant.fromEpochMilliseconds(1_000_000),
+      ),
+    ).toBe(true);
   });
 
   /** `expectedPeerName` overrides `serverName`; `null` means the issuing connection checked no name. */
   it('drops one whose validated identity is not the one being asked for', () => {
     const session = sessionAt();
     const other: PeerName = { kind: 'dns', value: 'evil.example.com' };
-    const now = new Date(1_000_000);
+    const now = Temporal.Instant.fromEpochMilliseconds(1_000_000);
 
     expect(isSessionOfferable(session, session.serverName, other, now)).toBe(false);
     expect(isSessionOfferable(session, session.serverName, null, now)).toBe(false);
@@ -406,14 +430,35 @@ describe('when a stored session may still be offered', () => {
 
   it('drops one past its lifetime, to the second', () => {
     const session = sessionAt();
-    expect(isSessionOfferable(session, session.serverName, HOST, new Date(1_059_999))).toBe(true);
-    expect(isSessionOfferable(session, session.serverName, HOST, new Date(1_060_000))).toBe(false);
+    expect(
+      isSessionOfferable(
+        session,
+        session.serverName,
+        HOST,
+        Temporal.Instant.fromEpochMilliseconds(1_059_999),
+      ),
+    ).toBe(true);
+    expect(
+      isSessionOfferable(
+        session,
+        session.serverName,
+        HOST,
+        Temporal.Instant.fromEpochMilliseconds(1_060_000),
+      ),
+    ).toBe(false);
   });
 
   /** A negative age encodes as an enormous `obfuscated_ticket_age`, which reads as a replay. */
   it('drops one from the future', () => {
     const session = sessionAt();
-    expect(isSessionOfferable(session, session.serverName, HOST, new Date(999_999))).toBe(false);
+    expect(
+      isSessionOfferable(
+        session,
+        session.serverName,
+        HOST,
+        Temporal.Instant.fromEpochMilliseconds(999_999),
+      ),
+    ).toBe(false);
   });
 
   /** RFC 9846 §4.7.1: 7 days regardless of `ticket_lifetime`; no alert is named, so the ceiling lands on the way in. */
@@ -435,27 +480,27 @@ describe('how long a resumption chain may outlive its certificate', () => {
 
   // The ticket is minted fresh at each check so only the chain's age can refuse; with the two
   // clocks at one instant, the ticket's own lifetime answers first and the ceiling is never read.
-  const renewedAt = (authenticatedDaysAgo: number, now: Date): TlsSession =>
+  const renewedAt = (authenticatedDaysAgo: number, now: Temporal.Instant): TlsSession =>
     sessionAt({
-      authenticatedAt: new Date(now.getTime() - authenticatedDaysAgo * 24 * 3600 * 1000),
+      authenticatedAt: now.subtract({ hours: authenticatedDaysAgo * 24 }),
       receivedAt: now,
       lifetimeSeconds: 600,
     });
 
   it('lets a freshly renewed ticket resume while the chain is inside the week', () => {
-    const now = new Date(1_000_000_000);
+    const now = Temporal.Instant.fromEpochMilliseconds(1_000_000_000);
     expect(isSessionOfferable(renewedAt(6, now), 'mail.example.com', HOST, now)).toBe(true);
   });
 
   it('refuses a freshly renewed ticket once the chain is past the week', () => {
-    const now = new Date(1_000_000_000);
+    const now = Temporal.Instant.fromEpochMilliseconds(1_000_000_000);
     expect(isSessionOfferable(renewedAt(8, now), 'mail.example.com', HOST, now)).toBe(false);
   });
 
   it('is exact to the millisecond', () => {
-    const authenticatedAt = new Date(1_000_000_000);
+    const authenticatedAt = Temporal.Instant.fromEpochMilliseconds(1_000_000_000);
     const at = (offset: number) => {
-      const now = new Date(authenticatedAt.getTime() + offset);
+      const now = authenticatedAt.add({ milliseconds: offset });
       return isSessionOfferable(
         sessionAt({ authenticatedAt, receivedAt: now, lifetimeSeconds: 600 }),
         'mail.example.com',
@@ -470,10 +515,16 @@ describe('how long a resumption chain may outlive its certificate', () => {
   /** The same rule on the way in: a connection held on `IDLE` past the ceiling still gets renewals. */
   it('does not mint a session already past the ceiling', async () => {
     expect(
-      await ticketOf({ authenticatedAt: new Date(0), receivedAt: new Date(WEEK) }),
+      await ticketOf({
+        authenticatedAt: Temporal.Instant.fromEpochMilliseconds(0),
+        receivedAt: Temporal.Instant.fromEpochMilliseconds(WEEK),
+      }),
     ).toBeUndefined();
     expect(
-      await ticketOf({ authenticatedAt: new Date(0), receivedAt: new Date(WEEK - 1) }),
+      await ticketOf({
+        authenticatedAt: Temporal.Instant.fromEpochMilliseconds(0),
+        receivedAt: Temporal.Instant.fromEpochMilliseconds(WEEK - 1),
+      }),
     ).toBeDefined();
   });
 });
@@ -481,22 +532,24 @@ describe('how long a resumption chain may outlive its certificate', () => {
 describe('the age reported on the wire', () => {
   it("is the real age in milliseconds plus the server's offset", () => {
     const session = sessionAt({ ticketAgeAdd: 1234 });
-    expect(obfuscatedTicketAge(session, new Date(1_010_000))).toBe(10_000 + 1234);
+    expect(obfuscatedTicketAge(session, Temporal.Instant.fromEpochMilliseconds(1_010_000))).toBe(
+      10_000 + 1234,
+    );
   });
 
   // §4.3.11.1 makes it a uint32, so the sum wraps; unwrapped, the encoder would truncate it.
   it('wraps at 2^32 rather than overflowing the field', () => {
     const session = sessionAt({ ticketAgeAdd: 0xffffffff });
-    expect(obfuscatedTicketAge(session, new Date(1_000_001))).toBe(0);
+    expect(obfuscatedTicketAge(session, Temporal.Instant.fromEpochMilliseconds(1_000_001))).toBe(0);
   });
 });
 
 /** No peer this package can drive mints a ticket on a resumed connection, so the rule is tested here. */
 describe('what a renewed ticket inherits', () => {
   const DAY = 24 * 3600 * 1000;
-  const proved = new Date(1_000_000_000);
+  const proved = Temporal.Instant.fromEpochMilliseconds(1_000_000_000);
   const later: PeerAuthentication = {
-    authenticatedAt: new Date(proved.getTime() + 5 * DAY),
+    authenticatedAt: proved.add({ milliseconds: 5 * DAY }),
     peerSignatureScheme: 'ed25519',
     peerCertificateChain: FRESH_CHAIN,
   };
@@ -517,15 +570,15 @@ describe('what a renewed ticket inherits', () => {
 
   it('carries the inherited instant far enough to actually expire', () => {
     // Eight days after the signature, a session renewed on day 7 is no longer offerable.
-    const resumed = sessionAt({ authenticatedAt: proved, receivedAt: new Date(proved.getTime()) });
+    const resumed = sessionAt({ authenticatedAt: proved, receivedAt: proved });
     const renewed = inheritedAuthentication(resumed, later);
-    const eightDaysOn = new Date(proved.getTime() + 8 * DAY);
+    const eightDaysOn = proved.add({ milliseconds: 8 * DAY });
 
     expect(
       isSessionOfferable(
         sessionAt({
           authenticatedAt: renewed.authenticatedAt,
-          receivedAt: new Date(proved.getTime() + 7 * DAY),
+          receivedAt: proved.add({ milliseconds: 7 * DAY }),
           lifetimeSeconds: 600_000,
         }),
         'mail.example.com',

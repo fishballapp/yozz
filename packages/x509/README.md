@@ -21,7 +21,7 @@ const result = await YOZZ_VALIDATOR.validatePath({
   peerCertificateDer: leafDer,
   untrustedIntermediateDer: intermediatesDer,
   trustAnchors: compileAnchors(ROOT_BUNDLE).source,
-  validationTime: new Date(), // never the clock implicitly; every limbo case pins this
+  validationTime: Temporal.Now.instant(), // never the clock implicitly; every limbo case pins this
   expectedPeerName: { kind: 'dns', value: 'imap.example.com' },
   requiredKeyUsages: [],
   requiredExtendedKeyUsages: [SERVER_AUTH],
@@ -29,6 +29,11 @@ const result = await YOZZ_VALIDATOR.validatePath({
 });
 // { ok: true, path } or { ok: false, reason } naming the check that refused
 ```
+
+**Requires a global `Temporal`.** Times are `Temporal.Instant`s (`validationTime`, a certificate's
+`notBefore` / `notAfter`), and `ROOT_BUNDLE` builds its cutoffs as the module loads. Node 26, Chrome and Firefox ship it; where the runtime has none (Safari, Node 24), install
+[`temporal-polyfill`](https://www.npmjs.com/package/temporal-polyfill) and load it before this package is
+imported (`import 'temporal-polyfill/global'`). The package imports no polyfill itself.
 
 `src/index.ts` is the whole public API and says why each export exists; the request and result
 types are in `src/validator.ts`. The source is in

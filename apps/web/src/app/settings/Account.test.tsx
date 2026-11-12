@@ -357,13 +357,13 @@ describe('Account', () => {
       id: 'pk-laptop',
       credentialId: 'cred-laptop',
       name: 'MacBook',
-      addedAt: Date.parse('2026-09-01T09:00:00.000Z'),
+      addedAt: Temporal.Instant.from('2026-09-01T09:00:00Z').epochMilliseconds,
     };
     const PHONE: AccountPasskey = {
       id: 'pk-phone',
       credentialId: 'cred-phone',
       name: null,
-      addedAt: Date.parse('2026-10-05T09:00:00.000Z'),
+      addedAt: Temporal.Instant.from('2026-10-05T09:00:00Z').epochMilliseconds,
     };
 
     const ADDED = { outcome: 'added', passkeyId: 'pk-new', name: 'Chrome on Mac' } as const;

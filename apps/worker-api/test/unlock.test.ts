@@ -207,7 +207,12 @@ describe('Worker unlock and finalisation routes', () => {
 
     const makeStale = (userId: string) =>
       env.DB.prepare('UPDATE session SET createdAt = ? WHERE userId = ?')
-        .bind(new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(), userId)
+        .bind(
+          Temporal.Instant.fromEpochMilliseconds(Date.now())
+            .subtract({ hours: 48 })
+            .toString({ fractionalSecondDigits: 3 }),
+          userId,
+        )
         .run();
 
     it('changes the password and the wrapped DEK together, and the new password signs in', async () => {
@@ -1053,7 +1058,12 @@ describe('Worker unlock and finalisation routes', () => {
     it('refuses a session older than a day', async () => {
       const account = await passkeyVault('remove-stale@example.com', { wrapped: ['one', 'two'] });
       await env.DB.prepare('UPDATE session SET createdAt = ? WHERE userId = ?')
-        .bind(new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(), account.userId)
+        .bind(
+          Temporal.Instant.fromEpochMilliseconds(Date.now())
+            .subtract({ hours: 48 })
+            .toString({ fractionalSecondDigits: 3 }),
+          account.userId,
+        )
         .run();
       const before = await storedPasskeys(account.userId);
 
