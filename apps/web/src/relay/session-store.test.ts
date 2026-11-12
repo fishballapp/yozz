@@ -65,7 +65,9 @@ describe('session store', () => {
     db.close();
     expect(row).toMatchObject({
       session: {
+        // biome-ignore lint/plugin/no-date: Asserts the Date shape that shipped builds wrote to IndexedDB.
         receivedAt: new Date('2026-08-24T00:00:00Z'),
+        // biome-ignore lint/plugin/no-date: Asserts the Date shape that shipped builds wrote to IndexedDB.
         authenticatedAt: new Date('2026-08-24T00:00:00Z'),
       },
     });

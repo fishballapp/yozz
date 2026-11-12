@@ -77,9 +77,11 @@ describe.skipIf(!hasOpenssl)('field-for-field against OpenSSL', () => {
 
     // OpenSSL prints `Jan  1 00:00:00 2024 GMT`, which only `Date.parse` reads.
     expect(certificate.notBefore.epochMilliseconds).toBe(
+      // biome-ignore lint/plugin/no-date: OpenSSL prints this date as 'Mon DD HH:MM:SS YYYY GMT', which Temporal cannot parse.
       Date.parse(openssl(file, '-startdate').trim().replace('notBefore=', '')),
     );
     expect(certificate.notAfter.epochMilliseconds).toBe(
+      // biome-ignore lint/plugin/no-date: OpenSSL prints this date as 'Mon DD HH:MM:SS YYYY GMT', which Temporal cannot parse.
       Date.parse(openssl(file, '-enddate').trim().replace('notAfter=', '')),
     );
 

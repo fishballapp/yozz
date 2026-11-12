@@ -4,7 +4,7 @@
   "files": {
     "includes": ["**", "!**/node_modules", "!**/dist", "!**/routeTree.gen.ts", "!**/*.gen.*"]
   },
-  "plugins": ["./biome-plugins/multiline-if-braces.grit"],
+  "plugins": ["./biome-plugins/multiline-if-braces.grit", "./biome-plugins/no-date.grit"],
   "assist": { "enabled": true, "actions": { "source": { "organizeImports": "on" } } },
   "linter": {
     "enabled": true,

@@ -69,7 +69,9 @@ export const saveSession = (
         peer,
         session: {
           ...session,
+          // biome-ignore lint/plugin/no-date: IndexedDB cannot store a Temporal value, and shipped builds stored Dates, so the row keeps that shape.
           receivedAt: new Date(session.receivedAt.epochMilliseconds),
+          // biome-ignore lint/plugin/no-date: IndexedDB cannot store a Temporal value, and shipped builds stored Dates, so the row keeps that shape.
           authenticatedAt: new Date(session.authenticatedAt.epochMilliseconds),
         },
       } satisfies StoredSession);

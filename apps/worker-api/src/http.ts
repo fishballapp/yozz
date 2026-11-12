@@ -65,6 +65,7 @@ export const requireNamedAccount = createMiddleware<AppEnv>(async (c, next) => {
 
 /** The same age rule Better Auth applies to passkey registration. It guards what a stolen cookie must not do: change how the vault opens, or delete the account. */
 const isSessionFresh = (session: AuthSession['session']): boolean =>
+  // biome-ignore lint/plugin/no-date: Better Auth types a session's createdAt as Date.
   Date.now() - new Date(session.createdAt).getTime() < SESSION_FRESH_AGE_SECONDS * 1000;
 
 const refuseStaleSession = (c: Context) =>

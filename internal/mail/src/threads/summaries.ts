@@ -108,6 +108,7 @@ const parseDate = (summary: ImapMessageSummary): number => {
   if (summary.envelope?.date) {
     // RFC 5322 dates arrive in every obsolete form (named zones, comments, two-digit years), which
     // only `Date.parse` reads; Temporal parses ISO 8601 alone.
+    // biome-ignore lint/plugin/no-date: Parses a mail Date header, which RFC 5322 writes in forms Temporal cannot read.
     const parsed = Date.parse(summary.envelope.date);
     if (!Number.isNaN(parsed)) return parsed;
   }

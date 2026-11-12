@@ -154,6 +154,7 @@ const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', '
  * RFC 5322's forms only `Date.parse` reads.
  */
 const arrivedAt = ({ date }: FakeMessage) => {
+  // biome-ignore lint/plugin/no-date: Parses a mail Date header, which RFC 5322 writes in forms Temporal cannot read.
   const parsed = Date.parse(date);
   return Temporal.Instant.fromEpochMilliseconds(
     Number.isNaN(parsed) ? Date.now() : parsed,

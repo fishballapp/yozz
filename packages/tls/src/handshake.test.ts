@@ -2590,6 +2590,7 @@ describe('Stage 7: Handshake state machine & scripted peer', () => {
       ['revived receivedAt as the string JSON wrote', { receivedAt: '2026-08-24T00:00:00Z' }],
       [
         'kept authenticatedAt as the Date a 0.2 store held',
+        // biome-ignore lint/plugin/no-date: The Date a 0.2 store held: a stored shape that must be rejected, so it stays a Date.
         { authenticatedAt: new Date('2026-08-24T00:00:00Z') },
       ],
     ])('throws before writing anything when a store %s', async (_case, overrides) => {

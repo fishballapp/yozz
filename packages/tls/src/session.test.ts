@@ -354,6 +354,7 @@ const ticketOf = (
 describe('a stored session whose instants did not survive the store', () => {
   it.each([
     ['receivedAt', 'the string JSON wrote', '2026-08-24T00:00:00Z'],
+    // biome-ignore lint/plugin/no-date: The Date a 0.2 store held: a stored shape that must be rejected, so it stays a Date.
     ['authenticatedAt', 'the Date a 0.2 store held', new Date('2026-08-24T00:00:00Z')],
   ] as const)('throws naming %s when it is %s', (field, _form, value) => {
     // `as`: a revived value lies about its type, which TypeScript cannot see.

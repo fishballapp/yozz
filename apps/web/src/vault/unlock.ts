@@ -478,6 +478,7 @@ export const listPasskeys = async (userId: string): Promise<readonly AccountPass
       credentialId: credentialID,
       name: name?.trim() || null,
       // Typed `Date` by Better Auth, but a JSON response carries a string; `new Date` reads either.
+      // biome-ignore lint/plugin/no-date: Better Auth types a passkey's createdAt as Date; a JSON response carries it as a string.
       addedAt: new Date(createdAt).getTime(),
     }))
     .toSorted((a, b) => a.addedAt - b.addedAt);
