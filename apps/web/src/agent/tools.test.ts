@@ -228,7 +228,7 @@ describe('get_threads', () => {
       inlineImagesTruncated: false,
       attachments: [],
     });
-    await expect(result).resolves.toEqual({ error: expect.stringContaining('signed out') });
+    await expect(result).resolves.toEqual({ error: expect.stringContaining('logged out') });
   });
 
   it('says which folders hold each message, so a mixed thread is legible', async () => {
@@ -1046,8 +1046,8 @@ describe('navigate', () => {
     const composed = call(tools, 'navigate', { target: 'composer', draftKey: 'k1' });
     endSession();
     navigation.resolve();
-    await expect(opened).resolves.toEqual({ error: expect.stringContaining('signed out') });
-    await expect(composed).resolves.toEqual({ error: expect.stringContaining('signed out') });
+    await expect(opened).resolves.toEqual({ error: expect.stringContaining('logged out') });
+    await expect(composed).resolves.toEqual({ error: expect.stringContaining('logged out') });
     expect(port.setRead).not.toHaveBeenCalled();
   });
 

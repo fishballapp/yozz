@@ -1,6 +1,7 @@
 import type { ComposeDraft } from '@yozz.app/mail/compose/draft';
+import type { Thread } from '@yozz.app/mail/threads/thread';
 import { describe, expect, it } from 'vitest';
-import { composeIntentSchema, isUntouched, seedRequestOf } from './intent';
+import { composeIntentSchema, composeTitleOf, isUntouched, seedRequestOf } from './intent';
 
 describe('seedRequestOf', () => {
   it('names the message a reply, a reply all or a forward answers', () => {
@@ -96,5 +97,50 @@ describe('isUntouched', () => {
       ],
     };
     expect(isUntouched(attached, opened)).toBe(false);
+  });
+});
+
+describe('composeTitleOf', () => {
+  const message = (id: string, fromName: string, fromAddress: string, toAddress: string) => ({
+    id,
+    fromName,
+    fromAddress,
+    toAddress,
+    at: 0,
+    body: [],
+    locations: [],
+  });
+  const thread = (messages: Thread['messages']): Thread => ({
+    id: 't',
+    mailboxes: ['me@x.test'],
+    subject: 'Sunday',
+    isUnread: false,
+    isReplied: false,
+    isStarred: false,
+    messages,
+  });
+  const fromDad = thread([
+    message('m-1', 'Dad', 'dad@family.example', 'me@x.test'),
+    message('m-2', 'Me', 'me@x.test', 'dad@family.example'),
+  ]);
+  const owned = ['me@x.test'];
+
+  it('names who a reply goes to, whichever message was pressed', () => {
+    expect(composeTitleOf('reply:m-1', [fromDad], owned)).toBe('Reply to Dad');
+    expect(composeTitleOf('reply:m-2', [fromDad], owned)).toBe('Reply to Dad');
+  });
+
+  it('names nobody when the thread is all your own mail, or has not loaded', () => {
+    const mine = thread([message('m-9', 'Me', 'me@x.test', 'dad@family.example')]);
+    expect(composeTitleOf('reply:m-9', [mine], owned)).toBe('Reply');
+    expect(composeTitleOf('reply:m-1', [], owned)).toBe('Reply');
+  });
+
+  it('says what the other intents are', () => {
+    expect(composeTitleOf('reply-all:m-1', [fromDad], owned)).toBe('Reply all');
+    expect(composeTitleOf('forward:m-1', [fromDad], owned)).toBe('Forward');
+    expect(composeTitleOf('new', [fromDad], owned)).toBe('New message');
+    expect(composeTitleOf('unsubscribe:m-1', [fromDad], owned)).toBe('New message');
+    expect(composeTitleOf('draft:k-1', [fromDad], owned)).toBe('New message');
   });
 });

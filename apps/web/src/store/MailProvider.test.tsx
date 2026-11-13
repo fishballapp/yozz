@@ -75,7 +75,10 @@ const {
 });
 
 vi.mock('../vault/session', () => ({ useVault: () => ({ session }) }));
-vi.mock('../ui/chrome', () => ({ isDemo: () => false }));
+vi.mock('../ui/chrome', async importOriginal => ({
+  ...(await importOriginal<typeof import('../ui/chrome')>()),
+  isDemo: () => false,
+}));
 vi.mock('../relay/connection', () => ({ connectImap: vi.fn() }));
 vi.mock('../relay/live', () => ({
   createLiveManager: (deps: { onMailboxChanged: (address: string) => void }) => {

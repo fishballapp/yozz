@@ -165,6 +165,7 @@ vi.mock('../store/MailProvider', () => ({
     return {
       threads: THREADS,
       mailboxes,
+      identities: mailboxes,
       windows: [],
       serverSearch: current,
       syncStates: {},
@@ -332,6 +333,128 @@ describe('the search box', () => {
     await type('stripe');
     await press('Escape');
     expect(box().value).toBe('stripe');
+  });
+});
+
+describe('the box as the title of a view', () => {
+  /** The view's name, which stands in place of the field at rest; null when the field shows. */
+  const title = () => host.querySelector('search span.cursor-text')?.textContent ?? null;
+  const button = (label: string) => host.querySelector(`search button[aria-label="${label}"]`);
+  const focus = () => act(async () => box().focus());
+  const blur = () => act(async () => box().blur());
+  const click = async (label: string) => {
+    await act(async () => {
+      button(label)?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    });
+    await commit();
+  };
+
+  it('shows the name of a named view and of an address at rest', async () => {
+    await open();
+    expect(title()).toBe('Inbox');
+    await open('trash');
+    expect(title()).toBe('Trash');
+    await open('me@x.co');
+    expect(title()).toBe('me@x.co');
+  });
+
+  it('shows the view’s query on focus, all of it selected, and the name again on blur', async () => {
+    await open('me@x.co');
+    await focus();
+    expect(title()).toBeNull();
+    expect(box().value).toBe('in:inbox mailbox:me@x.co');
+    expect([box().selectionStart, box().selectionEnd]).toEqual([0, box().value.length]);
+    await blur();
+    expect(title()).toBe('me@x.co');
+  });
+
+  it('selects the query when the name is pressed', async () => {
+    await open('trash');
+    await act(async () => {
+      host
+        .querySelector('search span.cursor-text')
+        ?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+    });
+    expect(document.activeElement).toBe(box());
+    expect([box().selectionStart, box().selectionEnd]).toEqual([0, 'in:trash'.length]);
+  });
+
+  it('searches all mail with what is typed from rest', async () => {
+    await open('trash');
+    await focus();
+    await type('stripe');
+    expect(url.read()).toEqual({ view: 'unified', q: 'stripe' });
+    await blur();
+    expect(title()).toBeNull();
+    expect(box().value).toBe('stripe');
+  });
+
+  it('offers no ✕ over a view, and from a search the ✕ goes back to the view it began from', async () => {
+    await open('trash');
+    expect(button('Close search')).toBeNull();
+    await focus();
+    expect(button('Close search')).toBeNull();
+    await type('stripe');
+    await click('Close search');
+    expect(url.read()).toEqual({ view: 'trash', q: undefined });
+    expect(title()).toBe('Trash');
+    expect(document.activeElement).not.toBe(box());
+  });
+
+  it('goes back to the view the search began from when the query was emptied', async () => {
+    await open('me@x.co');
+    await focus();
+    await type('');
+    expect(url.read()).toEqual({ view: 'unified', q: '' });
+    await click('Close search');
+    expect(url.read()).toEqual({ view: 'me@x.co', q: undefined });
+  });
+
+  it('lands on Inbox from a ?q= link opened cold', async () => {
+    await open('unified', 'stripe');
+    await click('Close search');
+    expect(url.read()).toEqual({ view: 'unified', q: undefined });
+    expect(title()).toBe('Inbox');
+  });
+
+  it('blurs on Escape and changes nothing else', async () => {
+    await open('unified', 'stripe');
+    await focus();
+    await press('Escape');
+    expect(document.activeElement).not.toBe(box());
+    expect(url.read()).toEqual({ view: 'unified', q: 'stripe' });
+  });
+});
+
+describe('the box over a view, one line', () => {
+  const hint = () => host.querySelector('search span[aria-hidden]:not(.truncate)');
+  const focus = () => act(async () => box().focus());
+
+  it('stays one line that scrolls sideways while focused over an address view', async () => {
+    await open('me@x.co');
+    await focus();
+    expect(box().getAttribute('wrap')).toBe('off');
+    expect(box().className).toContain('overflow-x-auto');
+    // The hidden copy that sizes the cell cannot wrap either, so the bar stays 44px.
+    expect(host.querySelector('search .invisible')?.className).toContain('truncate');
+    expect(host.querySelector('search .invisible')?.className).not.toContain('whitespace-pre-wrap');
+  });
+
+  it('wraps once it is a search, where the query is typed and read in full', async () => {
+    await open('me@x.co');
+    await focus();
+    await type('stripe');
+    expect(box().getAttribute('wrap')).toBe('soft');
+    expect(host.querySelector('search .invisible')?.className).toContain('whitespace-pre-wrap');
+  });
+
+  it('hints at search at rest over a view and nowhere else', async () => {
+    await open('unified');
+    expect(hint()?.textContent).toContain('Search all mail');
+    await focus();
+    expect(hint()?.textContent ?? '').not.toContain('Search all mail');
+    await open('unified', 'stripe');
+    expect(hint()?.textContent ?? '').not.toContain('Search all mail');
   });
 });
 

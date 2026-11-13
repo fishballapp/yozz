@@ -7,7 +7,16 @@ import {
 import type { MailConnectionFailure } from '@yozz.app/mail/connection';
 import { describeMailFailure } from '@yozz.app/mail/describe-failure';
 import type { MailAutoconfig } from '@yozz.app/vault-contract';
-import { type FormEvent, type ReactNode, useEffect, useRef, useState } from 'react';
+import { cn } from 'cn';
+import {
+  createContext,
+  type FormEvent,
+  type ReactNode,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+} from 'react';
 import { ZodError } from 'zod';
 import {
   type AutoconfigLookup,
@@ -17,9 +26,12 @@ import {
 } from '../../addresses/autoconfig';
 import { keepCompose } from '../../compose/intent';
 import { useMail } from '../../store/MailProvider';
-import { Button, buttonClass } from '../../ui/Button';
-import { FieldRow, Input } from '../../ui/Field';
-import { Definition, PageSection } from '../../ui/PageSection';
+import { Button, buttonClass, linkClass } from '../../ui/Button';
+import { Checkbox } from '../../ui/Checkbox';
+import { FieldRow, Input, PasswordInput } from '../../ui/Field';
+import { Definition } from '../../ui/PageSection';
+import { AuthColumn } from '../../vault/AuthColumn';
+import { SetupSteps } from '../../vault/SetupSteps';
 import { vaultErrorMessage } from '../../vault/screen-policy';
 import { SettingsPane } from './SettingsPane';
 
@@ -29,11 +41,37 @@ import { SettingsPane } from './SettingsPane';
  * looked up the way Thunderbird looks it up (autoconfig, ISPDB, the MX host's entry, SRV); a domain
  * that publishes nothing gets the fields. The password is tried against each server before the
  * record is written.
+ *
+ * The first address is the last step of setting up an account, so with `isFirst` it renders in the
+ * bare frame welcome and enrol use, under their step line: its own steps go unnumbered there (a "3"
+ * over "1 2 3" reads as two counters), and the way out is Skip for now, not a Cancel back to this
+ * same screen.
  */
 
 type StepId = 'address' | 'servers' | 'signin';
 
-const STEP_NUMBER: Record<StepId, number> = { address: 1, servers: 2, signin: 3 };
+const STEPS: Record<StepId, { readonly number: number; readonly title: string }> = {
+  address: { number: 1, title: 'Address' },
+  servers: { number: 2, title: 'Servers' },
+  // The provider's password, not a YOZZ login.
+  signin: { number: 3, title: 'Password' },
+};
+
+/** Google takes only an app password over IMAP and SMTP, and makes it on this page. */
+const GOOGLE_APP_PASSWORDS = 'https://myaccount.google.com/apppasswords';
+
+/** A Google address, or one whose servers are Google's (a Workspace domain). */
+const isGoogleMail = (address: string, servers: Servers): boolean => {
+  const isGoogleHost = (host: string) => {
+    const name = host.trim().toLowerCase();
+    return name === 'gmail.com' || name === 'googlemail.com' || name.endsWith('.gmail.com');
+  };
+  return (
+    isGoogleHost(domainOf(address) ?? '') ||
+    isGoogleHost(servers.imapHost) ||
+    isGoogleHost(servers.smtpHost)
+  );
+};
 
 type Lookup =
   | { readonly state: 'idle' }
@@ -86,8 +124,16 @@ const demoLookup = async (domain: string): Promise<AutoconfigLookup> => {
   return demoAutoconfig(domain);
 };
 
-export const AddAddress = () => {
+/** Whether this is the account's first address, read by the step parts below. */
+const IsFirstAddress = createContext(false);
+
+const SUBLINE =
+  "An address you already own. Its password is checked with your provider before it's saved.";
+
+export const AddAddress = ({ isFirst = false }: { isFirst?: boolean }) => {
   const navigate = useNavigate();
+  // The setup frame is on `--ink`; the settings pane is sunken.
+  const ground = isFirst ? 'page' : 'sunken';
   const { identities, putAddress, watchSession, isDemo: demo } = useMail();
 
   const [open, setOpen] = useState<StepId>('address');
@@ -320,6 +366,7 @@ export const AddAddress = () => {
       {needsImap && (
         <ServerFields
           protocol="IMAP"
+          ground={ground}
           idPrefix="connect-imap"
           autoFocus={needsImap}
           host={servers.imapHost}
@@ -330,6 +377,7 @@ export const AddAddress = () => {
       )}
       <ServerFields
         protocol="SMTP"
+        ground={ground}
         idPrefix="connect-smtp"
         autoFocus={!needsImap}
         host={servers.smtpHost}
@@ -362,133 +410,127 @@ export const AddAddress = () => {
     </>
   );
 
-  return (
-    <SettingsPane
-      title="Add an address"
-      subline="An address you already own. Its password is checked with your provider before it's saved."
-    >
+  const steps = (
+    <IsFirstAddress.Provider value={isFirst}>
       <div className="max-w-xl">
         <fieldset disabled={busyLabel !== null} className="m-0 min-w-0 border-0 p-0">
           {open === 'address' ? (
-            <OpenStep>
-              <PageSection label="Address">
-                <form onSubmit={continueFromAddress}>
-                  <StepNumber step="address" />
-                  <div className="space-y-6">
-                    <FieldRow label="Email address" htmlFor="connect-address">
-                      <Input
-                        id="connect-address"
-                        type="email"
-                        required
-                        autoComplete="email"
-                        autoFocus
-                        readOnly={lookup.state === 'looking'}
-                        value={address}
-                        onChange={event => {
-                          setAddress(event.target.value);
-                          clearProblem('address');
-                        }}
-                        placeholder="you@yourdomain.com"
-                      />
-                      {problem?.at === 'address' && (
-                        <p role="alert" className="text-base text-danger">
-                          {problem.message}
-                        </p>
-                      )}
-                    </FieldRow>
-                    <FieldRow
-                      label="Name"
-                      htmlFor="connect-name"
-                      hint="Shown next to this address on mail you send."
-                    >
-                      <Input
-                        id="connect-name"
-                        autoComplete="name"
-                        placeholder="Optional"
-                        value={senderName}
-                        onChange={event => setSenderName(event.target.value)}
-                      />
-                    </FieldRow>
-                  </div>
-                  {lookup.state === 'looking' && (
-                    <p className="mt-2 text-2xs text-paper-faint" aria-live="polite">
-                      Looking up mail servers for {lookup.domain}…
-                    </p>
-                  )}
-                  <StepActions>
-                    <Button type="submit" variant="primary" disabled={lookup.state === 'looking'}>
-                      {lookup.state === 'looking' ? 'Looking up…' : 'Continue'}
-                    </Button>
-                  </StepActions>
-                </form>
-              </PageSection>
+            <OpenStep step="address">
+              <form onSubmit={continueFromAddress}>
+                <div className="space-y-6">
+                  <FieldRow label="Address to connect" htmlFor="connect-address">
+                    <Input
+                      ground={ground}
+                      id="connect-address"
+                      type="email"
+                      required
+                      autoComplete="email"
+                      autoFocus
+                      readOnly={lookup.state === 'looking'}
+                      value={address}
+                      onChange={event => {
+                        setAddress(event.target.value);
+                        clearProblem('address');
+                      }}
+                      placeholder="you@yourdomain.com"
+                    />
+                    {problem?.at === 'address' && (
+                      <p role="alert" className="text-base text-danger">
+                        {problem.message}
+                      </p>
+                    )}
+                  </FieldRow>
+                  <FieldRow
+                    label="Name"
+                    htmlFor="connect-name"
+                    hint="Shown next to this address on mail you send."
+                  >
+                    <Input
+                      ground={ground}
+                      id="connect-name"
+                      autoComplete="name"
+                      placeholder="Optional"
+                      value={senderName}
+                      onChange={event => setSenderName(event.target.value)}
+                    />
+                  </FieldRow>
+                </div>
+                {lookup.state === 'looking' && (
+                  <p className="mt-2 text-2xs text-paper-faint" aria-live="polite">
+                    Looking up mail servers for {lookup.domain}…
+                  </p>
+                )}
+                <StepActions>
+                  <Button type="submit" variant="primary" disabled={lookup.state === 'looking'}>
+                    {lookup.state === 'looking' ? 'Looking up…' : 'Continue'}
+                  </Button>
+                </StepActions>
+              </form>
             </OpenStep>
           ) : (
             <StepLine
-              title="Address"
+              step="address"
               answer={done.has('address') ? addressAnswer : undefined}
               onChange={done.has('address') ? () => reopen('address') : undefined}
             />
           )}
 
           {open === 'servers' ? (
-            <OpenStep>
-              <PageSection label="Servers" error={serversProblem}>
-                <form onSubmit={continueFromServers}>
-                  <StepNumber step="servers" />
-                  <label className="mb-4 flex min-h-11 items-start gap-2.5 text-base text-paper lg:min-h-0">
-                    <input
-                      type="checkbox"
-                      checked={isSendOnly}
-                      onChange={event => setIsSendOnly(event.target.checked)}
-                      className="mt-0.5 size-4 shrink-0 accent-signal"
-                    />
-                    <span>
-                      Send-only
-                      <span className="block text-2xs text-paper-faint">
-                        Only send from this address; its inbox isn't read here.
-                      </span>
+            <OpenStep step="servers" error={serversProblem}>
+              <form onSubmit={continueFromServers}>
+                {/* biome-ignore lint/a11y/noLabelWithoutControl: Checkbox renders the input inside the label. */}
+                <label className="mb-4 flex min-h-11 items-start gap-2.5 text-base text-paper lg:min-h-0">
+                  <Checkbox
+                    label="Send-only"
+                    checked={isSendOnly}
+                    onCheckedChange={checked => setIsSendOnly(checked)}
+                    className="h-5 w-3.25 shrink-0"
+                  />
+                  <span>
+                    Send-only
+                    <span className="block text-2xs text-paper-faint">
+                      Only send from this address; its inbox isn't read here.
                     </span>
-                  </label>
-                  <div className="flex items-center justify-between gap-4">
-                    <p className="text-base text-paper-dim">{serversNote()}</p>
-                    {showFacts && (
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="-mr-2.5 shrink-0"
-                        autoFocus
-                        onClick={() => setIsEditingServers(true)}
-                      >
-                        Edit
-                      </Button>
-                    )}
-                  </div>
-                  {showFacts ? (
-                    <dl className="mt-3">
-                      {needsImap && (
-                        <Definition term="IMAP">
-                          {servers.imapHost}:{servers.imapPort}
-                        </Definition>
-                      )}
-                      <Definition term="SMTP">
-                        {servers.smtpHost}:{servers.smtpPort}
-                      </Definition>
-                    </dl>
-                  ) : (
-                    <div className="mt-4 space-y-4">{serverFields}</div>
-                  )}
-                  <StepActions>
-                    <Button type="submit" variant="primary">
-                      Continue
+                  </span>
+                </label>
+                <div className="flex items-center justify-between gap-4">
+                  <p className="text-base text-paper-dim">{serversNote()}</p>
+                  {showFacts && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="-mr-2.5 shrink-0"
+                      autoFocus
+                      onClick={() => setIsEditingServers(true)}
+                    >
+                      Edit
                     </Button>
-                  </StepActions>
-                </form>
-              </PageSection>
+                  )}
+                </div>
+                {showFacts ? (
+                  <dl className="mt-3">
+                    {needsImap && (
+                      <Definition term="IMAP">
+                        {servers.imapHost}:{servers.imapPort}
+                      </Definition>
+                    )}
+                    <Definition term="SMTP">
+                      {servers.smtpHost}:{servers.smtpPort}
+                    </Definition>
+                  </dl>
+                ) : (
+                  <div className="mt-4 space-y-4">{serverFields}</div>
+                )}
+                <StepActions>
+                  <Button type="submit" variant="primary">
+                    Continue
+                  </Button>
+                </StepActions>
+              </form>
             </OpenStep>
           ) : (
             <StepLine
-              title="Servers"
+              step="servers"
               answer={done.has('servers') ? serversAnswer : undefined}
               onChange={done.has('servers') ? () => reopen('servers') : undefined}
               error={problem?.at === 'server' ? problem.message : null}
@@ -496,130 +538,231 @@ export const AddAddress = () => {
           )}
 
           {open === 'signin' ? (
-            <OpenStep>
-              <PageSection label="Sign-in">
-                <form onSubmit={submit}>
-                  <StepNumber step="signin" />
-                  <div className="space-y-6">
-                    <FieldRow label="Username" htmlFor="connect-username">
-                      <Input
-                        id="connect-username"
-                        required
-                        autoFocus
-                        autoComplete="username"
-                        value={username}
-                        onChange={event => setUsername(event.target.value)}
-                        className="font-mono"
-                      />
-                    </FieldRow>
-                    <FieldRow
-                      label="Password"
-                      htmlFor="connect-password"
-                      hint="An app password if your provider issues them. Gmail and iCloud require one."
-                    >
-                      <Input
-                        id="connect-password"
-                        type="password"
-                        required
-                        autoComplete="off"
-                        value={password}
-                        onChange={event => {
-                          setPassword(event.target.value);
-                          clearProblem('password');
-                        }}
-                      />
-                      {problem?.at === 'password' && (
-                        <p role="alert" className="text-base text-danger">
-                          {problem.message}
-                        </p>
-                      )}
-                    </FieldRow>
-                  </div>
-                  {problem?.at === 'submit' && (
-                    <p role="alert" className="mt-6 text-base text-danger">
-                      {problem.message}
-                    </p>
-                  )}
-                  <StepActions onCancel={() => (attempt.current += 1)}>
-                    <Button type="submit" variant="primary" disabled={busyLabel !== null}>
-                      {busyLabel ?? 'Test and add'}
-                    </Button>
-                  </StepActions>
-                </form>
-              </PageSection>
+            <OpenStep step="signin">
+              <form onSubmit={submit}>
+                <div className="space-y-6">
+                  <FieldRow label="Username" htmlFor="connect-username">
+                    <Input
+                      ground={ground}
+                      id="connect-username"
+                      required
+                      autoFocus
+                      autoComplete="username"
+                      value={username}
+                      onChange={event => setUsername(event.target.value)}
+                      className="font-mono"
+                    />
+                  </FieldRow>
+                  <FieldRow
+                    label="Password"
+                    htmlFor="connect-password"
+                    hint={
+                      isGoogleMail(lookedUpFor ?? '', servers) ? (
+                        <>
+                          Gmail needs an app password, not your Google password.{' '}
+                          <a
+                            href={GOOGLE_APP_PASSWORDS}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="text-paper-dim underline underline-offset-2 hover:text-paper"
+                          >
+                            Make one at Google
+                          </a>
+                          .
+                        </>
+                      ) : (
+                        'An app password if your provider issues them. iCloud requires one.'
+                      )
+                    }
+                  >
+                    <PasswordInput
+                      id="connect-password"
+                      ground={ground}
+                      aria-describedby="connect-password-hint"
+                      required
+                      autoComplete="off"
+                      value={password}
+                      onChange={event => {
+                        setPassword(event.target.value);
+                        clearProblem('password');
+                      }}
+                    />
+                    {problem?.at === 'password' && (
+                      <p role="alert" className="text-base text-danger">
+                        {problem.message}
+                      </p>
+                    )}
+                  </FieldRow>
+                </div>
+                {problem?.at === 'submit' && (
+                  <p role="alert" className="mt-6 text-base text-danger">
+                    {problem.message}
+                  </p>
+                )}
+                <StepActions onCancel={() => (attempt.current += 1)}>
+                  <Button type="submit" variant="primary" disabled={busyLabel !== null}>
+                    {busyLabel ?? 'Test and add'}
+                  </Button>
+                </StepActions>
+              </form>
             </OpenStep>
           ) : (
-            <StepLine title="Sign-in" />
+            <StepLine step="signin" />
           )}
         </fieldset>
       </div>
+    </IsFirstAddress.Provider>
+  );
+
+  if (isFirst) {
+    return (
+      <AuthColumn
+        title="Connect an address"
+        description={SUBLINE}
+        progress={<SetupSteps current={3} />}
+        footer={
+          <Link
+            to="/m/$view"
+            params={{ view: 'unified' }}
+            search={keepCompose}
+            className={linkClass}
+          >
+            Skip for now
+          </Link>
+        }
+      >
+        {steps}
+      </AuthColumn>
+    );
+  }
+
+  return (
+    <SettingsPane title="Add an address" subline={SUBLINE}>
+      {steps}
     </SettingsPane>
   );
 };
 
-/** The step's number, as its place in the three. */
-const StepNumber = ({ step }: { step: StepId }) => (
-  <p className="mb-4 text-2xs text-paper-faint">Step {STEP_NUMBER[step]} of 3</p>
-);
+type StepState = 'open' | 'done' | 'pending';
+
+const STEP_TONE: Record<StepState, string> = {
+  open: 'text-paper',
+  done: 'text-paper-dim',
+  pending: 'text-paper-faint',
+};
+
+/** A step's number and title; the open one is lit, the ones not reached yet are faint. */
+const StepHeading = ({ step, state }: { step: StepId; state: StepState }) => {
+  const isFirst = useContext(IsFirstAddress);
+  return (
+    <h3
+      aria-current={state === 'open' ? 'step' : undefined}
+      className={cn(
+        'flex items-baseline gap-2.5 text-[15px] leading-snug font-medium',
+        STEP_TONE[state],
+      )}
+    >
+      {!isFirst && <span className="w-2 font-mono text-2xs">{STEPS[step].number}</span>}
+      {STEPS[step].title}
+    </h3>
+  );
+};
 
 /**
- * A step that is not open: its title, its answer when it is finished, and Change to reopen it. A
- * step that has not been reached shows only its title, faint, the way a label does.
+ * A step that is not open: its heading, its answer when it is finished, and Change to reopen it. A
+ * step that has not been reached shows only its heading, faint. On the first address the last line
+ * drops its rule: the auth frame's footer rule closes the list, and two would frame an empty band.
  */
 const StepLine = ({
-  title,
+  step,
   answer,
   onChange,
   error = null,
 }: {
-  title: string;
+  step: StepId;
   answer?: ReactNode;
   onChange?: () => void;
   error?: string | null;
-}) => (
-  <div className="border-b border-rule-soft">
-    <div className="flex items-center gap-4 py-2.5">
-      <span className="label-rule w-24 shrink-0">{title}</span>
-      {answer !== undefined && (
-        <span className="min-w-0 flex-1 font-mono text-2xs text-paper">{answer}</span>
-      )}
-      {onChange !== undefined && (
-        <Button variant="ghost" size="sm" className="-mr-2.5 shrink-0" onClick={onChange}>
-          Change
-        </Button>
+}) => {
+  const isFirst = useContext(IsFirstAddress);
+  return (
+    <div className={cn('border-b border-rule-soft', isFirst && 'last:border-b-0')}>
+      <div className="flex min-h-11 items-center gap-4 py-2.5">
+        <div className="w-28 shrink-0">
+          <StepHeading step={step} state={answer === undefined ? 'pending' : 'done'} />
+        </div>
+        {answer !== undefined && (
+          <span className="min-w-0 flex-1 font-mono text-2xs text-paper">{answer}</span>
+        )}
+        {onChange !== undefined && (
+          <Button variant="ghost" size="sm" className="-mr-2.5 ml-auto shrink-0" onClick={onChange}>
+            Change
+          </Button>
+        )}
+      </div>
+      {error !== null && (
+        <p role="alert" className="pb-2.5 text-base text-danger">
+          {error}
+        </p>
       )}
     </div>
+  );
+};
+
+/**
+ * The open step: its heading over a rule, its form, and what went wrong with it; space above it when
+ * finished steps come first.
+ */
+const OpenStep = ({
+  step,
+  error = null,
+  children,
+}: {
+  step: StepId;
+  error?: string | null;
+  children: ReactNode;
+}) => (
+  <section className="mt-10 mb-8 first:mt-0 last:mb-0">
+    <div className="border-b border-rule pb-2">
+      <StepHeading step={step} state="open" />
+    </div>
+    <div className="mt-4">{children}</div>
     {error !== null && (
-      <p role="alert" className="pb-2.5 text-base text-danger">
+      <p role="alert" className="mt-3 max-w-xl text-base text-danger">
         {error}
       </p>
     )}
-  </div>
+  </section>
 );
 
-/** The open step, with the space above it that a finished run needs; none when it is first. */
-const OpenStep = ({ children }: { children: ReactNode }) => (
-  <div className="mt-10 first:mt-0">{children}</div>
-);
-
-/** Cancel on the left, the step's own action after it. */
-const StepActions = ({ children, onCancel }: { children: ReactNode; onCancel?: () => void }) => (
-  <div className="mt-8 flex items-center justify-end gap-2">
-    <Link
-      to="/settings"
-      search={keepCompose}
-      onClick={onCancel}
-      className={buttonClass({ variant: 'ghost' })}
-    >
-      Cancel
-    </Link>
-    {children}
-  </div>
-);
+/**
+ * The step's own action first, Cancel after it, from the left like every other action row. The first
+ * address has no Cancel: it led to `/settings`, which is this same screen, and Skip for now is the
+ * way out there.
+ */
+const StepActions = ({ children, onCancel }: { children: ReactNode; onCancel?: () => void }) => {
+  const isFirst = useContext(IsFirstAddress);
+  return (
+    <div className="mt-8 flex flex-wrap items-center gap-2">
+      {children}
+      {!isFirst && (
+        <Link
+          to="/settings"
+          search={keepCompose}
+          onClick={onCancel}
+          className={buttonClass({ variant: 'ghost' })}
+        >
+          Cancel
+        </Link>
+      )}
+    </div>
+  );
+};
 
 /** Host and port as one ruled line. */
 const ServerFields = ({
   protocol,
+  ground,
   idPrefix,
   autoFocus,
   host,
@@ -628,6 +771,7 @@ const ServerFields = ({
   onPort,
 }: {
   protocol: 'IMAP' | 'SMTP';
+  ground: 'page' | 'sunken';
   idPrefix: string;
   autoFocus: boolean;
   host: string;
@@ -638,6 +782,7 @@ const ServerFields = ({
   <div className="grid grid-cols-[minmax(0,1fr)_5rem] gap-3">
     <FieldRow label={`${protocol} host`} htmlFor={`${idPrefix}-host`}>
       <Input
+        ground={ground}
         id={`${idPrefix}-host`}
         required
         autoFocus={autoFocus}
@@ -649,6 +794,7 @@ const ServerFields = ({
     </FieldRow>
     <FieldRow label="Port" htmlFor={`${idPrefix}-port`}>
       <Input
+        ground={ground}
         id={`${idPrefix}-port`}
         required
         inputMode="numeric"

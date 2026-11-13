@@ -11,6 +11,7 @@ import type { Attachment } from '@yozz.app/mail/threads/thread';
 import { cn } from 'cn';
 import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import { Button, buttonClass } from '../ui/Button';
+import { Tooltip } from '../ui/Tooltip';
 import {
   decodeText,
   displayName,
@@ -90,7 +91,7 @@ const StoredFileChip = ({
     >
       <Facts file={file} preview={null} />
       {state === 'downloading' && <span className="shrink-0 text-paper-faint">Downloading…</span>}
-      {state === 'failed' && <span className="shrink-0 text-signal">Couldn’t download</span>}
+      {state === 'failed' && <span className="shrink-0 text-danger">Couldn’t download</span>}
       <DownloadSimpleIcon size={12} className="shrink-0 text-paper-faint" />
     </button>
   );
@@ -142,14 +143,16 @@ const AttachmentChip = ({
           <ArrowSquareOutIcon size={12} className="shrink-0 text-paper-faint" />
         )}
       </button>
-      <button
-        type="button"
-        onClick={() => download(file)}
-        className="flex w-11 shrink-0 items-center justify-center text-paper-faint -outline-offset-2 transition-colors hover:bg-ink-hover hover:text-paper lg:w-7"
-        aria-label={`Download ${name}`}
-      >
-        <DownloadSimpleIcon size={12} />
-      </button>
+      <Tooltip label={`Download ${name}`}>
+        <button
+          type="button"
+          onClick={() => download(file)}
+          className="flex w-11 shrink-0 items-center justify-center text-paper-faint -outline-offset-2 transition-colors hover:bg-ink-hover hover:text-paper lg:w-7"
+          aria-label={`Download ${name}`}
+        >
+          <DownloadSimpleIcon size={12} />
+        </button>
+      </Tooltip>
     </div>
   );
 };
@@ -229,18 +232,20 @@ const StepButton = ({
   onStep: () => void;
   children: ReactNode;
 }) => (
-  <BaseButton
-    focusableWhenDisabled
-    disabled={isAtEnd}
-    onClick={onStep}
-    aria-label={label}
-    className={cn(
-      buttonClass({ variant: 'ghost', size: 'icon' }),
-      'size-11 data-disabled:pointer-events-none data-disabled:bg-transparent data-disabled:text-paper-faint lg:size-7',
-    )}
-  >
-    {children}
-  </BaseButton>
+  <Tooltip label={label}>
+    <BaseButton
+      focusableWhenDisabled
+      disabled={isAtEnd}
+      onClick={onStep}
+      aria-label={label}
+      className={cn(
+        buttonClass({ variant: 'ghost', size: 'icon' }),
+        'size-11 data-disabled:pointer-events-none data-disabled:bg-transparent data-disabled:text-paper-faint lg:size-7',
+      )}
+    >
+      {children}
+    </BaseButton>
+  </Tooltip>
 );
 
 const AttachmentViewer = ({

@@ -207,4 +207,43 @@ describe('MailProvider startup', () => {
       expect(mail?.syncStates[ADDRESS.address]).toEqual({ status: 'syncing' }),
     );
   });
+
+  describe('whether the addresses are loaded', () => {
+    it('is not until the vault has been read, and then is, empty or not', async () => {
+      let answer: () => void = () => {};
+      vault.session = {
+        userId: 'u3',
+        files: noFiles,
+        store: {
+          ...store,
+          list: () => new Promise(resolve => (answer = () => resolve([]))),
+        },
+      };
+
+      await renderProvider(<Mail />);
+      expect(mail?.areAddressesLoaded).toBe(false);
+      expect(mail?.identities).toEqual([]);
+
+      await act(async () => answer());
+      expect(mail?.areAddressesLoaded).toBe(true);
+      expect(mail?.identities).toEqual([]);
+    });
+
+    it('stays false when the list was refused, which says nothing about there being none', async () => {
+      vault.session = {
+        userId: 'u4',
+        files: noFiles,
+        store: {
+          ...store,
+          list: async () => {
+            throw new Error('offline');
+          },
+        },
+      };
+
+      await renderProvider(<Mail />);
+      await vi.waitFor(() => expect(mail?.recordsError).not.toBeNull());
+      expect(mail?.areAddressesLoaded).toBe(false);
+    });
+  });
 });

@@ -458,7 +458,7 @@ describe('Vault unlock and session orchestration', () => {
     });
 
     await expect(createPasskeyVault({ account: ALICE, api, idbFactory })).rejects.toThrow(
-      /already has a password sign-in/,
+      /already logs in with a password/,
     );
     // Before registering anything.
     expect(mocks.addPasskey).not.toHaveBeenCalled();
@@ -1210,7 +1210,7 @@ describe('this account’s passkeys', () => {
 
       await expect(
         removePasskey({ userId: ALICE.userId, credentialId: 'cred-1', api }),
-      ).rejects.toThrow('only passkey that can sign in');
+      ).rejects.toThrow('only passkey that can log in');
       await expect(
         removePasskey({ userId: ALICE.userId, credentialId: 'cred-none', api }),
       ).rejects.toThrow('already gone');
@@ -1271,7 +1271,7 @@ describe('createPasswordVault over an enrolled account', () => {
         api,
         idbFactory,
       }),
-    ).rejects.toThrow(/already has a password sign-in/);
+    ).rejects.toThrow(/already logs in with a password/);
     expect(alice.finalizePasswordUnlock).toHaveBeenCalledTimes(1);
   });
 });

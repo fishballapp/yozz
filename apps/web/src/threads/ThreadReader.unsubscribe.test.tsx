@@ -10,6 +10,7 @@ import { ThreadReader } from './ThreadReader';
 /** A link that shows what it would navigate to: the compose intent its search sets. */
 vi.mock('@tanstack/react-router', () => ({
   useParams: () => ({ view: 'unified' }),
+  useSearch: () => ({}),
   Link: ({
     search,
     children,
@@ -33,7 +34,7 @@ vi.mock('../store/MailProvider', () => ({
     toggleArchive: vi.fn(),
     trashThread: vi.fn(),
     restoreThread: vi.fn(),
-    moveThreads: vi.fn(),
+    moveThreadsWithUndo: vi.fn(),
     junkFolders: { 'me@example.com': true },
     markUnread: vi.fn(),
     loadBody: vi.fn(),

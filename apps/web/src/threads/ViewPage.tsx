@@ -45,7 +45,9 @@ export const ViewPage = () => {
         onReset={resetListWidth}
       />
 
+      {/* `data-reader-pane` is where a docked reply stops (`compose/Compose.tsx`). */}
       <section
+        data-reader-pane
         className={cn(
           'min-w-0 flex-1 lg:min-w-80',
           isReading ? 'max-lg:absolute max-lg:inset-0' : 'hidden lg:block',

@@ -10,15 +10,17 @@ import {
 } from '@phosphor-icons/react';
 import { Link } from '@tanstack/react-router';
 import { movesOffered } from '@yozz.app/mail/threads/reconcile';
-import type { ThreadState } from '@yozz.app/mail/threads/thread';
-import { attachmentsOf, isOnServer, newestInbound } from '@yozz.app/mail/threads/thread';
-import { latestOf, previewOf, type ViewId } from '@yozz.app/mail/threads/views';
+import type { Message, ThreadState } from '@yozz.app/mail/threads/thread';
+import { attachmentsOf, inboxesOf, isOnServer, newestInbound } from '@yozz.app/mail/threads/thread';
+import { isNamedView, latestOf, previewOf, type ViewId } from '@yozz.app/mail/threads/views';
 import { cn } from 'cn';
+import type { ButtonHTMLAttributes } from 'react';
 import { DISCARD_WARNING } from '../compose/intent';
 import { useMail } from '../store/MailProvider';
 import { Checkbox } from '../ui/Checkbox';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
 import { reportProblem } from '../ui/Toast';
+import { Tooltip } from '../ui/Tooltip';
 import { listTime } from '../ui/time';
 import { discardableDraftIds, discardDrafts, discardTitle } from './discard-drafts';
 import { JUNK_COPY } from './junk-copy';
@@ -29,19 +31,19 @@ import { useAdvancePast } from './use-advance';
 /**
  * The row's triage is revealed while the pointer is on the row, while anything in it has keyboard
  * focus, and while one of its confirm sheets is up — or the trigger would vanish under its own
- * dialog (Base UI's trigger sets `aria-expanded`, not `data-popup-open`).
+ * dialog (Base UI's trigger sets `aria-expanded`, not `data-popup-open`). Hover variants only
+ * apply on a device that hovers, so a tap never lands on a mark that has only just appeared.
  */
 const REVEALED = {
+  /** The cluster: out of sight and out of reach, yet in the tab order, until revealed. */
   shown:
-    'group-hover:opacity-100 group-has-[:focus-visible]:opacity-100 group-has-[[aria-expanded=true]]:opacity-100',
-  /** The time, which gives its place to the triage. */
-  gone: 'lg:group-hover:hidden lg:group-has-[:focus-visible]:hidden lg:group-has-[[aria-expanded=true]]:hidden',
-  /** The triage: no width until revealed, yet still in the tab order; then two marks wide, or three. */
-  opened: (marks: number) =>
-    marks > 2
-      ? 'w-0 overflow-hidden group-hover:w-18 group-has-[:focus-visible]:w-18 group-has-[[aria-expanded=true]]:w-18'
-      : 'w-0 overflow-hidden group-hover:w-12 group-has-[:focus-visible]:w-12 group-has-[[aria-expanded=true]]:w-12',
+    'pointer-events-none opacity-0 transition-opacity group-hover:pointer-events-auto group-hover:opacity-100 group-has-[:focus-visible]:pointer-events-auto group-has-[:focus-visible]:opacity-100 group-has-[[aria-expanded=true]]:pointer-events-auto group-has-[[aria-expanded=true]]:opacity-100',
+  /** The time, which gives its place to the cluster but keeps its room, so nothing beside it moves. */
+  gone: 'lg:group-hover:opacity-0 lg:group-has-[:focus-visible]:opacity-0 lg:group-has-[[aria-expanded=true]]:opacity-0',
 };
+
+/** The room the cluster of three marks takes, which the time's cell keeps beside an address. */
+const TRIAGE_CELL = 'lg:min-w-21';
 
 export type RowProps = { thread: ThreadState; view: ViewId; isSelected: boolean };
 
@@ -50,14 +52,96 @@ export type RowProps = { thread: ThreadState; view: ViewId; isSelected: boolean 
  * where the thread sits and its time; `inbound` decides everything the row says about
  * correspondence (on a thread you replied to, `latest` is your own reply).
  */
-const useRecord = (thread: ThreadState) => {
-  const { ownedAddresses } = useMail();
+const useRecord = (thread: ThreadState, view: ViewId) => {
+  const { ownedAddresses, mailboxes } = useMail();
   const latest = latestOf(thread);
+  const inbound = inboundOf(thread, ownedAddresses);
+  // Sent and Drafts list what you wrote, so the other party is who it is to.
+  const outbound = (() => {
+    if (view === 'drafts') return thread.messages.findLast(message => message.isDraft === true);
+    if (view !== 'sent') return undefined;
+    return thread.messages.findLast(
+      message => message.isDraft !== true && ownedAddresses.includes(message.fromAddress),
+    );
+  })();
   return {
     latest,
-    inbound: newestInbound(thread, ownedAddresses) ?? latest,
+    inbound,
+    who: outbound === undefined ? inbound.fromName : `To: ${recipientsOf(outbound)}`,
+    receivedAt: receivedAtOf(thread, view, ownedAddresses, mailboxes),
     attachments: attachmentsOf(thread),
   };
+};
+
+/** The message the row speaks for: the newest one that came in, else the newest there is. */
+const inboundOf = (thread: ThreadState, ownedAddresses: readonly string[]) =>
+  newestInbound(thread, ownedAddresses) ?? latestOf(thread);
+
+/**
+ * Which of your addresses a thread came to, as the row writes it. An address's own view says where
+ * the mail came to already, and so does having one address: then null.
+ */
+const receivedAtOf = (
+  thread: ThreadState,
+  view: ViewId,
+  ownedAddresses: readonly string[],
+  mailboxes: readonly { readonly address: string }[],
+): string | null => {
+  if (!isNamedView(view) || mailboxes.length <= 1) return null;
+  const [receivedAt, ...alsoAt] = [
+    ...inboxesOf(inboundOf(thread, ownedAddresses)),
+    ...thread.mailboxes,
+  ].filter((address, index, all) => all.indexOf(address) === index);
+  if (receivedAt === undefined) return null;
+  return `${shortAddress(receivedAt, mailboxes)}${alsoAt.length > 0 ? ` +${alsoAt.length}` : ''}`;
+};
+
+/** The widest the address cell gets: past it the address is cut, and the subject keeps its room. */
+const ADDRESS_CELL_MAX_CH = 10;
+
+/**
+ * The address cell's width in characters, the same for every row so the cells line up: as wide as
+ * the longest address the list shows, to a cap. Nought where no row shows one.
+ */
+export const addressCellWidth = (
+  threads: readonly ThreadState[],
+  view: ViewId,
+  ownedAddresses: readonly string[],
+  mailboxes: readonly { readonly address: string }[],
+): number => {
+  let widest = 0;
+  for (const thread of threads) {
+    widest = Math.max(widest, receivedAtOf(thread, view, ownedAddresses, mailboxes)?.length ?? 0);
+    if (widest >= ADDRESS_CELL_MAX_CH) return ADDRESS_CELL_MAX_CH;
+  }
+  return widest;
+};
+
+/** Who a message you wrote is to. A draft holds the To line as typed, and may hold none yet. */
+const recipientsOf = ({ to, toAddress }: Message) => {
+  if (to !== undefined && to.length > 0) {
+    return to.map(({ name, address }) => name ?? address).join(', ');
+  }
+  return toAddress.trim() === '' ? 'no one yet' : toAddress;
+};
+
+/** The parts of an address that might tell it from the others, shortest first. */
+const ADDRESS_PARTS: readonly ((address: string) => string)[] = [
+  address => address.slice(address.lastIndexOf('@') + 1).split('.')[0] ?? address,
+  address => address.slice(0, address.lastIndexOf('@')),
+  address => address,
+];
+
+/**
+ * An address in the fewest characters that still tell it from the other connected addresses: the
+ * first label of its domain (`northlane`), else its local part, else the whole address.
+ */
+const shortAddress = (address: string, mailboxes: readonly { readonly address: string }[]) => {
+  const partOf =
+    ADDRESS_PARTS.find(
+      part => new Set(mailboxes.map(mailbox => part(mailbox.address))).size === mailboxes.length,
+    ) ?? (whole => whole);
+  return partOf(address);
 };
 
 /**
@@ -65,7 +149,7 @@ const useRecord = (thread: ThreadState) => {
  * are decorative. It stays the current one while the open row's bar gives way to ticked rows.
  */
 const RowLink = ({ thread, view, isSelected, isBarred }: RowProps & { isBarred: boolean }) => {
-  const { latest, inbound, attachments } = useRecord(thread);
+  const { latest, inbound, who, attachments } = useRecord(thread, view);
 
   return (
     <Link
@@ -78,7 +162,7 @@ const RowLink = ({ thread, view, isSelected, isBarred }: RowProps & { isBarred: 
       className={cn('absolute inset-0 -outline-offset-2', isBarred && 'focus-visible:outline-ink')}
       aria-label={[
         thread.isUnread ? 'Unread.' : null,
-        `${inbound.fromName}: ${thread.subject}.`,
+        `${who}: ${thread.subject}.`,
         previewOf(thread),
         `Delivered to ${inbound.toAddress}.`,
         listTime(latest.at),
@@ -131,6 +215,9 @@ const StarButton = ({
 /** One mark in the hover cluster. `confirm` present means it asks before it acts. */
 type RowAction = {
   readonly icon: Icon;
+  /** What it does, for the tooltip. */
+  readonly name: string;
+  /** What it does to which thread, for the accessible name. */
   readonly label: string;
   readonly act: () => unknown;
   readonly confirm?: {
@@ -146,8 +233,14 @@ type RowAction = {
  * drafts alone; nothing otherwise.
  */
 const useRowActions = ({ thread, view, isSelected }: RowProps): readonly RowAction[] => {
-  const { toggleArchive, trashThread, restoreThread, moveThreads, junkFolders, removeDraft } =
-    useMail();
+  const {
+    toggleArchive,
+    trashThread,
+    restoreThread,
+    moveThreadsWithUndo,
+    junkFolders,
+    removeDraft,
+  } = useMail();
   const advancePast = useAdvancePast();
   // Filing the open thread from its row moves the reader on, as the reader's own buttons do; a
   // move the store refused moves nothing and says why, now or when the server answers.
@@ -165,6 +258,7 @@ const useRowActions = ({ thread, view, isSelected }: RowProps): readonly RowActi
       return [
         {
           icon: TrashIcon,
+          name: 'Discard',
           label: `Discard ${thread.subject}`,
           // The same sheet the composer's Discard takes.
           confirm: {
@@ -186,6 +280,7 @@ const useRowActions = ({ thread, view, isSelected }: RowProps): readonly RowActi
         ? [
             {
               icon: ArrowCounterClockwiseIcon,
+              name: 'Restore',
               label: `Restore ${thread.subject}`,
               act: file(restoreThread, 'Thread not restored'),
             },
@@ -195,6 +290,7 @@ const useRowActions = ({ thread, view, isSelected }: RowProps): readonly RowActi
         ? [
             {
               icon: ArchiveIcon,
+              name: 'Archive',
               label: `Archive ${thread.subject}`,
               act: file(toggleArchive, 'Thread not archived'),
             },
@@ -204,6 +300,7 @@ const useRowActions = ({ thread, view, isSelected }: RowProps): readonly RowActi
         ? [
             {
               icon: MailboxIcon,
+              name: 'Move to inbox',
               label: `Move ${thread.subject} to inbox`,
               act: file(toggleArchive, 'Thread not moved to inbox'),
             },
@@ -213,9 +310,11 @@ const useRowActions = ({ thread, view, isSelected }: RowProps): readonly RowActi
         ? [
             {
               icon: WarningOctagonIcon,
+              name: JUNK_COPY.moveToJunk,
               label: `${JUNK_COPY.moveToJunk}: ${thread.subject}`,
               act: file(
-                (threadId, onRefused) => moveThreads([threadId], 'junk', onRefused).has(threadId),
+                (threadId, onRefused) =>
+                  moveThreadsWithUndo([threadId], 'junk', onRefused).has(threadId),
                 JUNK_COPY.notMovedToJunk,
               ),
             },
@@ -225,6 +324,7 @@ const useRowActions = ({ thread, view, isSelected }: RowProps): readonly RowActi
         ? [
             {
               icon: MailboxIcon,
+              name: 'Move to inbox',
               label: `Move ${thread.subject} to inbox`,
               act: file(restoreThread, 'Thread not moved to inbox'),
             },
@@ -234,6 +334,7 @@ const useRowActions = ({ thread, view, isSelected }: RowProps): readonly RowActi
         ? [
             {
               icon: TrashIcon,
+              name: 'Delete',
               label: `Delete ${thread.subject}`,
               act: file(trashThread, 'Thread not deleted'),
             },
@@ -243,46 +344,76 @@ const useRowActions = ({ thread, view, isSelected }: RowProps): readonly RowActi
   })();
 };
 
-/** Desktop only: on touch, the reader carries triage. */
+/**
+ * One mark of the cluster, as tall as the row so a near miss does not open the message. It spreads
+ * what it is given: a confirm sheet's trigger and the tooltip both hand it their props.
+ */
+const TriageMark = ({
+  icon: Mark,
+  name,
+  isSelected,
+  ...props
+}: { icon: Icon; name: string; isSelected: boolean } & ButtonHTMLAttributes<HTMLButtonElement>) => (
+  <Tooltip label={name}>
+    <button
+      type="button"
+      className={cn(
+        'flex h-8.5 w-7 items-center justify-center -outline-offset-2',
+        isSelected
+          ? 'text-ink/60 hover:text-ink focus-visible:outline-ink'
+          : 'text-paper-faint hover:text-paper',
+      )}
+      {...props}
+    >
+      <Mark size={13} />
+    </button>
+  </Tooltip>
+);
+
+/**
+ * Desktop only: on touch, the reader carries triage. An overlay on the row's right edge, over the
+ * time's cell, on the row's own ground so whatever it covers is covered; the cells under it never
+ * move.
+ */
 const RowTriage = ({
   actions,
   isSelected,
-  className,
+  ground,
 }: {
   actions: readonly RowAction[];
   isSelected: boolean;
-  className: string;
+  ground: string;
 }) =>
   actions.length === 0 ? null : (
-    <span className={cn('relative z-10 hidden items-center justify-end lg:flex', className)}>
-      {actions.map(({ icon: Mark, label, act, confirm }) => {
-        const mark = (
-          <button
-            type="button"
-            {...(confirm === undefined ? { onClick: () => void act() } : {})}
-            className={cn(
-              'flex w-6 justify-center -outline-offset-2 opacity-0 transition-opacity',
-              REVEALED.shown,
-              isSelected
-                ? 'text-ink/60 hover:text-ink focus-visible:outline-ink'
-                : 'text-paper-faint hover:text-paper',
-            )}
+    <span
+      className={cn(
+        'absolute inset-y-0 right-2 z-10 hidden items-center justify-end lg:flex',
+        actions.length > 2 ? 'w-21' : 'w-14',
+        ground,
+        REVEALED.shown,
+      )}
+    >
+      {actions.map(({ icon, name, label, act, confirm }) =>
+        confirm === undefined ? (
+          <TriageMark
+            key={label}
+            icon={icon}
+            name={name}
+            isSelected={isSelected}
             aria-label={label}
-          >
-            <Mark size={13} />
-          </button>
-        );
-        return confirm === undefined ? (
-          <span key={label}>{mark}</span>
+            onClick={() => void act()}
+          />
         ) : (
           <ConfirmDialog
             key={label}
-            trigger={mark}
+            trigger={
+              <TriageMark icon={icon} name={name} isSelected={isSelected} aria-label={label} />
+            }
             {...confirm}
             onConfirm={async () => void (await act())}
           />
-        );
-      })}
+        ),
+      )}
     </span>
   );
 
@@ -291,6 +422,8 @@ type CheckProps = {
   isChecked: boolean;
   /** Whether any row in the list is ticked: then, as in Gmail, the open row gives up its bar. */
   hasSelection: boolean;
+  /** How wide, in characters, the cell for the address it came to is: see `addressCellWidth`. */
+  addressWidth: number;
   /** Below `lg`, the Select button's mode: the box takes the star's cell and a tap ticks the row. */
   isSelecting: boolean;
   onCheck: (isChecked: boolean, extend: boolean) => void;
@@ -306,30 +439,54 @@ export const ThreadRow = ({
   view,
   isSelected,
   isChecked,
+  addressWidth,
   hasSelection,
   isSelecting,
   onCheck,
 }: RowProps & CheckProps) => {
   const isBarred = isSelected && !hasSelection;
   const isUnread = thread.isUnread;
-  const { latest, inbound, attachments } = useRecord(thread);
+  const { latest, who, receivedAt, attachments } = useRecord(thread, view);
   const actions = useRowActions({ thread, view, isSelected });
+  // The row's ground in each state, which the triage cluster repeats over the time.
+  const ground = (() => {
+    if (isBarred) return 'bg-select';
+    if (isChecked) return 'bg-signal-wash';
+    return isUnread ? 'bg-ink-raised' : 'bg-ink';
+  })();
 
   return (
     <div
       className={cn(
         'group relative grid items-center gap-x-2 py-2 pr-2 pl-1 text-base',
         'grid-cols-[2.75rem_minmax(0,1fr)_auto_2.75rem]',
-        'lg:h-8.5 lg:grid-cols-[1.875rem_1.875rem_9.375rem_minmax(0,1fr)_auto_auto_auto] lg:gap-x-0 lg:py-0',
-        (() => {
-          if (isBarred) return 'bg-select text-ink';
-          if (isChecked) return 'bg-signal-wash';
-          // No hover ground, as in Gmail: beside unread's raised ground it read as a second state.
-          return isUnread && 'bg-ink-raised';
-        })(),
+        'lg:h-8.5 lg:grid-cols-[1.875rem_1.875rem_8.25rem_minmax(0,1fr)_auto_auto] lg:gap-x-0 lg:py-0',
+        isBarred && 'text-ink',
+        ground,
       )}
     >
       <RowLink thread={thread} view={view} isSelected={isSelected} isBarred={isBarred} />
+
+      {/* The row's left edge carries two marks that never read as each other. The pointer's is a
+          full-height hairline, and no ground: beside unread's raised ground a hover ground read as
+          a second state. Unread's is a square on the same edge, over the hairline, since weight
+          and a ground one step up are too faint to carry it alone. Open and ticked are grounds. */}
+      <span
+        aria-hidden
+        className={cn(
+          'pointer-events-none absolute inset-y-0 left-0 w-0.5 opacity-0 group-hover:opacity-100',
+          isBarred ? 'bg-ink' : 'bg-paper-faint',
+        )}
+      />
+      {isUnread && (
+        <span
+          aria-hidden
+          className={cn(
+            'pointer-events-none absolute top-1/2 left-0 size-1.5 -translate-y-1/2',
+            isBarred ? 'bg-signal-deep' : 'bg-signal',
+          )}
+        />
+      )}
 
       {/* While selecting, a tap anywhere on a phone's row ticks it rather than opening it. The box
           is the control a keyboard or screen reader uses; this only widens its target. */}
@@ -373,7 +530,7 @@ export const ThreadRow = ({
           isBarred && 'font-medium',
         )}
       >
-        {inbound.fromName}
+        {who}
       </span>
 
       <span
@@ -405,14 +562,27 @@ export const ThreadRow = ({
       </span>
 
       {/* Everything right of the subject is as wide as what it holds, so the subject runs up to
-          the time. As in Gmail, the time gives its place to the triage while the actions are out,
-          and the subject gives up only the difference. A row with nothing to do keeps its time. */}
-      {attachments.length > 0 && (
+          the time. As in Gmail, the triage is laid over the time while the actions are out, and the
+          time keeps its room, so nothing in the row moves. A row with nothing to do keeps its time. */}
+      {(attachments.length > 0 || receivedAt !== null) && (
         <span
           aria-hidden
-          className="pointer-events-none col-start-3 row-start-1 flex w-4 justify-center lg:col-start-5 lg:mr-1.5"
+          className={cn(
+            'pointer-events-none col-start-3 row-start-1 flex items-center gap-1.5 lg:col-start-5 lg:mr-1.5',
+            isBarred ? 'text-ink/60' : 'text-paper-faint',
+          )}
         >
-          <PaperclipIcon size={12} className={isBarred ? 'text-ink/60' : 'text-paper-faint'} />
+          {attachments.length > 0 && (
+            <span className="flex w-4 justify-center">
+              <PaperclipIcon size={12} />
+            </span>
+          )}
+          {/* Which of your addresses it came to: one width for the list, so the cells line up down it. */}
+          {receivedAt !== null && (
+            <span style={{ width: `${addressWidth}ch` }} className="truncate font-mono text-2xs">
+              {receivedAt}
+            </span>
+          )}
         </span>
       )}
 
@@ -425,16 +595,16 @@ export const ThreadRow = ({
             return isUnread ? 'font-semibold text-paper' : 'text-paper-faint';
           })(),
           actions.length > 0 && REVEALED.gone,
+          // The room the triage takes where an address sits beside it (the cluster would cover the
+          // tag), and for any date the list writes, so those cells share an edge all down the list.
+          receivedAt !== null && TRIAGE_CELL,
+          receivedAt !== null && 'lg:pl-2',
         )}
       >
         {listTime(latest.at)}
       </span>
 
-      <RowTriage
-        actions={actions}
-        isSelected={isBarred}
-        className={cn('col-start-7 row-start-1', REVEALED.opened(actions.length))}
-      />
+      <RowTriage actions={actions} isSelected={isBarred} ground={ground} />
     </div>
   );
 };

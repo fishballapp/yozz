@@ -44,6 +44,7 @@ const reading = vi.hoisted(() => ({ files: null as PromiseWithResolvers<Attachme
 vi.mock('@tanstack/react-router', () => ({
   useSearch: () => ({ compose: 'new' }),
   useNavigate: () => navigate,
+  useLocation: () => '/m/unified',
 }));
 vi.mock('../vault/session', () => ({ useVault: () => ({ session: { userId: 'user-1' } }) }));
 vi.mock('./draft', async importOriginal => ({
@@ -87,6 +88,12 @@ const root = createRoot(document.createElement('div'));
 
 beforeEach(async () => {
   mail.generation = 0;
+  // jsdom has no matchMedia; a phone-width window, where the composer is never docked.
+  vi.stubGlobal('matchMedia', () => ({
+    matches: false,
+    addEventListener: () => {},
+    removeEventListener: () => {},
+  }));
   await act(async () => root.render(<Compose />));
 });
 
@@ -359,5 +366,95 @@ describe("a draft's file chips", () => {
   it('offers no retry for a file whose bytes this device does not hold', async () => {
     await showing([{ ...stored, upload: 'failed' }]);
     expect(document.querySelector('[aria-label="Retry plan.pdf"]')).toBeNull();
+  });
+});
+
+describe('the composer’s footer', () => {
+  const showing = async (draft: ComposeDraft) => {
+    mail.draft = draft;
+    await act(async () => root.render(<Compose />));
+  };
+  const send = () =>
+    [...document.querySelectorAll('button')].find(({ textContent }) => textContent === 'Send');
+
+  afterEach(() => {
+    mail.draft = null;
+  });
+
+  it('says why Send is off until someone is addressed', async () => {
+    await showing({ ...DRAFT, to: '' });
+    expect(send()?.disabled).toBe(true);
+    expect(document.body.textContent).toContain('Add a recipient to send.');
+  });
+
+  it('keeps the reason beside Send, in the row the buttons are in, so the foot does not move', async () => {
+    await showing({ ...DRAFT, to: '' });
+    const reason = [...document.querySelectorAll('p')].find(
+      ({ textContent }) => textContent === 'Add a recipient to send.',
+    );
+    expect(reason?.parentElement).toBe(send()?.parentElement);
+    // Below `sm` its line is kept even when it is silent.
+    await showing({ ...DRAFT, to: 'you@x.test' });
+    const silent = [...document.querySelectorAll('p')].find(({ className }) =>
+      className.includes('min-h-4'),
+    );
+    expect(silent?.textContent).toBe('');
+  });
+
+  it('says nothing once there is a recipient, a Bcc counting as one', async () => {
+    await showing({ ...DRAFT, to: '', bcc: 'you@x.test' });
+    expect(send()?.disabled).toBe(false);
+    expect(document.body.textContent).not.toContain('Add a recipient to send.');
+  });
+
+  it('does not blame the recipient for a frozen draft', async () => {
+    mail.openSendState = 'sending';
+    await showing({ ...DRAFT, to: '' });
+    expect(document.body.textContent).not.toContain('Add a recipient to send.');
+  });
+
+  it('prints an upload problem as an error, not in the accent', async () => {
+    await showing({
+      ...DRAFT,
+      attachments: [
+        {
+          id: 'f',
+          name: 'plan.pdf',
+          size: 1,
+          kind: 'pdf',
+          upload: 'failed',
+          content: new Uint8Array(1),
+        },
+      ],
+    });
+    expect(document.querySelector('p[role="alert"]')?.className).toContain('text-danger');
+  });
+
+  it('asks nothing of the Subject field until it is empty and focused', async () => {
+    await showing(DRAFT);
+    expect(document.getElementById('compose-subject')?.getAttribute('placeholder')).toBeNull();
+  });
+
+  it('keeps Discard quiet: a ghost that only turns red on hover', async () => {
+    await showing(DRAFT);
+    const discard = [...document.querySelectorAll('button')].find(
+      ({ textContent }) => textContent === 'Discard',
+    );
+    expect(discard?.className).toContain('text-paper-dim');
+    expect(discard?.className).toContain('hover:text-danger');
+  });
+
+  it('offers a Markdown cheat sheet instead of a bare label', async () => {
+    await showing(DRAFT);
+    const trigger = [...document.querySelectorAll('button')].find(
+      ({ textContent }) => textContent === 'Markdown supported',
+    );
+    await act(async () => {
+      trigger?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+      trigger?.click();
+    });
+    const sheet = document.querySelector('[aria-label="Markdown cheat sheet"]')?.textContent;
+    expect(sheet).toContain('**bold**');
+    expect(sheet).toContain('[text](url)a link');
   });
 });

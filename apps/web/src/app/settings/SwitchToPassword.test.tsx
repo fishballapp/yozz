@@ -27,12 +27,14 @@ vi.mock('@tanstack/react-router', () => ({
     children,
     to,
     className,
+    'aria-label': label,
   }: {
     children: React.ReactNode;
     to: string;
     className?: string;
+    'aria-label'?: string;
   }) => (
-    <a href={to} className={className}>
+    <a href={to} className={className} aria-label={label}>
       {children}
     </a>
   ),
@@ -103,8 +105,10 @@ describe('SwitchToPassword', () => {
   it('checks its fields under them and says what a forgotten password costs, before it saves', async () => {
     await mount();
     expect(document.body.textContent).toContain('nobody can recover your saved addresses');
-    // Phone back link: to Sign-in, not the list.
-    expect(document.querySelector('a[href="/settings/account"]')?.textContent).toContain('Sign-in');
+    // The way back leads to Account, not the list.
+    expect(
+      document.querySelector('a[href="/settings/account"][aria-label]')?.getAttribute('aria-label'),
+    ).toBe('Back to Account');
 
     await type('switch-password', 'short');
     await type('switch-confirm', 'short');
@@ -114,9 +118,13 @@ describe('SwitchToPassword', () => {
     await type('switch-password', 'long enough password');
     await type('switch-confirm', 'a different password');
     await submitFormAround('switch-confirm');
-    expect(document.getElementById('switch-confirm')?.nextElementSibling?.textContent).toBe(
-      'The two passwords do not match.',
-    );
+    expect(
+      document
+        .querySelector('label[for="switch-confirm"]')
+        ?.parentElement?.querySelector('[role="alert"]')?.textContent,
+    ).toBe('The two passwords do not match.');
+    // The live line said so before the submit did.
+    expect(document.getElementById('switch-confirm-status')?.textContent).toBe('Doesn’t match yet');
     expect(switchModeToPassword).not.toHaveBeenCalled();
   });
 

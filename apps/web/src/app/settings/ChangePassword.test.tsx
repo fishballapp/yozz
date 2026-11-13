@@ -27,12 +27,14 @@ vi.mock('@tanstack/react-router', () => ({
     children,
     to,
     className,
+    'aria-label': label,
   }: {
     children: React.ReactNode;
     to: string;
     className?: string;
+    'aria-label'?: string;
   }) => (
-    <a href={to} className={className}>
+    <a href={to} className={className} aria-label={label}>
       {children}
     </a>
   ),
@@ -85,8 +87,10 @@ const type = async (id: string, value: string) => {
   });
 };
 
-/** The message under a field, which is its next sibling. */
-const under = (id: string) => document.getElementById(id)?.nextElementSibling?.textContent;
+/** The message under a field, inside the field's row. */
+const under = (id: string) =>
+  document.querySelector(`label[for="${id}"]`)?.parentElement?.querySelector('[role="alert"]')
+    ?.textContent;
 
 /** Enter in a field submits the form around it. */
 const submit = async () => {
@@ -114,14 +118,38 @@ afterEach(async () => {
 });
 
 describe('ChangePassword', () => {
-  it('is titled for what it does and goes back to Sign-in at every width', async () => {
+  it('is titled for what it does and goes back to Account from `lg`', async () => {
     await mount();
     expect(document.querySelector('h2')?.textContent).toBe('Change password');
     const back = document.querySelector('a[href="/settings/account"]');
-    expect(back?.textContent).toContain('Sign-in');
-    // A sub-page is one level below the list beside it, so its way back shows on a desktop too.
-    expect(back?.className).not.toContain('lg:hidden');
+    expect(back?.getAttribute('aria-label')).toBe('Back to Account');
+    // A sub-page is one level below the list beside it, so its way back shows on a desktop; below
+    // `lg` the app bar carries it, and the title is there too.
+    expect(back?.className).toContain('lg:flex');
+    expect(back?.className).toContain('hidden');
+    expect(document.querySelector('h2')?.className).toContain('max-lg:sr-only');
     expect(document.body.textContent).toContain('nobody can recover your saved addresses');
+  });
+
+  it('counts the new password against the minimum as it is typed, and reads any field back', async () => {
+    await mount();
+    expect(document.getElementById('change-password-status')?.textContent).toBe(
+      '12 characters minimum',
+    );
+    await type('change-password', 'short');
+    expect(document.getElementById('change-password-status')?.textContent).toBe(
+      '5 characters · 12 minimum',
+    );
+    await type('change-confirm', 'shor');
+    expect(document.getElementById('change-confirm-status')?.textContent).toBe('Doesn’t match yet');
+    await type('change-confirm', 'short');
+    expect(document.getElementById('change-confirm-status')?.textContent).toBe('Matches');
+
+    const current = document.getElementById('change-current');
+    const reveal = current?.parentElement?.querySelector('button');
+    expect(current?.getAttribute('type')).toBe('password');
+    await act(async () => reveal?.click());
+    expect(current?.getAttribute('type')).toBe('text');
   });
 
   it('checks each field under it, and asks the vault for nothing until all three pass', async () => {
@@ -156,7 +184,7 @@ describe('ChangePassword', () => {
     expect(mocks.navigate).not.toHaveBeenCalled();
   });
 
-  it('hands over both passwords, then goes back to Sign-in saying so', async () => {
+  it('hands over both passwords, then goes back to Account saying so', async () => {
     vi.mocked(changePasswordOfSession).mockResolvedValueOnce({
       outcome: 'changed',
       session: sessionOf(),

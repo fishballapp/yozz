@@ -40,12 +40,14 @@ vi.mock('@tanstack/react-router', () => ({
     children,
     to,
     className,
+    'aria-label': label,
   }: {
     children: React.ReactNode;
     to: string;
     className?: string;
+    'aria-label'?: string;
   }) => (
-    <a href={to} className={className}>
+    <a href={to} className={className} aria-label={label}>
       {children}
     </a>
   ),
@@ -225,14 +227,17 @@ afterEach(async () => {
 describe('Account', () => {
   it('says how you sign in, and links to the one change that is on offer', async () => {
     await mount();
-    expect(document.body.textContent).toContain('You sign in with a password.');
+    expect(document.body.textContent).toContain('Log in with');
+    expect(document.body.textContent).toContain('You log in with a password.');
     expect(linkTo('Change password')?.getAttribute('href')).toBe('/settings/account/password');
     expect(linkTo('Switch to a passkey')?.getAttribute('href')).toBe('/settings/account/passkey');
     expect(linkTo('Switch to a password')).toBeUndefined();
 
     mocks.session = sessionOf('user-alice', 'alice@example.com', 'passkey');
     await mount();
-    expect(linkTo('Switch to a password')?.getAttribute('href')).toBe('/settings/account/password');
+    expect(linkTo('Switch to a password')?.getAttribute('href')).toBe(
+      '/settings/account/switch-to-password',
+    );
   });
 
   it('says in a word what the change that brought it here did, politely', async () => {
@@ -241,7 +246,7 @@ describe('Account', () => {
     expect(notice?.textContent).toBe('Switched.');
     expect(notice?.getAttribute('aria-live')).toBe('polite');
     // Said once: the sentence above it already says how you sign in now.
-    expect(document.body.textContent).not.toContain('You now sign in with');
+    expect(document.body.textContent).not.toContain('You now log in with');
 
     await mount('changed');
     expect(document.body.textContent).toContain('Password changed.');
@@ -249,18 +254,17 @@ describe('Account', () => {
 
   it('is titled by what it holds, and has no reset', async () => {
     await mount();
-    expect(document.querySelector('h2')?.textContent).toBe('Sign-in');
-    // A top-level pane goes back to the list.
-    const back = document.querySelector('a[href="/settings"]');
-    expect(back?.textContent).toContain('Settings');
-    expect(back?.className).toContain('lg:hidden');
+    expect(document.querySelector('h2')?.textContent).toBe('Account');
+    // A top-level pane has no way back of its own: the list is beside it from `lg`, and below
+    // that the app bar carries the back chevron.
+    expect(document.querySelector('a[aria-label^="Back to"]')).toBeNull();
     expect(button('Reset')).toBeUndefined();
     expect(document.body.textContent).not.toContain('new key');
   });
 
   it('locks nothing and goes nowhere once the session ended under the sign-out', async () => {
     await mount();
-    await click('Sign out');
+    await click('Log out');
 
     mocks.generation += 1;
     await act(async () => mocks.signingOut.resolve({ error: null }));
@@ -284,14 +288,14 @@ describe('Account', () => {
       await click('Confirm with your passkey');
       const [, retried] = vi.mocked(addPasskeyToSession).mock.calls;
       expect(retried?.[0].isCurrent()).toBe(true);
-      expect(document.body.textContent).toContain('Added. That passkey can now sign you in.');
+      expect(document.body.textContent).toContain('Added. That passkey can now log you in.');
     });
 
     it('says the change is to how you sign in when a sign-in change asked', async () => {
       vi.mocked(addPasskeyToSession).mockRejectedValueOnce('not fresh');
       await mount();
       await click('Add passkey');
-      expect(document.body.textContent).toContain('Changing how you sign in needs a fresh sign-in');
+      expect(document.body.textContent).toContain('Changing how you log in needs a fresh login');
     });
 
     it('says the change is revoking a CLI key when Revoke asked, then revokes under it', async () => {
@@ -309,8 +313,8 @@ describe('Account', () => {
       await mount();
       await click('Revoke');
       await click('Revoke key');
-      expect(document.body.textContent).toContain('Revoking a CLI key needs a fresh sign-in');
-      expect(document.body.textContent).not.toContain('Changing how you sign in');
+      expect(document.body.textContent).toContain('Revoking a CLI key needs a fresh login');
+      expect(document.body.textContent).not.toContain('Changing how you log in');
 
       await click('Confirm with your passkey');
       expect(revokeCliKey).toHaveBeenCalledTimes(2);
@@ -322,8 +326,8 @@ describe('Account', () => {
       await click('Delete account');
       await typeConfirmation('DELETE');
       await click('Delete account');
-      expect(document.body.textContent).toContain('Deleting your account needs a fresh sign-in');
-      expect(document.body.textContent).not.toContain('Changing how you sign in');
+      expect(document.body.textContent).toContain('Deleting your account needs a fresh login');
+      expect(document.body.textContent).not.toContain('Changing how you log in');
     });
 
     it('keeps the question open with the reason when the current password is wrong', async () => {
@@ -413,7 +417,7 @@ describe('Account', () => {
 
       const dialog = document.querySelector('[role="alertdialog"]')?.textContent ?? '';
       expect(dialog).toContain('Remove this passkey?');
-      expect(dialog).toContain('can no longer sign in to alice@example.com');
+      expect(dialog).toContain('can no longer log in to alice@example.com');
       expect(dialog).toContain('every other device is signed out. Your other passkeys still work.');
       expect(dialog).not.toMatch(/vault/i);
       expect(removePasskey).not.toHaveBeenCalled();

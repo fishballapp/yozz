@@ -1,3 +1,4 @@
+import { Menu } from '@base-ui/react/menu';
 import { Popover } from '@base-ui/react/popover';
 import {
   ArchiveIcon,
@@ -8,6 +9,7 @@ import {
   BellSlashIcon,
   CaretDownIcon,
   CodeIcon,
+  DotsThreeIcon,
   EnvelopeSimpleIcon,
   type Icon,
   MailboxIcon,
@@ -18,7 +20,7 @@ import {
   WarningOctagonIcon,
   XIcon,
 } from '@phosphor-icons/react';
-import { Link } from '@tanstack/react-router';
+import { Link, useSearch } from '@tanstack/react-router';
 import { replyAllCc } from '@yozz.app/mail/compose/seed';
 import { movesOffered } from '@yozz.app/mail/threads/reconcile';
 import type { SenderCheck, ThreadState } from '@yozz.app/mail/threads/thread';
@@ -33,12 +35,13 @@ import {
 import { fullTime } from '@yozz.app/mail/time';
 import { cn } from 'cn';
 import { Fragment, type ReactNode, useId, useState } from 'react';
-import { withCompose } from '../compose/intent';
+import { type ComposeIntent, withCompose } from '../compose/intent';
 import { useMail } from '../store/MailProvider';
 import { Button, buttonClass } from '../ui/Button';
 import { useChromePref, useMediaQuery } from '../ui/chrome';
 import { IconSwitch } from '../ui/IconSwitch';
 import { reportProblem } from '../ui/Toast';
+import { Tooltip } from '../ui/Tooltip';
 import { AttachmentList } from './AttachmentList';
 import { HtmlBody } from './HtmlBody';
 import { JUNK_COPY } from './junk-copy';
@@ -48,9 +51,13 @@ import { UNSUBSCRIBE_COPY } from './unsubscribe-copy';
 
 /**
  * Every message says who it was written to under its From line, the way Gmail does: one "to me,
- * Alice" line whose caret opens the envelope. Reply and Forward sit under every message; which one
- * you press decides what is quoted, never who the mail goes to (`seedFor`).
+ * Alice" line whose caret opens the envelope. Reply, Reply all and Forward sit under the last
+ * message; an earlier one offers the same three from a menu on its header line. Which one you press
+ * decides what is quoted, never who the mail goes to (`seedFor`).
  */
+
+/** Body copy is READ, not scanned: full ink, a measure of about 75 letters, larger on a phone held further away. */
+const PROSE_CLASS = 'max-w-[60ch] text-[16px]/[1.55] text-paper lg:text-[15px]/[1.6]';
 
 /** Name in sans, address in mono; your own addresses at full ink, so you find yourself on a long list. */
 const RecipientList = ({
@@ -178,10 +185,22 @@ const MessageDetails = ({
   const [isOpen, setIsOpen] = useState(false);
   const regionId = useId();
   const addressees = addresseesOf(message, ownedAddresses);
+  // "me" is enough while there is one address to be; with several, which one it reached is the fact.
+  const yourAddress =
+    ownedAddresses.length > 1
+      ? [...(message.to ?? []), ...(message.cc ?? [])].find(({ address }) =>
+          ownedAddresses.some(owned => owned.toLowerCase() === address.toLowerCase()),
+        )?.address
+      : undefined;
   const summary =
     addressees.length === 0
       ? 'undisclosed recipients'
-      : addressees.map(entry => (entry === 'me' ? 'me' : (entry.name ?? entry.address))).join(', ');
+      : addressees
+          .map(entry => {
+            if (entry === 'me') return yourAddress ?? 'me';
+            return entry.name ?? entry.address;
+          })
+          .join(', ');
   const label = `To ${summary}. Details`;
   const toLine = (
     <span className="truncate">
@@ -190,6 +209,9 @@ const MessageDetails = ({
         ? summary
         : addressees.map((entry, index) => {
             const addressee = (() => {
+              if (entry === 'me' && yourAddress !== undefined) {
+                return <span className="font-mono text-paper-dim">{yourAddress}</span>;
+              }
               if (entry === 'me') return <span className="text-paper-dim">me</span>;
               if (entry.name !== undefined) {
                 return <bdi className="text-paper-dim">{entry.name}</bdi>;
@@ -275,20 +297,104 @@ const MessageDetails = ({
 };
 
 /**
- * `sm` on a pointer, full 44px on touch. The accessible name says what each quotes, not who it
- * reaches. Reply all appears only when it would reach someone Reply would not (`replyAllCc`).
+ * The three ways to answer a message, as one list for the buttons under the last message and the
+ * menu on an earlier one. The accessible name says what each quotes, not who it reaches. Reply all
+ * appears only when it would reach someone Reply would not (`replyAllCc`).
+ */
+const repliesTo = (message: Message, canReplyAll: boolean) =>
+  [
+    {
+      id: 'reply',
+      intent: `reply:${message.id}`,
+      label: 'Reply',
+      ariaLabel: `Reply, quoting ${message.fromName}`,
+      Icon: ArrowUUpLeftIcon,
+      weight: 'regular',
+    },
+    ...(canReplyAll
+      ? [
+          {
+            id: 'reply-all',
+            intent: `reply-all:${message.id}`,
+            label: 'Reply all',
+            ariaLabel: `Reply to all, quoting ${message.fromName}`,
+            Icon: ArrowUUpLeftIcon,
+            weight: 'bold',
+          } as const,
+        ]
+      : []),
+    {
+      id: 'forward',
+      intent: `forward:${message.id}`,
+      label: 'Forward',
+      ariaLabel: `Forward the message from ${message.fromName}`,
+      Icon: ArrowUUpRightIcon,
+      weight: 'regular',
+    },
+  ] as const satisfies readonly {
+    id: string;
+    intent: ComposeIntent;
+    label: string;
+    ariaLabel: string;
+    Icon: Icon;
+    weight: 'regular' | 'bold';
+  }[];
+
+/** An earlier message's replies: one icon on its header line, so a long thread is not a column of buttons. */
+const MoreReplies = ({ message, canReplyAll }: { message: Message; canReplyAll: boolean }) => (
+  <Menu.Root>
+    <Tooltip label="Reply or forward">
+      <Menu.Trigger
+        aria-label={`Reply to or forward the message from ${message.fromName}`}
+        className={cn(
+          buttonClass({ variant: 'ghost', size: 'icon' }),
+          'size-11 data-[popup-open]:bg-ink-hover data-[popup-open]:text-paper lg:size-7',
+        )}
+      >
+        <DotsThreeIcon size={15} weight="bold" />
+      </Menu.Trigger>
+    </Tooltip>
+    <Menu.Portal>
+      <Menu.Positioner side="bottom" align="end" sideOffset={4} className="z-30">
+        <Menu.Popup className="min-w-40 border border-rule bg-ink-raised py-1 outline-none">
+          {repliesTo(message, canReplyAll).map(({ id, intent, label, ariaLabel, Icon, weight }) => (
+            <Menu.LinkItem
+              key={id}
+              closeOnClick
+              render={<Link to="." search={withCompose(intent)} aria-label={ariaLabel} />}
+              className="flex h-11 items-center gap-2 px-3 text-base text-paper outline-none data-[highlighted]:bg-ink-hover lg:h-8"
+            >
+              <Icon size={13} weight={weight} />
+              {label}
+            </Menu.LinkItem>
+          ))}
+        </Menu.Popup>
+      </Menu.Positioner>
+    </Menu.Portal>
+  </Menu.Root>
+);
+
+/**
+ * `sm` on a pointer, full 44px on touch. Only the last message carries Reply, Reply all and
+ * Forward in full; every message keeps its own Unsubscribe and an unsent draft its Edit draft.
  */
 const MessageActions = ({
   message,
   thread,
   canReplyAll,
+  isLast,
+  canCompose,
 }: {
   message: Message;
   thread: ThreadState;
   canReplyAll: boolean;
+  isLast: boolean;
+  /** False beside an open composer: nothing here may swap the draft being written for another. */
+  canCompose: boolean;
 }) => {
   // An unsent draft is finished in the composer, not replied to.
   if (message.isDraft === true) {
+    if (!canCompose) return null;
     return (
       <div className="mt-4 flex gap-2">
         <Link
@@ -302,42 +408,33 @@ const MessageActions = ({
       </div>
     );
   }
-  const unsubscribe = unsubscribeActionOf(message, thread);
+  const offered = unsubscribeActionOf(message, thread);
+  // The sender's own page opens in a tab; writing to the sender needs the composer.
+  const unsubscribe = offered?.kind === 'write-draft' && !canCompose ? null : offered;
+  const hasReplies = isLast && canCompose;
+  if (!hasReplies && unsubscribe === null) return null;
   const unsubscribeClass = cn(buttonClass({ variant: 'ghost', size: 'sm' }), 'h-11 lg:h-7');
   return (
     // Both quote the body, so neither is offered until it has arrived.
     <div
       className={cn('mt-4 flex flex-wrap gap-2', message.bodyStatus !== undefined && 'invisible')}
     >
-      <Link
-        to="."
-        search={withCompose(`reply:${message.id}`)}
-        className={cn(buttonClass({ variant: 'secondary', size: 'sm' }), 'h-11 lg:h-7')}
-        aria-label={`Reply, quoting ${message.fromName}`}
-      >
-        <ArrowUUpLeftIcon size={13} />
-        Reply
-      </Link>
-      {canReplyAll && (
-        <Link
-          to="."
-          search={withCompose(`reply-all:${message.id}`)}
-          className={cn(buttonClass({ variant: 'ghost', size: 'sm' }), 'h-11 lg:h-7')}
-          aria-label={`Reply to all, quoting ${message.fromName}`}
-        >
-          <ArrowUUpLeftIcon size={13} weight="bold" />
-          Reply all
-        </Link>
-      )}
-      <Link
-        to="."
-        search={withCompose(`forward:${message.id}`)}
-        className={cn(buttonClass({ variant: 'ghost', size: 'sm' }), 'h-11 lg:h-7')}
-        aria-label={`Forward the message from ${message.fromName}`}
-      >
-        <ArrowUUpRightIcon size={13} />
-        Forward
-      </Link>
+      {hasReplies &&
+        repliesTo(message, canReplyAll).map(({ id, intent, label, ariaLabel, Icon, weight }) => (
+          <Link
+            key={id}
+            to="."
+            search={withCompose(intent)}
+            className={cn(
+              buttonClass({ variant: id === 'reply' ? 'secondary' : 'ghost', size: 'sm' }),
+              'h-11 lg:h-7',
+            )}
+            aria-label={ariaLabel}
+          >
+            <Icon size={13} weight={weight} />
+            {label}
+          </Link>
+        ))}
       {unsubscribe?.kind === 'open-link' && (
         // The sender's page, not ours: nothing about this tab goes with the click.
         <a
@@ -429,7 +526,7 @@ const MessageBody = ({
           fromAddress={message.fromAddress}
           senderCheck={message.senderCheck}
           inlineImagesTruncated={message.inlineImagesTruncated ?? false}
-          fallback={<div className="max-w-[68ch]">{fallback}</div>}
+          fallback={<div className={cn(PROSE_CLASS, 'space-y-3')}>{fallback}</div>}
         />
       );
     }
@@ -457,7 +554,7 @@ export const ThreadReader = ({
     toggleArchive,
     trashThread,
     restoreThread,
-    moveThreads,
+    moveThreadsWithUndo,
     junkFolders,
     markUnread,
     loadBody,
@@ -483,7 +580,25 @@ export const ThreadReader = ({
     };
   // A star, an unread mark and a move all act on server copies, so a conversation with none offers none.
   const canMark = isOnServer(thread);
+  const hasMenu = (index: number) =>
+    index < thread.messages.length - 1 && thread.messages[index]?.isDraft !== true;
   const hasHtml = thread.messages.some(message => message.html !== undefined);
+  const isWide = useMediaQuery('(min-width: 64rem)');
+  // From `lg` an open composer sits beside the reader (a docked reply) or over it, so nothing here
+  // may open a second draft in its place. On a phone the composer covers the reader.
+  const { compose } = useSearch({ from: '__root__' });
+  const canCompose = compose === undefined || !isWide;
+
+  const readingModeSwitch = (
+    <IconSwitch
+      label="Reading mode"
+      options={READING_MODES}
+      value={mode}
+      onChange={setMode}
+      // A 32px box on a phone, its 44px targets reaching past it into the bar's air.
+      cellClassName="relative h-8 w-11 after:absolute after:inset-x-0 after:-inset-y-1.5 lg:size-7 lg:after:hidden"
+    />
+  );
 
   return (
     <article className="flex h-full flex-col bg-ink-sunken">
@@ -542,7 +657,7 @@ export const ThreadReader = ({
                     className="size-11 lg:size-7"
                     onClick={file(
                       (threadId, onRefused) =>
-                        moveThreads([threadId], 'junk', onRefused).has(threadId),
+                        moveThreadsWithUndo([threadId], 'junk', onRefused).has(threadId),
                       JUNK_COPY.notMovedToJunk,
                     )}
                     aria-label={JUNK_COPY.moveToJunk}
@@ -596,6 +711,29 @@ export const ThreadReader = ({
           >
             <XIcon size={15} />
           </Button>
+          {/* Below `lg` this bar is the screen's top bar. In a reader the next thing to do is
+              answer, and the foot's Reply is a whole message away, so the bar's one filled action
+              is Reply to the last message (Compose is one Back away, on the list). It is offered
+              exactly when the foot's is: not for a draft, and inert until the body has arrived. */}
+          <div className="-mr-5 ml-auto flex items-center lg:hidden">
+            {hasHtml && !isWide && readingModeSwitch}
+            {newest.isDraft !== true && (
+              <Tooltip label="Reply">
+                <Link
+                  to="."
+                  search={withCompose(`reply:${newest.id}`)}
+                  aria-label="Reply"
+                  className={cn(
+                    buttonClass({ variant: 'primary', size: 'icon' }),
+                    'm-2 shrink-0',
+                    newest.bodyStatus !== undefined && 'invisible',
+                  )}
+                >
+                  <ArrowUUpLeftIcon size={15} />
+                </Link>
+              </Tooltip>
+            )}
+          </div>
         </div>
 
         <div className="flex items-start px-5 pb-3 lg:gap-x-2 lg:pt-2">
@@ -633,21 +771,10 @@ export const ThreadReader = ({
               </p>
             )}
           </div>
-          {/* How the thread is shown, not something done to it, so it sits with the subject rather
-              than on the bar: level with its first line, which wraps beside it. It appears once a
-              message has an HTML body to switch away from. */}
-          {hasHtml && (
-            <div className="mt-1.5 ml-3 lg:mt-0">
-              <IconSwitch
-                label="Reading mode"
-                options={READING_MODES}
-                value={mode}
-                onChange={setMode}
-                // A 32px box on a phone, its 44px targets reaching past it into the header's air.
-                cellClassName="relative h-8 w-11 after:absolute after:inset-x-0 after:-inset-y-1.5 lg:size-7 lg:after:hidden"
-              />
-            </div>
-          )}
+          {/* How the thread is shown, not something done to it, so it sits with the subject
+              rather than on the bar: level with its first line, which wraps beside it. It appears
+              once a message has an HTML body to switch away from. Below `lg` the bar holds it. */}
+          {hasHtml && isWide && <div className="ml-3">{readingModeSwitch}</div>}
         </div>
       </header>
 
@@ -655,16 +782,34 @@ export const ThreadReader = ({
         {thread.messages.map((message, index) => (
           <div
             key={message.id}
-            className={cn('px-5 pt-4 pb-6', index > 0 && 'border-t border-rule-soft')}
+            className={cn('relative px-5 pt-4 pb-6', index > 0 && 'border-t border-rule-soft')}
           >
             <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
-              <p dir="auto" className="text-base font-medium text-paper">
+              <p
+                dir="auto"
+                className={cn('text-base font-medium text-paper', hasMenu(index) && 'pr-9 lg:pr-0')}
+              >
                 {message.fromName}
                 <span className="ml-2 font-mono text-2xs font-normal text-paper-faint">
                   {message.fromAddress}
                 </span>
               </p>
-              <p className="font-mono text-2xs text-paper-faint">{fullTime(message.at)}</p>
+              <div className="flex items-center gap-2">
+                <p className="font-mono text-2xs text-paper-faint">{fullTime(message.at)}</p>
+                {/* The last message's replies sit under it in full. */}
+                {hasMenu(index) && canCompose && (
+                  // Top right of the message on a phone, where the time has a line of its own; beside
+                  // the time from `lg`. Either way its glyph sits on the content edge.
+                  <div
+                    className={cn(
+                      'absolute top-1 right-1.5 lg:static lg:-my-1 lg:-mr-1.5',
+                      message.bodyStatus !== undefined && 'invisible',
+                    )}
+                  >
+                    <MoreReplies message={message} canReplyAll={canReplyAll} />
+                  </div>
+                )}
+              </div>
             </div>
             {/* A draft has no envelope yet. */}
             {message.to !== undefined && (
@@ -672,15 +817,13 @@ export const ThreadReader = ({
             )}
 
             {/* Body copy is the one place in this app that is READ rather than scanned, so it
-                gets full-strength ink and a measure capped near 68 characters. An HTML body is
-                the sender's own document instead: it gets the width its 600px-grid templates
-                assume, and its type is set inside the frame, not here. */}
+                gets full-strength ink and a measure of about 75 letters. An HTML body is the
+                sender's own document instead: it gets the width its 600px-grid templates assume,
+                and its type is set inside the frame, not here. */}
             <div
               className={cn(
                 'mt-3 space-y-3',
-                message.html !== undefined && mode === 'html'
-                  ? 'max-w-2xl'
-                  : 'max-w-[68ch] text-[13.5px] leading-[1.65] text-paper',
+                message.html !== undefined && mode === 'html' ? 'max-w-2xl' : PROSE_CLASS,
               )}
             >
               <MessageBody
@@ -694,7 +837,13 @@ export const ThreadReader = ({
               <AttachmentList attachments={message.attachments} loadFile={readStoredFile} />
             )}
 
-            <MessageActions message={message} thread={thread} canReplyAll={canReplyAll} />
+            <MessageActions
+              message={message}
+              thread={thread}
+              canReplyAll={canReplyAll}
+              isLast={index === thread.messages.length - 1}
+              canCompose={canCompose}
+            />
           </div>
         ))}
       </div>

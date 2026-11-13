@@ -65,7 +65,7 @@ export const useServerSearch = ({
       }
       const userId = userIdRef.current;
       if (userId === null) {
-        return { ok: false, error: { kind: 'error', detail: "You're signed out" } };
+        return { ok: false, error: { kind: 'error', detail: "You're logged out" } };
       }
       const runOn = bindRunOn();
       // The whole search, for the activity bar: each command is its own task, and a quick one would
@@ -107,7 +107,7 @@ export const useServerSearch = ({
         }
         const userId = userIdRef.current;
         if (userId === null) {
-          return { ok: false, error: { kind: 'error', detail: "You're signed out" } };
+          return { ok: false, error: { kind: 'error', detail: "You're logged out" } };
         }
         const runOn = bindRunOn();
         const [{ readMoreMatches }, { createMailCache }] = await Promise.all([

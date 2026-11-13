@@ -22,22 +22,22 @@ export const PASSKEY_OFFER: Record<
 
 const API_ERROR_MESSAGES: Record<ApiErrorCode | 'NETWORK_ERROR', string> = {
   NETWORK_ERROR: 'The YOZZ API did not answer. Check that it is running and reachable.',
-  UNAUTHORIZED: 'Your sign-in has expired. Request a new link.',
+  UNAUTHORIZED: 'Your login has expired. Request a new link.',
   FORBIDDEN: 'The server refused that request.',
   NOT_FOUND:
-    'This passkey is not set up for your account. Sign in on a device that already works, then add this one from Settings.',
+    'This passkey is not set up for your account. Log in on a device that already works, then add this one from Settings.',
   CONFLICT:
-    'Another tab or device set up your account first. Sign in there instead of setting it up again.',
+    'Another tab or device set up your account first. Log in there instead of setting it up again.',
   BAD_REQUEST: 'The server rejected that request as malformed.',
   PAYLOAD_TOO_LARGE: 'That was too large to store.',
   FILE_TOO_LARGE: 'That file is too large to attach.',
   STORAGE_FULL: 'Your file storage is full.',
   INTERNAL_ERROR: 'The server failed on that request. Try again.',
   INVALID_MODE: 'This account is not in that login method.',
-  SESSION_NOT_FRESH: 'Sign in again to change how you sign in.',
+  SESSION_NOT_FRESH: 'Log in again to change how you log in.',
   WRONG_PASSWORD: 'That is not your current password.',
   ACCOUNT_MISMATCH:
-    'This browser signed in to another account since this page opened, so nothing was changed. Sign in again to go on.',
+    'This browser logged in to another account since this page opened, so nothing was changed. Log in again to go on.',
   UPGRADE_REQUIRED: 'A WebSocket connection is required.',
   RATE_LIMITED: 'Too many requests. Please wait a moment and try again.',
   UPSTREAM_UNREACHABLE: 'Could not reach the upstream mail server. Check the host and port.',

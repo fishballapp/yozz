@@ -28,8 +28,9 @@ export const ConfirmDialog = ({
   /** What the way out is called when it is a decision of its own, such as Skip. */
   cancelLabel?: string;
   /**
-   * `danger` for a destructive question, `primary` for one that merely wants a decision, `ghost`
-   * for one the app advises against, so Confirm is no louder than the way out.
+   * `danger` for a destructive question (a filled danger slab), `primary` for one that merely
+   * wants a decision, `ghost` for one the app advises against, so Confirm is quieter than the way
+   * out.
    */
   confirmVariant?: 'danger' | 'primary' | 'ghost';
   /** False keeps Confirm disabled, and Enter with it, until something in `children` is answered. */
@@ -128,12 +129,12 @@ export const ConfirmDialog = ({
               </AlertDialog.Description>
               {children}
               <div className="mt-5 flex flex-wrap items-center gap-2">
-                <AlertDialog.Close render={<Button variant="ghost" disabled={isBusy} />}>
+                <AlertDialog.Close render={<Button variant="secondary" disabled={isBusy} />}>
                   {cancelLabel}
                 </AlertDialog.Close>
                 <Button
                   type="submit"
-                  variant={confirmVariant}
+                  variant={confirmVariant === 'danger' ? 'dangerFilled' : confirmVariant}
                   disabled={isBusy || !isConfirmEnabled}
                 >
                   {isBusy ? busyLabel : confirmLabel}

@@ -15,12 +15,12 @@ import { cn } from 'cn';
 import type { ReactNode } from 'react';
 import { keepCompose, withCompose } from '../compose/intent';
 import { useMail } from '../store/MailProvider';
-import { JUNK_COPY } from '../threads/junk-copy';
+import { nameOfView } from '../threads/view-name';
 import { buttonClass } from '../ui/Button';
 import { Wordmark } from '../ui/Wordmark';
 
 /**
- * Address-first (PRODUCT.md principle 2), so connecting a mailbox lives in Settings. The Inbox
+ * Address-first (PRODUCT.md principle 2), so connecting an address lives in Settings. The Inbox
  * row's id stays `unified` (DECISIONS.md), and every link uses `keepCompose`.
  */
 
@@ -65,7 +65,7 @@ const UnifiedRow = ({ onNavigate }: { onNavigate?: () => void }) => {
       {isActive && <span className="absolute inset-y-0 left-0 w-0.5 bg-signal" />}
       <MailboxIcon size={16} className={isActive ? 'text-paper' : 'text-paper-faint'} />
       <span className="min-w-0 flex-1 truncate text-[14px] font-medium tracking-[-0.01em]">
-        Inbox
+        {nameOfView('unified')}
       </span>
       {unread > 0 && (
         <span className="shrink-0 bg-signal px-1.5 py-px font-mono text-2xs font-medium text-signal-ink">
@@ -139,7 +139,10 @@ const SectionLabel = ({ children }: { children: ReactNode }) => (
 );
 
 export const AddressRail = ({ onNavigate }: { onNavigate?: () => void }) => {
-  const { mailboxes, threads, isDemo, junkFolders } = useMail();
+  const { mailboxes, identities, areAddressesLoaded, threads, isDemo, junkFolders } = useMail();
+  const sendOnlyCount = identities.length - mailboxes.length;
+  // Not before they load: an account whose addresses are still being read has not none.
+  const hasNoAddress = areAddressesLoaded && identities.length === 0;
   const isSettings = useLocation({ select: location => location.pathname.startsWith('/settings') });
 
   return (
@@ -159,16 +162,29 @@ export const AddressRail = ({ onNavigate }: { onNavigate?: () => void }) => {
       </div>
 
       <div className="px-3 pb-3">
-        <Link
-          to="."
-          search={withCompose('new')}
-          // The mobile sheet is a modal; left open behind the composer it traps focus.
-          onClick={onNavigate}
-          className={cn(buttonClass({ variant: 'primary' }), 'w-full justify-start gap-2')}
-        >
-          <PlusIcon size={14} weight="bold" />
-          Compose
-        </Link>
+        {/* The mobile sheet is a modal; left open behind the composer it traps focus. With no
+            address to send from, the composer is a dead end, so it opens the way to one instead. */}
+        {hasNoAddress ? (
+          <Link
+            to="/settings/new"
+            search={keepCompose}
+            onClick={onNavigate}
+            className={cn(buttonClass({ variant: 'primary' }), 'w-full justify-start gap-2')}
+          >
+            <PlusIcon size={14} weight="bold" />
+            Compose
+          </Link>
+        ) : (
+          <Link
+            to="."
+            search={withCompose('new')}
+            onClick={onNavigate}
+            className={cn(buttonClass({ variant: 'primary' }), 'w-full justify-start gap-2')}
+          >
+            <PlusIcon size={14} weight="bold" />
+            Compose
+          </Link>
+        )}
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto pb-2">
@@ -184,35 +200,61 @@ export const AddressRail = ({ onNavigate }: { onNavigate?: () => void }) => {
             onNavigate={onNavigate}
           />
         ))}
+        {hasNoAddress && (
+          <Link
+            to="/settings/new"
+            search={keepCompose}
+            onClick={onNavigate}
+            className="flex items-center gap-2.5 py-1.5 pr-2.5 pl-3 text-base text-paper-dim transition-colors hover:bg-ink-hover/60 hover:text-paper"
+          >
+            <span aria-hidden className="flex w-4 shrink-0 justify-center text-paper-faint">
+              <PlusIcon size={13} />
+            </span>
+            Connect an address
+          </Link>
+        )}
+        {/* A send-only address has no list to open, so no row: one line says they exist, and
+            reads as the link it is. */}
+        {sendOnlyCount > 0 && (
+          <Link
+            to="/settings"
+            search={keepCompose}
+            onClick={onNavigate}
+            aria-label={`${sendOnlyCount} send-only ${sendOnlyCount === 1 ? 'address' : 'addresses'}, manage in Settings`}
+            className="flex min-h-8 items-center pr-2.5 pl-3 font-mono text-2xs text-paper-faint underline decoration-rule underline-offset-3 transition-colors hover:text-paper hover:decoration-paper"
+          >
+            +{sendOnlyCount} send-only
+          </Link>
+        )}
         <SectionLabel>Views</SectionLabel>
         <RailRow
           view="starred"
           mark={<StarIcon size={13} />}
-          label="Starred"
+          label={nameOfView('starred')}
           onNavigate={onNavigate}
         />
         <RailRow
           view="drafts"
           mark={<NotePencilIcon size={13} />}
-          label="Drafts"
+          label={nameOfView('drafts')}
           onNavigate={onNavigate}
         />
         <RailRow
           view="sent"
           mark={<PaperPlaneTiltIcon size={13} />}
-          label="Sent"
+          label={nameOfView('sent')}
           onNavigate={onNavigate}
         />
         <RailRow
           view="archive"
           mark={<ArchiveIcon size={13} />}
-          label="Archive"
+          label={nameOfView('archive')}
           onNavigate={onNavigate}
         />
         <RailRow
           view="trash"
           mark={<TrashIcon size={13} />}
-          label="Trash"
+          label={nameOfView('trash')}
           onNavigate={onNavigate}
         />
         {/* Only where a server lists one: YOZZ never creates it. No count: spam asks nothing of you. */}
@@ -220,7 +262,7 @@ export const AddressRail = ({ onNavigate }: { onNavigate?: () => void }) => {
           <RailRow
             view="junk"
             mark={<WarningOctagonIcon size={13} />}
-            label={JUNK_COPY.view}
+            label={nameOfView('junk')}
             onNavigate={onNavigate}
           />
         )}

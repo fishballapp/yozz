@@ -61,7 +61,7 @@ const VaultActionButton = ({
 };
 
 /**
- * "Always from <address>": one click, offered only on a verified message. The trust covers that
+ * "Always for this sender": one click, offered only on a verified message. The trust covers that
  * address's verified mail and nothing else.
  */
 const AlwaysFromButton = ({
@@ -76,7 +76,7 @@ const AlwaysFromButton = ({
   const remoteImages = useRemoteImages();
   return (
     <VaultActionButton
-      label={<span className="truncate">Always from {address}</span>}
+      label="Always for this sender"
       busyLabel="Saving…"
       failure="Sender not saved"
       variant={variant}
@@ -110,7 +110,7 @@ export const HtmlBody = ({
   messageId: string;
   fromName: string;
   fromAddress: string;
-  /** "Always from" is offered only when this is `verified`; undefined means not known yet, `checking` that it is on its way. */
+  /** "Always for this sender" is offered only when this is `verified`; undefined means not known yet, `checking` that it is on its way. */
   senderCheck: SenderCheck | undefined;
   inlineImagesTruncated: boolean;
   fallback: ReactNode;
@@ -185,9 +185,12 @@ export const HtmlBody = ({
       {/* Nothing is offered until the remembered answers are read and a trusted sender's check is in,
           or the bar flashes on a message about to load by itself. */}
       {remoteImages.isReady && !isAwaitingTrust && hasRemoteImages && !isRemoteAllowed && (
-        <div className="flex min-h-11 flex-wrap items-center gap-x-2 lg:min-h-7">
-          {/* Pulled out by its padding as a pair, so whichever button starts a line on a phone
-              lines up with the text under it. */}
+        // One ruled row: what loading costs first, then the two ways to say yes. The buttons'
+        // padding pulls them out as a pair, so whichever starts a line lines up with the sentence.
+        <div className="flex flex-wrap items-center gap-x-3 border border-rule-soft px-3 py-1">
+          <p className="py-2 text-base text-paper-dim">
+            The sender may learn you opened this message.
+          </p>
           <div className="-ml-2.5 flex min-w-0 flex-wrap items-center">
             <Button variant="ghost" size="sm" onClick={allowRemoteImages} className="h-11 lg:h-7">
               <ImageIcon size={13} />
@@ -195,9 +198,6 @@ export const HtmlBody = ({
             </Button>
             {isVerified && <AlwaysFromButton address={fromAddress} onTrusted={allowRemoteImages} />}
           </div>
-          <span className="font-mono text-2xs text-paper-faint">
-            The sender may learn you opened this message.
-          </span>
         </div>
       )}
       {/* Loaded by hand, so "always" is still on offer, from where the bar was. */}
@@ -213,7 +213,7 @@ export const HtmlBody = ({
               variant="secondary"
               onTrusted={allowRemoteImages}
             />
-            <span className="font-mono text-2xs text-paper-faint">Just this message.</span>
+            <span className="text-2xs text-paper-faint">Just this message.</span>
           </div>
         )}
       {hasRemoteImages && isTrustedSender && (
@@ -247,10 +247,10 @@ export const HtmlBody = ({
         </div>
       )}
       {remoteImagesTruncated && isRemoteAllowed && (
-        <p className="font-mono text-2xs text-paper-faint">Some remote images were blocked.</p>
+        <p className="text-2xs text-paper-faint">Some remote images were blocked.</p>
       )}
       {inlineImagesTruncated && (
-        <p className="font-mono text-2xs text-paper-faint">Some inline images were blocked.</p>
+        <p className="text-2xs text-paper-faint">Some inline images were blocked.</p>
       )}
       <ConfirmDialog
         open={isAsking}

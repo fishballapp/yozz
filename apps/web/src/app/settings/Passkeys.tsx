@@ -83,7 +83,7 @@ export const PasskeysSection = ({
   return (
     <PageSection
       label="Passkeys"
-      note="Each passkey you add can sign you in on its own. Add one from a device before you need it."
+      note="Each passkey you add can log you in on its own. Add one from a device before you need it."
       error={openRemoval !== null || openNaming !== null ? null : (error ?? listError)}
     >
       {passkeys !== null && (
@@ -163,7 +163,7 @@ export const PasskeysSection = ({
         </Button>
         {isAdded && (
           <p role="status" className="text-base text-paper-dim">
-            Added. That passkey can now sign you in.
+            Added. That passkey can now log you in.
           </p>
         )}
       </div>
@@ -224,7 +224,7 @@ export const PasskeysSection = ({
             if (!isOpen) setRemoval(null);
           }}
           title="Remove this passkey?"
-          description={`The device or password manager holding the passkey added ${fullDate(openRemoval.addedAt)} can no longer sign in to ${session.email}, and every other device is signed out. Your other passkeys still work.`}
+          description={`The device or password manager holding the passkey added ${fullDate(openRemoval.addedAt)} can no longer log in to ${session.email}, and every other device is signed out. Your other passkeys still work.`}
           confirmLabel="Remove passkey"
           busyLabel="Removing…"
           onConfirm={async () => {

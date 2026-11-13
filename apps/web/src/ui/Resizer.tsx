@@ -17,7 +17,7 @@ export const RAIL_WIDTH = { min: 176, max: 320, base: 224 };
  * until the reader is down to its own floor: `max` leaves a 2560px screen's reader its `20rem`,
  * and on anything narrower CSS stops the drag there first.
  */
-export const LIST_WIDTH = { min: 320, max: 2048, wide: 528, base: 432 };
+export const LIST_WIDTH = { min: 320, max: 2048, wide: 608, base: 432 };
 
 /** The stored widths, read by the panes and by the startup skeleton that stands in for them. */
 export const useRailWidth = () =>

@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act } from 'react';
+import { act, type ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { approveCliLogin, parseCliApproveQuery } from '../vault/cli-keys';
@@ -16,6 +16,11 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('@tanstack/react-router', () => ({
   Navigate: ({ to }: { to: string }) => <a href={to}>redirect</a>,
+  Link: ({ to, className, children }: { to: string; className?: string; children: ReactNode }) => (
+    <a href={to} className={className}>
+      {children}
+    </a>
+  ),
 }));
 vi.mock('../vault/session', () => ({
   useVault: () => ({ session: mocks.session, isResuming: false }),
@@ -117,14 +122,14 @@ describe('CliApprove', () => {
     expect(monoCommands()).toHaveLength(1);
   });
 
-  it('says the change is approving a CLI when Approve asked for a fresh sign-in, then approves', async () => {
+  it('says the change is approving a CLI when Approve asked for a fresh login, then approves', async () => {
     vi.mocked(approveCliLogin)
       .mockRejectedValueOnce('not fresh')
       .mockResolvedValueOnce({ outcome: 'ended' });
     await mount();
     await click('Approve');
-    expect(document.body.textContent).toContain('Approving a CLI needs a fresh sign-in');
-    expect(document.body.textContent).not.toContain('Changing how you sign in');
+    expect(document.body.textContent).toContain('Approving a CLI needs a fresh login');
+    expect(document.body.textContent).not.toContain('Changing how you log in');
 
     await click('Confirm');
     expect(approveCliLogin).toHaveBeenCalledTimes(2);

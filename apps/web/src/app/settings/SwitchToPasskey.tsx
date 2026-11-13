@@ -21,15 +21,15 @@ export const SwitchToPasskey = () => {
       <SettingsPane
         title="Switch to a passkey"
         subline={session.email}
-        back={{ label: 'Sign-in', to: '/settings/account' }}
+        back={{ label: 'Account', to: '/settings/account' }}
       >
-        <PageSection label="Passkey" note="You already sign in with a passkey.">
+        <PageSection label="Passkey" note="You already log in with a passkey.">
           <Link
             to="/settings/account"
             search={previous => previous}
             className={buttonClass({ variant: 'secondary' })}
           >
-            Back to sign-in
+            Back to Account
           </Link>
         </PageSection>
       </SettingsPane>
@@ -42,11 +42,11 @@ export const SwitchToPasskey = () => {
     <SettingsPane
       title="Switch to a passkey"
       subline={session.email}
-      back={{ label: 'Sign-in', to: '/settings/account' }}
+      back={{ label: 'Account', to: '/settings/account' }}
     >
       <PageSection
         label="Passkey"
-        note="Your password stops working for signing in, and a passkey takes its place. Your addresses stay as they are."
+        note="Your password stops working for logging in, and a passkey takes its place. Your addresses stay as they are."
         error={errors.switch}
       >
         {canOffer ? (

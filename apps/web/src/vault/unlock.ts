@@ -172,7 +172,7 @@ export const loginWithPassword = async ({
 
   const signinRes = await authSignInPassword(email, keys.authValue);
   if (signinRes.error) {
-    throw new UnlockError(signinRes.error.message || 'Password sign-in failed');
+    throw new UnlockError(signinRes.error.message || 'Logging in with the password failed.');
   }
   const account = accountOf(signinRes.data.user);
 
@@ -202,7 +202,7 @@ const refuseIfAlreadyEnrolled = async (api: AccountVaultApi): Promise<void> => {
   const status = await api.getUnlockStatus();
   if (status.mode !== null) {
     throw new UnlockError(
-      `This account already has a ${status.mode} sign-in. Switch modes to keep it, or start again first — creating one now would leave every saved record unreadable.`,
+      `This account already logs in with a ${status.mode}. Switch modes to keep it, or start again first — creating one now would leave every saved record unreadable.`,
     );
   }
 };
@@ -348,7 +348,7 @@ export const loginWithPasskey = async ({
 } = {}): Promise<UnlockedVaultSession> => {
   const authRes = await authSignInPasskey(getPrfEvalInput());
   if (authRes.error || !authRes.data) {
-    throw new PasskeyPrfError(authRes.error?.message || 'Passkey sign-in failed');
+    throw new PasskeyPrfError(authRes.error?.message || 'Logging in with the passkey failed.');
   }
 
   const account = accountOf(authRes.data.user);
@@ -533,7 +533,7 @@ export const removePasskey = async ({
   } catch (error) {
     if (error instanceof VaultApiError && error.code === 'CONFLICT') {
       throw new UnlockError(
-        'This is the only passkey that can sign in. Add another before you remove it.',
+        'This is the only passkey that can log in. Add another before you remove it.',
       );
     }
     if (error instanceof VaultApiError && error.code === 'NOT_FOUND') {
@@ -668,7 +668,7 @@ const signInAgain = async (
   if (mode === 'passkey') {
     const res = await authSignInPasskey();
     if (res.error || !res.data) {
-      throw new PasskeyPrfError(res.error?.message || 'Passkey sign-in failed');
+      throw new PasskeyPrfError(res.error?.message || 'Logging in with the passkey failed.');
     }
     return accountOf(res.data.user);
   }
@@ -695,7 +695,7 @@ export const confirmIdentity = async ({
 }): Promise<void> => {
   const { userId } = await signInAgain(currentSession, password);
   if (userId !== currentSession.userId) {
-    throw new UnlockError('That signed in to a different account.');
+    throw new UnlockError('That logged in to a different account.');
   }
 };
 

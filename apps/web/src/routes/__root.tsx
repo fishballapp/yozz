@@ -6,6 +6,7 @@ import { composeIntentSchema } from '../compose/intent';
 import { MailProvider } from '../store/MailProvider';
 import { RemoteImagesProvider } from '../threads/remote-images-context';
 import { Toasts } from '../ui/Toast';
+import { TooltipProvider } from '../ui/Tooltip';
 import { VaultProvider } from '../vault/session';
 
 /**
@@ -26,9 +27,11 @@ function RootLayout() {
     <VaultProvider>
       <MailProvider>
         <RemoteImagesProvider>
-          <Outlet />
-          <Compose />
-          <Toasts />
+          <TooltipProvider>
+            <Outlet />
+            <Compose />
+            <Toasts />
+          </TooltipProvider>
         </RemoteImagesProvider>
       </MailProvider>
     </VaultProvider>

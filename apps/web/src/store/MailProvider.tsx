@@ -86,6 +86,7 @@ import { isDemo } from '../ui/chrome';
 import { toast } from '../ui/Toast';
 import { vaultErrorMessage } from '../vault/screen-policy';
 import { useVault } from '../vault/session';
+import { reportMoved } from './move-undo';
 import { type Composer, type ComposerShared, useComposerStore } from './use-composer';
 import { useServerSearch } from './use-server-search';
 
@@ -102,6 +103,8 @@ type OnRefused = (reason: string) => void;
 type MailContextValue = ComposerShared & {
   mailboxes: readonly InboundAddress[];
   identities: readonly AddressRecord[];
+  /** Whether the vault has been read for them: until then `identities` is empty without meaning none. */
+  areAddressesLoaded: boolean;
   /** Every address you own, inbound or send-only. */
   ownedAddresses: readonly string[];
   threads: readonly ThreadState[];
@@ -142,6 +145,9 @@ type MailContextValue = ComposerShared & {
   toggleStar: (threadId: string) => boolean;
   /** Fetches a body, joining a fetch in flight, and resolves with the outcome itself. */
   loadBody: (threadId: string, messageId: string) => Promise<BodyOutcome>;
+  /**
+   * These three are a person's own moves: each says what it did in a toast that offers Undo.
+   */
   toggleArchive: (threadId: string, onRefused?: OnRefused) => boolean;
   /** Moves the whole conversation to Trash, own sent copies included. */
   trashThread: (threadId: string, onRefused?: OnRefused) => boolean;
@@ -154,6 +160,12 @@ type MailContextValue = ComposerShared & {
    * folder however many threads, answering the ids they took (a flag already set counts).
    */
   moveThreads: (
+    threadIds: readonly string[],
+    to: MoveTarget,
+    onRefused?: OnRefused,
+  ) => ReadonlySet<string>;
+  /** `moveThreads` as a person's own move: it says what it did in a toast that offers Undo. */
+  moveThreadsWithUndo: (
     threadIds: readonly string[],
     to: MoveTarget,
     onRefused?: OnRefused,
@@ -179,7 +191,7 @@ const ComposerContext = createContext<Composer | null>(null);
 /** What a runner answers once its session has ended, or before the session's manager exists. */
 const VAULT_LOCKED = {
   ok: false,
-  error: { kind: 'error', detail: "You're signed out" },
+  error: { kind: 'error', detail: "You're logged out" },
 } as const satisfies Result<never, MailConnectionFailure>;
 
 /** What a task answers when the record it was made for has been edited or removed since. */
@@ -257,6 +269,7 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
 
   const [records, setRecords] = useState<readonly AddressRecord[]>([]);
   const [recordsError, setRecordsError] = useState<string | null>(null);
+  const [areAddressesLoaded, setAreAddressesLoaded] = useState(false);
   const [demoThreads, setDemoThreads] = useState<readonly ThreadState[]>([]);
   const [demoWindows, setDemoWindows] = useState<readonly FolderWindow[]>([]);
   /** What the server last said, per mailbox. Never patched: `ops` is laid over it at render (`lib/reconcile.ts`). */
@@ -428,7 +441,7 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
     async (record: AddressRecord) => {
       if (isDemo()) return;
       // Unreachable while locked; refuse rather than hold an address that looks stored and is not.
-      if (session === null) throw new Error("You're signed out; nothing can be stored.");
+      if (session === null) throw new Error("You're logged out; nothing can be stored.");
       await session.store.put({
         type: ADDRESS_RECORD_TYPE,
         naturalKey: record.address,
@@ -444,7 +457,7 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
       const generation = sessionGeneration.current;
       await removalsRef.current.get(record.address);
       if (generation !== sessionGeneration.current) {
-        throw new Error('You were signed out; nothing was stored.');
+        throw new Error('You were logged out; nothing was stored.');
       }
       await storeAddress(record);
       // Stored in the vault the call began in, whose next unlock lists it. Shown in the session
@@ -466,7 +479,7 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
   const removeAddress = useCallback(
     async (address: string) => {
       if (!isDemo()) {
-        if (session === null) throw new Error("You're signed out; nothing can be removed.");
+        if (session === null) throw new Error("You're logged out; nothing can be removed.");
         const generation = sessionGeneration.current;
         const { store, userId } = session;
         const removal = Promise.withResolvers<void>();
@@ -936,6 +949,7 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
       // lets Vite drop the branch.
       void import('../dev/fixtures').then(({ DEMO_ADDRESSES, DEMO_WINDOWS, THREADS }) => {
         setRecords(DEMO_ADDRESSES);
+        setAreAddressesLoaded(true);
         setDemoThreads(THREADS);
         setDemoWindows(DEMO_WINDOWS);
       });
@@ -996,6 +1010,7 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
         // Read by the runner, which would otherwise refuse the resumed work this load starts.
         mailboxesRef.current = parsed.filter(isInbound);
         setRecords(parsed);
+        setAreAddressesLoaded(true);
         await load({ store, files }, parsed, () => cancelled);
       } catch (err) {
         if (!cancelled) setRecordsError(vaultErrorMessage(err));
@@ -1027,6 +1042,7 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
         await clearMailCache(userId).catch(() => {});
       })();
       setRecords([]);
+      setAreAddressesLoaded(false);
       setRecordsError(null);
       setBaseByMailbox({});
       search.stop();
@@ -1710,32 +1726,52 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
     [runThreadOps],
   );
 
+  // Undo is pressed seconds after the move, and must move the threads as they are by then.
+  const moveThreadsRef = useRef(moveThreads);
+  moveThreadsRef.current = moveThreads;
+
+  const moveThreadsWithUndo = useCallback(
+    (threadIds: readonly string[], to: MoveTarget, onRefused?: OnRefused) => {
+      const taken = moveThreads(threadIds, to, onRefused);
+      reportMoved(
+        threads.filter(thread => taken.has(thread.id)),
+        to,
+        // Flushed, so a way back in two steps moves in the second what the first brought back.
+        (ids, step, onUndoRefused) =>
+          flushSync(() => moveThreadsRef.current(ids, step, onUndoRefused)),
+      );
+      return taken;
+    },
+    [moveThreads, threads],
+  );
+
   const toggleArchive = useCallback(
     (threadId: string, onRefused?: OnRefused) => {
       const thread = threads.find(t => t.id === threadId);
       if (thread === undefined) return false;
       const to = isArchived(thread) ? 'inbox' : 'archive';
-      return moveThreads([threadId], to, onRefused).has(threadId);
+      return moveThreadsWithUndo([threadId], to, onRefused).has(threadId);
     },
-    [moveThreads, threads],
+    [moveThreadsWithUndo, threads],
   );
 
   const trashThread = useCallback(
     (threadId: string, onRefused?: OnRefused) =>
-      moveThreads([threadId], 'trash', onRefused).has(threadId),
-    [moveThreads],
+      moveThreadsWithUndo([threadId], 'trash', onRefused).has(threadId),
+    [moveThreadsWithUndo],
   );
 
   const restoreThread = useCallback(
     (threadId: string, onRefused?: OnRefused) =>
-      moveThreads([threadId], 'inbox', onRefused).has(threadId),
-    [moveThreads],
+      moveThreadsWithUndo([threadId], 'inbox', onRefused).has(threadId),
+    [moveThreadsWithUndo],
   );
 
   const value = useMemo<MailContextValue>(
     () => ({
       mailboxes,
       identities,
+      areAddressesLoaded,
       ownedAddresses,
       threads,
       ...shared,
@@ -1767,11 +1803,13 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
       restoreThread,
       junkFolders,
       moveThreads,
+      moveThreadsWithUndo,
       flagThreads,
     }),
     [
       mailboxes,
       identities,
+      areAddressesLoaded,
       ownedAddresses,
       threads,
       demo,
@@ -1802,6 +1840,7 @@ export const MailProvider = ({ children }: { children: ReactNode }) => {
       restoreThread,
       junkFolders,
       moveThreads,
+      moveThreadsWithUndo,
       flagThreads,
       shared,
     ],

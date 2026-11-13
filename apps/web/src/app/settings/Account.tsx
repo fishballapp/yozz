@@ -1,10 +1,11 @@
 import { Link, useNavigate } from '@tanstack/react-router';
 import type { RecordStore } from '@yozz.app/mail/vault/record-store';
+import { cn } from 'cn';
 import { useState } from 'react';
 import { Button, buttonClass } from '../../ui/Button';
 import { ConfirmDialog } from '../../ui/ConfirmDialog';
 import { FieldRow, Input } from '../../ui/Field';
-import { PageSection } from '../../ui/PageSection';
+import { PageSection, proseClass } from '../../ui/PageSection';
 import { getApiBaseUrl, isApiConfigured } from '../../vault/api-base-url';
 import { signOut } from '../../vault/auth-client';
 import { useVault } from '../../vault/session';
@@ -22,7 +23,7 @@ const DELETE_WORD = 'DELETE';
 
 /** What **Confirm it's you** says when deleting the account asked for it. */
 const DELETE_FRESH_SIGN_IN =
-  'You signed in more than a day ago. Deleting your account needs a fresh sign-in, so a session someone else got hold of cannot do it. It is deleted right after.';
+  'You logged in more than a day ago. Deleting your account needs a fresh login, so a session someone else got hold of cannot do it. It is deleted right after.';
 
 /** The notice a change leaves behind, read from the URL the change returns to. */
 export type SignInNotice = 'switched' | 'changed';
@@ -46,11 +47,11 @@ export const Account = ({ notice }: { notice?: SignInNotice }) => {
 
   if (!isApiConfigured()) {
     return (
-      <SettingsPane title="Sign-in">
+      <SettingsPane title="Account">
         <div className="border-y border-rule bg-ink-raised px-4 py-3.5">
           <p className="label-rule">No backend configured</p>
-          <p className="mt-2 max-w-xl text-base leading-relaxed text-paper-dim">
-            The YOZZ API worker is needed to sign in, and no address for it was supplied at build
+          <p className={cn('mt-2 max-w-xl text-paper-dim', proseClass)}>
+            The YOZZ API worker is needed to log in, and no address for it was supplied at build
             time. Set <span className="font-mono text-2xs text-paper">VITE_API_URL</span> before
             starting the app. Nothing on this screen will work until then.
           </p>
@@ -62,10 +63,10 @@ export const Account = ({ notice }: { notice?: SignInNotice }) => {
 
   if (session === null) {
     return (
-      <SettingsPane title="Sign-in">
+      <SettingsPane title="Account">
         <PageSection
-          label="Not signed in"
-          note="Your addresses and passwords are encrypted, and only you can open them. Your existing mail provider stays as it is. This device stays signed in until you sign out."
+          label="Not logged in"
+          note="Your addresses and passwords are encrypted, and only you can open them. Your existing mail provider stays as it is. This device stays logged in until you log out."
         >
           <div className="flex flex-wrap items-center gap-2">
             <Link
@@ -93,10 +94,10 @@ export const Account = ({ notice }: { notice?: SignInNotice }) => {
   const typed = openDeletion?.typed ?? '';
 
   return (
-    <SettingsPane title="Sign-in" subline={session.email}>
-      <PageSection label="Method">
+    <SettingsPane title="Account" subline={session.email}>
+      <PageSection label="Log in with">
         <p className="text-base text-paper">
-          You sign in with a {session.mode === 'passkey' ? 'passkey' : 'password'}.
+          You log in with a {session.mode === 'passkey' ? 'passkey' : 'password'}.
         </p>
         {notice !== undefined && (
           <p role="status" aria-live="polite" className="mt-1.5 text-base text-paper-dim">
@@ -124,7 +125,7 @@ export const Account = ({ notice }: { notice?: SignInNotice }) => {
           )}
           {session.mode === 'passkey' && (
             <Link
-              to="/settings/account/password"
+              to="/settings/account/switch-to-password"
               search={previous => previous}
               className={buttonClass({ variant: 'secondary' })}
             >
@@ -150,13 +151,12 @@ export const Account = ({ notice }: { notice?: SignInNotice }) => {
       <CliKeysSection session={session} isBusy={busy !== null} error={errors.cliKeys} run={run} />
 
       <PageSection
-        label="Session"
-        note="Signing out keeps your data as it is. Sign in again to open it."
+        label="This device"
+        note="Logging out keeps your data as it is. Log in again to open it."
         error={errors.session}
       >
         <Button
-          variant="ghost"
-          className="-ml-3"
+          variant="secondary"
           disabled={busy !== null}
           onClick={() =>
             void run('session', async isCurrent => {
@@ -164,7 +164,7 @@ export const Account = ({ notice }: { notice?: SignInNotice }) => {
                 // Better Auth reports a refused sign-out as `{ error }`; this device is locked either way.
                 const res = await signOut(session.userId);
                 if (!isCurrent()) return;
-                if (res.error) throw new Error(res.error.message || 'Signing out failed.');
+                if (res.error) throw new Error(res.error.message || 'Logging out failed.');
                 void navigate({ to: '/login', search: previous => previous });
               } finally {
                 // The session after this one is not this button's to lock.
@@ -173,7 +173,7 @@ export const Account = ({ notice }: { notice?: SignInNotice }) => {
             })
           }
         >
-          {busy === 'session' ? 'Signing out…' : 'Sign out'}
+          {busy === 'session' ? 'Logging out…' : 'Log out'}
         </Button>
       </PageSection>
 
@@ -184,7 +184,6 @@ export const Account = ({ notice }: { notice?: SignInNotice }) => {
       >
         <Button
           variant="danger"
-          className="-ml-3"
           disabled={busy !== null}
           onClick={() => {
             setDeletion({ store: session.store, typed: '' });

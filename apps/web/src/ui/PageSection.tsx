@@ -1,4 +1,11 @@
+import { cn } from 'cn';
 import type { ReactNode } from 'react';
+
+/**
+ * Sentences a person reads before deciding something (the auth screens, a settings section's note):
+ * 15px on 24px at every width, the reader's body size. Controls and lists stay at `text-base`.
+ */
+export const proseClass = 'text-[15px] leading-6';
 
 /**
  * A labelled block of a settings pane, under the pane's own `h2`. What went wrong in a section is
@@ -29,9 +36,7 @@ export const PageSection = ({
       {/* Centred on the label and flush with the rule's end; its own padding stays a hit area. */}
       {action !== undefined && <div className="-my-1.5 -mr-2.5">{action}</div>}
     </div>
-    {note !== undefined && (
-      <p className="mt-3 max-w-xl text-base leading-relaxed text-paper-dim">{note}</p>
-    )}
+    {note !== undefined && <p className={cn('mt-3 max-w-xl text-paper-dim', proseClass)}>{note}</p>}
     <div className="mt-3">{children}</div>
     {error !== undefined && error !== null && (
       <p role="alert" className="mt-3 max-w-xl text-base text-danger">

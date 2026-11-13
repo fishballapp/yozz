@@ -1,10 +1,10 @@
-import { Navigate } from '@tanstack/react-router';
+import { Link, Navigate } from '@tanstack/react-router';
 import { pairingCode } from '@yozz.app/vault';
 import type { CliApproveQuery } from '@yozz.app/vault-contract';
+import { cn } from 'cn';
 import { type ReactNode, useEffect, useState } from 'react';
-import { Button } from '../ui/Button';
-import { Definition } from '../ui/PageSection';
-import { AuthColumn } from '../vault/AuthColumn';
+import { Button, buttonClass } from '../ui/Button';
+import { AuthColumn, authActionClass, authHeadingClass, authProseClass } from '../vault/AuthColumn';
 import { approveCliLogin, cliCallbackUrl, parseCliApproveQuery } from '../vault/cli-keys';
 import { useVault } from '../vault/session';
 import { useSignInChange } from './settings/SignInChange';
@@ -19,6 +19,7 @@ const COPY = {
       and open the link it prints.
     </>
   ),
+  openApp: 'Open YOZZ',
   title: 'Approve a command-line client',
   description: (command: ReactNode) => <>{command} is asking to open your mail from a terminal.</>,
   codeLabel: 'Pairing code',
@@ -28,7 +29,7 @@ const COPY = {
   account: 'Account',
   grantsLabel: 'What approving allows',
   grantsLead: 'This computer can read, triage, draft and send your mail through YOZZ',
-  grantsUntil: ' until you revoke its key in Settings → Sign-in.',
+  grantsUntil: ' until you revoke its key in Settings → Account.',
   grantsCaveat: 'Revoking stops it from then on. It cannot take back what it has already read.',
   approve: 'Approve',
   approving: 'Approving…',
@@ -36,7 +37,7 @@ const COPY = {
   approved: 'Approved. Your terminal takes it from here.',
   denied: 'Denied. Your terminal has been told.',
   freshSignIn:
-    'You signed in more than a day ago. Approving a CLI needs a fresh sign-in, so a session someone else got hold of cannot do it. Your approval goes through right after.',
+    'You logged in more than a day ago. Approving a CLI needs a fresh login, so a session someone else got hold of cannot do it. Your approval goes through right after.',
 } as const;
 
 const COMMAND = <span className="font-mono text-paper">yozz login</span>;
@@ -52,7 +53,16 @@ export const CliApprove = ({ search }: { search: string }) => {
   if (query === null) {
     return (
       <AuthColumn title={COPY.invalidTitle}>
-        <p className="text-base leading-relaxed text-paper-dim">{COPY.invalidBody(COMMAND)}</p>
+        <p className={authProseClass}>{COPY.invalidBody(COMMAND)}</p>
+        {/* The CLI's query means nothing to the app, so none of it is carried over. */}
+        <Link
+          to="/m/$view"
+          params={{ view: 'unified' }}
+          search={{}}
+          className={cn(buttonClass({ variant: 'secondary' }), 'mt-6', authActionClass)}
+        >
+          {COPY.openApp}
+        </Link>
       </AuthColumn>
     );
   }
@@ -62,6 +72,19 @@ export const CliApprove = ({ search }: { search: string }) => {
   }
   return <Approval query={query} />;
 };
+
+/**
+ * `Definition` with a value that is never cut: this page asks the person to check these two, so a
+ * long account or computer name wraps, at any character, and on a phone sits under its label.
+ */
+const CheckedValue = ({ term, children }: { term: string; children: ReactNode }) => (
+  <div className="flex flex-col gap-1 border-b border-rule-soft py-2.5 sm:flex-row sm:items-baseline sm:gap-4">
+    <dt className="label-rule shrink-0 sm:w-24">{term}</dt>
+    <dd className="min-w-0 flex-1 font-mono text-2xs text-paper [overflow-wrap:anywhere]">
+      {children}
+    </dd>
+  </div>
+);
 
 const Approval = ({ query }: { query: CliApproveQuery }) => {
   const { session } = useVault();
@@ -77,21 +100,21 @@ const Approval = ({ query }: { query: CliApproveQuery }) => {
   return (
     <AuthColumn title={COPY.title} description={COPY.description(COMMAND)}>
       <section>
-        <h2 className="label-rule">{COPY.codeLabel}</h2>
+        <h2 className={authHeadingClass}>{COPY.codeLabel}</h2>
         <p className="mt-3 font-mono text-[1.5rem] leading-none tracking-[0.12em] text-paper">
           {code ?? ' '}
         </p>
-        <p className="mt-3 text-base leading-relaxed text-paper-dim">{COPY.codeNote}</p>
+        <p className={cn('mt-3', authProseClass)}>{COPY.codeNote}</p>
       </section>
 
       <dl className="mt-6">
-        <Definition term={COPY.computer}>{query.name}</Definition>
-        <Definition term={COPY.account}>{session.email}</Definition>
+        <CheckedValue term={COPY.computer}>{query.name}</CheckedValue>
+        <CheckedValue term={COPY.account}>{session.email}</CheckedValue>
       </dl>
 
       <div className="mt-6 border-y border-rule bg-ink-raised px-4 py-3.5">
         <p className="label-rule">{COPY.grantsLabel}</p>
-        <p className="mt-2 text-base leading-relaxed text-paper-dim">
+        <p className={cn('mt-2', authProseClass)}>
           <span className="text-paper">{COPY.grantsLead}</span>
           {COPY.grantsUntil} {COPY.grantsCaveat}
         </p>
@@ -100,6 +123,7 @@ const Approval = ({ query }: { query: CliApproveQuery }) => {
       <div className="mt-6 flex flex-wrap items-center gap-2">
         <Button
           variant="primary"
+          className={authActionClass}
           disabled={isSettled || code === null}
           onClick={() =>
             void run('approve', async isCurrent => {
@@ -112,8 +136,10 @@ const Approval = ({ query }: { query: CliApproveQuery }) => {
         >
           {busy === 'approve' ? COPY.approving : COPY.approve}
         </Button>
+        {/* A slab like Approve, so on a phone it is a full-width button under it, not a stray word. */}
         <Button
-          variant="ghost"
+          variant="secondary"
+          className={authActionClass}
           disabled={isSettled}
           onClick={() => {
             setAnswer('denied');

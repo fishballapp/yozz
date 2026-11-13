@@ -7,7 +7,7 @@ import { keepCompose } from '../../compose/intent';
 import { useMail } from '../../store/MailProvider';
 import { Button, buttonClass } from '../../ui/Button';
 import { ConfirmDialog } from '../../ui/ConfirmDialog';
-import { FieldRow, Input } from '../../ui/Field';
+import { FieldRow, Input, PasswordInput } from '../../ui/Field';
 import { Definition, PageSection } from '../../ui/PageSection';
 import { SendOnlyTag } from '../../ui/SendOnlyTag';
 import { vaultErrorMessage } from '../../vault/screen-policy';
@@ -112,6 +112,7 @@ const DisplayNameSection = ({ record }: { record: AddressRecord }) => {
       >
         <div className="flex items-center gap-3">
           <Input
+            ground="sunken"
             aria-labelledby="address-display-name"
             value={draft}
             onChange={event => setDraft(event.target.value)}
@@ -345,6 +346,7 @@ const ServersSection = ({ record }: { record: AddressRecord }) => {
             {hasOneUsername ? (
               <FieldRow label="Username" htmlFor="address-username">
                 <Input
+                  ground="sunken"
                   id="address-username"
                   required
                   autoComplete="username"
@@ -360,6 +362,7 @@ const ServersSection = ({ record }: { record: AddressRecord }) => {
               <>
                 <FieldRow label="IMAP username" htmlFor="address-imap-username">
                   <Input
+                    ground="sunken"
                     id="address-imap-username"
                     required
                     autoComplete="username"
@@ -370,6 +373,7 @@ const ServersSection = ({ record }: { record: AddressRecord }) => {
                 </FieldRow>
                 <FieldRow label="SMTP username" htmlFor="address-smtp-username">
                   <Input
+                    ground="sunken"
                     id="address-smtp-username"
                     required
                     value={draft.smtpUsername}
@@ -380,9 +384,9 @@ const ServersSection = ({ record }: { record: AddressRecord }) => {
               </>
             )}
             <FieldRow label="Password" htmlFor="address-password">
-              <Input
+              <PasswordInput
+                ground="sunken"
                 id="address-password"
-                type="password"
                 autoComplete="new-password"
                 placeholder="Leave blank to keep the stored one"
                 value={draft.password}
@@ -443,6 +447,7 @@ const ServerFields = ({
       <div className="grid grid-cols-[minmax(0,1fr)_5rem] gap-3">
         <FieldRow label={`${protocol} host`} htmlFor={`${id}-host`}>
           <Input
+            ground="sunken"
             id={`${id}-host`}
             required
             autoFocus={autoFocus}
@@ -453,6 +458,7 @@ const ServerFields = ({
         </FieldRow>
         <FieldRow label="Port" htmlFor={`${id}-port`}>
           <Input
+            ground="sunken"
             id={`${id}-port`}
             required
             inputMode="numeric"
@@ -503,13 +509,13 @@ const RemoveSection = ({
       label="Remove"
       note={
         isInbound(record)
-          ? 'Its mail leaves the inbox and the copy cached on this device is cleared. The mailbox itself is untouched.'
-          : 'It leaves the From switch. Nothing at the provider changes.'
+          ? 'Nothing is deleted at your provider. The address leaves YOZZ, and its mail cached on this device is cleared.'
+          : 'Nothing changes at your provider. The address leaves the From switch.'
       }
       error={error}
     >
       <ConfirmDialog
-        trigger={<Button variant="danger" className="-ml-3" />}
+        trigger={<Button variant="danger" />}
         triggerLabel="Remove address"
         title={`Remove ${record.address}?`}
         description="Its stored password is deleted from YOZZ. Adding it back takes a minute and a password from the provider; nothing else changes."

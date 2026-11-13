@@ -340,12 +340,12 @@ describe('HtmlBody remembered consent', () => {
     const unknown = await mountWithheld(html, { store });
     await settle();
     // Nothing known about this From: nothing to offer.
-    expect(unknown.button('Always from')).toBeUndefined();
+    expect(unknown.button('Always for this sender')).toBeUndefined();
     unknown.container.remove();
 
     const verified = await mountWithheld(html, { store, senderCheck: VERIFIED });
     await settle();
-    await act(async () => verified.button('Always from news@sender.example')?.click());
+    await act(async () => verified.button('Always for this sender')?.click());
     await settle();
     expect(document.querySelector('[role="alertdialog"]')).toBeNull();
     expect(senderRecord(rows, key(IMAGE_SENDER_RECORD_TYPE, 'news@sender.example'))).toMatchObject({
@@ -377,18 +377,18 @@ describe('HtmlBody remembered consent', () => {
     await settle();
     expect(loaded(forged.srcdoc())).toBe(false);
     expect(forged.button('Load remote images')).toBeDefined();
-    expect(forged.button('Always from')).toBeUndefined();
+    expect(forged.button('Always for this sender')).toBeUndefined();
     forged.container.remove();
   });
 
-  it('offers no "Always from" while the check is under way, and does not load a trusted sender on its word', async () => {
+  it('offers no "Always for this sender" while the check is under way, and does not load a trusted sender on its word', async () => {
     const { store } = fakeRecordStore();
     const CHECKING = { status: 'checking' } as const;
     // Not trusted: the way to load this one message is there at once, the "always" waits for the check.
     const stranger = await mountWithheld(html, { store, senderCheck: CHECKING });
     await settle();
     expect(stranger.button('Load remote images')).toBeDefined();
-    expect(stranger.button('Always from')).toBeUndefined();
+    expect(stranger.button('Always for this sender')).toBeUndefined();
     stranger.container.remove();
 
     await trustSender(store, { address: 'news@sender.example', addedAt: 1 });
@@ -418,17 +418,17 @@ describe('HtmlBody remembered consent', () => {
     trusted.container.remove();
   });
 
-  it('offers no "Always from" on an unverified message, but still loads it for that message', async () => {
+  it('offers no "Always for this sender" on an unverified message, but still loads it for that message', async () => {
     const { store, rows, key } = fakeRecordStore();
     const reader = await mountWithheld(html, { store, senderCheck: UNVERIFIED });
     await settle();
     expect(reader.button('Load remote images')).toBeDefined();
-    expect(reader.button('Always from')).toBeUndefined();
+    expect(reader.button('Always for this sender')).toBeUndefined();
 
     await act(async () => reader.button('Load remote images')?.click());
     await settle();
     expect(loaded(reader.srcdoc())).toBe(true);
-    expect(reader.button('Always from')).toBeUndefined();
+    expect(reader.button('Always for this sender')).toBeUndefined();
     expect(reader.container.textContent).not.toContain('Just this message.');
     expect(rows.has(key(IMAGE_SENDER_RECORD_TYPE, 'news@sender.example'))).toBe(false);
     reader.container.remove();
@@ -449,14 +449,14 @@ describe('HtmlBody remembered consent', () => {
     const reader = await mountWithheld(html, { store: flaky, senderCheck: VERIFIED });
     await settle();
     problems.length = 0;
-    await act(async () => reader.button('Always from news@sender.example')?.click());
+    await act(async () => reader.button('Always for this sender')?.click());
     await settle();
     expect(problems.map(problem => problem.title)).toEqual(['Sender not saved']);
     expect(rows.has(key(IMAGE_SENDER_RECORD_TYPE, 'news@sender.example'))).toBe(false);
     expect(loaded(reader.srcdoc())).toBe(false);
 
     isOffline = false;
-    await act(async () => reader.button('Always from news@sender.example')?.click());
+    await act(async () => reader.button('Always for this sender')?.click());
     await settle();
     expect(rows.has(key(IMAGE_SENDER_RECORD_TYPE, 'news@sender.example'))).toBe(true);
     expect(loaded(reader.srcdoc())).toBe(true);
@@ -466,7 +466,7 @@ describe('HtmlBody remembered consent', () => {
   it('does not load unverified mail for an old record that trusted every message', async () => {
     const { store, rows, key } = fakeRecordStore();
     rows.set(key(IMAGE_SENDER_RECORD_TYPE, 'news@sender.example'), {
-      // Saved while "Always from" could be given to unverified senders.
+      // Saved while "Always for this sender" could be given to unverified senders.
       plaintext: JSON.stringify({
         address: 'news@sender.example',
         addedAt: 1,
@@ -478,7 +478,7 @@ describe('HtmlBody remembered consent', () => {
     await settle();
     expect(loaded(unverified.srcdoc())).toBe(false);
     expect(unverified.button('Load remote images')).toBeDefined();
-    expect(unverified.button('Always from')).toBeUndefined();
+    expect(unverified.button('Always for this sender')).toBeUndefined();
     unverified.container.remove();
 
     const verified = await mountWithheld(html, {
@@ -500,32 +500,32 @@ describe('HtmlBody remembered consent', () => {
     expect(loaded(reader.srcdoc())).toBe(true);
     expect(reader.button('Load remote images')).toBeUndefined();
     expect(reader.container.textContent).toContain('Just this message.');
-    await act(async () => reader.button('Always from news@sender.example')?.click());
+    await act(async () => reader.button('Always for this sender')?.click());
     await settle();
     expect(rows.has(key(IMAGE_SENDER_RECORD_TYPE, 'news@sender.example'))).toBe(true);
     expect(reader.container.textContent).not.toContain('Just this message.');
-    expect(reader.button('Always from')).toBeUndefined();
+    expect(reader.button('Always for this sender')).toBeUndefined();
     expect(reader.button('Stop')).toBeDefined();
     reader.container.remove();
   });
 
   it('draws Stop as a button, not as a word in the sentence', async () => {
     const reader = await mountWithheld(html, { senderCheck: VERIFIED });
-    await act(async () => reader.button('Always from news@sender.example')?.click());
+    await act(async () => reader.button('Always for this sender')?.click());
     expect(reader.button('Stop')?.className).toContain('bg-ink-hover');
     reader.container.remove();
   });
 
   it('stops trusting a sender from the message it loaded, and blocks that message in place', async () => {
     const { store, rows, key } = fakeRecordStore();
-    // Trusted from this message ("Always from" loads it too); another of theirs was loaded by hand.
+    // Trusted from this message ("Always for this sender" loads it too); another of theirs was loaded by hand.
     const reader = await mountWithheld(html, {
       store,
       messageId: 'mid/<m4@sender.example>',
       senderCheck: VERIFIED,
     });
     await settle();
-    await act(async () => reader.button('Always from news@sender.example')?.click());
+    await act(async () => reader.button('Always for this sender')?.click());
     await settle();
     const other = await mountWithheld(html, { store, messageId: 'mid/<m5@sender.example>' });
     await settle();
@@ -539,7 +539,7 @@ describe('HtmlBody remembered consent', () => {
     expect(rows.has(key(IMAGE_SENDER_RECORD_TYPE, 'news@sender.example'))).toBe(false);
     expect(loaded(reader.srcdoc())).toBe(false);
     expect(reader.button('Load remote images')).toBeDefined();
-    expect(reader.button('Always from news@sender.example')).toBeDefined();
+    expect(reader.button('Always for this sender')).toBeDefined();
     const stored = rows.get(key(IMAGE_CONSENTS_RECORD_TYPE, 'consents'))?.plaintext ?? '';
     expect(stored).not.toContain('mid/<m4@sender.example>');
     expect(stored).toContain('mid/<m5@sender.example>');

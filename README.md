@@ -34,8 +34,8 @@ something.
 
 The browser does the mail. It opens TLS 1.3 to your IMAP and SMTP servers itself, with a TLS
 and X.509 implementation in TypeScript, and reaches them through a relay on our side that
-forwards bytes it cannot read. Your mail passwords never leave your device: YOZZ stores them
-encrypted with a key only you hold, and our servers keep ciphertext they cannot open. If we were
+forwards bytes it cannot read. Your mail passwords are encrypted on your device before YOZZ
+stores them, with a key only you hold, and our servers keep ciphertext they cannot open. If we were
 breached or subpoenaed, there is no readable mailbox or credential store to hand over.
 
 ![The browser and mail provider terminate TLS while YOZZ's relay only forwards the encrypted traffic](assets/tls-relay.png)

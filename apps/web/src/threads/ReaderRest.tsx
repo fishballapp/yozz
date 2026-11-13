@@ -1,57 +1,40 @@
-import { unreadCount } from '@yozz.app/mail/threads/views';
 import { useMail } from '../store/MailProvider';
-import { Wordmark } from '../ui/Wordmark';
+import { useListing } from './use-listing';
+import { nameOfView } from './view-name';
 
 /**
- * On a wide screen this pane is roughly a third of the first viewport and "Select a message."
- * wastes it, so it holds the product's own statement: what YOZZ is, which addresses are feeding the
- * stream, and an honest note of what is and is not fetched.
+ * The reader with nothing open: one quiet line about the list beside it, and nothing about YOZZ.
+ * With no address yet the line says so and offers nothing: the list beside it holds the one button.
  */
 export const ReaderRest = () => {
-  const { mailboxes, threads } = useMail();
+  const { mailboxes } = useMail();
+  const listing = useListing();
+
+  if (mailboxes.length === 0) {
+    return (
+      <div className="flex h-full items-center justify-center bg-ink-sunken px-8">
+        <p className="text-base text-paper-faint">No address connected yet.</p>
+      </div>
+    );
+  }
+
+  const threads = listing?.threads ?? [];
+  const unread = threads.filter(thread => thread.isUnread).length;
+  const line =
+    listing === undefined || threads.length === 0
+      ? 'Nothing selected'
+      : [
+          listing.isSearch ? null : nameOfView(listing.view),
+          unread > 0
+            ? `${unread} unread`
+            : `${threads.length} ${threads.length === 1 ? 'conversation' : 'conversations'}`,
+        ]
+          .filter(part => part !== null)
+          .join(' · ');
 
   return (
     <div className="flex h-full items-center justify-center bg-ink-sunken px-8">
-      <div className="w-full max-w-sm">
-        <Wordmark className="h-6 w-auto text-paper" />
-        <p className="mt-3 text-base leading-relaxed text-paper-dim">
-          One client over the mail you already own. Read every address in one stream, and answer as
-          any address you control — over your own SMTP.
-        </p>
-
-        <p className="label-rule mt-8 border-b border-rule-soft pb-2">Reading</p>
-        {mailboxes.length === 0 ? (
-          <p className="mt-3 text-base leading-relaxed text-paper-faint">
-            No address connected yet. Connect one and it appears here.
-          </p>
-        ) : (
-          <ul className="mt-1">
-            {mailboxes.map(mailbox => {
-              const unread = unreadCount(threads, mailbox.address);
-              return (
-                <li
-                  key={mailbox.address}
-                  className="flex items-center gap-3 border-b border-rule-soft py-2"
-                >
-                  <span className="min-w-0 flex-1 truncate font-mono text-2xs text-paper-dim">
-                    {mailbox.address}
-                  </span>
-                  <span
-                    className={`shrink-0 font-mono text-2xs ${unread > 0 ? 'text-signal' : 'text-paper-faint'}`}
-                  >
-                    {unread > 0 ? `${unread} unread` : '—'}
-                  </span>
-                </li>
-              );
-            })}
-          </ul>
-        )}
-
-        <p className="mt-6 font-mono text-2xs leading-relaxed text-paper-faint">
-          Mail stays on your servers and in this device’s cache. Recent message bodies are fetched
-          ahead so they’re ready to read.
-        </p>
-      </div>
+      <p className="max-w-full truncate text-base text-paper-faint">{line}</p>
     </div>
   );
 };

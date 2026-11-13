@@ -45,14 +45,14 @@ const useBulkActions = (
   openId: string | undefined,
   onDone: () => void,
 ): readonly { readonly key: string; readonly actions: readonly BulkAction[] }[] => {
-  const { moveThreads, flagThreads, junkFolders, removeDraft } = useMail();
+  const { moveThreadsWithUndo, flagThreads, junkFolders, removeDraft } = useMail();
   const advancePast = useAdvancePast();
   const navigate = useNavigate();
 
   // One write for the whole batch. Filing the open thread moves the reader on, past every other
   // thread filed with it.
   const file = (candidates: readonly ThreadState[], to: MoveTarget, notFiled: string) => () => {
-    const filed = moveThreads(
+    const filed = moveThreadsWithUndo(
       candidates.map(({ id }) => id),
       to,
       reason => reportProblem(notFiled, reason),

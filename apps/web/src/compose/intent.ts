@@ -1,5 +1,6 @@
 import type { ComposeDraft } from '@yozz.app/mail/compose/draft';
 import type { SeedRequest } from '@yozz.app/mail/compose/seed';
+import { newestInbound, type Thread } from '@yozz.app/mail/threads/thread';
 import { z } from 'zod';
 
 /** `?compose=` carries the intent, never the draft. See DECISIONS.md, "The composer's INTENT is in the URL". */
@@ -52,9 +53,37 @@ export const seedRequestOf = (intent: ComposeIntent): SeedRequest | null => {
 export const draftKeyOfIntent = (intent: ComposeIntent): string | null =>
   intent.startsWith('draft:') ? intent.slice('draft:'.length) : null;
 
+/** A reply or a forward keeps the message it answers on screen beside it, where there is room. */
+export const answersMessage = (intent: ComposeIntent): boolean => {
+  const kind = seedRequestOf(intent)?.kind;
+  return kind === 'reply' || kind === 'reply-all' || kind === 'forward';
+};
+
+/**
+ * What the composer is called, from the intent alone. A reply names who it goes to, read from the
+ * same message `seedFor` addresses it from; a thread that is all your own mail has nobody to name.
+ */
+export const composeTitleOf = (
+  intent: ComposeIntent,
+  threads: readonly Thread[],
+  ownedAddresses: readonly string[],
+): string => {
+  const request = seedRequestOf(intent);
+  if (request?.kind === 'reply-all') return 'Reply all';
+  if (request?.kind === 'forward') return 'Forward';
+  if (request?.kind !== 'reply') return 'New message';
+  const thread = threads.find(candidate =>
+    candidate.messages.some(message => message.id === request.messageId),
+  );
+  const inbound = thread === undefined ? undefined : newestInbound(thread, ownedAddresses);
+  const isFromSomeoneElse =
+    inbound !== undefined &&
+    !ownedAddresses.some(owned => owned.toLowerCase() === inbound.fromAddress.toLowerCase());
+  return isFromSomeoneElse ? `Reply to ${inbound.fromName}` : 'Reply';
+};
+
 /** The same sentence wherever discarding is offered. Tombstoned for 30 days, but no screen brings one back. */
-export const DISCARD_WARNING =
-  'The message is thrown away and nothing is sent. No screen here brings a discarded draft back.';
+export const DISCARD_WARNING = "It's deleted for good. Nothing is sent.";
 
 /** Measured against the draft as it opened: a reply opens with a recipient, subject and quote already in it. */
 export const isUntouched = (draft: ComposeDraft, opened: ComposeDraft): boolean =>

@@ -51,7 +51,7 @@ const COMPONENTS: MarkdownComponents = {
 };
 
 export const MarkdownView = ({ source }: { source: string }) => (
-  <div className="max-w-[68ch] text-[13.5px] leading-[1.65] text-paper">
+  <div className="max-w-[60ch] text-[16px]/[1.55] text-paper lg:text-[15px]/[1.6]">
     <Markdown components={COMPONENTS}>{source}</Markdown>
   </div>
 );

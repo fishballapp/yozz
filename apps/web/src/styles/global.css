@@ -35,8 +35,8 @@
   --ink-hover: oklch(0.235 0.008 75);
 
   /* rules — the only separator; there are no borders in this system */
-  --rule: oklch(0.3 0.008 75);
-  --rule-soft: oklch(0.243 0.007 75);
+  --rule: oklch(0.34 0.008 75);
+  --rule-soft: oklch(0.27 0.007 75);
 
   /* ink on ink — warm off-white, three steps */
   /* Three steps of ink-on-ink. The binding surface for contrast is --ink-hover, NOT --ink: the
@@ -81,7 +81,23 @@
 
   --danger: oklch(0.64 0.16 25);
 
+  /* The two type sizes, as size / line-height. A phone is held further away, so both are a step
+     up below `lg`; the theme's `--text-*` steps point here so no call site states a breakpoint. */
+  --type-base: 0.9375rem;
+  --type-base-leading: 1.25rem;
+  --type-2xs: 0.75rem;
+  --type-2xs-leading: 1rem;
+
   color-scheme: dark;
+}
+
+/* 64rem is Tailwind's `lg`, the width the layout unfolds at. */
+@media (width >= 64rem) {
+  :root {
+    --type-base: 0.8125rem;
+    --type-base-leading: 1.125rem;
+    --type-2xs: 0.6875rem;
+  }
 }
 
 /* The activity bar's segment crosses the bar: it is 30% wide, so 100 / 30 of its own width. */
@@ -122,8 +138,9 @@
   --color-signal-deep: var(--signal-deep);
   --color-danger: var(--danger);
 
-  /* Product-tight scale. This app's BASE size is 13px — the list record — so the `base` step is
-     redefined rather than a new step invented.
+  /* Product-tight scale. This app's BASE size is 13px from `lg` up (the list record) and 15px
+     below it, so the `base` step is redefined rather than a new step invented; `2xs` is 11px and
+     12px. The values live on :root (`--type-*`), where a media query can change them.
 
      NAME THESE CAREFULLY. cn() decides whether `text-x` is a size or a colour by whether
      `x` looks like a t-shirt size; an invented name like `text-row` is classified as a COLOUR, put
@@ -131,10 +148,10 @@
      shipped a near-white label on the filled primary button at 1.2:1. `base` and `2xs` are both recognised as
      sizes, so they coexist with colour utilities. Never add a text size whose name is not a
      t-shirt size. */
-  --text-2xs: 0.6875rem;
-  --text-2xs--line-height: 1rem;
-  --text-base: 0.8125rem;
-  --text-base--line-height: 1.125rem;
+  --text-2xs: var(--type-2xs);
+  --text-2xs--line-height: var(--type-2xs-leading);
+  --text-base: var(--type-base);
+  --text-base--line-height: var(--type-base-leading);
 }
 
 @layer base {
@@ -146,7 +163,7 @@
     background-color: var(--ink);
     color: var(--paper);
     font-family: var(--font-sans);
-    font-size: var(--text-base);
+    font-size: var(--type-base);
     -webkit-font-smoothing: antialiased;
     text-rendering: optimizeLegibility;
   }
@@ -195,7 +212,7 @@
      rail section headers, and settings field labels — the system's one piece of "chrome" type. */
   .label-rule {
     font-family: var(--font-mono);
-    font-size: var(--text-2xs);
+    font-size: var(--type-2xs);
     letter-spacing: 0.14em;
     text-transform: uppercase;
     color: var(--paper-faint);

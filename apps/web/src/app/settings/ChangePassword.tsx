@@ -1,7 +1,10 @@
 import { Link, useNavigate } from '@tanstack/react-router';
+import { cn } from 'cn';
 import { type FormEvent, useState } from 'react';
 import { Button, buttonClass } from '../../ui/Button';
-import { FieldRow, Input } from '../../ui/Field';
+import { FieldRow, PasswordInput } from '../../ui/Field';
+import { proseClass } from '../../ui/PageSection';
+import { PasswordFields } from '../../vault/PasswordFields';
 import { useVault } from '../../vault/session';
 import {
   changePasswordOfSession,
@@ -75,13 +78,15 @@ export const ChangePassword = () => {
     <SettingsPane
       title="Change password"
       subline={session.email}
-      back={{ label: 'Sign-in', to: '/settings/account' }}
+      back={{ label: 'Account', to: '/settings/account' }}
     >
-      <form className="max-w-xs space-y-3" onSubmit={submit}>
+      {/* Full width on a phone like every other form; a password's width from `sm`. Field groups sit
+          further apart than a label from its field, so a status line reads as its own field's. */}
+      <form className="space-y-5 sm:max-w-xs" onSubmit={submit}>
         <FieldRow label="Current password" htmlFor="change-current">
-          <Input
+          <PasswordInput
             id="change-current"
-            type="password"
+            ground="sunken"
             autoComplete="current-password"
             autoFocus
             value={currentPassword}
@@ -90,30 +95,19 @@ export const ChangePassword = () => {
           />
           {errorUnder('current')}
         </FieldRow>
-        <FieldRow label="New password" htmlFor="change-password">
-          <Input
-            id="change-password"
-            type="password"
-            autoComplete="new-password"
-            value={password}
-            onChange={event => setPassword(event.target.value)}
-            disabled={busy !== null}
-          />
-          {errorUnder('password')}
-        </FieldRow>
-        <FieldRow label="Confirm new password" htmlFor="change-confirm">
-          <Input
-            id="change-confirm"
-            type="password"
-            autoComplete="new-password"
-            value={confirmPassword}
-            onChange={event => setConfirmPassword(event.target.value)}
-            disabled={busy !== null}
-          />
-          {errorUnder('confirm')}
-        </FieldRow>
-        <p className="text-base leading-relaxed text-paper-dim">
-          Your other devices are signed out, and sign in again with the new password. If you forget
+        <PasswordFields
+          idPrefix="change"
+          label="New password"
+          ground="sunken"
+          password={password}
+          confirmPassword={confirmPassword}
+          onPassword={setPassword}
+          onConfirmPassword={setConfirmPassword}
+          isDisabled={busy !== null}
+          errors={{ password: errorUnder('password'), confirm: errorUnder('confirm') }}
+        />
+        <p className={cn('text-paper-dim', proseClass)}>
+          Your other devices are signed out, and log in again with the new password. If you forget
           it, nobody can recover your saved addresses, not even us. You would add them again.
         </p>
         {errors.change !== undefined && (

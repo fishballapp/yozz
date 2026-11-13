@@ -26,7 +26,7 @@ const COPY = {
   confirm: 'Revoke key',
   busy: 'Revoking…',
   freshSignIn:
-    'You signed in more than a day ago. Revoking a CLI key needs a fresh sign-in, so a session someone else got hold of cannot do it. The key is revoked right after.',
+    'You logged in more than a day ago. Revoking a CLI key needs a fresh login, so a session someone else got hold of cannot do it. The key is revoked right after.',
 } as const;
 
 /** What **Confirm it's you** says when a revocation asked for it. */

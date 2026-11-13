@@ -13,8 +13,24 @@ import { SendOnlyTag } from '../ui/SendOnlyTag';
  * time, the list at `/settings` and a pane at any route under it.
  */
 
-const hostsOf = (record: AddressRecord): string =>
-  isInbound(record) ? `${record.imap.host} · ${record.smtp.host}` : record.smtp.host;
+/** A host without its first label (`imap.fastmail.com` → `fastmail.com`), or itself when that leaves no dot. */
+const parentOf = (host: string): string => {
+  const rest = host.slice(host.indexOf('.') + 1);
+  return rest.includes('.') ? rest : host;
+};
+
+/**
+ * The servers as the list prints them, one per line: a pair under one domain is that domain once
+ * (`fastmail.com`), so neither host is cut off; any other pair is each host on its own line.
+ */
+export const hostsOf = (record: AddressRecord): readonly string[] => {
+  if (!isInbound(record)) return [record.smtp.host];
+  const imap = record.imap.host.toLowerCase();
+  const smtp = record.smtp.host.toLowerCase();
+  if (imap === smtp) return [imap];
+  if (parentOf(imap) === parentOf(smtp)) return [parentOf(imap)];
+  return [imap, smtp];
+};
 
 /** Reading addresses first, in the rail's order, then the send-only ones. */
 export const byRole = (a: AddressRecord, b: AddressRecord): number =>
@@ -71,9 +87,14 @@ const SettingsNav = () => {
           >
             <span className="min-w-0">
               <span className="block truncate text-base">{record.address}</span>
-              <span className="mt-0.5 block truncate font-mono text-2xs text-paper-faint">
-                {hostsOf(record)}
-              </span>
+              {hostsOf(record).map(host => (
+                <span
+                  key={host}
+                  className="mt-0.5 block truncate font-mono text-2xs text-paper-faint"
+                >
+                  {host}
+                </span>
+              ))}
             </span>
             {isInbound(record) ? <span /> : <SendOnlyTag />}
           </NavRow>
@@ -104,9 +125,9 @@ const SettingsNav = () => {
       <ul className="border-t border-rule-soft pb-8">
         <NavRow to="/settings/account" isActive={pathname.startsWith('/settings/account')}>
           <span className="min-w-0">
-            <span className="block truncate text-base">Sign-in</span>
+            <span className="block truncate text-base">Account</span>
             <span className="mt-0.5 block truncate text-2xs text-paper-faint">
-              Password, passkeys, CLI keys, sign out, delete
+              Password, passkeys, CLI keys, log out, delete
             </span>
           </span>
           <span />

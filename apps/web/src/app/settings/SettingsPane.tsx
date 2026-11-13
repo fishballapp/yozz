@@ -3,16 +3,18 @@ import { Link } from '@tanstack/react-router';
 import { cn } from 'cn';
 import type { ReactNode } from 'react';
 import { keepCompose } from '../../compose/intent';
-import { buttonClass } from '../../ui/Button';
+import { Tooltip } from '../../ui/Tooltip';
 
-/** Where the phone's back link goes: the list, unless the pane sits under another pane. */
+/** Where the pane's back link goes: the list, unless the pane sits under another pane. */
 export type PaneBack = { readonly label: string; readonly to: '/settings' | '/settings/account' };
 
 const SETTINGS_LIST: PaneBack = { label: 'Settings', to: '/settings' };
 
 /**
- * The right half of Settings: what the selected row is, then its sections. On a phone the pane is
- * the whole screen, so it carries the way back; a sub-page's way back shows at every width.
+ * The right half of Settings: what the selected row is, then its sections. Below `lg` the pane is the
+ * whole screen and the app bar above it carries the way back and the page's title (the route's
+ * `staticData.title`), so the pane shows only its subline there; the title stays for screen readers.
+ * From `lg` the title is on the pane, and a sub-page's caret leads back to the pane it sits under.
  */
 export const SettingsPane = ({
   title,
@@ -27,24 +29,27 @@ export const SettingsPane = ({
   children: ReactNode;
 }) => (
   <>
-    <Link
-      to={back.to}
-      search={keepCompose}
-      className={cn(
-        buttonClass({ variant: 'ghost', size: 'sm' }),
-        '-ml-2.5 mb-4',
-        // The list sits beside a top-level pane on a wide screen; it cannot lead back from a sub-page.
-        back.to === SETTINGS_LIST.to && 'lg:hidden',
+    <header className={cn('flex items-start lg:mb-8', subline === undefined ? 'mb-0' : 'mb-6')}>
+      {/* The list sits beside a top-level pane on a wide screen, so only a sub-page has a way back here. */}
+      {back.to !== SETTINGS_LIST.to && (
+        <Tooltip label={`Back to ${back.label}`}>
+          <Link
+            to={back.to}
+            search={keepCompose}
+            aria-label={`Back to ${back.label}`}
+            // 44px to the pointer, centred on the title's first line; the caret sits on the column edge.
+            className="-my-2.5 -mr-1 -ml-3.5 hidden size-11 shrink-0 items-center justify-center text-paper-dim transition-colors hover:text-paper lg:flex"
+          >
+            <CaretLeftIcon size={16} />
+          </Link>
+        </Tooltip>
       )}
-    >
-      <CaretLeftIcon size={12} />
-      {back.label}
-    </Link>
-    <header className="mb-8">
-      <h2 className="min-w-0 text-[19px] leading-tight font-medium tracking-[-0.015em] text-paper">
-        {title}
-      </h2>
-      {subline !== undefined && <p className="mt-1.5 text-base text-paper-dim">{subline}</p>}
+      <div className="min-w-0">
+        <h2 className="text-[19px] leading-tight font-medium tracking-[-0.015em] text-paper max-lg:sr-only">
+          {title}
+        </h2>
+        {subline !== undefined && <p className="text-base text-paper-dim lg:mt-1.5">{subline}</p>}
+      </div>
     </header>
     {children}
   </>

@@ -5,9 +5,13 @@ import { cn } from 'cn';
 import { useMail } from '../store/MailProvider';
 import { SendOnlyTag } from '../ui/SendOnlyTag';
 
-/** The first and largest control in the composer; it always states the SMTP host it will use, and a send-only address is labelled, not hidden. */
+/**
+ * The first and largest control in the composer; it always states the SMTP host it will use (which
+ * tells the person which provider sends; the port is Settings' to show), and a send-only address is
+ * labelled, not hidden.
+ */
 
-const smtpVia = (identity: AddressRecord) => `${identity.smtp.host}:${identity.smtp.port}`;
+const smtpVia = (identity: AddressRecord) => identity.smtp.host;
 
 const IdentityOption = ({ identity }: { identity: AddressRecord }) => (
   <>
@@ -45,7 +49,7 @@ export const FromSwitch = ({
   if (selected === undefined) {
     return (
       <div className="flex items-stretch">
-        <span className="label-rule flex w-20 shrink-0 items-center pl-3">From</span>
+        <span className="label-rule flex w-20 shrink-0 items-center pl-4">From</span>
         <button
           type="button"
           disabled
@@ -59,7 +63,7 @@ export const FromSwitch = ({
 
   return (
     <div className="flex items-stretch">
-      <span className="label-rule flex w-20 shrink-0 items-center pl-3">From</span>
+      <span className="label-rule flex w-20 shrink-0 items-center pl-4">From</span>
       <Select.Root value={value} onValueChange={next => onChange(String(next))}>
         <Select.Trigger
           className={cn(
@@ -86,11 +90,19 @@ export const FromSwitch = ({
         </Select.Trigger>
 
         <Select.Portal>
-          <Select.Positioner sideOffset={2} alignItemWithTrigger={false} className="z-50">
-            <Select.Popup className="max-h-80 w-[var(--anchor-width)] min-w-72 overflow-y-auto bg-ink-raised py-1 border border-rule outline-none">
+          {/* On the field's own left edge, flush to the screen's on a phone as the field is; as
+              tall as the screen allows, so a short list never ends mid-row. */}
+          <Select.Positioner
+            sideOffset={2}
+            align="start"
+            collisionPadding={{ top: 8, bottom: 8, left: 0, right: 0 }}
+            alignItemWithTrigger={false}
+            className="z-50"
+          >
+            <Select.Popup className="max-h-[min(28rem,var(--available-height))] w-[var(--anchor-width)] min-w-72 overflow-y-auto border border-rule bg-ink-raised pt-1 pb-1.5 outline-none">
               <Select.Group>
                 <Select.GroupLabel className="label-rule block px-2.5 pt-2 pb-1">
-                  Mailboxes
+                  Addresses
                 </Select.GroupLabel>
                 {withInbox.map(identity => (
                   <Select.Item
@@ -106,7 +118,7 @@ export const FromSwitch = ({
               {sendOnly.length > 0 && (
                 <Select.Group>
                   <Select.GroupLabel className="label-rule mt-1 block border-t border-rule-soft px-2.5 pt-2.5 pb-1">
-                    Send-only addresses
+                    Send-only
                   </Select.GroupLabel>
                   {sendOnly.map(identity => (
                     <Select.Item

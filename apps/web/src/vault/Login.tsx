@@ -1,12 +1,25 @@
 import { Link, Navigate, useNavigate } from '@tanstack/react-router';
+import { cn } from 'cn';
 import { useState } from 'react';
-import { Button } from '../ui/Button';
-import { FieldRow, Input } from '../ui/Field';
-import { AuthColumn } from './AuthColumn';
+import { Button, LinkButton } from '../ui/Button';
+import { FieldRow, Input, PasswordInput } from '../ui/Field';
+import { AuthColumn, authActionClass, authHeadingClass, authProseClass } from './AuthColumn';
 import { requestRecoveryLink } from './auth-client';
+import { LinkSentActions } from './LinkSentActions';
 import { vaultErrorMessage } from './screen-policy';
 import { useVault } from './session';
 import { loginWithPasskey, loginWithPassword } from './unlock';
+
+/** Sends the recovery link; resolves to what went wrong, or null once it is on its way. */
+const sendRecoveryLink = async (email: string): Promise<string | null> => {
+  try {
+    const res = await requestRecoveryLink(email);
+    if (res.error) return res.error.message || 'The login link could not be sent.';
+    return null;
+  } catch (err) {
+    return vaultErrorMessage(err);
+  }
+};
 
 /**
  * Only ever the approve page: the query is the one part of the URL a link to here can choose.
@@ -70,63 +83,62 @@ export const Login = ({
     </p>
   );
 
+  const backToLogin = (
+    <LinkButton
+      onClick={() => {
+        setMode('login');
+        setError(null);
+        setSentTo(null);
+      }}
+    >
+      Back to logging in
+    </LinkButton>
+  );
+
   if (mode === 'recover') {
     if (sentTo !== null) {
       return (
         <AuthColumn
-          title="Log in"
-          description={`A sign-in link is on its way to ${sentTo}. It is valid for 10 minutes.`}
+          title="Check your inbox"
+          description={`We sent a recovery link to ${sentTo} from no-reply@yozz.app. It works for 10 minutes.`}
           footer={footer}
         >
-          <h2 className="label-rule">Recover the account</h2>
-          <p className="mt-3 text-base text-paper-dim">Check your inbox.</p>
+          <LinkSentActions resend={() => sendRecoveryLink(sentTo)}>{backToLogin}</LinkSentActions>
           {import.meta.env.DEV && (
             <div className="mt-6 border-y border-rule bg-ink-raised px-4 py-3.5">
               <p className="label-rule">Dev</p>
-              <p className="mt-2 text-base leading-relaxed text-paper-dim">
+              <p className={cn('mt-2', authProseClass)}>
                 There is no mailbox on localhost. The link is printed in the wrangler dev terminal
                 running the API worker.
               </p>
             </div>
           )}
-          <Button variant="ghost" className="mt-4" onClick={() => setMode('login')}>
-            Back to logging in
-          </Button>
         </AuthColumn>
       );
     }
 
     return (
       <AuthColumn title="Log in" footer={footer}>
-        <h2 className="label-rule">Recover the account</h2>
-        <p className="mt-3 text-base leading-relaxed text-paper-dim">
-          A recovery link restores your YOZZ account, but it cannot unlock your saved addresses: it
-          proves your address and holds no key. What follows starts again, which deletes everything
-          stored here, so your saved addresses have to be added back. Each password can be made
-          again at your provider. It takes about ten minutes.
+        <h2 className={authHeadingClass}>Recover your account</h2>
+        <p className={cn('mt-3', authProseClass)}>
+          A recovery link gets you back into your account, but it can't unlock your saved addresses.
+          You start again and add each address back, with a new password from its provider. It takes
+          about ten minutes.
         </p>
         <form
           className="mt-6 space-y-4"
-          onSubmit={event => {
+          onSubmit={async event => {
             event.preventDefault();
-            void (async () => {
-              setBusyKind('recover');
-              setError(null);
-              try {
-                const res = await requestRecoveryLink(recoveryEmail);
-                if (res.error) {
-                  setError(res.error.message || 'The sign-in link could not be sent.');
-                  setErrorPanel('recover');
-                  return;
-                }
-                setSentTo(recoveryEmail);
-              } catch (err) {
-                setError(vaultErrorMessage(err));
-                setErrorPanel('recover');
-              } finally {
-                setBusyKind(null);
-              }
-            })();
+            setBusyKind('recover');
+            setError(null);
+            const failure = await sendRecoveryLink(recoveryEmail);
+            setBusyKind(null);
+            if (failure !== null) {
+              setError(failure);
+              setErrorPanel('recover');
+              return;
+            }
+            setSentTo(recoveryEmail);
           }}
         >
           <FieldRow label="Email address" htmlFor="recover-email">
@@ -145,21 +157,11 @@ export const Login = ({
               {error}
             </p>
           )}
-          <Button type="submit" variant="secondary" disabled={isBusy}>
+          <Button type="submit" variant="secondary" className={authActionClass} disabled={isBusy}>
             {busyKind === 'recover' ? 'Sending…' : 'Send recovery link'}
           </Button>
         </form>
-        <Button
-          variant="ghost"
-          className="mt-4"
-          onClick={() => {
-            setMode('login');
-            setError(null);
-            setSentTo(null);
-          }}
-        >
-          Back to logging in
-        </Button>
+        <div className="mt-8">{backToLogin}</div>
       </AuthColumn>
     );
   }
@@ -172,26 +174,22 @@ export const Login = ({
         </p>
       )}
       <div className="space-y-4">
-        <p className="text-base leading-relaxed text-paper-dim">
-          If you enrolled a passkey, this is the whole login.
-        </p>
         <Button
           variant="primary"
+          className={authActionClass}
           disabled={isBusy}
-          onClick={() => {
-            void (async () => {
-              setBusyKind('passkey');
-              setError(null);
-              try {
-                setSession(await loginWithPasskey());
-                void navigateOnward();
-              } catch (err) {
-                setError(vaultErrorMessage(err));
-                setErrorPanel('passkey');
-              } finally {
-                setBusyKind(null);
-              }
-            })();
+          onClick={async () => {
+            setBusyKind('passkey');
+            setError(null);
+            try {
+              setSession(await loginWithPasskey());
+              void navigateOnward();
+            } catch (err) {
+              setError(vaultErrorMessage(err));
+              setErrorPanel('passkey');
+            } finally {
+              setBusyKind(null);
+            }
           }}
         >
           {busyKind === 'passkey' ? 'Waiting for your authenticator…' : 'Log in with a passkey'}
@@ -203,8 +201,25 @@ export const Login = ({
         )}
       </div>
 
-      <div className="mt-8 space-y-4 border-t border-rule-soft pt-8">
-        <h2 className="label-rule">Password</h2>
+      <form
+        className="mt-8 space-y-4 border-t border-rule-soft pt-8"
+        onSubmit={async event => {
+          event.preventDefault();
+          setBusyKind('password');
+          setError(null);
+          try {
+            const session = await loginWithPassword({ email, password });
+            setSession(session);
+            void navigateOnward();
+          } catch (err) {
+            setError(vaultErrorMessage(err));
+            setErrorPanel('password');
+          } finally {
+            setBusyKind(null);
+          }
+        }}
+      >
+        <h2 className={authHeadingClass}>Or use your password</h2>
         <FieldRow label="Email address" htmlFor="login-email">
           <Input
             id="login-email"
@@ -216,35 +231,15 @@ export const Login = ({
           />
         </FieldRow>
         <FieldRow label="Password" htmlFor="login-password">
-          <Input
+          <PasswordInput
             id="login-password"
-            type="password"
             autoComplete="current-password"
             value={password}
             onChange={event => setPassword(event.target.value)}
             disabled={isBusy}
           />
         </FieldRow>
-        <Button
-          variant="secondary"
-          disabled={isBusy}
-          onClick={() => {
-            void (async () => {
-              setBusyKind('password');
-              setError(null);
-              try {
-                const session = await loginWithPassword({ email, password });
-                setSession(session);
-                void navigateOnward();
-              } catch (err) {
-                setError(vaultErrorMessage(err));
-                setErrorPanel('password');
-              } finally {
-                setBusyKind(null);
-              }
-            })();
-          }}
-        >
+        <Button type="submit" variant="secondary" className={authActionClass} disabled={isBusy}>
           {busyKind === 'password' ? 'Logging in…' : 'Log in'}
         </Button>
         {busyKind === 'password' && (
@@ -257,10 +252,9 @@ export const Login = ({
             {error}
           </p>
         )}
-      </div>
+      </form>
 
-      <Button
-        variant="ghost"
+      <LinkButton
         className="mt-8"
         onClick={() => {
           setMode('recover');
@@ -269,7 +263,7 @@ export const Login = ({
         }}
       >
         Lost your passkey or password?
-      </Button>
+      </LinkButton>
     </AuthColumn>
   );
 };

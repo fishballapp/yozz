@@ -8,6 +8,7 @@ import { ThreadReader } from './ThreadReader';
 
 vi.mock('@tanstack/react-router', () => ({
   useParams: () => ({ view: 'unified' }),
+  useSearch: () => ({}),
   Link: () => null,
 }));
 vi.mock('../store/MailProvider', () => ({
@@ -17,7 +18,7 @@ vi.mock('../store/MailProvider', () => ({
     toggleArchive: vi.fn(),
     trashThread: vi.fn(),
     restoreThread: vi.fn(),
-    moveThreads: vi.fn(),
+    moveThreadsWithUndo: vi.fn(),
     junkFolders: { 'me@example.com': true },
     markUnread: vi.fn(),
     loadBody: vi.fn(),

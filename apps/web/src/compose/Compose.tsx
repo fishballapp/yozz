@@ -1,4 +1,5 @@
 import { Dialog } from '@base-ui/react/dialog';
+import { Popover } from '@base-ui/react/popover';
 import { Tabs } from '@base-ui/react/tabs';
 import {
   EyeIcon,
@@ -8,27 +9,30 @@ import {
   TrashIcon,
   XIcon,
 } from '@phosphor-icons/react';
-import { useNavigate, useSearch } from '@tanstack/react-router';
+import { useLocation, useNavigate, useSearch } from '@tanstack/react-router';
 import { type DraftFile, MAX_ATTACHMENT_BYTES } from '@yozz.app/mail/compose/draft';
 import type { DeleteOutcome } from '@yozz.app/mail/compose/draft-vault';
 import { seedFor } from '@yozz.app/mail/compose/seed';
 import { describeMailFailure } from '@yozz.app/mail/describe-failure';
 import { cn } from 'cn';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useComposer, useMail } from '../store/MailProvider';
 import type { LoadStoredFile } from '../threads/AttachmentList';
 import { displayName, download } from '../threads/attachment-preview';
 import { ATTACHMENT_LABEL, formatBytes } from '../threads/attachments';
 import { Button } from '../ui/Button';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
-import { isDemo } from '../ui/chrome';
+import { isDemo, useMediaQuery } from '../ui/chrome';
 import { Input } from '../ui/Field';
 import { reportProblem, toast } from '../ui/Toast';
+import { Tooltip } from '../ui/Tooltip';
 import { useVault } from '../vault/session';
 import type { SessionEnded } from '../vault/unlock';
 import { readAttachments, type SendReport } from './draft';
 import { FromSwitch } from './FromSwitch';
 import {
+  answersMessage,
+  composeTitleOf,
   DISCARD_WARNING,
   draftKeyOfIntent,
   seedRequestOf,
@@ -47,6 +51,45 @@ const FieldLabel = ({ children, htmlFor }: { children: string; htmlFor?: string 
     {children}
   </label>
 );
+
+/** The four marks most mail needs, as a popover: the tab bar says Markdown works, this says how. */
+const MarkdownCheatSheet = () => (
+  <Popover.Root>
+    <Popover.Trigger className="ml-auto self-stretch text-2xs text-paper-faint underline underline-offset-4 outline-none transition-colors hover:text-paper focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-signal data-[popup-open]:text-paper">
+      Markdown supported
+    </Popover.Trigger>
+    <Popover.Portal>
+      <Popover.Positioner
+        side="bottom"
+        align="end"
+        sideOffset={4}
+        collisionPadding={12}
+        className="z-[60]"
+      >
+        <Popover.Popup
+          aria-label="Markdown cheat sheet"
+          className="border border-rule bg-ink-raised px-4 py-3 outline-none"
+        >
+          <dl className="grid grid-cols-[auto_auto] items-baseline gap-x-6 gap-y-1.5 text-base">
+            {MARKDOWN_MARKS.map(({ mark, result }) => (
+              <div key={mark} className="contents">
+                <dt className="font-mono text-paper">{mark}</dt>
+                <dd className="text-paper-dim">{result}</dd>
+              </div>
+            ))}
+          </dl>
+        </Popover.Popup>
+      </Popover.Positioner>
+    </Popover.Portal>
+  </Popover.Root>
+);
+
+const MARKDOWN_MARKS = [
+  { mark: '**bold**', result: 'bold' },
+  { mark: '- item', result: 'a bulleted list' },
+  { mark: '> quote', result: 'an indented quote' },
+  { mark: '[text](url)', result: 'a link' },
+] as const;
 
 const TABS = [
   { value: 'write', label: 'Write', Icon: PencilSimpleIcon },
@@ -199,11 +242,11 @@ const DraftFileChip = ({
         facts
       )}
       {isDownloading && <span className="text-paper-faint">Downloading…</span>}
-      {hasDownloadFailed && <span className="text-signal">Couldn’t download</span>}
+      {hasDownloadFailed && <span className="text-danger">Couldn’t download</span>}
       {file.upload !== 'uploaded' && (
         <span
           role={file.upload === 'uploading' ? 'status' : undefined}
-          className={file.upload === 'uploading' ? 'text-paper-faint' : 'text-signal'}
+          className={file.upload === 'uploading' ? 'text-paper-faint' : 'text-danger'}
         >
           {UPLOAD_WORDS[file.upload]}
         </span>
@@ -220,17 +263,47 @@ const DraftFileChip = ({
           </button>
         )}
       {!isFrozen && (
-        <button
-          type="button"
-          onClick={onRemove}
-          className="-m-1 flex size-6 items-center justify-center -outline-offset-2 text-paper-faint hover:text-paper"
-          aria-label={`Remove ${name}`}
-        >
-          <XIcon size={11} />
-        </button>
+        <Tooltip label={`Remove ${name}`}>
+          <button
+            type="button"
+            onClick={onRemove}
+            className="-m-1 flex size-6 items-center justify-center -outline-offset-2 text-paper-faint hover:text-paper"
+            aria-label={`Remove ${name}`}
+          >
+            <XIcon size={11} />
+          </button>
+        </Tooltip>
       )}
     </li>
   );
+};
+
+/**
+ * Where the reader pane starts, which is how wide a docked composer is: it covers the rail and the
+ * list and stops at the message it answers. Measured, since the list can render narrower than its
+ * stored width. `null` with no reader pane on screen, which means not docked.
+ */
+const useReaderPaneLeft = (isWanted: boolean): number | null => {
+  const [left, setLeft] = useState<number | null>(null);
+  // A route can mount or drop the pane under an open composer.
+  const pathname = useLocation({ select: location => location.pathname });
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `pathname` re-finds the pane.
+  useLayoutEffect(() => {
+    if (!isWanted) {
+      setLeft(null);
+      return;
+    }
+    const pane = document.querySelector('[data-reader-pane]');
+    const measure = () => setLeft(pane?.getBoundingClientRect().left ?? null);
+    measure();
+    if (pane === null) return;
+    // The body for the window, the pane for the list's resizer.
+    const observer = new ResizeObserver(measure);
+    observer.observe(document.body);
+    observer.observe(pane);
+    return () => observer.disconnect();
+  }, [isWanted, pathname]);
+  return left;
 };
 
 export const Compose = () => {
@@ -353,6 +426,10 @@ export const Compose = () => {
   };
 
   const uploadProblem = uploadProblemOf(draft?.attachments ?? []);
+  // A Bcc-only send is a real message.
+  const isMissingRecipient =
+    draft !== null && [draft.to, draft.cc, draft.bcc].every(field => field.trim() === '');
+  const canSend = !isSending && !isOpenDraftFrozen && pendingReads === 0 && !isMissingRecipient;
   const sendLabel = (() => {
     if (!isSending) return 'Send';
     return draft?.attachments.some(({ upload }) => upload === 'uploading')
@@ -360,27 +437,62 @@ export const Compose = () => {
       : 'Sending…';
   })();
 
+  const isShown = compose !== undefined && draft !== null;
+  // A reply or a forward docks over the rail and the list from `lg`, so the message it answers
+  // stays on screen to read, scroll and copy from. Everything else is the centred modal.
+  const isWide = useMediaQuery('(min-width: 64rem)');
+  const readerLeft = useReaderPaneLeft(isShown && isWide && answersMessage(compose));
+  // Held through the closing transition, which runs after the intent has left the URL: the
+  // composer leaves in the shape and under the title it had.
+  const frameRef = useRef<{ title: string; readerLeft: number | null }>({
+    title: '',
+    readerLeft: null,
+  });
+  if (isShown) {
+    frameRef.current = { title: composeTitleOf(compose, threads, ownedAddresses), readerLeft };
+  }
+  const frame = frameRef.current;
+  const isDocked = frame.readerLeft !== null;
+
   return (
     <Dialog.Root
       // Open once there is a draft to show, not merely an intent: the intent is there during the
       // resume too. A stray click closes, since closing keeps the draft.
-      open={compose !== undefined && draft !== null}
+      open={isShown}
       onOpenChange={open => {
         if (!open) close();
       }}
+      // Docked, focus stays in the composer while the pointer and the wheel still reach the
+      // reader; a click there is reading, not a stray click, so it does not close.
+      modal={isDocked ? 'trap-focus' : true}
+      disablePointerDismissal={isDocked}
     >
       <Dialog.Portal>
-        <Dialog.Backdrop className="fixed inset-0 z-40 bg-ink/75 transition-opacity duration-150 data-ending-style:opacity-0 data-starting-style:opacity-0" />
-        <Dialog.Viewport className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto sm:p-6 lg:p-10">
+        {!isDocked && (
+          <Dialog.Backdrop className="fixed inset-0 z-40 bg-ink/75 transition-opacity duration-150 data-ending-style:opacity-0 data-starting-style:opacity-0" />
+        )}
+        <Dialog.Viewport
+          className={
+            isDocked
+              ? 'fixed inset-y-0 left-0 z-50'
+              : 'fixed inset-0 z-50 flex items-start justify-center overflow-y-auto sm:p-6 lg:p-10'
+          }
+          style={frame.readerLeft === null ? undefined : { width: frame.readerLeft }}
+        >
           <Dialog.Popup
+            data-docked={isDocked ? '' : undefined}
             className={cn(
-              'flex min-h-dvh w-full flex-col bg-ink-raised outline-none',
-              'sm:h-[min(46rem,calc(100dvh-3rem))] sm:min-h-0 sm:max-w-3xl sm:border sm:border-rule',
+              'flex w-full flex-col bg-ink-raised outline-none',
+              isDocked
+                ? 'h-dvh border-r border-rule'
+                : 'min-h-dvh sm:h-[min(46rem,calc(100dvh-3rem))] sm:min-h-0 sm:max-w-3xl sm:border sm:border-rule',
               'transition-[opacity,translate] duration-150 data-ending-style:translate-y-1 data-ending-style:opacity-0 data-starting-style:translate-y-1 data-starting-style:opacity-0',
             )}
           >
-            <div className="flex h-11 shrink-0 items-center justify-between border-b border-rule-soft pr-1 pl-4">
-              <Dialog.Title className="label-rule text-paper-dim">New message</Dialog.Title>
+            <div className="flex h-11 shrink-0 items-center justify-between gap-3 border-b border-rule-soft pr-1 pl-4">
+              <Dialog.Title className="label-rule truncate text-paper-dim">
+                {frame.title}
+              </Dialog.Title>
               {/* Close keeps the draft. Discard, in the footer, is the only thing that does not. */}
               <Dialog.Close
                 render={
@@ -477,7 +589,8 @@ export const Compose = () => {
                     value={draft.identityId}
                     onChange={identityId => updateDraft({ identityId })}
                   />
-                  <div className="flex items-stretch">
+                  {/* The Cc/Bcc cell is part of the To row, so the row's focus rule runs under it too. */}
+                  <div className="group/to flex items-stretch">
                     <FieldLabel htmlFor="compose-to">To</FieldLabel>
                     <Input
                       ref={toInput}
@@ -493,11 +606,11 @@ export const Compose = () => {
                       <Button
                         variant="ghost"
                         size="sm"
-                        className="h-auto shrink-0 border-b border-rule bg-ink-sunken"
+                        className="h-auto shrink-0 border-b border-paper-faint bg-ink-sunken transition-colors group-has-[input:hover]/to:border-paper-dim group-has-[input:focus]/to:border-signal group-has-[input:focus]/to:shadow-[inset_0_-1px_0_var(--signal)]"
                         onClick={() => setShowCopies(true)}
                         aria-label="Show Cc and Bcc"
                       >
-                        Cc Bcc
+                        Cc/Bcc
                       </Button>
                     )}
                   </div>
@@ -535,7 +648,6 @@ export const Compose = () => {
                       id="compose-subject"
                       value={draft.subject}
                       onChange={event => updateDraft({ subject: event.target.value })}
-                      placeholder="No subject"
                     />
                   </div>
                 </div>
@@ -546,13 +658,13 @@ export const Compose = () => {
                       <Tabs.Tab
                         key={value}
                         value={value}
-                        className="label-rule -mb-px flex items-center gap-1.5 border-b-2 border-transparent py-2.5 outline-none transition-colors hover:text-paper data-active:border-signal data-active:text-paper"
+                        className="label-rule -mb-px flex items-center gap-1.5 border-b-2 border-transparent py-2.5 outline-none transition-colors hover:text-paper focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-signal data-active:border-signal data-active:text-paper"
                       >
                         <Icon size={13} />
                         {label}
                       </Tabs.Tab>
                     ))}
-                    <span className="ml-auto font-mono text-2xs text-paper-faint">markdown</span>
+                    <MarkdownCheatSheet />
                   </Tabs.List>
 
                   {/* A flex column, not `h-full`: below `sm` the dialog only has a min-height, which a percentage cannot resolve against. */}
@@ -561,11 +673,14 @@ export const Compose = () => {
                       ref={bodyInput}
                       value={draft.body}
                       onChange={event => updateDraft({ body: event.target.value })}
-                      placeholder={
-                        'Write your message.\n\nMarkdown works — **bold**, lists, > quotes.'
-                      }
+                      placeholder="Write your message."
                       aria-label="Message body, markdown"
-                      className="min-h-0 w-full flex-1 resize-none bg-ink-raised px-4 py-4 font-mono text-[13px] leading-[1.7] text-paper outline-none placeholder:text-paper-faint"
+                      className={cn(
+                        'min-h-0 w-full flex-1 resize-none bg-ink-raised px-4 py-4 font-mono text-[16px]/[1.6] text-paper outline-none placeholder:text-paper-faint lg:text-[14px]/[1.6]',
+                        // A docked composer is as wide as the rail and the list together; a line of
+                        // mail still wants a measure, as the reader beside it has.
+                        isDocked && 'max-w-[80ch]',
+                      )}
                     />
                   </Tabs.Panel>
 
@@ -576,7 +691,9 @@ export const Compose = () => {
                     {draft.body.trim() === '' ? (
                       <p className="text-base text-paper-faint">Nothing to preview yet.</p>
                     ) : (
-                      <MarkdownView source={draft.body} />
+                      <div className={cn(isDocked && 'max-w-[80ch]')}>
+                        <MarkdownView source={draft.body} />
+                      </div>
                     )}
                   </Tabs.Panel>
                 </Tabs.Root>
@@ -596,124 +713,121 @@ export const Compose = () => {
                       ))}
                     </ul>
                     {uploadProblem !== null && (
-                      <p className="mt-2 text-2xs text-signal" role="alert">
+                      <p className="mt-2 text-base text-danger" role="alert">
                         {uploadProblem}
                       </p>
                     )}
                   </div>
                 )}
 
-                <div className="flex shrink-0 flex-col gap-2 border-t border-rule-soft px-4 py-3">
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="flex items-center gap-3">
-                      <input
-                        ref={fileInput}
-                        type="file"
-                        multiple
-                        className="sr-only"
-                        onChange={event => {
-                          const files = [...(event.target.files ?? [])];
-                          event.target.value = '';
-                          // Sizes are known before a byte is read. Same dedupe as `attach`.
-                          const kept = draft.attachments.filter(
-                            file => !files.some(next => next.name === file.name),
+                {/* One grid, so the reason Send is off sits beside Send from `sm` and above the row
+                    below it, in a line whose height is kept: the foot never moves when it goes. */}
+                <div className="grid shrink-0 grid-cols-[1fr_auto] items-center gap-x-3 gap-y-2 border-t border-rule-soft px-4 py-3 sm:grid-cols-[1fr_auto_auto]">
+                  <div className="flex items-center gap-3">
+                    <input
+                      ref={fileInput}
+                      type="file"
+                      multiple
+                      className="sr-only"
+                      onChange={event => {
+                        const files = [...(event.target.files ?? [])];
+                        event.target.value = '';
+                        // Sizes are known before a byte is read. Same dedupe as `attach`.
+                        const kept = draft.attachments.filter(
+                          file => !files.some(next => next.name === file.name),
+                        );
+                        const total = [...kept, ...files].reduce((sum, file) => sum + file.size, 0);
+                        if (total > MAX_ATTACHMENT_BYTES) {
+                          setSendError(
+                            `Attachments must total under ${formatBytes(MAX_ATTACHMENT_BYTES)}.`,
                           );
-                          const total = [...kept, ...files].reduce(
-                            (sum, file) => sum + file.size,
-                            0,
-                          );
-                          if (total > MAX_ATTACHMENT_BYTES) {
-                            setSendError(
-                              `Attachments must total under ${formatBytes(MAX_ATTACHMENT_BYTES)}.`,
-                            );
-                            return;
-                          }
-                          setSendError(null);
-                          // A send snapshotted mid-read would go out without the file.
-                          setPendingReads(count => count + files.length);
-                          // A lock during the read hands this composer to the next session, whose
-                          // draft must not gain this person's files.
-                          const isCurrent = watchSession();
-                          void (async () => {
-                            try {
-                              const read = await readAttachments(files);
-                              if (isCurrent()) attach(read);
-                            } catch (err) {
-                              if (isCurrent()) {
-                                setSendError(err instanceof Error ? err.message : String(err));
-                              }
-                            } finally {
-                              setPendingReads(count => count - files.length);
+                          return;
+                        }
+                        setSendError(null);
+                        // A send snapshotted mid-read would go out without the file.
+                        setPendingReads(count => count + files.length);
+                        // A lock during the read hands this composer to the next session, whose
+                        // draft must not gain this person's files.
+                        const isCurrent = watchSession();
+                        void (async () => {
+                          try {
+                            const read = await readAttachments(files);
+                            if (isCurrent()) attach(read);
+                          } catch (err) {
+                            if (isCurrent()) {
+                              setSendError(err instanceof Error ? err.message : String(err));
                             }
-                          })();
-                        }}
-                      />
-                      {/*
+                          } finally {
+                            setPendingReads(count => count - files.length);
+                          }
+                        })();
+                      }}
+                    />
+                    {/*
                         The footer's controls are the one row a thumb uses, so they carry the 44px
                         target on a phone and the compact one from `lg` up — the same shape the
                         header's Close already had, and the reason it was the only control here
                         that met the rule.
                       */}
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="h-11 lg:h-7"
-                        disabled={isSending || isOpenDraftFrozen}
-                        onClick={() => fileInput.current?.click()}
-                      >
-                        <PaperclipIcon size={13} />
-                        Attach
-                      </Button>
-                      {/*
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-11 lg:h-7"
+                      disabled={isSending || isOpenDraftFrozen}
+                      onClick={() => fileInput.current?.click()}
+                    >
+                      <PaperclipIcon size={13} />
+                      Attach
+                    </Button>
+                    {/*
                         The one control that destroys writing, so it sits at the opposite end of
                         the bar from Send and asks before it acts. The record is tombstoned rather
                         than deleted, but no screen in the app brings one back — so from here it
                         is irreversible, and it takes the same sheet Remove address and Reset
                         vault take (DECISIONS.md).
                       */}
-                      <ConfirmDialog
-                        trigger={
-                          <Button
-                            variant="danger"
-                            size="sm"
-                            className="h-11 lg:h-7"
-                            // Frozen as Send is: the bytes may already be on the wire.
-                            disabled={isSending || isOpenDraftFrozen}
-                          >
-                            <TrashIcon size={13} />
-                            Discard
-                          </Button>
-                        }
-                        title="Discard this draft?"
-                        description={DISCARD_WARNING}
-                        confirmLabel="Discard"
-                        busyLabel="Discarding…"
-                        onConfirm={async () => {
-                          const discarded = discardDraft();
-                          close();
-                          void reportDiscard(discarded);
-                        }}
-                      />
-                    </div>
-                    <Button
-                      variant="primary"
-                      className="h-11 lg:h-8"
-                      onClick={() => pressSend(send)}
-                      // A Bcc-only send is a real message.
-                      disabled={
-                        isSending ||
-                        // Frozen by a send in flight, here or on another device, or one to settle.
-                        isOpenDraftFrozen ||
-                        pendingReads > 0 ||
-                        [draft.to, draft.cc, draft.bcc].every(field => field.trim() === '')
+                    <ConfirmDialog
+                      trigger={
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-11 hover:text-danger focus-visible:text-danger lg:h-7"
+                          // Frozen as Send is: the bytes may already be on the wire.
+                          disabled={isSending || isOpenDraftFrozen}
+                        >
+                          <TrashIcon size={13} />
+                          Discard
+                        </Button>
                       }
-                    >
-                      <PaperPlaneRightIcon size={13} weight="fill" />
-                      {sendLabel}
-                    </Button>
+                      title="Discard this draft?"
+                      description={DISCARD_WARNING}
+                      confirmLabel="Discard"
+                      busyLabel="Discarding…"
+                      onConfirm={async () => {
+                        const discarded = discardDraft();
+                        close();
+                        void reportDiscard(discarded);
+                      }}
+                    />
                   </div>
+                  {/* A disabled button shows no tooltip and takes no focus or touch, so the reason is
+                      a line of its own. Only for the one cause the person can fix by typing. */}
+                  <p className="order-first col-span-2 min-h-4 text-2xs text-paper-faint sm:order-none sm:col-span-1 sm:min-h-0 sm:text-right">
+                    {isMissingRecipient && !isSending && !isOpenDraftFrozen
+                      ? 'Add a recipient to send.'
+                      : null}
+                  </p>
+                  <Button
+                    variant="primary"
+                    className="h-11 lg:h-8"
+                    onClick={() => pressSend(send)}
+                    disabled={!canSend}
+                  >
+                    <PaperPlaneRightIcon size={13} weight="fill" />
+                    {sendLabel}
+                  </Button>
                   {sendError !== null && (
-                    <p className="text-2xs text-signal" role="alert">
+                    <p className="col-span-full text-base text-danger" role="alert">
                       {sendError}
                     </p>
                   )}

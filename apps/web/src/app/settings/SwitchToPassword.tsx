@@ -1,13 +1,15 @@
 import { Link, useNavigate } from '@tanstack/react-router';
+import { cn } from 'cn';
 import { type FormEvent, useState } from 'react';
 import { Button, buttonClass } from '../../ui/Button';
-import { FieldRow, Input } from '../../ui/Field';
+import { proseClass } from '../../ui/PageSection';
+import { PasswordFields } from '../../vault/PasswordFields';
 import { useVault } from '../../vault/session';
 import { MIN_PASSWORD_LENGTH, switchModeToPassword } from '../../vault/unlock';
 import { SettingsPane } from './SettingsPane';
 import { useSignInChange } from './SignInChange';
 
-/** Sets a password for an account that signs in with a passkey; `ChangePassword` is for one that has a password. */
+/** Sets a password for an account that logs in with a passkey; `ChangePassword` is for one that has a password. */
 export const SwitchToPassword = () => {
   const navigate = useNavigate();
   const { session, setSession } = useVault();
@@ -48,41 +50,32 @@ export const SwitchToPassword = () => {
     <SettingsPane
       title="Switch to a password"
       subline={session.email}
-      back={{ label: 'Sign-in', to: '/settings/account' }}
+      back={{ label: 'Account', to: '/settings/account' }}
     >
-      <form className="max-w-xs space-y-3" onSubmit={submit}>
-        <FieldRow label="Password" htmlFor="switch-password">
-          <Input
-            id="switch-password"
-            type="password"
-            autoComplete="new-password"
-            autoFocus
-            value={password}
-            onChange={event => setPassword(event.target.value)}
-            disabled={busy !== null}
-          />
-          {fieldError?.field === 'password' && (
-            <p role="alert" className="text-2xs text-danger">
-              {fieldError.message}
-            </p>
-          )}
-        </FieldRow>
-        <FieldRow label="Confirm password" htmlFor="switch-confirm">
-          <Input
-            id="switch-confirm"
-            type="password"
-            autoComplete="new-password"
-            value={confirmPassword}
-            onChange={event => setConfirmPassword(event.target.value)}
-            disabled={busy !== null}
-          />
-          {fieldError?.field === 'confirm' && (
-            <p role="alert" className="text-2xs text-danger">
-              {fieldError.message}
-            </p>
-          )}
-        </FieldRow>
-        <p className="text-base leading-relaxed text-paper-dim">
+      <form className="space-y-5 sm:max-w-xs" onSubmit={submit}>
+        <PasswordFields
+          idPrefix="switch"
+          ground="sunken"
+          autoFocus
+          password={password}
+          confirmPassword={confirmPassword}
+          onPassword={setPassword}
+          onConfirmPassword={setConfirmPassword}
+          isDisabled={busy !== null}
+          errors={{
+            password: fieldError?.field === 'password' && (
+              <p role="alert" className="text-2xs text-danger">
+                {fieldError.message}
+              </p>
+            ),
+            confirm: fieldError?.field === 'confirm' && (
+              <p role="alert" className="text-2xs text-danger">
+                {fieldError.message}
+              </p>
+            ),
+          }}
+        />
+        <p className={cn('text-paper-dim', proseClass)}>
           If you forget this password, nobody can recover your saved addresses, not even us. You
           would add them again.
         </p>

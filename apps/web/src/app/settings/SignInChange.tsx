@@ -24,7 +24,7 @@ type PendingConfirmation<Area extends string> = {
 
 /** What **Confirm it's you** says when the change is to how the person signs in. */
 const SIGN_IN_CHANGE_REASON =
-  'You signed in more than a day ago. Changing how you sign in needs a fresh sign-in, so a session someone else got hold of cannot do it. Your change goes through right after.';
+  'You logged in more than a day ago. Changing how you log in needs a fresh login, so a session someone else got hold of cannot do it. Your change goes through right after.';
 
 /**
  * Every change to how a person signs in runs through here: a refused one asks **Confirm it's you**

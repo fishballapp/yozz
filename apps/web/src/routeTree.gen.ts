@@ -25,6 +25,7 @@ import { Route as AppMViewIndexRouteImport } from './routes/_app.m.$view.index'
 import { Route as AppSettingsAAddressRouteImport } from './routes/_app.settings.a.$address'
 import { Route as AppSettingsAccountPasskeyRouteImport } from './routes/_app.settings.account_.passkey'
 import { Route as AppSettingsAccountPasswordRouteImport } from './routes/_app.settings.account_.password'
+import { Route as AppSettingsAccountSwitchToPasswordRouteImport } from './routes/_app.settings.account_.switch-to-password'
 import { Route as AppMViewTSplatRouteImport } from './routes/_app.m.$view.t.$'
 
 const IndexRoute = IndexRouteImport.update({
@@ -108,6 +109,12 @@ const AppSettingsAccountPasswordRoute =
     path: '/account/password',
     getParentRoute: () => AppSettingsRoute,
   } as any)
+const AppSettingsAccountSwitchToPasswordRoute =
+  AppSettingsAccountSwitchToPasswordRouteImport.update({
+    id: '/account_/switch-to-password',
+    path: '/account/switch-to-password',
+    getParentRoute: () => AppSettingsRoute,
+  } as any)
 const AppMViewTSplatRoute = AppMViewTSplatRouteImport.update({
   id: '/t/$',
   path: '/t/$',
@@ -129,6 +136,7 @@ export interface FileRoutesByFullPath {
   '/settings/a/$address': typeof AppSettingsAAddressRoute
   '/settings/account/passkey': typeof AppSettingsAccountPasskeyRoute
   '/settings/account/password': typeof AppSettingsAccountPasswordRoute
+  '/settings/account/switch-to-password': typeof AppSettingsAccountSwitchToPasswordRoute
   '/m/$view/': typeof AppMViewIndexRoute
   '/m/$view/t/$': typeof AppMViewTSplatRoute
 }
@@ -145,6 +153,7 @@ export interface FileRoutesByTo {
   '/settings/a/$address': typeof AppSettingsAAddressRoute
   '/settings/account/passkey': typeof AppSettingsAccountPasskeyRoute
   '/settings/account/password': typeof AppSettingsAccountPasswordRoute
+  '/settings/account/switch-to-password': typeof AppSettingsAccountSwitchToPasswordRoute
   '/m/$view': typeof AppMViewIndexRoute
   '/m/$view/t/$': typeof AppMViewTSplatRoute
 }
@@ -165,6 +174,7 @@ export interface FileRoutesById {
   '/_app/settings/a/$address': typeof AppSettingsAAddressRoute
   '/_app/settings/account_/passkey': typeof AppSettingsAccountPasskeyRoute
   '/_app/settings/account_/password': typeof AppSettingsAccountPasswordRoute
+  '/_app/settings/account_/switch-to-password': typeof AppSettingsAccountSwitchToPasswordRoute
   '/_app/m/$view/': typeof AppMViewIndexRoute
   '/_app/m/$view/t/$': typeof AppMViewTSplatRoute
 }
@@ -185,6 +195,7 @@ export interface FileRouteTypes {
     | '/settings/a/$address'
     | '/settings/account/passkey'
     | '/settings/account/password'
+    | '/settings/account/switch-to-password'
     | '/m/$view/'
     | '/m/$view/t/$'
   fileRoutesByTo: FileRoutesByTo
@@ -201,6 +212,7 @@ export interface FileRouteTypes {
     | '/settings/a/$address'
     | '/settings/account/passkey'
     | '/settings/account/password'
+    | '/settings/account/switch-to-password'
     | '/m/$view'
     | '/m/$view/t/$'
   id:
@@ -220,6 +232,7 @@ export interface FileRouteTypes {
     | '/_app/settings/a/$address'
     | '/_app/settings/account_/passkey'
     | '/_app/settings/account_/password'
+    | '/_app/settings/account_/switch-to-password'
     | '/_app/m/$view/'
     | '/_app/m/$view/t/$'
   fileRoutesById: FileRoutesById
@@ -347,6 +360,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppSettingsAccountPasswordRouteImport
       parentRoute: typeof AppSettingsRoute
     }
+    '/_app/settings/account_/switch-to-password': {
+      id: '/_app/settings/account_/switch-to-password'
+      path: '/account/switch-to-password'
+      fullPath: '/settings/account/switch-to-password'
+      preLoaderRoute: typeof AppSettingsAccountSwitchToPasswordRouteImport
+      parentRoute: typeof AppSettingsRoute
+    }
     '/_app/m/$view/t/$': {
       id: '/_app/m/$view/t/$'
       path: '/t/$'
@@ -365,6 +385,7 @@ interface AppSettingsRouteChildren {
   AppSettingsAAddressRoute: typeof AppSettingsAAddressRoute
   AppSettingsAccountPasskeyRoute: typeof AppSettingsAccountPasskeyRoute
   AppSettingsAccountPasswordRoute: typeof AppSettingsAccountPasswordRoute
+  AppSettingsAccountSwitchToPasswordRoute: typeof AppSettingsAccountSwitchToPasswordRoute
 }
 
 const AppSettingsRouteChildren: AppSettingsRouteChildren = {
@@ -375,6 +396,8 @@ const AppSettingsRouteChildren: AppSettingsRouteChildren = {
   AppSettingsAAddressRoute: AppSettingsAAddressRoute,
   AppSettingsAccountPasskeyRoute: AppSettingsAccountPasskeyRoute,
   AppSettingsAccountPasswordRoute: AppSettingsAccountPasswordRoute,
+  AppSettingsAccountSwitchToPasswordRoute:
+    AppSettingsAccountSwitchToPasswordRoute,
 }
 
 const AppSettingsRouteWithChildren = AppSettingsRoute._addFileChildren(

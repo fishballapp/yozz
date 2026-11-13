@@ -4,7 +4,7 @@ import { Account } from '../app/settings/Account';
 
 /** A change that returns here says what it did, so the notice survives the page change. */
 export const Route = createFileRoute('/_app/settings/account')({
-  staticData: { title: 'Sign-in' },
+  staticData: { title: 'Account' },
   validateSearch: z.object({
     notice: z.enum(['switched', 'changed']).optional().catch(undefined),
   }),

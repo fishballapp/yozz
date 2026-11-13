@@ -79,11 +79,16 @@ const endSession = () => {
 
 const unmounts: (() => Promise<void>)[] = [];
 
-const mount = async () => {
+vi.mock('../../vault/api-base-url', () => ({
+  isApiConfigured: () => true,
+  getApiBaseUrl: () => 'http://localhost',
+}));
+
+const mount = async ({ isFirst = false } = {}) => {
   const host = document.createElement('div');
   document.body.append(host);
   const root = createRoot(host);
-  await act(async () => root.render(<AddAddress />));
+  await act(async () => root.render(<AddAddress isFirst={isFirst} />));
   unmounts.push(async () => {
     await act(async () => root.unmount());
     host.remove();
@@ -106,6 +111,10 @@ const buttonNamed = (page: HTMLElement, label: string) => {
   return button;
 };
 
+/** The open step's heading, as its number and title. */
+const openStepOf = (page: HTMLElement) =>
+  page.querySelector('h3[aria-current="step"]')?.textContent;
+
 /** Only the open step renders a form, so the page's one form is the step to submit. */
 const submitStep = async (page: HTMLElement) => {
   const form = page.querySelector('form');
@@ -117,14 +126,14 @@ const submitStep = async (page: HTMLElement) => {
 const toServers = async (page: HTMLElement, addressValue = 'alice@example.com') => {
   await act(async () => type(page, 'connect-address', addressValue));
   await submitStep(page);
-  await vi.waitFor(() => expect(page.textContent).toContain('Step 2 of 3'));
+  await vi.waitFor(() => expect(openStepOf(page)).toBe('2Servers'));
 };
 
 /** The whole flow to the password step, with the password typed. */
 const toPassword = async (page: HTMLElement) => {
   await toServers(page);
   await submitStep(page);
-  await vi.waitFor(() => expect(page.textContent).toContain('Step 3 of 3'));
+  await vi.waitFor(() => expect(openStepOf(page)).toBe('3Password'));
   await act(async () => type(page, 'connect-password', 'pw'));
 };
 
@@ -147,6 +156,83 @@ afterEach(async () => {
 });
 
 describe('AddAddress', () => {
+  it('numbers the steps and dims the ones not reached, with no separate step count', async () => {
+    const page = await mount();
+    const headings = [...page.querySelectorAll('h3')];
+    expect(headings.map(heading => heading.textContent)).toEqual([
+      '1Address',
+      '2Servers',
+      '3Password',
+    ]);
+    expect(headings[0]?.className).toContain('text-paper');
+    expect(headings[1]?.className).toContain('text-paper-faint');
+    expect(page.textContent).not.toMatch(/Step \d of 3/);
+  });
+
+  it('as the first address, sits in the setup frame: step line, unnumbered, Skip for now, no Cancel', async () => {
+    const page = await mount({ isFirst: true });
+    expect(page.querySelector('h1')?.textContent).toBe('Connect an address');
+    expect(
+      page.querySelector('ol[aria-label="Setting up YOZZ"] [aria-current="step"]')?.textContent,
+    ).toBe('3Address');
+    expect([...page.querySelectorAll('h3')].map(heading => heading.textContent)).toEqual([
+      'Address',
+      'Servers',
+      'Password',
+    ]);
+    const links = [...page.querySelectorAll('a')].map(link => link.textContent);
+    expect(links).toContain('Skip for now');
+    expect(links).not.toContain('Cancel');
+    // The frame is on the page ground, not the sunken settings pane.
+    expect(page.querySelector('#connect-address')?.className).toContain('bg-ink-sunken');
+  });
+
+  it('in Settings, keeps its numbers and Cancel and shows no step line', async () => {
+    const page = await mount();
+    expect(page.querySelector('ol')).toBeNull();
+    expect(page.querySelector('h3')?.textContent).toBe('1Address');
+    const links = [...page.querySelectorAll('a')].map(link => link.textContent);
+    expect(links).toContain('Cancel');
+    expect(links).not.toContain('Skip for now');
+  });
+
+  it('puts the step’s action first, then Cancel', async () => {
+    const page = await mount();
+    const row = page.querySelector('form > div:last-child');
+    expect([...(row?.children ?? [])].map(child => child.textContent)).toEqual([
+      'Continue',
+      'Cancel',
+    ]);
+  });
+
+  it('links a Gmail address to Google’s app passwords on Password', async () => {
+    mocks.lookupResult = {
+      status: 'found',
+      config: {
+        imap: { host: 'imap.gmail.com', port: 993 },
+        smtp: { host: 'smtp.gmail.com', port: 465 },
+        username: 'address',
+        source: 'ispdb',
+        sourceDomain: 'gmail.com',
+      },
+    };
+    const page = await mount();
+    await toServers(page, 'jason@gmail.com');
+    await submitStep(page);
+    await vi.waitFor(() => expect(openStepOf(page)).toBe('3Password'));
+    const hint = page.querySelector('#connect-password-hint');
+    expect(hint?.textContent).toContain('Gmail needs an app password');
+    expect(hint?.querySelector('a')?.getAttribute('href')).toBe(
+      'https://myaccount.google.com/apppasswords',
+    );
+  });
+
+  it('says nothing of Google for another provider', async () => {
+    const page = await mount();
+    await toPassword(page);
+    expect(page.querySelector('#connect-password-hint')?.textContent).not.toContain('Gmail');
+  });
+
   it('walks the three steps and stores a tested address under its name', async () => {
     const page = await mount();
     await act(async () => type(page, 'connect-name', 'Jason Yu'));
@@ -182,20 +268,20 @@ describe('AddAddress', () => {
     expect(page.querySelector('#connect-username')).toBeNull();
     await act(async () => type(page, 'connect-imap-host', 'imap.elsewhere.test'));
     await submitStep(page);
-    await vi.waitFor(() => expect(page.textContent).toContain('Step 3 of 3'));
+    await vi.waitFor(() => expect(openStepOf(page)).toBe('3Password'));
     await act(async () => type(page, 'connect-password', 'pw'));
     await submitStep(page);
     await vi.waitFor(() => expect(mocks.putAddress).toHaveBeenCalled());
     expect(mocks.putAddress.mock.calls[0]?.[0].imap?.host).toBe('imap.elsewhere.test');
   });
 
-  it('keeps the username off the servers step and prefills it on Sign-in', async () => {
+  it('keeps the username off the servers step and prefills it on Password', async () => {
     const page = await mount();
     await toServers(page);
     expect(page.querySelector('#connect-username')).toBeNull();
     expect(page.textContent).not.toContain('Username');
     await submitStep(page);
-    await vi.waitFor(() => expect(page.textContent).toContain('Step 3 of 3'));
+    await vi.waitFor(() => expect(openStepOf(page)).toBe('3Password'));
     expect(page.querySelector<HTMLInputElement>('#connect-username')?.value).toBe(
       'alice@example.com',
     );
@@ -214,8 +300,8 @@ describe('AddAddress', () => {
     const page = await mount();
     await toPassword(page);
     await act(async () => type(page, 'connect-username', 'typed-login'));
-    const addressRow = [...page.querySelectorAll('span.label-rule')]
-      .find(candidate => candidate.textContent === 'Address')
+    const addressRow = [...page.querySelectorAll('h3')]
+      .find(candidate => candidate.textContent === '1Address')
       ?.closest('div.flex');
     await act(async () =>
       [...(addressRow?.querySelectorAll('button') ?? [])]
@@ -224,9 +310,9 @@ describe('AddAddress', () => {
     );
     await act(async () => type(page, 'connect-address', 'bob@example.com'));
     await submitStep(page);
-    await vi.waitFor(() => expect(page.textContent).toContain('Step 2 of 3'));
+    await vi.waitFor(() => expect(openStepOf(page)).toBe('2Servers'));
     await submitStep(page);
-    await vi.waitFor(() => expect(page.textContent).toContain('Step 3 of 3'));
+    await vi.waitFor(() => expect(openStepOf(page)).toBe('3Password'));
     expect(page.querySelector<HTMLInputElement>('#connect-username')?.value).toBe(
       'bob@example.com',
     );
@@ -269,7 +355,7 @@ describe('AddAddress', () => {
     expect(page.querySelector('[role="alert"]')?.textContent).toBe(
       'That address is already stored. Open it from Settings.',
     );
-    expect(page.textContent).toContain('Step 1 of 3');
+    expect(openStepOf(page)).toBe('1Address');
   });
 
   it('reopens an earlier step from Change and keeps the answers after it', async () => {
@@ -279,7 +365,7 @@ describe('AddAddress', () => {
     expect(page.textContent).toContain('Jason Yu');
     expect(page.textContent).toContain('imap.example.com:993');
     await act(async () => buttonNamed(page, 'Change').click());
-    expect(page.textContent).toContain('Step 1 of 3');
+    expect(openStepOf(page)).toBe('1Address');
     expect(page.querySelector<HTMLInputElement>('#connect-name')?.value).toBe('Jason Yu');
     expect(page.textContent).toContain('imap.example.com:993');
   });
@@ -293,7 +379,7 @@ describe('AddAddress', () => {
         'imap.example.com rejected the username or password',
       ),
     );
-    expect(page.textContent).toContain('Step 3 of 3');
+    expect(openStepOf(page)).toBe('3Password');
     expect(mocks.putAddress).not.toHaveBeenCalled();
   });
 
@@ -306,7 +392,7 @@ describe('AddAddress', () => {
         'Could not reach the relay: connection refused',
       ),
     );
-    expect(page.textContent).toContain('Step 3 of 3');
+    expect(openStepOf(page)).toBe('3Password');
     expect(page.textContent).toContain('imap.example.com:993');
   });
 
@@ -317,7 +403,7 @@ describe('AddAddress', () => {
     await submitStep(page);
     expect(page.querySelector<HTMLInputElement>('#connect-address')?.readOnly).toBe(true);
     await act(async () => mocks.lookupGate?.resolve());
-    await vi.waitFor(() => expect(page.textContent).toContain('Step 2 of 3'));
+    await vi.waitFor(() => expect(openStepOf(page)).toBe('2Servers'));
   });
 
   it('stores the address that was looked up, not one typed while the lookup waited', async () => {
@@ -327,7 +413,7 @@ describe('AddAddress', () => {
     await submitStep(page);
     await act(async () => type(page, 'connect-address', 'bob@example.com'));
     await act(async () => mocks.lookupGate?.resolve());
-    await vi.waitFor(() => expect(page.textContent).toContain('Step 2 of 3'));
+    await vi.waitFor(() => expect(openStepOf(page)).toBe('2Servers'));
     await submitStep(page);
     await act(async () => type(page, 'connect-password', 'pw'));
     await submitStep(page);
@@ -384,7 +470,7 @@ describe('AddAddress', () => {
     expect(document.activeElement?.id).toBe('connect-address');
   });
 
-  it('moves focus to the username when Sign-in opens', async () => {
+  it('moves focus to the username when Password opens', async () => {
     const page = await mount();
     await toServers(page);
     await submitStep(page);
@@ -401,8 +487,8 @@ describe('AddAddress', () => {
   it('moves focus to Edit when a found servers step is reopened', async () => {
     const page = await mount();
     await toPassword(page);
-    const servers = [...page.querySelectorAll('span.label-rule')].find(
-      candidate => candidate.textContent === 'Servers',
+    const servers = [...page.querySelectorAll('h3')].find(
+      candidate => candidate.textContent === '2Servers',
     );
     const row = servers?.closest('div.flex');
     await act(async () =>

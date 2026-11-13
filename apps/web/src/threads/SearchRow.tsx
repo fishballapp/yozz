@@ -1,10 +1,17 @@
 import { useNavigate, useParams, useSearch } from '@tanstack/react-router';
 import { describeMailFailure } from '@yozz.app/mail/describe-failure';
 import { planOf } from '@yozz.app/mail/threads/server-search';
-import { type Listing, viewOfQuery, viewShown } from '@yozz.app/mail/threads/views';
+import {
+  type Listing,
+  queryOfView,
+  type ViewId,
+  viewOfQuery,
+  viewShown,
+} from '@yozz.app/mail/threads/views';
 import { type ReactNode, useRef } from 'react';
 import { useMail } from '../store/MailProvider';
 import { SearchBox } from './SearchBox';
+import { nameOfView } from './view-name';
 
 /**
  * The one line under the box, when there is something to say and only then: what went wrong, ahead
@@ -30,7 +37,7 @@ const ListLine = ({ query }: { query: string }) => {
     const asked = planOf(query, mailboxes)?.mailboxes.length ?? running.failed.length;
     const addresses = running.failed.map(({ address }) => address).join(', ');
     return {
-      text: `${running.failed.length} of ${asked} ${asked === 1 ? 'mailbox' : 'mailboxes'} couldn't be searched. ${addresses} may be missing results.`,
+      text: `${running.failed.length} of ${asked} ${asked === 1 ? 'address' : 'addresses'} couldn't be searched. ${addresses} may be missing results.`,
       whole: running.failed
         .map(({ address, failure }) => describeMailFailure(failure, hostOf(address)))
         .join('\n'),
@@ -63,10 +70,11 @@ const ListLine = ({ query }: { query: string }) => {
  * The box over a list and the line under it. A view's own query stays out of the URL, and any other
  * sits on `/m/unified`: one link per query, wherever it was typed. The first keystroke adds a history
  * entry, so Back returns to the list, and the later ones replace it. Typing filters this device's
- * mail at once and asks the servers after a pause; Enter skips the pause.
+ * mail at once and asks the servers after a pause; Enter skips the pause. The ✕ over a search goes
+ * back to the view it was typed over.
  */
 export const SearchRow = ({
-  listing: { query },
+  listing: { query, view: listedView, isSearch },
   leading,
   trailing,
 }: {
@@ -79,6 +87,8 @@ export const SearchRow = ({
   const navigate = useNavigate();
   const { mailboxes, search } = useMail();
   const hasBackEntry = useRef(false);
+  // The view a search began from, for the ✕; a `?q=` link opened cold began from none.
+  const origin = useRef<ViewId>('unified');
 
   const stillShows = (text: string) => {
     const own = viewOfQuery(text, mailboxes);
@@ -89,6 +99,8 @@ export const SearchRow = ({
   const showQuery = (text: string, isUrlBehind = false) => {
     if (!isUrlBehind && stillShows(text)) return;
     const own = viewOfQuery(text, mailboxes);
+    const shown = view === undefined ? null : viewShown(view, q, mailboxes);
+    if (own === null && shown !== null) origin.current = shown;
     const target = {
       search: <T,>(previous: T) => ({ ...previous, q: own === null ? text.trim() : undefined }),
       replace: hasBackEntry.current,
@@ -110,6 +122,7 @@ export const SearchRow = ({
         {leading}
         <SearchBox
           query={query}
+          viewName={isSearch ? null : nameOfView(listedView)}
           stillShows={stillShows}
           onQueryChange={(text, isUrlBehind) => {
             search.type(text);
@@ -122,6 +135,7 @@ export const SearchRow = ({
           onLeave={() => {
             hasBackEntry.current = false;
           }}
+          onClose={() => showQuery(queryOfView(origin.current))}
         />
         {trailing}
       </div>

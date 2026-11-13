@@ -174,7 +174,7 @@ const omittedFrom = (...lines: readonly (readonly Recipient[] | undefined)[]) =>
 
 /** What a tool read belongs to a session that has ended, and what it would do next to the session after it. */
 const SESSION_ENDED =
-  'You were signed out before this finished; try again once the user has signed in again.';
+  'You were logged out before this finished; try again once the user has logged in again.';
 
 const NOT_ON_SERVER =
   'no copy of this conversation is on a mail server to change; a message just sent has one once its Sent copy syncs';
@@ -361,9 +361,9 @@ const saved = (outcome: Awaited<ReturnType<AgentPort['writeDraft']>>, threadId?:
           : ''
       }. Read it again with get_threads before writing.`;
     }
-    if (outcome.reason === 'locked') return "You're signed out, so nothing can be written.";
+    if (outcome.reason === 'locked') return "You're logged out, so nothing can be written.";
     if (outcome.reason === 'ended') {
-      return 'You were signed out before it answered; the draft may or may not be saved.';
+      return 'You were logged out before it answered; the draft may or may not be saved.';
     }
     return 'The draft could not be saved; YOZZ could not be reached.';
   })();
@@ -744,10 +744,10 @@ export const buildAgentTools = (port: () => AgentPort): readonly AgentTool[] => 
               error: `That draft was changed since you read it; its current draftId is ${outcome.currentDraftId}.`,
             };
           case 'locked':
-            return { error: "You're signed out, so nothing can be deleted." };
+            return { error: "You're logged out, so nothing can be deleted." };
           case 'ended':
             return {
-              error: 'You were signed out before it answered; the draft may or may not be gone.',
+              error: 'You were logged out before it answered; the draft may or may not be gone.',
             };
           default:
             return { error: 'The draft could not be deleted; YOZZ could not be reached.' };

@@ -19,7 +19,7 @@ export const RemoteImages = () => {
     <SettingsPane title="Remote images">
       <PageSection
         label="Always load from"
-        note="Images from these senders load without asking when a message is verified. Add one from any of their verified messages."
+        note="Images from these senders load without asking, when the message passes the sender's signature check. Add a sender from any message of theirs that passes."
         error={error}
       >
         {isReady && trustedSenders.length === 0 && (

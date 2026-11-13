@@ -26,7 +26,7 @@ const mail = vi.hoisted(() => ({
   toggleArchive: vi.fn((_threadId: string) => true),
   trashThread: vi.fn(),
   restoreThread: vi.fn((_threadId: string) => true),
-  moveThreads: vi.fn((threadIds: readonly string[], _to: string) => new Set(threadIds)),
+  moveThreadsWithUndo: vi.fn((threadIds: readonly string[], _to: string) => new Set(threadIds)),
   junkFolders: { 'me@example.com': true } as Record<string, boolean>,
   flagThreads: vi.fn(
     (threadIds: readonly string[], _key: string, _value: boolean) => new Set(threadIds),
@@ -47,12 +47,20 @@ vi.mock('@tanstack/react-router', () => ({
     children,
     'aria-label': ariaLabel,
     'aria-current': ariaCurrent,
+    search,
   }: {
     children?: React.ReactNode;
     'aria-label'?: string;
     'aria-current'?: boolean;
+    search?: (previous: object) => unknown;
   }) => (
-    <a href="https://yozz.test" aria-label={ariaLabel} aria-current={ariaCurrent}>
+    <a
+      href="https://yozz.test"
+      aria-label={ariaLabel}
+      aria-current={ariaCurrent}
+      // What the link would put in the URL, for a test to read.
+      data-search={typeof search === 'function' ? JSON.stringify(search({})) : undefined}
+    >
       {children}
     </a>
   ),
@@ -184,7 +192,7 @@ const FEW = MAILBOX.slice(0, 5);
 
 afterEach(async () => {
   route.splat = undefined;
-  mail.moveThreads.mockClear();
+  mail.moveThreadsWithUndo.mockClear();
   mail.flagThreads.mockClear();
   route.navigate.mockClear();
   mail.removeDraft.mockClear();
@@ -261,7 +269,7 @@ describe('ThreadList', () => {
     await click(boxOf('Subject 4'));
     await click(button('Archive'));
     // One write for the whole batch.
-    expect(mail.moveThreads.mock.calls.map(([ids, to]) => [ids, to])).toEqual([
+    expect(mail.moveThreadsWithUndo.mock.calls.map(([ids, to]) => [ids, to])).toEqual([
       [['thread-0', 'thread-4'], 'archive'],
     ]);
     expect(tickedSubjects()).toEqual([]);
@@ -272,7 +280,7 @@ describe('ThreadList', () => {
     await show(archived, 'in:archive', 'archive');
     await click(boxOf('Subject 1'));
     await click(button('Move to inbox'));
-    expect(mail.moveThreads.mock.calls.map(([ids, to]) => [ids, to])).toEqual([
+    expect(mail.moveThreadsWithUndo.mock.calls.map(([ids, to]) => [ids, to])).toEqual([
       [['thread-1'], 'inbox'],
     ]);
   });
@@ -359,7 +367,7 @@ describe('ThreadList', () => {
       [...host.querySelectorAll('button')].flatMap(({ ariaLabel }) =>
         ariaLabel === null ? [] : [ariaLabel],
       );
-    const movedTo = () => mail.moveThreads.mock.calls.map(([ids, to]) => [ids, to]);
+    const movedTo = () => mail.moveThreadsWithUndo.mock.calls.map(([ids, to]) => [ids, to]);
 
     it('moves ticked archived hits back to the inbox under a search', async () => {
       await show([holding(['archive'])], 'stripe', 'unified', true);
@@ -375,7 +383,7 @@ describe('ThreadList', () => {
       await click(button('Archive'));
       expect(movedTo()).toEqual([[['thread-0'], 'archive']]);
 
-      mail.moveThreads.mockClear();
+      mail.moveThreadsWithUndo.mockClear();
       await click(boxOf('Subject 0'));
       await click(boxOf('Subject 1'));
       await click(button('Move to inbox'));
@@ -389,7 +397,7 @@ describe('ThreadList', () => {
       await click(button('Move to Junk'));
       expect(movedTo()).toEqual([[['thread-0'], 'junk']]);
 
-      mail.moveThreads.mockClear();
+      mail.moveThreadsWithUndo.mockClear();
       await click(boxOf('Subject 0'));
       await click(boxOf('Subject 1'));
       await click(button('Move to inbox'));
@@ -517,13 +525,17 @@ describe('ThreadList', () => {
     it('says nothing matches once every server has answered', async () => {
       mail.serverSearch = asking('settled');
       await show([], 'nonexistent', 'unified', true);
-      expect(host.textContent).toContain('Nothing matches "nonexistent".');
+      expect(host.textContent).toContain(
+        'Nothing matches "nonexistent" in all mail. Trash and Junk aren\'t searched.',
+      );
       expect(host.textContent).not.toContain('Fetching');
     });
 
     it('never says fetching when no search is under way, as nothing would arrive', async () => {
       await show([], 'nonexistent', 'unified', true);
-      expect(host.textContent).toContain('Nothing matches "nonexistent".');
+      expect(host.textContent).toContain(
+        'Nothing matches "nonexistent" in all mail. Trash and Junk aren\'t searched.',
+      );
       expect(host.textContent).not.toContain('Fetching');
 
       // What an older search is doing says nothing about this one.
@@ -538,14 +550,16 @@ describe('ThreadList', () => {
       });
       await show(FEW, 'nonexistent', 'unified', true);
       expect(host.textContent).toContain(
-        "1 of 1 mailbox couldn't be searched. me@example.com may be missing results.",
+        "1 of 1 address couldn't be searched. me@example.com may be missing results.",
       );
       expect(rowOf('Subject 1')).not.toBeNull();
       await click(button('Retry'));
       expect(mail.search.retry).toHaveBeenCalled();
 
       await show([], 'nonexistent', 'unified', true);
-      expect(host.textContent).toContain('Nothing matches "nonexistent".');
+      expect(host.textContent).toContain(
+        'Nothing matches "nonexistent" in all mail. Trash and Junk aren\'t searched.',
+      );
     });
   });
 
@@ -622,11 +636,50 @@ describe('ThreadList', () => {
       expect(host.textContent).not.toContain('unread');
     });
 
+    it('say a search looked in all mail unless it names a folder or an address', async () => {
+      await show(FEW, 'word', 'unified', true);
+      expect(host.textContent).toContain('5 conversations in all mail');
+      await show(FEW.slice(0, 1), '', 'unified', true);
+      expect(host.textContent).toContain('1 conversation in all mail');
+
+      await show(FEW, 'in:sent word', 'unified', true);
+      expect(host.textContent).not.toContain('in all mail');
+      await show(FEW, 'mailbox:me@example.com word', 'unified', true);
+      expect(host.textContent).not.toContain('in all mail');
+      await show(FEW);
+      expect(host.textContent).not.toContain('in all mail');
+    });
+
     it('go with the box and Select when the list is empty', async () => {
       await show([], 'word', 'unified', true);
       expect(host.textContent).not.toContain('conversations');
       expect(host.querySelector('input[aria-label="Select every message"]')).toBeNull();
       expect(() => button('Select')).toThrow();
+    });
+  });
+
+  describe('an empty view', () => {
+    it.each([
+      ['unified', 'in:inbox', 'Inbox zeroNothing new.'],
+      ['drafts', 'in:drafts', "No draftsClose a message without sending and it's saved here."],
+      ['starred', 'is:starred', 'Nothing starred'],
+      ['sent', 'in:sent', 'Nothing sent yet'],
+      ['archive', 'in:archive', 'Nothing archived'],
+      ['trash', 'in:trash', 'Trash is empty'],
+      ['junk', 'in:junk', 'No junk'],
+      [
+        'me@example.com',
+        'in:inbox mailbox:me@example.com',
+        'No mail yetNothing has arrived at me@example.com.',
+      ],
+    ] as const)('%s says its own', async (view, query, copy) => {
+      await show([], query, view);
+      expect(host.textContent).toContain(copy);
+    });
+
+    it('says a search narrowed to a folder found nothing there, with no word of all mail', async () => {
+      await show([], 'in:sent nonexistent', 'unified', true);
+      expect(host.textContent).toContain('Nothing matches "in:sent nonexistent".');
     });
   });
 
@@ -655,7 +708,7 @@ describe('ThreadList', () => {
     expect(rowOf('Subject 1')?.querySelector('button[aria-label="Archive Subject 1"]')).toBeNull();
     await click(boxOf('Subject 1'));
     await click(button('Restore'));
-    expect(mail.moveThreads.mock.calls.map(([ids, to]) => [ids, to])).toEqual([
+    expect(mail.moveThreadsWithUndo.mock.calls.map(([ids, to]) => [ids, to])).toEqual([
       [['thread-1'], 'inbox'],
     ]);
   });
@@ -671,5 +724,36 @@ describe('ThreadList', () => {
     for (const label of ['Restore Subject 1', 'Archive Subject 1', 'Delete Subject 1']) {
       expect(row?.querySelector(`button[aria-label="${label}"]`)).not.toBeNull();
     }
+  });
+});
+
+describe('the way past the list', () => {
+  it('gives "Skip to mail" the scroll container to land on, and the empty list too', async () => {
+    await show(FEW);
+    expect(document.getElementById('mail')?.getAttribute('tabindex')).toBe('-1');
+    expect(document.getElementById('mail')?.querySelector('ul')).not.toBeNull();
+    await show([]);
+    expect(document.getElementById('mail')?.getAttribute('tabindex')).toBe('-1');
+  });
+});
+
+describe('a search with nothing in it', () => {
+  const trashAndJunk = () =>
+    [...host.querySelectorAll('a')].find(link => link.textContent === 'Search Trash and Junk');
+
+  it('offers the same words in Trash and Junk, which a search leaves out', async () => {
+    await show([], 'receipt', 'unified', true);
+    expect(JSON.parse(trashAndJunk()?.dataset.search ?? 'null')).toEqual({
+      q: 'receipt in:trash in:junk',
+    });
+  });
+
+  it('offers nothing to a search that already names a folder or an address, nor to a list that is no search', async () => {
+    await show([], 'receipt in:sent', 'unified', true);
+    expect(trashAndJunk()).toBeUndefined();
+    await show([], 'receipt mailbox:me@example.com', 'unified', true);
+    expect(trashAndJunk()).toBeUndefined();
+    await show([], 'receipt', 'unified', false);
+    expect(trashAndJunk()).toBeUndefined();
   });
 });

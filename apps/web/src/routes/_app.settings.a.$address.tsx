@@ -14,5 +14,7 @@ export const Route = createFileRoute('/_app/settings/a/$address')({
     },
     stringify: ({ address }) => ({ address }),
   },
+  // The bar names the address itself from the route's param; this is the word when it can't.
+  staticData: { title: 'Address' },
   component: Address,
 });

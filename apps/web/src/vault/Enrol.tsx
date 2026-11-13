@@ -1,13 +1,15 @@
 import { Link, useNavigate, useSearch } from '@tanstack/react-router';
 import { VaultApiError } from '@yozz.app/mail/vault/api';
 import { useEffect, useState } from 'react';
-import { Button } from '../ui/Button';
-import { FieldRow, Input } from '../ui/Field';
-import { AuthColumn } from './AuthColumn';
+import { Button, LinkButton, linkClass } from '../ui/Button';
+import { FieldHint } from '../ui/Field';
+import { AuthColumn, authActionClass, authHeadingClass, authProseClass } from './AuthColumn';
 import { vaultApi } from './api';
 import { isApiConfigured } from './api-base-url';
 import { getSession } from './auth-client';
+import { PasswordFields } from './PasswordFields';
 import { checkPasskeyPrfCapability, PasskeyPrfError, type PrfCapability } from './passkey-prf';
+import { SetupSteps } from './SetupSteps';
 import { PASSKEY_OFFER, vaultErrorMessage } from './screen-policy';
 import { useVault } from './session';
 import {
@@ -42,6 +44,8 @@ export const Enrol = () => {
     null,
   );
 
+  // The password path waits behind a link while a passkey is on offer, so it does not compete with it.
+  const [isPasswordOpen, setIsPasswordOpen] = useState(false);
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
 
@@ -98,6 +102,7 @@ export const Enrol = () => {
     }
     if (panel === 'passkey' && err instanceof PasskeyPrfError) {
       setErrorExtra('password-instead');
+      setIsPasswordOpen(true);
       return;
     }
     setErrorExtra(null);
@@ -111,20 +116,12 @@ export const Enrol = () => {
           {errorExtra === 'password-instead' ? ' Set a password below instead.' : ''}
         </p>
         {errorExtra === 'login' && (
-          <Link
-            to="/login"
-            search={previous => previous}
-            className="text-base text-paper underline"
-          >
+          <Link to="/login" search={previous => previous} className={linkClass}>
             Log in instead
           </Link>
         )}
         {errorExtra === 'welcome' && (
-          <Link
-            to="/welcome"
-            search={previous => previous}
-            className="text-base text-paper underline"
-          >
+          <Link to="/welcome" search={previous => previous} className={linkClass}>
             Request a new link
           </Link>
         )}
@@ -133,7 +130,7 @@ export const Enrol = () => {
 
   if (enrolStep.step === 'checking') {
     return (
-      <AuthColumn title="Setting up your sign-in" description="Checking this sign-in…">
+      <AuthColumn title="Setting up your login" description="Checking your link…">
         {error !== null && (
           <p role="alert" className="text-base text-danger">
             {error}
@@ -147,19 +144,16 @@ export const Enrol = () => {
     return (
       <AuthColumn
         title="Start again"
-        description="A recovery link restores your YOZZ account, but it cannot unlock your saved addresses: the link proves your address and holds no key. Starting again deletes everything stored here, so your saved addresses have to be added again. Revoke each password at your provider, generate a new one, then add each address back."
+        description="The recovery link got you into your account, but it can't unlock your saved addresses. Starting again deletes everything YOZZ stores for you, so you add each address back. Revoke each old password at its provider and make a new one."
         footer={
-          <Link
-            to="/login"
-            search={previous => previous}
-            className="text-base text-paper-dim underline"
-          >
+          <Link to="/login" search={previous => previous} className={linkClass}>
             Cancel and log in
           </Link>
         }
       >
         <Button
           variant="danger"
+          className={authActionClass}
           disabled={isBusy}
           onClick={() => {
             void (async () => {
@@ -189,13 +183,17 @@ export const Enrol = () => {
 
   const { account, prf } = enrolStep;
   const canOfferPasskey = PASSKEY_OFFER[prf].canOffer;
+  // Open when it is the only path, when asked for, or while it holds what went wrong with it.
+  const showsPasswordForm =
+    !canOfferPasskey || isPasswordOpen || (error !== null && errorPanel === 'password');
 
   return (
     <AuthColumn
       title="Choose how you log in"
+      progress={<SetupSteps current={2} />}
       footer={
         <p className="text-base text-paper-dim">
-          Choosing one retires the other. You can switch in Settings.{' '}
+          You can switch later in Settings.{' '}
           <Link to="/login" search={previous => previous} className="text-paper underline">
             Log in instead
           </Link>
@@ -205,40 +203,35 @@ export const Enrol = () => {
     >
       {canOfferPasskey && (
         <div className="space-y-4">
-          <h2 className="label-rule">Passkey (recommended)</h2>
-          <p className="text-base leading-relaxed text-paper-dim">
-            Your passkey signs you in and unlocks your saved addresses. The key is derived by your
-            authenticator and never reaches us.
-          </p>
-          <p className="text-base leading-relaxed text-paper-dim">
-            Your browser will ask twice: once to create the passkey, once to derive the key it
-            protects. Both prompts are the same passkey.
+          <h2 className={authHeadingClass}>Passkey (recommended)</h2>
+          <p className={authProseClass}>
+            Log in with Face ID, Touch ID or your security key. Your browser asks twice: once to
+            create the passkey, once to unlock YOZZ with it.
           </p>
           {PASSKEY_OFFER[prf].note !== null && (
             <p className="text-2xs text-paper-faint">{PASSKEY_OFFER[prf].note}</p>
           )}
           <Button
             variant="primary"
+            className={authActionClass}
             disabled={isBusy}
-            onClick={() => {
-              void (async () => {
-                setBusyKind('passkey');
-                setError(null);
-                setErrorExtra(null);
-                try {
-                  const session = await createPasskeyVault({ account });
-                  setSession(session);
-                  void navigate({
-                    to: '/m/$view',
-                    params: { view: 'unified' },
-                    search: previous => previous,
-                  });
-                } catch (err) {
-                  handleEnrolError(err, 'passkey');
-                } finally {
-                  setBusyKind(null);
-                }
-              })();
+            onClick={async () => {
+              setBusyKind('passkey');
+              setError(null);
+              setErrorExtra(null);
+              try {
+                const session = await createPasskeyVault({ account });
+                setSession(session);
+                void navigate({
+                  to: '/m/$view',
+                  params: { view: 'unified' },
+                  search: previous => previous,
+                });
+              } catch (err) {
+                handleEnrolError(err, 'passkey');
+              } finally {
+                setBusyKind(null);
+              }
             }}
           >
             {busyKind === 'passkey' ? 'Waiting for your authenticator…' : 'Create passkey'}
@@ -247,89 +240,80 @@ export const Enrol = () => {
         </div>
       )}
 
-      <div
-        className={canOfferPasskey ? 'mt-8 space-y-4 border-t border-rule-soft pt-8' : 'space-y-4'}
-      >
-        <h2 className="label-rule">Password</h2>
-        {!canOfferPasskey && PASSKEY_OFFER.unsupported.note !== null && (
-          <p className="text-2xs text-paper-faint">{PASSKEY_OFFER.unsupported.note}</p>
-        )}
-        <p className="text-base leading-relaxed text-paper-dim">
-          Your password is the only key. It never leaves this browser, and nothing else has to be
-          carried to a new one, so any browser you can type it into unlocks your saved addresses.
-        </p>
-        <p className="text-base leading-relaxed text-paper-dim">
-          Make it a passphrase rather than a password. It is the only thing standing between your
-          saved addresses and whoever holds a copy of the encrypted data, and twelve characters is
-          the floor rather than the target.
-        </p>
-        <p className="text-base leading-relaxed text-paper-dim">
-          If you forget this password, nobody can recover your saved addresses, not even us. You
-          would add them again.
-        </p>
-        <FieldRow label="Password" htmlFor="enrol-password">
-          <Input
-            id="enrol-password"
-            type="password"
-            autoComplete="new-password"
-            value={password}
-            onChange={event => setPassword(event.target.value)}
-            disabled={isBusy}
-          />
-        </FieldRow>
-        <FieldRow label="Confirm password" htmlFor="enrol-confirm">
-          <Input
-            id="enrol-confirm"
-            type="password"
-            autoComplete="new-password"
-            value={confirmPassword}
-            onChange={event => setConfirmPassword(event.target.value)}
-            disabled={isBusy}
-          />
-        </FieldRow>
-        <Button
-          variant="secondary"
-          disabled={isBusy}
-          onClick={() => {
-            void (async () => {
-              setBusyKind('password');
-              setError(null);
-              setErrorExtra(null);
-              try {
-                if (password.length < MIN_PASSWORD_LENGTH) {
-                  setError(`Use at least ${MIN_PASSWORD_LENGTH} characters.`);
-                  setErrorPanel('password');
-                  return;
-                }
-                if (password !== confirmPassword) {
-                  setError('The two passwords do not match.');
-                  setErrorPanel('password');
-                  return;
-                }
-                const session = await createPasswordVault({ account, password });
-                setSession(session);
-                void navigate({
-                  to: '/m/$view',
-                  params: { view: 'unified' },
-                  search: previous => previous,
-                });
-              } catch (err) {
-                handleEnrolError(err, 'password');
-              } finally {
-                setBusyKind(null);
-              }
-            })();
+      {!showsPasswordForm && (
+        <div className="mt-8 border-t border-rule-soft pt-6">
+          <LinkButton disabled={isBusy} onClick={() => setIsPasswordOpen(true)}>
+            Use a password instead
+          </LinkButton>
+        </div>
+      )}
+
+      {showsPasswordForm && (
+        <form
+          className={
+            canOfferPasskey ? 'mt-8 space-y-5 border-t border-rule-soft pt-8' : 'space-y-5'
+          }
+          onSubmit={async event => {
+            event.preventDefault();
+            setError(null);
+            setErrorExtra(null);
+            if (password.length < MIN_PASSWORD_LENGTH) {
+              setError(`Use at least ${MIN_PASSWORD_LENGTH} characters.`);
+              setErrorPanel('password');
+              return;
+            }
+            if (password !== confirmPassword) {
+              setError('The two passwords do not match.');
+              setErrorPanel('password');
+              return;
+            }
+            setBusyKind('password');
+            try {
+              const session = await createPasswordVault({ account, password });
+              setSession(session);
+              void navigate({
+                to: '/m/$view',
+                params: { view: 'unified' },
+                search: previous => previous,
+              });
+            } catch (err) {
+              handleEnrolError(err, 'password');
+            } finally {
+              setBusyKind(null);
+            }
           }}
         >
-          {busyKind === 'password' ? 'Creating…' : 'Create password'}
-        </Button>
-        {busyKind === 'password' && (
-          <p className="text-2xs text-paper-faint">
-            650,000 PBKDF2 rounds, in this tab. The browser cannot report progress on it.
+          <h2 className={authHeadingClass}>Password</h2>
+          {!canOfferPasskey && PASSKEY_OFFER.unsupported.note !== null && (
+            <p className="text-2xs text-paper-faint">{PASSKEY_OFFER.unsupported.note}</p>
+          )}
+          <p className={authProseClass}>
+            Use a long passphrase, {MIN_PASSWORD_LENGTH} characters or more. It unlocks your saved
+            addresses in any browser.
           </p>
-        )}
-        {renderError('password')}
-      </div>
+          <PasswordFields
+            idPrefix="enrol"
+            password={password}
+            confirmPassword={confirmPassword}
+            onPassword={setPassword}
+            onConfirmPassword={setConfirmPassword}
+            isDisabled={isBusy}
+            autoFocus={isPasswordOpen}
+          />
+          <FieldHint tone="caution">
+            We can't reset it. If you forget it, you start again and add your addresses back.
+          </FieldHint>
+          <Button type="submit" variant="secondary" className={authActionClass} disabled={isBusy}>
+            {busyKind === 'password' ? 'Creating…' : 'Create password'}
+          </Button>
+          {busyKind === 'password' && (
+            <p className="text-2xs text-paper-faint">
+              650,000 PBKDF2 rounds, in this tab. The browser cannot report progress on it.
+            </p>
+          )}
+          {renderError('password')}
+        </form>
+      )}
     </AuthColumn>
   );
 };

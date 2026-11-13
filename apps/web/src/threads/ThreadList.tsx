@@ -1,6 +1,7 @@
 import { Link, useParams } from '@tanstack/react-router';
 import { defaultRangeExtractor, useVirtualizer } from '@tanstack/react-virtual';
 import { describeMailFailure } from '@yozz.app/mail/describe-failure';
+import { parseQuery } from '@yozz.app/mail/threads/query';
 import { type ThreadState, threadByHandle } from '@yozz.app/mail/threads/thread';
 import {
   isNamedView,
@@ -10,15 +11,15 @@ import {
   type ViewId,
 } from '@yozz.app/mail/threads/views';
 import { cn } from 'cn';
-import { type ReactNode, useEffect, useEffectEvent, useRef, useState } from 'react';
+import { type ReactNode, useEffect, useEffectEvent, useMemo, useRef, useState } from 'react';
 import { useMail } from '../store/MailProvider';
-import { buttonClass } from '../ui/Button';
+import { buttonClass, linkClass } from '../ui/Button';
 import { Checkbox } from '../ui/Checkbox';
 import { useMediaQuery } from '../ui/chrome';
 import { BulkActions } from './BulkActions';
 import { SearchRow } from './SearchRow';
 import { useSelection } from './selection';
-import { ThreadRow } from './ThreadRow';
+import { addressCellWidth, ThreadRow } from './ThreadRow';
 
 /** The list over a view: search, the rows, the empty states and Older mail. */
 
@@ -28,15 +29,36 @@ const EmptyState = ({
   action,
 }: {
   title: string;
-  body: string;
+  body?: string;
   action?: ReactNode;
 }) => (
   <div className="flex flex-1 flex-col items-center justify-center gap-3 px-6">
     <p className="label-rule">{title}</p>
-    <p className="max-w-xs text-center text-base leading-relaxed text-paper-dim">{body}</p>
+    {body !== undefined && (
+      <p className="max-w-xs text-center text-base leading-relaxed text-paper-dim">{body}</p>
+    )}
     {action}
   </div>
 );
+
+type EmptyCopy = { readonly title: string; readonly body?: string };
+
+/** What a view with no mail in it says: "nothing here" means something else in each. */
+const EMPTY_VIEW = {
+  unified: { title: 'Inbox zero', body: 'Nothing new.' },
+  starred: { title: 'Nothing starred' },
+  drafts: { title: 'No drafts', body: "Close a message without sending and it's saved here." },
+  sent: { title: 'Nothing sent yet' },
+  archive: { title: 'Nothing archived' },
+  trash: { title: 'Trash is empty' },
+  junk: { title: 'No junk' },
+} as const satisfies Record<string, EmptyCopy>;
+
+/** An address is shown as written, so it goes in the sentence and not in the capitals over it. */
+const emptyCopyOf = (view: ViewId): EmptyCopy =>
+  isNamedView(view)
+    ? EMPTY_VIEW[view]
+    : { title: 'No mail yet', body: `Nothing has arrived at ${view}.` };
 
 /**
  * How much is in the list: above `lg` over the time column, as a mail client's range is, and below
@@ -45,9 +67,12 @@ const EmptyState = ({
  */
 const ListCounts = ({
   threads,
+  isAllMail,
   isSelecting,
 }: {
   threads: readonly ThreadState[];
+  /** A search that named no folder and no address, so the count says how far it looked. */
+  isAllMail: boolean;
   isSelecting: boolean;
 }) => {
   const unread = threads.filter(thread => thread.isUnread).length;
@@ -59,7 +84,7 @@ const ListCounts = ({
       )}
     >
       {unread > 0 && <span className="text-signal">{unread} unread · </span>}
-      {`${threads.length} ${threads.length === 1 ? 'conversation' : 'conversations'}`}
+      {`${threads.length} ${threads.length === 1 ? 'conversation' : 'conversations'}${isAllMail ? ' in all mail' : ''}`}
     </p>
   );
 };
@@ -94,6 +119,12 @@ const ThreadRows = ({
   // The row holding focus stays mounted when it scrolls away, or focus would fall to the page.
   const [focusedId, setFocusedId] = useState<string | null>(null);
   const focusedIndex = threads.findIndex(thread => thread.id === focusedId);
+  const { ownedAddresses, mailboxes } = useMail();
+  // The same width for every row, so the address cells line up: as wide as the longest, to a cap.
+  const addressWidth = useMemo(
+    () => addressCellWidth(threads, view, ownedAddresses, mailboxes),
+    [threads, view, ownedAddresses, mailboxes],
+  );
   const virtualizer = useVirtualizer({
     count: threads.length,
     getScrollElement: () => scrollRef.current,
@@ -118,7 +149,13 @@ const ThreadRows = ({
   useEffect(() => showOpen(openId), [openId]);
 
   return (
-    <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto">
+    <div
+      ref={scrollRef}
+      // What "Skip to mail" moves focus to.
+      id="mail"
+      tabIndex={-1}
+      className="min-h-0 flex-1 overflow-y-auto outline-none"
+    >
       <ul
         className="relative"
         style={{ height: virtualizer.getTotalSize() }}
@@ -150,6 +187,7 @@ const ThreadRows = ({
                 view={view}
                 isSelected={thread.id === openId}
                 isChecked={selection.isChecked(thread.id)}
+                addressWidth={addressWidth}
                 hasSelection={selection.checkedIds.length > 0}
                 isSelecting={selection.isSelecting}
                 onCheck={(isChecked, extend) => selection.check(thread.id, isChecked, extend)}
@@ -193,19 +231,40 @@ export const ThreadList = ({
   const isWide = useMediaQuery('(min-width: 64rem)');
   // Only a search under way says fetching: nothing else is on its way, and it would hang for ever.
   const running = serverSearch?.query === query.trim() ? serverSearch : null;
-  const emptyAnswer =
-    running !== null && running.phase !== 'settled' ? 'Fetching…' : `Nothing matches "${query}".`;
+  // What a typed search covers is what the box says: no `in:` is every folder but Trash and Junk,
+  // no `mailbox:` every address. The count and the no-results line say so in words.
+  const asked = parseQuery(query);
+  const isAllMail = isSearch && asked.in.length === 0 && asked.mailboxes.length === 0;
+  const isFetching = running !== null && running.phase !== 'settled';
+  const emptyAnswer = (() => {
+    if (isFetching) return 'Fetching…';
+    return isAllMail
+      ? `Nothing matches "${query}" in all mail. Trash and Junk aren't searched.`
+      : `Nothing matches "${query}".`;
+  })();
+  // `in:` repeated is a union, so one more query reaches the two folders a search leaves out.
+  const isOfferingTrashAndJunk = isAllMail && query.trim() !== '' && !isFetching;
 
   const empty = (() => {
     if (error !== null || (isSearch && query !== '')) {
       return (
-        <div className="flex flex-1 items-center justify-center px-6">
+        <div className="flex flex-1 flex-col items-center justify-center gap-2 px-6">
           <p
             role="status"
             className="max-w-xs text-center text-base leading-relaxed text-paper-dim"
           >
             {error ?? emptyAnswer}
           </p>
+          {error === null && isOfferingTrashAndJunk && (
+            <Link
+              to="/m/$view"
+              params={{ view }}
+              search={previous => ({ ...previous, q: `${query.trim()} in:trash in:junk` })}
+              className={cn(linkClass, 'py-2')}
+            >
+              Search Trash and Junk
+            </Link>
+          )}
         </div>
       );
     }
@@ -266,7 +325,7 @@ export const ThreadList = ({
             body={
               pending.length === 1
                 ? `Fetching the newest mail from ${waitingOn.imap.host}.`
-                : `Fetching the newest mail from ${pending.length} mailboxes.`
+                : `Fetching the newest mail from ${pending.length} addresses.`
             }
           />
         );
@@ -291,7 +350,8 @@ export const ThreadList = ({
         );
       }
     }
-    return <EmptyState title="Nothing here yet" body="Mail appears here." />;
+    // An empty box is no view: every folder but Trash and Junk, with nothing in any of them.
+    return <EmptyState {...(isSearch ? { title: 'No mail yet' } : emptyCopyOf(view))} />;
   })();
 
   return (
@@ -318,12 +378,17 @@ export const ThreadList = ({
               <BulkActions threads={checked} view={view} openId={openId} onDone={selection.clear} />
             </div>
           ) : (
-            <ListCounts threads={threads} isSelecting={selection.isSelecting} />
+            <ListCounts
+              threads={threads}
+              isAllMail={isAllMail}
+              isSelecting={selection.isSelecting}
+            />
           )}
           <button
             type="button"
             onClick={() => selection.setSelecting(!selection.isSelecting)}
-            className="ml-auto h-full w-16 shrink-0 border-l border-rule-soft pr-2 text-right text-base text-paper-dim -outline-offset-2 hover:bg-ink-hover hover:text-paper lg:hidden"
+            // As wide as Cancel, so the rule holds, with the same gutter either side.
+            className="ml-auto h-full w-20 shrink-0 border-l border-rule-soft px-4 text-right text-base text-paper-dim -outline-offset-2 hover:bg-ink-hover hover:text-paper lg:hidden"
           >
             {selection.isSelecting ? 'Cancel' : 'Select'}
           </button>
@@ -331,11 +396,14 @@ export const ThreadList = ({
       )}
 
       {threads.length === 0 ? (
-        empty
+        // What "Skip to mail" moves focus to when there are no rows to land on.
+        <div id="mail" tabIndex={-1} className="flex min-h-0 flex-1 flex-col outline-none">
+          {empty}
+        </div>
       ) : (
         <ThreadRows threads={threads} view={view} openId={openId} selection={selection} />
       )}
-      {/* Hidden, not disabled, once every mailbox shown has its folder's start cached: a
+      {/* Hidden, not disabled, once every address shown has its folder's start cached: a
           control that stays on screen implies there is more mail behind it. A query with something
           to look for searches the whole folder, so it has nothing to page. It stands under an empty
           list too: a Starred view with nothing in the newest window is exactly where older mail is

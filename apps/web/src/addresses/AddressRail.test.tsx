@@ -10,6 +10,8 @@ globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 const route = vi.hoisted(() => ({ view: 'unified' as string | undefined }));
 const mail = vi.hoisted(() => ({
   mailboxes: [{ address: 'me@example.com' }],
+  identities: [{ address: 'me@example.com' }] as { address: string }[],
+  areAddressesLoaded: true,
   threads: [],
   sync: vi.fn(),
   junkFolders: {} as Record<string, boolean>,
@@ -19,13 +21,23 @@ vi.mock('@tanstack/react-router', () => ({
   Link: ({
     children,
     onClick,
+    to,
+    'aria-label': ariaLabel,
     'aria-current': ariaCurrent,
   }: {
     children?: ReactNode;
     onClick?: () => void;
+    to?: string;
+    'aria-label'?: string;
     'aria-current'?: 'page';
   }) => (
-    <a href="https://yozz.test" onClick={onClick} aria-current={ariaCurrent}>
+    <a
+      href="https://yozz.test"
+      onClick={onClick}
+      data-to={to}
+      aria-label={ariaLabel}
+      aria-current={ariaCurrent}
+    >
       {children}
     </a>
   ),
@@ -48,6 +60,9 @@ afterEach(async () => {
   await act(async () => root.render(null));
   mail.sync.mockClear();
   mail.junkFolders = {};
+  mail.identities = [{ address: 'me@example.com' }];
+  mail.mailboxes = [{ address: 'me@example.com' }];
+  mail.areAddressesLoaded = true;
 });
 
 describe('AddressRail', () => {
@@ -80,5 +95,54 @@ describe('AddressRail', () => {
     mail.junkFolders = { 'me@example.com': true };
     await show();
     expect(labels()).toContain('Junk');
+  });
+
+  it('says how many addresses only send, which have no row of their own', async () => {
+    await show();
+    expect(host.textContent).not.toContain('send-only');
+
+    mail.identities = [
+      { address: 'me@example.com' },
+      { address: 'sales@example.com' },
+      { address: 'billing@example.com' },
+    ];
+    await show();
+    expect(host.textContent).toContain('+2 send-only');
+  });
+
+  it('names the send-only line as the link it is', async () => {
+    mail.identities = [{ address: 'me@example.com' }, { address: 'sales@example.com' }];
+    await show();
+    const link = [...host.querySelectorAll('a')].find(a => a.textContent === '+1 send-only');
+    expect(link?.getAttribute('aria-label')).toBe('1 send-only address, manage in Settings');
+    expect(link?.getAttribute('data-to')).toBe('/settings');
+  });
+
+  describe('a fresh account', () => {
+    const link = (text: string) =>
+      [...host.querySelectorAll('a')].find(a => a.textContent === text);
+
+    it('offers to connect an address under Addresses, and sends Compose to the same place', async () => {
+      mail.identities = [];
+      mail.mailboxes = [];
+      await show();
+      expect(link('Connect an address')?.getAttribute('data-to')).toBe('/settings/new');
+      expect(link('Compose')?.getAttribute('data-to')).toBe('/settings/new');
+    });
+
+    it('opens the composer, and offers no such row, once there is an address', async () => {
+      await show();
+      expect(link('Connect an address')).toBeUndefined();
+      expect(link('Compose')?.getAttribute('data-to')).toBe('.');
+    });
+
+    it('says nothing of it while the addresses are still being read', async () => {
+      mail.identities = [];
+      mail.mailboxes = [];
+      mail.areAddressesLoaded = false;
+      await show();
+      expect(link('Connect an address')).toBeUndefined();
+      expect(link('Compose')?.getAttribute('data-to')).toBe('.');
+    });
   });
 });
