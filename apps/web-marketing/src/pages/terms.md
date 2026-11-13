@@ -1,7 +1,7 @@
 ---
 layout: ../layouts/Policy.astro
 title: Terms of use
-description: The terms for using YOZZ, a free zero-knowledge webmail client over the mail accounts you already have.
+description: The terms for using YOZZ, a zero-knowledge webmail client over the mail accounts you already have.
 updated: 13 November 2026
 ---
 
@@ -22,7 +22,7 @@ mail passwords and settings in a vault encrypted with a key only you hold.
 YOZZ is not a mail provider. It hosts no mailbox and gives you no address. Your mail stays with
 your providers, under their terms.
 
-YOZZ is free, and early: it is still being built and will change.
+YOZZ is in beta, and free while it is. It is still being built and will change.
 
 ## Your responsibilities
 
