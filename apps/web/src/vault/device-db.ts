@@ -93,6 +93,13 @@ export const openDeviceDb = (factory: IDBFactory): Promise<IDBDatabase> =>
       reject(new DeviceDbError('IndexedDB open blocked by existing connection'));
   });
 
+/** The database, or null when this device never made one: a page that only looks must not create it. */
+export const openExistingDeviceDb = async (factory: IDBFactory): Promise<IDBDatabase | null> => {
+  const databases = await factory.databases();
+  if (!databases.some(({ name }) => name === DB_NAME)) return null;
+  return openDeviceDb(factory);
+};
+
 /** Settled on the transaction, never on a request inside it: a request that succeeded in an aborted transaction touched nothing. */
 /** One read-write transaction over several stores, for a clear that must be all-or-nothing. */
 export const runStoresTransaction = (

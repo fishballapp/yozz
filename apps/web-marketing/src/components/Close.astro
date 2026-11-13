@@ -1,0 +1,77 @@
+---
+import StartButton from './StartButton.astro';
+---
+
+<section class="wrap" aria-labelledby="close-title">
+  <div class="close">
+    <div>
+      <h2 id="close-title">Close the other tabs.</h2>
+      <p>Free. <span>Your addresses, one inbox, and a vault we cannot read.</span></p>
+    </div>
+    <div class="act">
+      <StartButton class="cta" data-cta="start-closing" />
+      <small>
+        You make a vault with a passkey or a password that we cannot reset, then add each address
+        with its mail password. Gmail needs an app password.
+      </small>
+    </div>
+  </div>
+</section>
+
+<style>
+  .close {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 32px 48px;
+    margin-top: var(--section-gap);
+    padding-block: clamp(40px, 5vw, 64px);
+    border-block: 1px solid var(--ink);
+  }
+
+  h2 {
+    font-size: clamp(2.25rem, 4.4vw, 3.75rem);
+    line-height: 1.02;
+    font-weight: 600;
+    letter-spacing: -0.04em;
+  }
+
+  p {
+    max-width: 22em;
+    margin-top: 16px;
+    font-size: clamp(1.25rem, 2vw, 1.625rem);
+    line-height: 1.25;
+    font-weight: 500;
+    letter-spacing: -0.02em;
+  }
+
+  p span {
+    color: var(--text-faint);
+  }
+
+  .act {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 14px;
+    max-width: 20em;
+  }
+
+  small {
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    line-height: 1.125rem;
+    color: var(--text-faint);
+  }
+
+  @media (max-width: 760px) {
+    .act {
+      max-width: none;
+    }
+
+    .cta {
+      width: 100%;
+    }
+  }
+</style>

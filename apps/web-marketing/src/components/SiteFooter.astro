@@ -1,0 +1,68 @@
+---
+import Logo from './Logo.astro';
+
+// `hasCookieSettings` only where the cookie banner is: the landing page, the one page with analytics.
+type Props = { note?: string; hasCookieSettings?: boolean };
+
+const { note, hasCookieSettings = false } = Astro.props;
+---
+
+<footer class="wrap footer">
+  <Logo class="logo" />
+  <nav aria-label="Footer">
+    <a href="https://github.com/fishballapp/yozz">GitHub</a>
+    <a href="https://www.npmjs.com/package/@yozz.app/cli">npm</a>
+    <a href="https://github.com/fishballapp/yozz/issues">Issues</a>
+    <a href="/login" data-cta="login-footer">Log in</a>
+    <a href="/privacy">Privacy</a>
+    <a href="/terms">Terms</a>
+    <a href="https://fishball.ltd">Fishball Ltd</a>
+    {hasCookieSettings && <button type="button" data-cookie-settings>Cookie settings</button>}
+  </nav>
+  {note !== undefined && <span>{note}</span>}
+</footer>
+
+<style>
+  .footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 20px 40px;
+    /* The page's end scrolls clear of the cookie banner while it waits. */
+    padding-block: 36px calc(56px + var(--cookie-consent-inset, 0px));
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    line-height: 1.125rem;
+    color: var(--text-faint);
+  }
+
+  .logo {
+    width: 84px;
+    height: 36px;
+  }
+
+  nav {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0 24px;
+  }
+
+  a,
+  button {
+    line-height: 44px;
+    color: var(--text-dim);
+    text-decoration: none;
+  }
+
+  button {
+    cursor: pointer;
+  }
+
+  a:hover,
+  button:hover {
+    color: var(--ink);
+    text-decoration: underline;
+    text-underline-offset: 4px;
+  }
+</style>

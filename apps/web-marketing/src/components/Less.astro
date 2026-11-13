@@ -1,0 +1,110 @@
+---
+import SplitSection from './SplitSection.astro';
+
+// What YOZZ has and what it refuses, side by side: the refusal is the product (PRODUCT.md).
+const here = [
+  'One inbox for everything, or one address at a time',
+  'Threads, stars, archive, junk, trash',
+  'Search across every address',
+  'A Markdown composer',
+  'Drafts that follow you between devices',
+  'Remote images off until you ask',
+];
+const refused = [
+  'An assistant in a side panel',
+  'Tabs, categories, promotions',
+  'Chat, meetings, a calendar',
+  'Shortcuts to memorise',
+  'A light theme',
+];
+const notYet = [
+  { item: 'A phone app', why: 'Not yet. The web app works on a phone.' },
+  { item: 'Notifications while the tab is closed', why: 'The reason is in the next section.' },
+];
+---
+
+<SplitSection id="less" label="02 · Less" title="Fewer features than Gmail. On purpose.">
+  <p>
+    Most mail clients answer Gmail with more. YOZZ is the smallest client that can still run
+    a working life across several accounts, laid out like the Gmail you already know.
+  </p>
+  <p>Anything added has to push something out.</p>
+
+  <div class="columns" slot="aside">
+    <div>
+      <h3>What is here</h3>
+      <ul>{here.map(item => <li>{item}</li>)}</ul>
+    </div>
+    <div>
+      <h3>What is not</h3>
+      <ul class="refused">
+        {
+          refused.map(item => (
+            <li>
+              <s>{item}</s>
+            </li>
+          ))
+        }
+        {
+          notYet.map(({ item, why }) => (
+            <li class="not-yet">
+              {item} <small>{why}</small>
+            </li>
+          ))
+        }
+      </ul>
+    </div>
+  </div>
+</SplitSection>
+
+<style>
+  .columns {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 40px clamp(24px, 4vw, 56px);
+  }
+
+  h3 {
+    padding-bottom: 12px;
+    border-bottom: 1px solid var(--ink);
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    line-height: 1rem;
+    font-weight: 400;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--text-faint);
+  }
+
+  li {
+    padding: 13px 0;
+    border-bottom: 1px solid var(--line);
+    font-size: 1.0625rem;
+    line-height: 1.4;
+  }
+
+  .refused li {
+    color: var(--text-faint);
+  }
+
+  s {
+    color: var(--text-dim);
+    text-decoration-thickness: 1px;
+  }
+
+  .refused .not-yet {
+    color: var(--text-dim);
+  }
+
+  small {
+    display: block;
+    font-size: 0.875rem;
+    color: var(--text-faint);
+  }
+
+  @media (max-width: 760px) {
+    .columns {
+      grid-template-columns: minmax(0, 1fr);
+    }
+  }
+</style>

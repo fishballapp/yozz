@@ -1,0 +1,11 @@
+// The Worker and its test, on workers-types. The Node assembly script is its own project
+// (scripts/tsconfig.json).
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "composite": true,
+    "tsBuildInfoFile": "node_modules/.tmp/tsconfig.tsbuildinfo",
+    "types": ["@cloudflare/workers-types"]
+  },
+  "include": ["src/**/*.ts"]
+}

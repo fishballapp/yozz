@@ -1,0 +1,97 @@
+---
+import LedgerRow from './LedgerRow.astro';
+import SplitSection from './SplitSection.astro';
+
+// A session as typed. A comment line has no prompt.
+const lines: readonly { text: string; isComment?: boolean }[] = [
+  { text: 'npm i -g @yozz.app/cli' },
+  { text: 'yozz login' },
+  { text: '# approve the pairing code at yozz.app, then:', isComment: true },
+  { text: "yozz list --query 'is:unread invoice'" },
+  { text: "yozz read 'mid/<0412@harbourprint.example>' --save-attachments ./invoices" },
+  { text: "yozz draft --reply 'mid/<0412@harbourprint.example>' --text @reply.md" },
+];
+
+// A command breaks only between its arguments, so a flag is never split across lines.
+const argumentsOf = (text: string) => text.match(/'[^']*'|\S+/g) ?? [];
+---
+
+<SplitSection id="cli" label="04 · CLI and source" title="The same mailbox, from a terminal.">
+  <p>
+    <span class="code">yozz</span> is a mail client for your shell and for the coding agent beside
+    you. It opens your vault with a key you approve at yozz.app, then speaks IMAP and SMTP to your
+    own servers itself. Every command prints one JSON document.
+  </p>
+
+  <div slot="aside">
+    <pre class="terminal dark">{
+      lines.map(({ text, isComment }) => (
+        <code class:list={['line', { comment: isComment }]}>
+          {!isComment && <span class="prompt" aria-hidden="true">$ </span>}
+          {isComment
+            ? text
+            : argumentsOf(text).map(argument => (
+                <Fragment>
+                  <span class="argument">{argument}</span>{' '}
+                </Fragment>
+              ))}
+        </code>
+      ))
+    }</pre>
+    <ul class="facts">
+      <LedgerRow label="npm">
+        <a href="https://www.npmjs.com/package/@yozz.app/cli">@yozz.app/cli</a>, which installs
+        the <span class="code">yozz</span> command.
+      </LedgerRow>
+      <LedgerRow label="Source">
+        <a href="https://github.com/fishballapp/yozz">github.com/fishballapp/yozz</a>. The code is
+        public: the app is AGPL-3.0, and production deploys from that repository.
+      </LedgerRow>
+      <LedgerRow label="Libraries">
+        The TLS 1.3, X.509, IMAP and SMTP clients that run in your browser are MIT and on npm
+        under <span class="code">@yozz.app</span>.
+      </LedgerRow>
+    </ul>
+  </div>
+</SplitSection>
+
+<style>
+  .terminal {
+    padding: 18px 20px;
+    border: 1px solid var(--rule);
+    background: var(--ink-sunken);
+    font-family: var(--font-mono);
+    font-size: 0.8125rem;
+    line-height: 1.5rem;
+    white-space: normal;
+    overflow-x: auto;
+  }
+
+  /* A long command wraps under itself, past the prompt, rather than scrolling off a phone. The
+     template's own line breaks collapse (white-space: normal), so its layout stays free. */
+  .line {
+    display: block;
+    padding-left: 2ch;
+    text-indent: -2ch;
+  }
+
+  .argument {
+    white-space: nowrap;
+  }
+
+  /* Copying a command must not copy the prompt. */
+  .prompt {
+    color: var(--signal);
+    user-select: none;
+  }
+
+  .comment {
+    padding-left: 0;
+    text-indent: 0;
+    color: var(--paper-faint);
+  }
+
+  .facts {
+    margin-top: 28px;
+  }
+</style>

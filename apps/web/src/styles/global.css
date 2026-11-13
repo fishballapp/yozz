@@ -7,80 +7,10 @@
 @import "@fontsource-variable/geist";
 @import "@fontsource-variable/geist-mono";
 
-/*
-  INK & RULE — token system for yozz.
-
-  DARK ONLY, BY PRODUCT DECISION. There is no light theme and no system-scheme detection: yozz
-  ships one surface. The token SHAPE is still the repo convention (bare custom properties on
-  :root, mapped into Tailwind via `@theme inline`, no `dark:` at callsites), so a light set is a
-  purely additive `:root[data-theme='light']` block if that decision is ever revisited.
-
-  Strategy: Restrained. Warm ink neutrals + exactly ONE chromatic signal.
-
-  The neutrals are warm (hue ~75-85, very low chroma), never blue-black — that is what keeps this
-  out of the near-black-plus-neon look every AI mail client ships. Reinforced by material: no
-  glow, no gradient, no glass, no shadow, no rounded panels. Separation is hairline and space.
-
-  State is carried by INVERSION, not colour: the selected row is a solid --select bar with --ink
-  text reversed out of it, the way a terminal mail client has always done it. --signal is spent
-  only on unread, focus, the one primary action and a set star, so it stays meaningful at a
-  glance down a dense column.
-*/
+/* INK & RULE: the colour tokens, and why each value is what it is. */
+@import "./tokens.css";
 
 :root {
-  /* grounds — warm ink */
-  --ink: oklch(0.155 0.006 75);
-  --ink-raised: oklch(0.198 0.007 75); /* rail, compose plate, unread row */
-  --ink-sunken: oklch(0.128 0.006 75); /* reader ground, inset wells */
-  --ink-hover: oklch(0.235 0.008 75);
-
-  /* rules — the only separator; there are no borders in this system */
-  --rule: oklch(0.34 0.008 75);
-  --rule-soft: oklch(0.27 0.007 75);
-
-  /* ink on ink — warm off-white, three steps */
-  /* Three steps of ink-on-ink. The binding surface for contrast is --ink-hover, NOT --ink: the
-     active rail row, a highlighted select item and a secondary button are the lightest ground any
-     of this text sits on, so a value tuned against --ink alone gets worse there. Measured against
-     --ink-hover: --paper 14.9:1, --paper-dim 6.4:1, --paper-faint 4.96:1. All clear AA at 11px. */
-  --paper: oklch(0.945 0.008 85);
-  --paper-dim: oklch(0.706 0.01 82);
-  --paper-faint: oklch(0.64 0.01 80);
-
-  /* The one INVERTED surface: the ground of the selected row, and nothing else. Deliberately a
-     step below --paper — a full-strength paper bar dropped into a 0.155 ground is a glare source
-     on a screen you sit in front of all day, and this is the one shape the eye is pulled to. It
-     stops at 0.90 rather than going lower because the row's secondary content is --ink/60 on it,
-     which holds 4.67:1 here and falls under AA by 0.87. */
-  --select: oklch(0.9 0.01 84);
-
-  /* The one signal: unread, focus, primary action, a set star.
-     PHOSPHOR GREEN, and the hue is the decision. Green and amber are the two colours a terminal
-     ever had, and this is a terminal mail client; yozz shipped amber first and it failed on one
-     specific job, so it took the sibling.
-
-     Hue 140 is not the fintech green (that is viridian, ~165, blue-green). It sits 60° off the
-     ground's ~80 — clear of the "accent reading as the ground turned up" trap — and 115° off
-     --danger, so nothing is confusable.
-
-     What decided it is that hue 140 is the ONLY family with two vivid ends. Measured across every
-     hue at maximum in-gamut chroma: it carries 13.97:1 on --ink at C 0.19, AND --signal-deep below
-     still holds C 0.177 where it has to survive the inverted row. Chrome yellow could not do the
-     second — see DECISIONS.md, and check any new value against the sRGB boundary before shipping
-     it, because three in a row here were authored outside it and silently clipped. */
-  --signal: oklch(0.87 0.19 140);
-  --signal-ink: oklch(0.18 0.035 140);
-  --signal-well: oklch(0.3 0.05 140); /* faint signal wash — the send-only chip, nothing else */
-  /* The ground of a ticked row: a step below --signal-well so --paper-faint still reads on it
-     (4.56:1; on --signal-well it falls to 3.98:1), and green so ticked never reads as unread (--ink-raised). */
-  --signal-wash: oklch(0.26 0.04 140);
-  /* The accent as it survives --select, and the only thing on it is a set star on a selected row.
-     3.37:1 there, and still C 0.177 — a proper green, not a drab one, which is the whole reason
-     the hue changed. On any dark ground the accent is --signal; this is not an alternative to it. */
-  --signal-deep: oklch(0.55 0.177 140);
-
-  --danger: oklch(0.64 0.16 25);
-
   /* The two type sizes, as size / line-height. A phone is held further away, so both are a step
      up below `lg`; the theme's `--text-*` steps point here so no call site states a breakpoint. */
   --type-base: 0.9375rem;

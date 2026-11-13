@@ -1,0 +1,32 @@
+{
+  "name": "@yozz.app/web-marketing",
+  "version": "0.0.0",
+  "private": true,
+  "license": "AGPL-3.0-only",
+  "type": "module",
+  "description": "YOZZ's landing page, the one prerendered page at yozz.app/. Astro 7 + Tailwind v4 on the app's own colour tokens; the yozz-web Worker serves it beside the app to a browser that is not signed in.",
+  "exports": {
+    "./analytics": "./src/analytics.ts"
+  },
+  "scripts": {
+    "dev": "astro dev --port 4177",
+    "build": "astro build",
+    "check": "astro check",
+    "astro": "astro"
+  },
+  "dependencies": {
+    "@astrojs/sitemap": "catalog:",
+    "@fontsource-variable/geist": "catalog:",
+    "@fontsource-variable/geist-mono": "catalog:",
+    "@internal/cookie-consent": "workspace:*",
+    "@internal/marketing": "workspace:*",
+    "@tailwindcss/vite": "catalog:",
+    "@yozz.app/web": "workspace:*",
+    "astro": "catalog:",
+    "tailwindcss": "catalog:"
+  },
+  "devDependencies": {
+    "@astrojs/check": "catalog:",
+    "typescript": "catalog:ts6"
+  }
+}

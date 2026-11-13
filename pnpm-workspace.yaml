@@ -1,12 +1,15 @@
 packages:
   - apps/cli
   - apps/web
+  - apps/web-marketing
   - apps/worker-api
   - apps/worker-web
   - internal/cli-login
+  - internal/cookie-consent
   - internal/email
   - internal/html-screenshot
   - internal/mail
+  - internal/marketing
   - internal/vault
   - internal/vault-contract
   - internal/vite-plugins
@@ -35,11 +38,14 @@ overrides:
   "@better-auth/core": 1.7.5
 allowBuilds:
   "@biomejs/biome": true
+  core-js: false
   esbuild: true
   puppeteer: true
   sharp: false
   workerd: true
 catalog:
+  "@astrojs/check": ^0.9.10
+  "@astrojs/sitemap": ^3.7.4
   "@babel/core": ^7.29.7
   "@base-ui/react": ^1.8.0
   "@better-auth/passkey": 1.7.5
@@ -60,6 +66,7 @@ catalog:
   "@types/node": ^24.13.4
   "@varlock/1password-plugin": ^2.0.6
   "@vitejs/plugin-react": ^6.1.1
+  astro: ^7.3.2
   better-auth: 1.7.5
   better-auth-cloudflare: ^0.3.1
   class-variance-authority: ^0.7.1
@@ -72,8 +79,10 @@ catalog:
   hono: ^4.13.8
   jsdom: ^30.0.1
   kysely: ^0.29.5
+  node-html-parser: ^9.0.4
   parse5: ^8.0.1
   postal-mime: ^3.0.0
+  posthog-js: ^1.433.4
   puppeteer: ^25.13.0
   react-native: 0.86.3
   react-native-gesture-handler: ~2.32.0
@@ -94,6 +103,8 @@ catalog:
   wrangler: ^4.158.0
   zod: ^4.6.7
 catalogs:
+  ts6:
+    typescript: npm:@typescript/typescript6@~6.0.2
   web:
     "@types/react": ^19.3.0
     "@types/react-dom": ^19.3.0

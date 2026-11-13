@@ -1,0 +1,8 @@
+User-agent: *
+Allow: /
+# The app's own pages: each asks for a login, so a crawler finds the same empty shell on all of them.
+Disallow: /m/
+Disallow: /settings
+Disallow: /cli/
+
+Sitemap: https://yozz.app/sitemap-index.xml

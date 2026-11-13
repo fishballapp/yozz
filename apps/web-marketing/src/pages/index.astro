@@ -1,0 +1,74 @@
+---
+import Cli from '../components/Cli.astro';
+import Close from '../components/Close.astro';
+import Hero from '../components/Hero.astro';
+import Less from '../components/Less.astro';
+import Privacy from '../components/Privacy.astro';
+import SendAs from '../components/SendAs.astro';
+import SiteFooter from '../components/SiteFooter.astro';
+import SiteHeader from '../components/SiteHeader.astro';
+import Sprite from '../components/Sprite.astro';
+import Landing from '../layouts/Landing.astro';
+
+const softwareApplication = {
+  '@context': 'https://schema.org',
+  '@type': 'SoftwareApplication',
+  name: 'YOZZ',
+  url: 'https://yozz.app/',
+  applicationCategory: 'CommunicationApplication',
+  operatingSystem: 'Web',
+  description:
+    'A zero-knowledge webmail client over the mail accounts you already have: one inbox for every address, and send from any of them over its own SMTP server.',
+  offers: { '@type': 'Offer', price: '0', priceCurrency: 'USD' },
+};
+---
+
+<Landing
+  title="YOZZ: every address you own, in one inbox"
+  description="YOZZ is a zero-knowledge webmail client over the mail accounts you already have. Read them as one stream and send from any address over its own SMTP server."
+  structuredData={softwareApplication}
+>
+  <Sprite />
+  <SiteHeader />
+  <main id="main" tabindex="-1">
+    <Hero />
+    <SendAs />
+    <Less />
+    <Privacy />
+    <Cli />
+    <Close />
+  </main>
+  <SiteFooter note="Mail shown on this page is invented demo data." hasCookieSettings />
+</Landing>
+
+<script>
+  import { getConsent, onConsentChange } from '@internal/cookie-consent';
+  // Defines <cookie-consent> before the banner below is opened.
+  import '@internal/cookie-consent/element';
+  import { startBundledPostHog } from '@internal/marketing/posthog-bundled';
+  import { hasAnyUnlockKeys } from '@yozz.app/web/signed-in';
+  import { COOKIE_SETTINGS_PARAM } from '../analytics';
+
+  // `?cookie-settings` is where anyone, signed in or not, changes their cookie choice. Whoever comes
+  // to it, often from inside the app, is counted only once they have accepted.
+  if (new URLSearchParams(location.search).has(COOKIE_SETTINGS_PARAM)) {
+    const banner = document.querySelector('cookie-consent');
+    banner?.show();
+    banner?.querySelector<HTMLButtonElement>('.cookie-consent-btn')?.focus();
+    if (getConsent() === 'granted') {
+      startBundledPostHog();
+    } else {
+      const stopWaiting = onConsentChange(consent => {
+        if (consent !== 'granted') return;
+        stopWaiting();
+        startBundledPostHog();
+      });
+    }
+  } else if (await hasAnyUnlockKeys().catch(() => false)) {
+    // A signed-in browser carries a cookie, and the Worker serves it the app instead of this page.
+    // One that unlocked before the cookie existed has only its saved keys: send it on, uncounted.
+    location.replace('/m/unified');
+  } else {
+    startBundledPostHog();
+  }
+</script>

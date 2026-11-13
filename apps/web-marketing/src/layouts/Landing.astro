@@ -1,0 +1,37 @@
+---
+import CookieConsent from '@internal/marketing/CookieConsent.astro';
+import PostHogBundled from '@internal/marketing/PostHogBundled.astro';
+import { POSTHOG_API_KEY, POSTHOG_HOST } from '../analytics';
+import Page from './Page.astro';
+
+type Props = {
+  title: string;
+  description: string;
+  structuredData?: Record<string, unknown>;
+};
+
+const { title, description, structuredData } = Astro.props;
+
+if (import.meta.env.PROD && !/^phc_[A-Za-z0-9]{32,}$/.test(POSTHOG_API_KEY)) {
+  throw new Error(
+    `POSTHOG_API_KEY in src/analytics.ts is "${POSTHOG_API_KEY}", not a PostHog project key. Set YOZZ's PostHog web project key (phc_…) before building.`,
+  );
+}
+---
+
+<Page title={title} description={description} structuredData={structuredData}>
+  {/* The shared Layout's PostHog is a snippet that loads PostHog's script from its CDN, which this
+      origin's CSP forbids; this one is bundled from npm and loads nothing remote. */}
+  <PostHogBundled slot="head" apiKey={POSTHOG_API_KEY} host={POSTHOG_HOST} />
+  <slot />
+  <CookieConsent slot="end" privacyPolicyHref="/privacy" />
+</Page>
+
+<script>
+  import { capture } from '@internal/marketing/posthog';
+
+  // The page's two conversions, "Start using YOZZ" and "Log in", wherever they sit (`data-cta`).
+  for (const element of document.querySelectorAll<HTMLElement>('[data-cta]')) {
+    element.addEventListener('click', () => capture('cta_clicked', { cta: element.dataset.cta }));
+  }
+</script>

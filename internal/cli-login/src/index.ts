@@ -17,10 +17,9 @@ import * as Stream from 'effect/Stream';
 // that port, and let the approved page navigate the browser straight here with the key on the query
 // string. A random `state` nonce ties the callback to this exact run so nothing else on the
 // machine can complete it. What the callback carries is the caller's (`approveInBrowser`'s `accept`):
-// a plain key (`loginViaBrowser`, whose limits are in DECISIONS.md), or a login sealed to the CLI's
-// own key. It's a top-level navigation (not a fetch) on purpose: a public page that *fetches* a
-// loopback address trips the browser's "access devices on your network" permission prompt, whereas
-// navigating to it does not.
+// a plain key (`loginViaBrowser`), or a login sealed to the CLI's own key. It's a top-level
+// navigation (not a fetch) on purpose: a public page that *fetches* a loopback address trips the
+// browser's "access devices on your network" permission prompt, whereas navigating to it does not.
 //
 // ponytail: node:http, not NodeHttpServer — for this one request it would add ~100 kB (and `ws`) to
 // the bundled CLI.

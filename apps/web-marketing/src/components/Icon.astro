@@ -1,0 +1,30 @@
+---
+import type { HTMLAttributes } from 'astro/types';
+
+/** The names Sprite.astro defines, each `#i-<name>`. */
+export type IconName =
+  | 'star'
+  | 'plus'
+  | 'tray'
+  | 'send'
+  | 'file'
+  | 'archive'
+  | 'trash'
+  | 'gear'
+  | 'search'
+  | 'clip'
+  | 'reply'
+  | 'forward'
+  | 'mail'
+  | 'close'
+  | 'menu'
+  | 'arrow';
+
+// The rest of the props carry the parent's style scope (`data-astro-cid-*`), so a parent's
+// scoped style for the class it passes reaches this <svg>.
+type Props = HTMLAttributes<'svg'> & { name: IconName };
+
+const { name, class: className, ...rest } = Astro.props;
+---
+
+<svg class:list={['icon', className]} aria-hidden="true" {...rest}><use href={`#i-${name}`}></use></svg>

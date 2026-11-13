@@ -1,0 +1,683 @@
+---
+import { ADDRESSES, OPEN_MESSAGE, THREADS } from '../../demo';
+import Icon, { type IconName } from '../Icon.astro';
+
+// The app, drawn in HTML from its own tokens and demo data: rail, unified list, reader. It folds
+// the way the app does: the reader goes first, then the rail, leaving one list of two-line rows.
+const mailboxes = ADDRESSES.filter(({ unread }) => unread !== null);
+const sendOnlyCount = ADDRESSES.length - mailboxes.length;
+const unreadTotal = THREADS.filter(({ isUnread }) => isUnread).length;
+const views: readonly { icon: IconName; label: string }[] = [
+  { icon: 'star', label: 'Starred' },
+  { icon: 'file', label: 'Drafts' },
+  { icon: 'send', label: 'Sent' },
+  { icon: 'archive', label: 'Archive' },
+  { icon: 'trash', label: 'Trash' },
+];
+---
+
+<div
+  class="app dark"
+  role="img"
+  aria-label="The YOZZ inbox, with demo data. A rail on the left lists three addresses on three domains and one more that is send-only. The middle column is one list of mail from all of them, each row marked with the address that received it. On the right, an open message with two attachments."
+>
+  <div class="rail">
+    <div class="wordmark"><svg><use href="#wordmark"></use></svg></div>
+    <div class="compose"><Icon name="plus" class="compose-plus" />Compose</div>
+    <div class="row on">
+      <Icon name="tray" /><span class="name">Inbox</span><span class="count">{unreadTotal}</span>
+    </div>
+    <div class="section">Addresses</div>
+    {
+      mailboxes.map(({ address, unread }) => (
+        <div class="row">
+          <span class="name">{address}</span>
+          {unread !== null && unread > 0 && <span class="count">{unread}</span>}
+        </div>
+      ))
+    }
+    <div class="send-only">+{sendOnlyCount} send-only</div>
+    <div class="section">Views</div>
+    {
+      views.map(({ icon, label }) => (
+        <div class="row">
+          <Icon name={icon} />
+          <span class="name">{label}</span>
+        </div>
+      ))
+    }
+    <div class="row settings"><Icon name="gear" /><span class="name">Settings</span></div>
+  </div>
+
+  <div class="list">
+    <div class="bar">
+      <Icon name="menu" class="menu" />
+      <Icon name="search" class="search" />
+      <b>Inbox</b>
+      <span class="meta hint">Search all mail</span>
+      <Icon name="plus" class="new" />
+    </div>
+    <div class="selection">
+      <span class="box"></span>
+      <span class="meta"><em>{unreadTotal} unread</em> · {THREADS.length} conversations</span>
+    </div>
+    <ul class="rows">
+      {
+        THREADS.map((thread, index) => (
+          <li class:list={{ open: index === 0, unread: thread.isUnread }}>
+            <span class="box" />
+            <Icon name="star" class:list={['star', { set: thread.isStarred }]} />
+            <span class="from">{thread.from}</span>
+            <span class="subject">
+              <b>{thread.subject}</b>
+              {thread.messageCount !== undefined && (
+                <span class="thread-count">{thread.messageCount}</span>
+              )}
+              <i>{thread.snippet}</i>
+            </span>
+            <span class="account">
+              {thread.hasAttachment && <Icon name="clip" class="clip" />}
+              {thread.account}
+            </span>
+            <span class="time">{thread.time}</span>
+          </li>
+        ))
+      }
+    </ul>
+  </div>
+
+  <div class="reader">
+    <div class="head">
+      <div class="title">
+        <Icon name="star" class="star set" />
+        <h3>{OPEN_MESSAGE.subject}</h3>
+        <div class="tools">
+          <Icon name="mail" /><Icon name="archive" /><Icon name="trash" /><Icon name="close" />
+        </div>
+      </div>
+      <div class="meta where">Inbox · hello@stillwater.example</div>
+    </div>
+    <div class="body">
+      <div class="sender">
+        <b>{OPEN_MESSAGE.fromName}</b>
+        <span class="meta">{OPEN_MESSAGE.fromAddress}</span>
+        <span class="meta date">{OPEN_MESSAGE.date}</span>
+      </div>
+      {OPEN_MESSAGE.paragraphs.map(paragraph => <p>{paragraph}</p>)}
+      <div class="attachments">
+        {
+          OPEN_MESSAGE.attachments.map(({ kind, name, size }) => (
+            <span>
+              <i>{kind}</i>
+              {name}
+              <i>{size}</i>
+            </span>
+          ))
+        }
+      </div>
+      <div class="actions">
+        <span class="primary"><Icon name="reply" />Reply</span>
+        <span><Icon name="forward" />Forward</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<style>
+  .app {
+    display: grid;
+    grid-template-columns: 224px minmax(0, 1.7fr) minmax(0, 1fr);
+    height: 600px;
+    overflow: hidden;
+    font-size: 13px;
+    line-height: 18px;
+    text-align: left;
+  }
+
+  .meta {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    line-height: 16px;
+    color: var(--paper-faint);
+  }
+
+  /* ---------- rail ---------- */
+  .rail {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    background: var(--ink-raised);
+    border-right: 1px solid var(--rule-soft);
+  }
+
+  .wordmark {
+    display: flex;
+    align-items: center;
+    height: 44px;
+    padding: 0 12px;
+  }
+
+  .wordmark svg {
+    width: 51px;
+    height: 15px;
+  }
+
+  .compose {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    height: 32px;
+    margin: 0 12px 12px;
+    padding: 0 12px;
+    background: var(--signal);
+    color: var(--signal-ink);
+    font-weight: 500;
+  }
+
+  .compose-plus {
+    width: 14px;
+    height: 14px;
+    stroke-width: 2.2;
+  }
+
+  .row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 7px 10px 7px 12px;
+    color: var(--paper-dim);
+  }
+
+  .row .name {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .row .count {
+    flex: none;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--signal);
+  }
+
+  .row.on {
+    background: var(--ink-hover);
+    color: var(--paper);
+    box-shadow: inset 2px 0 0 var(--signal);
+  }
+
+  .row.on .count {
+    padding: 1px 6px;
+    background: var(--signal);
+    color: var(--signal-ink);
+  }
+
+  .section {
+    padding: 18px 12px 6px;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--paper-faint);
+  }
+
+  .send-only {
+    display: flex;
+    align-items: center;
+    min-height: 32px;
+    padding: 0 10px 0 12px;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--paper-faint);
+    text-decoration: underline;
+    text-decoration-color: var(--rule);
+    text-underline-offset: 3px;
+  }
+
+  .settings {
+    margin-top: auto;
+    border-top: 1px solid var(--rule-soft);
+  }
+
+  /* ---------- list ---------- */
+  .list {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    border-right: 1px solid var(--rule-soft);
+  }
+
+  .bar {
+    display: grid;
+    grid-template-columns: 30px 1fr auto;
+    align-items: center;
+    height: 44px;
+    padding-right: 12px;
+    border-bottom: 1px solid var(--rule-soft);
+    color: var(--paper-faint);
+  }
+
+  .bar .icon {
+    justify-self: center;
+  }
+
+  .bar b {
+    font-weight: 500;
+    color: var(--paper);
+  }
+
+  .bar .menu,
+  .bar .new {
+    display: none;
+  }
+
+  .selection {
+    display: grid;
+    grid-template-columns: 30px 1fr;
+    align-items: center;
+    height: 34px;
+    padding-right: 12px;
+  }
+
+  .selection .meta {
+    text-align: right;
+  }
+
+  .selection em {
+    font-style: normal;
+    color: var(--signal);
+  }
+
+  .box {
+    justify-self: center;
+    width: 13px;
+    height: 13px;
+    border: 1px solid var(--paper-faint);
+  }
+
+  .rows li {
+    position: relative;
+    display: grid;
+    grid-template-columns: 30px 30px 132px minmax(0, 1fr) auto auto;
+    align-items: center;
+    height: 34px;
+    color: var(--paper-dim);
+  }
+
+  .rows li > * {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .star {
+    justify-self: center;
+    overflow: visible;
+    color: var(--paper-faint);
+  }
+
+  .star.set {
+    color: var(--signal);
+    fill: currentColor;
+  }
+
+  .from {
+    padding-right: 12px;
+  }
+
+  .subject {
+    padding-right: 12px;
+  }
+
+  .subject b {
+    font-weight: 400;
+  }
+
+  .subject i {
+    margin-left: 8px;
+    font-style: normal;
+    color: var(--paper-faint);
+  }
+
+  .thread-count {
+    margin-left: 6px;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--paper-faint);
+  }
+
+  .account {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 6px;
+    width: 14ch;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--paper-faint);
+  }
+
+  .clip {
+    width: 12px;
+    height: 12px;
+  }
+
+  .time {
+    width: 64px;
+    padding: 0 12px 0 8px;
+    text-align: right;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--paper-faint);
+  }
+
+  .rows li.unread {
+    background: var(--ink-raised);
+  }
+
+  .rows li.unread .from,
+  .rows li.unread .subject b,
+  .rows li.unread .time {
+    color: var(--paper);
+    font-weight: 600;
+  }
+
+  .rows li.unread::before {
+    content: '';
+    position: absolute;
+    top: 14px;
+    left: 0;
+    width: 6px;
+    height: 6px;
+    background: var(--signal);
+  }
+
+  /* The selected row: the app's one inversion. */
+  .rows li.open {
+    background: var(--select);
+    color: var(--ink);
+  }
+
+  .rows li.open .subject i,
+  .rows li.open .account,
+  .rows li.open .time,
+  .rows li.open .thread-count {
+    color: color-mix(in oklab, var(--ink) 62%, transparent);
+  }
+
+  .rows li.open .box {
+    border-color: color-mix(in oklab, var(--ink) 50%, transparent);
+  }
+
+  .rows li.open .star.set {
+    color: var(--signal-deep);
+  }
+
+  /* ---------- reader ---------- */
+  .reader {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    background: var(--ink-sunken);
+  }
+
+  .head {
+    padding: 12px 20px 14px;
+    border-bottom: 1px solid var(--rule-soft);
+  }
+
+  .title {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  h3 {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 17px;
+    line-height: 1.375;
+    font-weight: 500;
+    letter-spacing: -0.01em;
+  }
+
+  .tools {
+    display: flex;
+    gap: 14px;
+    color: var(--paper-dim);
+  }
+
+  .where {
+    margin: 6px 0 0 25px;
+  }
+
+  .body {
+    padding: 18px 20px;
+    font-size: 15px;
+    line-height: 1.6;
+  }
+
+  .sender {
+    display: flex;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: 0 8px;
+    margin-bottom: 12px;
+    font-size: 13px;
+  }
+
+  .sender b {
+    font-weight: 500;
+  }
+
+  .date {
+    margin-left: auto;
+    white-space: nowrap;
+  }
+
+  .body p {
+    max-width: 60ch;
+    margin-bottom: 12px;
+  }
+
+  .attachments {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin: 18px 0;
+  }
+
+  .attachments span {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    height: 28px;
+    padding: 0 10px;
+    border: 1px solid var(--rule);
+    background: var(--ink);
+    font-family: var(--font-mono);
+    font-size: 12px;
+    white-space: nowrap;
+  }
+
+  .attachments i {
+    font-style: normal;
+    color: var(--paper-faint);
+  }
+
+  .actions {
+    display: flex;
+    gap: 8px;
+    font-size: 13px;
+  }
+
+  .actions span {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    height: 28px;
+    padding: 0 12px;
+    color: var(--paper-dim);
+    font-weight: 500;
+  }
+
+  .actions .primary {
+    background: var(--ink-hover);
+    color: var(--paper);
+    box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--paper-faint) 70%, transparent);
+  }
+
+  /* ---------- narrower: the reader goes first ---------- */
+  @media (max-width: 1180px) {
+    .app {
+      grid-template-columns: 224px minmax(0, 1fr);
+    }
+
+    .reader {
+      display: none;
+    }
+
+    .list {
+      border-right: 0;
+    }
+  }
+
+  /* ---------- a phone or a narrow column: one pane of two-line records, as the app draws it there.
+     The rail goes at the width the page itself goes to one column, so the list is never squeezed
+     beside it. ---------- */
+  @media (max-width: 900px) {
+    .app {
+      grid-template-columns: minmax(0, 1fr);
+      height: auto;
+      font-size: 15px;
+      line-height: 20px;
+    }
+
+    .meta,
+    .time {
+      font-size: 12px;
+    }
+
+    .rail {
+      display: none;
+    }
+
+    .bar {
+      grid-template-columns: 44px 1fr 44px 44px;
+      padding-right: 0;
+      background: var(--ink-raised);
+    }
+
+    .bar .menu,
+    .bar .new {
+      display: block;
+    }
+
+    .bar .menu {
+      order: 1;
+      color: var(--paper-dim);
+    }
+
+    .bar b {
+      order: 2;
+    }
+
+    .bar .search {
+      order: 3;
+    }
+
+    .bar .new {
+      order: 4;
+      color: var(--signal);
+      stroke-width: 2.2;
+    }
+
+    .bar .hint {
+      display: none;
+    }
+
+    .selection {
+      grid-template-columns: 44px 1fr auto;
+      height: 44px;
+      padding-right: 0;
+      border-bottom: 1px solid var(--rule-soft);
+    }
+
+    .selection .box {
+      visibility: hidden;
+    }
+
+    .selection .meta {
+      text-align: left;
+    }
+
+    .selection::after {
+      content: 'Select';
+      padding: 0 16px;
+      border-left: 1px solid var(--rule-soft);
+      line-height: 44px;
+      color: var(--paper-dim);
+    }
+
+    .rows li {
+      grid-template-columns: 44px minmax(0, 1fr) auto;
+      column-gap: 8px;
+      height: auto;
+      padding: 8px 0;
+      border-bottom: 1px solid var(--rule-soft);
+    }
+
+    .rows li .box {
+      display: none;
+    }
+
+    .rows li .star {
+      grid-row: 1 / span 2;
+      grid-column: 1;
+      width: 17px;
+      height: 17px;
+    }
+
+    .rows li .from {
+      grid-row: 1;
+      grid-column: 2;
+    }
+
+    .rows li .time {
+      grid-row: 1;
+      grid-column: 3;
+      width: auto;
+      padding: 0 16px 0 0;
+    }
+
+    .rows li .subject {
+      grid-row: 2;
+      grid-column: 2;
+      padding-right: 8px;
+    }
+
+    /* Under the time: which address it arrived at, the one fact the unified list exists to show. */
+    .rows li .account {
+      grid-row: 2;
+      grid-column: 3;
+      width: auto;
+      padding-right: 16px;
+      font-size: 12px;
+    }
+
+    .rows li.unread::before {
+      top: calc(50% - 3px);
+    }
+
+    .rows li:nth-child(n + 8) {
+      display: none;
+    }
+  }
+</style>

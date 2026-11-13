@@ -1,0 +1,117 @@
+---
+import Logo from './Logo.astro';
+import StartButton from './StartButton.astro';
+---
+
+<header class="wrap top">
+  <a class="skip" href="#main">Skip to content</a>
+  <a class="home" href="/"><Logo class="logo" /></a>
+  <nav aria-label="Page">
+    <a class="link" href="/#send">Send-as</a>
+    <a class="link" href="/#privacy">Privacy</a>
+    <a class="link" href="/#cli">CLI</a>
+    <a class="link" href="https://github.com/fishballapp/yozz">Source</a>
+    <a class="link login" href="/login" data-cta="login-header">Log in</a>
+    <StartButton size="small" class="start" data-cta="start-header" />
+  </nav>
+</header>
+
+<style>
+  .top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 0 16px;
+    padding-block: 20px;
+  }
+
+  /* Off screen until focused: the first stop for a keyboard, past the six links. */
+  .skip {
+    position: absolute;
+    left: var(--pad);
+    top: 8px;
+    z-index: 1;
+    padding: 10px 14px;
+    background: var(--ink);
+    color: var(--signal);
+    font-size: 0.9375rem;
+    line-height: 1.5rem;
+    transform: translateY(-200%);
+  }
+
+  .skip:focus {
+    transform: none;
+  }
+
+  .home {
+    flex: none;
+  }
+
+  .logo {
+    width: 112px;
+    height: 48px;
+  }
+
+  nav {
+    display: flex;
+    align-items: center;
+    gap: 28px;
+  }
+
+  .link {
+    font-family: var(--font-mono);
+    font-size: 0.8125rem;
+    line-height: 44px;
+    color: var(--text-dim);
+    text-decoration: none;
+    white-space: nowrap;
+  }
+
+  .link:hover {
+    color: var(--ink);
+    text-decoration: underline;
+    text-underline-offset: 4px;
+  }
+
+  @media (max-width: 1000px) {
+    nav {
+      gap: 20px;
+    }
+  }
+
+  /* Below this only the two things a visitor needs on the first screen stay: log in, and start. */
+  @media (max-width: 860px) {
+    .link:not(.login) {
+      display: none;
+    }
+  }
+
+  @media (max-width: 420px) {
+    nav {
+      gap: 14px;
+    }
+
+    .start {
+      padding-inline: 12px;
+    }
+
+    .start :global(.arrow) {
+      display: none;
+    }
+  }
+
+  @media (max-width: 360px) {
+    .logo {
+      width: 84px;
+      height: 36px;
+    }
+  }
+
+  /* The hero's own button is on the first screen; here only "Log in" fits beside the logo. */
+  @media (max-width: 339px) {
+    .start {
+      display: none;
+    }
+  }
+</style>

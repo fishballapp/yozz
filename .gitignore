@@ -17,3 +17,6 @@ packages/tls/.bogo/
 # Vite reads these too; the monorepo root ignored them, the standalone tree must as well
 .env.local
 .env.*.local
+
+# Astro's generated types (apps/web-marketing)
+.astro/

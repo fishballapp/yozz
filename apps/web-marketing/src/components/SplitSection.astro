@@ -1,0 +1,46 @@
+---
+// The page's light-sheet section: a numbered label, a headline and its copy on the left, the
+// drawing or list it argues from on the right (slot "aside"), and optionally a full-width row
+// under both (slot "below"). One column below 900px.
+type Props = { id: string; label: string; title: string };
+
+const { id, label, title } = Astro.props;
+---
+
+<section class="wrap section" id={id}>
+  <div class="split">
+    <div class="copy">
+      <p class="label">{label}</p>
+      <h2 class="section-title">{title}</h2>
+      <slot />
+    </div>
+    <slot name="aside" />
+  </div>
+  <slot name="below" />
+</section>
+
+<style>
+  /* A margin, not padding, so a jump to the section lands on its label rather than on the gap. */
+  .section {
+    margin-top: var(--section-gap);
+  }
+
+  .split {
+    display: grid;
+    grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
+    gap: clamp(32px, 6vw, 96px);
+    align-items: start;
+  }
+
+  .copy > :global(p:not(.label)) {
+    max-width: 30em;
+    margin-top: 24px;
+    color: var(--text-dim);
+  }
+
+  @media (max-width: 900px) {
+    .split {
+      grid-template-columns: minmax(0, 1fr);
+    }
+  }
+</style>

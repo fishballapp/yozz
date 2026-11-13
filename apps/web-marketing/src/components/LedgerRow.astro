@@ -1,0 +1,62 @@
+---
+// One row of the page's one table shape: a mono key, then its value. `isEmphasised` rules the row
+// off in ink, for the line the others lead to.
+type Props = { label: string; isEmphasised?: boolean };
+
+const { label, isEmphasised = false } = Astro.props;
+---
+
+<li class:list={['row', { emphasised: isEmphasised }]}>
+  <span class="key">{label}</span>
+  <span class="value"><slot /></span>
+</li>
+
+<style>
+  .row {
+    display: grid;
+    grid-template-columns: 8.5rem minmax(0, 1fr);
+    gap: 16px;
+    padding: 14px 0;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .row:first-child {
+    border-top: 1px solid var(--ink);
+  }
+
+  .key {
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    line-height: 1.75rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--text-faint);
+  }
+
+  .value {
+    color: var(--text-dim);
+  }
+
+  .value :global(a) {
+    color: var(--ink);
+    text-decoration: underline;
+    text-underline-offset: 4px;
+  }
+
+  .emphasised {
+    border-bottom-color: var(--ink);
+  }
+
+  .emphasised .key,
+  .emphasised .value {
+    color: var(--ink);
+    font-weight: 500;
+  }
+
+  @media (max-width: 760px) {
+    .row {
+      grid-template-columns: minmax(0, 1fr);
+      gap: 0;
+    }
+  }
+</style>

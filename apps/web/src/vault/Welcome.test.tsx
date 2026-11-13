@@ -86,6 +86,26 @@ describe('Welcome', () => {
     expect(page.querySelector('label[for="welcome-email"]')?.textContent).toBe('Your email');
   });
 
+  it('says, where the account is made, that it means agreeing to the terms, and links both policies', async () => {
+    const page = await mount();
+    expect(page.textContent).toContain('By creating an account, you agree to the Terms.');
+    const links = [...page.querySelectorAll('a')].map(link => [
+      link.textContent,
+      link.getAttribute('href'),
+    ]);
+    expect(links).toEqual(
+      expect.arrayContaining([
+        ['Terms', '/terms'],
+        ['Privacy policy', '/privacy'],
+      ]),
+    );
+    // Right under the button that makes the account.
+    const terms = page.querySelector('a[href="/terms"]');
+    expect(terms?.compareDocumentPosition(buttonStartingWith(page, 'Continue with email'))).toBe(
+      Node.DOCUMENT_POSITION_PRECEDING,
+    );
+  });
+
   it('names the sender, and offers a resend only after 30 seconds', async () => {
     const page = await mount();
     await sendLink(page);

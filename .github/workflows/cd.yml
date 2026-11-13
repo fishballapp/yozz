@@ -47,8 +47,9 @@ jobs:
         run: pnpm -F @yozz.app/worker-api run deploy
         env:
           OP_TOKEN: ${{ secrets.YOZZ_OP_TOKEN }}
-      # Builds apps/web with VITE_API_URL=https://api.yozz.app, then deploys the assets-only host.
-      # Its varlock schema loads the deploy token alone, so no runtime secret reaches this step.
+      # Builds apps/web with VITE_API_URL=https://api.yozz.app and the landing page, assembles them,
+      # then deploys yozz-web. Its varlock schema loads the deploy token alone, so no runtime secret
+      # reaches this step.
       - name: Deploy the web host
         run: pnpm -F @yozz.app/worker-web run deploy
         env:

@@ -147,6 +147,18 @@ export const Welcome = () => {
           {isBusy ? 'Sending…' : 'Continue with email'}
         </Button>
       </form>
+      {/* Plain links: the policies are pages of the landing site, not app routes. */}
+      <p className="mt-4 text-2xs text-paper-faint">
+        By creating an account, you agree to the{' '}
+        <a href="/terms" className="text-paper-dim underline">
+          Terms
+        </a>
+        . The{' '}
+        <a href="/privacy" className="text-paper-dim underline">
+          Privacy policy
+        </a>{' '}
+        says how your data is handled.
+      </p>
     </AuthColumn>
   );
 };

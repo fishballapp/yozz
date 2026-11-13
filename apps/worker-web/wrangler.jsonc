@@ -1,23 +1,27 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "yozz-web",
+  "main": "src/index.ts",
   "compatibility_date": "2026-06-21",
   "account_id": "ef1db00eff7bafcb12e7acb5754d1377",
-  // The SPA's only hostname, the apex. A deploy makes the Worker's custom domains match this list,
+  "dev": { "port": 8182, "inspector_port": 9242 },
+  // The app's only hostname, the apex. A deploy makes the Worker's custom domains match this list,
   // and Cloudflare keeps the DNS record and the certificate.
   "routes": [{ "pattern": "yozz.app", "custom_domain": true }],
   // Served on its own domain only: not on workers.dev, and with no preview URLs.
   "workers_dev": false,
   "preview_urls": false,
-  // Assets-only Worker — no `main`/worker code, so static hits are served by Cloudflare's asset
-  // layer and NOT billed as Worker invocations (cost-equivalent to Pages). `not_found_handling`
-  // serves index.html for client-side routing. Build the SPA first: `pnpm -F @yozz.app/web build`
-  // (produces ../web/dist).
-  // Deploy bakes VITE_API_URL=https://api.yozz.app — apps/web/src/vault/api-base-url.ts reads it
-  // and the vault screens refuse to work without it (isApiConfigured).
+  // dist/ is the app (@yozz.app/web) with the landing page (@yozz.app/web-marketing) beside it as
+  // _landing.html, put together by scripts/assemble-assets.ts. Only `/` runs the Worker, which
+  // picks between the two by the signed-in cookie; every other path is the assets layer's, with
+  // index.html for the app's client-side routes, so static hits stay unbilled.
+  // The deploy builds the app with VITE_API_URL=https://api.yozz.app: apps/web/src/vault/api-base-url.ts
+  // reads it, and the vault screens refuse to work without it (isApiConfigured).
   "assets": {
-    "directory": "../web/dist",
-    "not_found_handling": "single-page-application"
+    "directory": "./dist",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/"]
   },
   "observability": {
     "enabled": true

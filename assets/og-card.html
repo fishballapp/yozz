@@ -5,8 +5,11 @@
   script explains its own steps; do not screenshot this file straight to og.png, because the
   envelope and the type want opposite treatment and the script is what reconciles them.
 
-  Three layers: envelope.jpg for the envelope, the real app screenshot clipped into its opening,
-  and live text on the front panel.
+  Three layers: envelope.jpg for the envelope, og-inbox.png clipped into its opening, and live
+  text on the front panel. og-inbox.png is the landing page's own inbox drawing, demo data and
+  all, screenshotted from the built page (`pnpm -F @yozz.app/web og:inbox`), so the card shows
+  what the link lands on. The headline is the page's H1, and the line under it says the inbox is
+  demo data, in the type, where it is legible at an unfurl's size.
 
   envelope.png is a generated raster with the sheet keyed out to transparency, so the app shows
   through the opening and the envelope's own fold edge — antialiasing and all — lands on top of it.
@@ -86,7 +89,7 @@
         top: 78px;
         width: 800px;
         height: 330px;
-        background: url('screenshot.png') 4px 4px / 792px auto no-repeat;
+        background: url('og-inbox.png') 4px 4px / 792px auto no-repeat;
       }
 
       /* The contact shadow the envelope casts onto the sheet was painted on the placeholder in
@@ -113,7 +116,7 @@
 
       h1 {
         margin: 16px 0 0;
-        font-size: 62px;
+        font-size: 56px;
         font-weight: 600;
         letter-spacing: -0.03em;
         line-height: 1;
@@ -167,8 +170,8 @@
           <path transform="translate(240 0)" d="M0 0H76V26L36 74H76V100H0V74L40 26H0Z" />
         </g>
       </svg>
-      <h1>Zero-knowledge webmail</h1>
-      <p>For the email accounts you already own.</p>
+      <h1>Every address you own, in one inbox.</h1>
+      <p>A zero-knowledge webmail client. The inbox shown is demo data.</p>
     </div>
     <script>
       const layer = new URLSearchParams(location.search).get('layer');

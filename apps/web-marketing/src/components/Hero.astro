@@ -1,0 +1,95 @@
+---
+import MockInbox from './app/MockInbox.astro';
+import StartButton from './StartButton.astro';
+---
+
+<section class="wrap hero">
+  <h1>Every address you own, in one inbox. <span>And not much else.</span></h1>
+  <div class="lede">
+    <p>
+      YOZZ is a webmail client for the mail accounts you already have: your Gmail, your work
+      account, the addresses on your own domain. Read them as one list, and reply from the address
+      each message came to.
+    </p>
+    <div class="act">
+      <StartButton class="cta" data-cta="start-hero" />
+      <small>
+        Free. No paid tiers, no card.<br />Runs in your browser. Nothing to install.<br />Gmail
+        stops sending as your domain in January&nbsp;2027.
+      </small>
+    </div>
+  </div>
+
+  <figure>
+    <MockInbox />
+    <figcaption class="caption">
+      <span>Demo data. Every name, address and message here is invented.</span>
+      <span>Three inboxes and a send-only address, one list.</span>
+    </figcaption>
+  </figure>
+</section>
+
+<style>
+  .hero {
+    padding-top: clamp(20px, 3.4vw, 44px);
+  }
+
+  h1 {
+    font-size: clamp(2.5rem, 4.9vw, 4.375rem);
+    line-height: 1.02;
+    font-weight: 600;
+    letter-spacing: -0.04em;
+    text-wrap: balance;
+  }
+
+  h1 span {
+    display: block;
+    color: var(--text-faint);
+  }
+
+  .lede {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 32px 64px;
+    margin-top: clamp(20px, 2.4vw, 32px);
+  }
+
+  .lede p {
+    max-width: 33em;
+    font-size: clamp(1.125rem, 1.5vw, 1.3125rem);
+    line-height: 1.45;
+    letter-spacing: -0.01em;
+    color: var(--text-dim);
+    text-wrap: pretty;
+  }
+
+  .act {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 16px 20px;
+  }
+
+  small {
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    line-height: 1.125rem;
+    color: var(--text-faint);
+  }
+
+  figure {
+    margin-top: clamp(28px, 3.4vw, 48px);
+  }
+
+  @media (max-width: 760px) {
+    .act {
+      width: 100%;
+    }
+
+    .cta {
+      width: 100%;
+    }
+  }
+</style>

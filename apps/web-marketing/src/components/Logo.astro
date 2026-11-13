@@ -1,0 +1,12 @@
+---
+// projects/yozz/assets/logo.svg, the file itself: the mark is used unchanged.
+import type { HTMLAttributes } from 'astro/types';
+import logoUrl from '../../../../assets/logo.svg?url';
+
+// The rest of the props carry the parent's style scope, for the class it passes.
+type Props = Omit<HTMLAttributes<'img'>, 'src' | 'alt'>;
+
+const props = Astro.props;
+---
+
+<img src={logoUrl} alt="YOZZ" width="420" height="180" {...props} />

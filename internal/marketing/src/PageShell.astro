@@ -1,0 +1,151 @@
+---
+// The page with no analytics: head, metadata and body. Layout.astro is this plus PostHog and the
+// consent banner. A site with no analytics uses this one, because Astro bundles the scripts of every
+// component a page imports, rendered or not.
+import { type IconLink, PUBLIC_ICONS } from './icons';
+
+export type Props = {
+  title: string;
+  description: string;
+  ogTitle?: string;
+  ogDescription?: string;
+  ogSiteName: string;
+  ogLocale?: string;
+  // The share image. `path` is from the site root (e.g. '/og.png'); `width` and `height` are the
+  // file's real pixels, declared so the first share renders before the scraper has fetched it.
+  // When omitted, no og:image is rendered and the Twitter card is `summary`.
+  ogImage?: { path: string; alt: string; width: number; height: number };
+  // The browser's chrome colour: one colour, or one per colour scheme (`media`), each written as
+  // its own <meta name="theme-color">.
+  themeColor: string | readonly { media: string; content: string }[];
+  // Apple App Store numeric ID (e.g. '6758626786'). When set, renders the
+  // <meta name="apple-itunes-app"> tag for iOS Safari's Smart App Banner.
+  appStoreId?: string;
+  // <html lang> attribute, e.g. 'zh-HK', 'en'
+  htmlLang: string;
+  // Google Fonts (or any other stylesheet) <link href>. Pass `null` to
+  // skip loading a font stylesheet entirely.
+  fontHref: string | null;
+  // JSON-LD object for the page (typically a SoftwareApplication on the home page). Server-rendered
+  // so it is in the HTML Google reads first; the home page also gets a WebSite block on its own.
+  structuredData?: Record<string, unknown>;
+  // `false` renders `robots: noindex`; the build check then fails while the page is in the sitemap.
+  isIndexable?: boolean;
+  // The icons every page links, from the site's own list of what it serves. Defaults to the two
+  // files a site keeps in its public/ folder (`PUBLIC_ICONS`).
+  icons?: readonly IconLink[];
+};
+
+const {
+  title,
+  description,
+  ogTitle,
+  ogDescription,
+  ogSiteName,
+  ogLocale,
+  ogImage,
+  themeColor,
+  appStoreId,
+  htmlLang,
+  fontHref,
+  structuredData,
+  isIndexable = true,
+  icons = PUBLIC_ICONS,
+} = Astro.props;
+
+if (Astro.site === undefined) {
+  throw new Error('@internal/marketing Layout: set `site` in astro.config');
+}
+
+// Under build.format 'file' the pathname is the built file ("/index.html", "/about.html"), which
+// Workers Static Assets serves at "/" and "/about": the URL that answers 200 is the canonical.
+const pageUrl = new URL(
+  Astro.url.pathname.replace(/\.html$/, '').replace(/\/index$/, '/'),
+  Astro.site,
+).href;
+const homeUrl = new URL('/', Astro.site).href;
+const ogImageUrl = ogImage !== undefined ? new URL(ogImage.path, Astro.site).href : undefined;
+
+const jsonLdBlocks = [
+  ...(pageUrl === homeUrl
+    ? [{ '@context': 'https://schema.org', '@type': 'WebSite', name: ogSiteName, url: homeUrl }]
+    : []),
+  ...(structuredData !== undefined ? [structuredData] : []),
+];
+---
+
+<!doctype html>
+<html lang={htmlLang}>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="generator" content={Astro.generator} />
+    <title>{title}</title>
+    <meta name="description" content={description} />
+    {!isIndexable && <meta name="robots" content="noindex" />}
+    <link rel="canonical" href={pageUrl} />
+    {typeof themeColor === 'string' ? (
+      <meta name="theme-color" content={themeColor} />
+    ) : (
+      themeColor.map(({ media, content }) => (
+        <meta name="theme-color" media={media} content={content} />
+      ))
+    )}
+
+    {/* Smart App Banner — iOS Safari shows a one-tap install prompt for
+        users on iPhone who don't already have the app installed. */}
+    {appStoreId !== undefined && (
+      <meta name="apple-itunes-app" content={`app-id=${appStoreId}`} />
+    )}
+
+    {/* Open Graph (Facebook / WhatsApp / iMessage / generic) */}
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content={pageUrl} />
+    <meta property="og:site_name" content={ogSiteName} />
+    <meta property="og:title" content={ogTitle ?? title} />
+    <meta property="og:description" content={ogDescription ?? description} />
+    {ogLocale !== undefined && <meta property="og:locale" content={ogLocale} />}
+    {ogImage !== undefined && (
+      <>
+        <meta property="og:image" content={ogImageUrl} />
+        <meta property="og:image:width" content={String(ogImage.width)} />
+        <meta property="og:image:height" content={String(ogImage.height)} />
+        <meta property="og:image:alt" content={ogImage.alt} />
+      </>
+    )}
+
+    {/* Twitter / X card. Falls back to og: tags but image is explicit
+        because some clients still check twitter:image first. */}
+    <meta name="twitter:card" content={ogImage !== undefined ? 'summary_large_image' : 'summary'} />
+    {ogImage !== undefined && (
+      <>
+        <meta name="twitter:image" content={ogImageUrl} />
+        <meta name="twitter:image:alt" content={ogImage.alt} />
+      </>
+    )}
+
+    {icons.map(icon => <link {...icon} />)}
+    {fontHref !== null && (
+      <>
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+        <link href={fontHref} rel="stylesheet" />
+      </>
+    )}
+
+    {/* `<` escaped so a value holding "</script>" can't close the tag. */}
+    {jsonLdBlocks.map(block => (
+      <script
+        is:inline
+        type="application/ld+json"
+        set:html={JSON.stringify(block).replaceAll('<', '\\u003c')}
+      />
+    ))}
+
+    <slot name="head" />
+  </head>
+  <body class="bg-background font-sans text-foreground antialiased">
+    <slot />
+    <slot name="end" />
+  </body>
+</html>

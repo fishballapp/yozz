@@ -1,0 +1,98 @@
+---
+import MockComposer from './app/MockComposer.astro';
+import LedgerRow from './LedgerRow.astro';
+import SplitSection from './SplitSection.astro';
+
+// The hosts the repo's own live checks pass against, IMAP on 993 and SMTP on 465 both
+// (packages/imap and packages/smtp `live`): keep this list equal to theirs.
+const providers = [
+  'Gmail',
+  'Fastmail',
+  'Forward Email',
+  'Gandi',
+  'Disroot',
+  'mailbox.org',
+  'Riseup',
+  'Migadu',
+  'Posteo',
+];
+---
+
+<SplitSection
+  id="send"
+  label="01 · Send-as"
+  title={'Gmail stops sending as your domain in January\u00a02027.'}
+>
+  <p>If you write as <span class="code">you@yourdomain.com</span> from inside Gmail, that ends.</p>
+  <p>
+    In YOZZ it is the normal case. Add as many addresses as you own, each with the SMTP server you
+    already use, and pick From on every message. An address with no inbox behind it is fine too.
+  </p>
+  <ol class="dates">
+    <LedgerRow label="Jan 2026">Gmail removed POP fetch and Gmailify.</LedgerRow>
+    <LedgerRow label="Jan 2027">Gmail removes “Send mail as” for third-party addresses.</LedgerRow>
+    <LedgerRow label="In YOZZ" isEmphasised>
+      No limit on addresses. Each one sends over its own SMTP.
+    </LedgerRow>
+  </ol>
+
+  <figure slot="aside">
+    <MockComposer />
+    <figcaption class="caption">
+      <span>Demo addresses. Nothing is sent from this page.</span>
+    </figcaption>
+  </figure>
+
+  <ul class="providers" slot="below">
+    <LedgerRow label="Connects to">
+      {providers.join(', ')}. Gmail connects with an app password. We test the encrypted
+      connection to all nine, and signing in and sending on one. Any server with IMAP on port 993
+      and SMTP on port 465 should work too.
+    </LedgerRow>
+    <LedgerRow label="Not yet">
+      Providers that need OAuth sign-in, or that only offer SMTP on port 587.
+    </LedgerRow>
+  </ul>
+</SplitSection>
+
+<style>
+  .dates {
+    margin-top: 32px;
+  }
+
+  /* A row of its own under the copy and the composer, so neither column runs past the other. It
+     keeps the split's own columns and gap (SplitSection): "Not yet" sits under the copy, and the
+     longer "Connects to" under the composer. */
+  .providers {
+    display: grid;
+    grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
+    column-gap: clamp(32px, 6vw, 96px);
+    margin-top: 56px;
+  }
+
+  .providers :global(.row:first-child) {
+    order: 1;
+  }
+
+  .providers :global(.row) {
+    border-top: 1px solid var(--ink);
+  }
+
+  @media (max-width: 1100px) {
+    .providers {
+      grid-template-columns: minmax(0, 1fr);
+    }
+
+    .providers :global(.row:first-child) {
+      order: 0;
+    }
+
+    .providers :global(.row:not(:first-child)) {
+      border-top: 0;
+    }
+
+    .providers :global(.value) {
+      max-width: 36em;
+    }
+  }
+</style>

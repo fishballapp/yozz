@@ -1,3 +1,6 @@
+# The origin's policy, for the app and the landing page alike. apps/worker-web/src/index.ts adds
+# PostHog's ingest host to connect-src on the landing page's response, and only there
+# (DECISIONS.md, "Analytics on the landing page only"); every other byte here reaches both.
 /*
   Content-Security-Policy: default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self' 'sha256-jnsQ/4yNPZwpQxe2qiUGfkcdILJ36ll/d0hNonxPDtI='; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; font-src 'self'; connect-src 'self' https://api.yozz.app wss://api.yozz.app https://cloudflare-dns.com; frame-src 'self'; manifest-src 'self'; upgrade-insecure-requests
   Cross-Origin-Opener-Policy: same-origin
@@ -8,3 +11,8 @@
   X-Content-Type-Options: nosniff
   X-DNS-Prefetch-Control: off
   X-Frame-Options: DENY
+
+# The landing page's files (apps/web-marketing, which apps/worker-web serves beside the app), named
+# by their content, so a year's cache is safe. HTML keeps the default, so a deploy shows at once.
+/_astro/*
+  Cache-Control: public, max-age=31536000, immutable

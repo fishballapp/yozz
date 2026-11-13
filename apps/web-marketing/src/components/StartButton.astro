@@ -1,0 +1,66 @@
+---
+import type { HTMLAttributes } from 'astro/types';
+import Icon from './Icon.astro';
+
+// The page's one action, an ink block in the logo's two colours. Sign-up is /welcome, which
+// links on to /login for someone who already has an account. The rest of the props carry the
+// parent's style scope, for the class it passes.
+type Props = Omit<HTMLAttributes<'a'>, 'href'> & { size?: 'small' | 'large' };
+
+const { size = 'large', class: className, ...rest } = Astro.props;
+---
+
+<a class:list={['start', size, className]} href="/welcome" {...rest}>
+  Start using YOZZ <Icon name="arrow" class="arrow" />
+</a>
+
+<style>
+  .start {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    height: 56px;
+    padding: 0 24px;
+    background: var(--ink);
+    color: var(--signal);
+    font-size: 1.125rem;
+    font-weight: 500;
+    line-height: 1;
+    letter-spacing: -0.01em;
+    text-decoration: none;
+    white-space: nowrap;
+    transition: background-color 120ms;
+  }
+
+  .start:hover {
+    background: var(--ink-hover);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .start {
+      transition: none;
+    }
+  }
+
+  .start:focus-visible {
+    outline-color: var(--ink);
+  }
+
+  .arrow {
+    width: 18px;
+    height: 18px;
+  }
+
+  .small {
+    height: 44px;
+    padding: 0 16px;
+    gap: 8px;
+    font-size: 0.9375rem;
+  }
+
+  .small .arrow {
+    width: 14px;
+    height: 14px;
+  }
+</style>

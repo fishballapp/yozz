@@ -5,6 +5,10 @@
   "license": "AGPL-3.0-only",
   "type": "module",
   "description": "YOZZ zero-knowledge webmail SPA \u2014 a multi-account client for addresses users already own. YOZZ's servers cannot read mail or credentials; existing mail providers remain unchanged.",
+  "exports": {
+    "./signed-in": "./src/vault/signed-in.ts",
+    "./tokens.css": "./src/styles/tokens.css"
+  },
   "scripts": {
     "dev": "vite --port 5177",
     "build": "vite build",
@@ -14,7 +18,8 @@
     "vault:drive": "node harness/vault-drive.ts",
     "draft:drive": "node harness/draft-open.ts",
     "attachments:drive": "pnpm -F @yozz.app/cli build && node harness/attachment-drive.ts",
-    "og": "node scripts/build-og.ts"
+    "og:inbox": "node scripts/build-og-inbox.ts",
+    "og": "node scripts/build-og-inbox.ts && node scripts/build-og.ts"
   },
   "dependencies": {
     "@base-ui/react": "catalog:",

@@ -1,0 +1,72 @@
+---
+// PostHog web snippet — synchronous stub on window.posthog so queued
+// capture() calls survive the gap between page parse and the real SDK
+// arriving.
+//
+// UK PECR / ICO compliance: nothing is written to cookies, localStorage or
+// sessionStorage until the visitor accepts on the cookie consent banner.
+// `cookieless_mode: 'on_reject'` with `opt_out_capturing_by_default: true`
+// treats a visitor who hasn't chosen as opted out by default: PostHog counts
+// them, page views and custom events alike, with its cookieless server-side
+// hash, and stores nothing, not even an opt-out flag.
+//
+// Single source of truth:
+// The `@internal/cookie-consent` store holds the visitor's choice.
+// When consent is 'granted', `posthog.opt_in_capturing()` enables cookies
+// and client storage.
+// When consent is 'denied', `posthog.opt_out_capturing()` keeps the
+// cookieless counting and stores PostHog's opt-out flag,
+// `__ph_opt_in_out_<key>`, in localStorage.
+//
+// The IIFE below is PostHog's canonical snippet, pasted verbatim from
+// project settings. Do not pretty-format — it relies on comma-operator
+// chains and assignment-as-expression; rewriting risks subtle changes.
+// Update by copying the latest from posthog.com/settings/project#snippet.
+//
+// `is:inline` on the snippet keeps Astro out of the stub script.
+// A bundled <script> below synchronises PostHog with the consent store.
+
+type Props = {
+  // Public project key (phc_...).
+  apiKey: string;
+  // Ingest host. Defaults to EU cloud.
+  host?: string;
+  // UI host for `redirected to ph...` links the SDK emits. Defaults
+  // alongside the EU ingest endpoint.
+  uiHost?: string;
+};
+
+const {
+  apiKey,
+  host = 'https://eu.i.posthog.com',
+  uiHost = 'https://eu.posthog.com',
+} = Astro.props;
+---
+
+<script is:inline define:vars={{ apiKey, host, uiHost }}>
+  !function(t,e){var o,n,p,r;e.__SV||(window.posthog=e,e._i=[],e.init=function(i,s,a){function g(t,e){var o=e.split(".");2==o.length&&(t=t[o[0]],e=o[1]),t[e]=function(){t.push([e].concat(Array.prototype.slice.call(arguments,0)))}}(p=t.createElement("script")).type="text/javascript",p.async=!0,p.src=s.api_host.replace(".i.posthog.com","-assets.i.posthog.com")+"/static/array.js",(r=t.getElementsByTagName("script")[0]).parentNode.insertBefore(p,r);var u=e;for(void 0!==a?u=e[a]=[]:a="posthog",u.people=u.people||[],u.toString=function(t){var e="posthog";return"posthog"!==a&&(e+="."+a),t||(e+=" (stub)"),e},u.people.toString=function(){return u.toString(1)+".people (stub)"},o="init capture register register_once register_for_session unregister opt_out_capturing has_opted_out_capturing opt_in_capturing reset isFeatureEnabled getFeatureFlag getFeatureFlagPayload reloadFeatureFlags group identify setPersonProperties setPersonPropertiesForFlags resetPersonPropertiesForFlags setGroupPropertiesForFlags resetGroupPropertiesForFlags resetGroups onFeatureFlags addFeatureFlagsHandler onSessionId getSurveys getActiveMatchingSurveys renderSurvey canRenderSurvey getNextSurveyStep".split(" "),n=0;n<o.length;n++)g(u,o[n]);e._i.push([i,s,a])},e.__SV=1)}(document,window.posthog||[]);
+
+  // Skip init on localhost — the stub above is still on window.posthog so
+  // click handlers don't throw; calls just queue to a never-flushed buffer.
+  // Saves quota and keeps dev clicks out of the production funnel without
+  // needing a project-level filter to remember.
+  if (location.hostname !== 'localhost' && location.hostname !== '127.0.0.1') {
+    posthog.init(apiKey, {
+      api_host: host,
+      ui_host: uiHost,
+      defaults: '2026-01-30',
+      person_profiles: 'identified_only',
+      disable_session_recording: true,
+      cookieless_mode: 'on_reject',
+      opt_out_capturing_by_default: true,
+    });
+  }
+</script>
+
+<script>
+  import { syncPostHogWithConsent } from './posthog';
+
+  if (location.hostname !== 'localhost' && location.hostname !== '127.0.0.1') {
+    syncPostHogWithConsent();
+  }
+</script>

@@ -100,6 +100,8 @@ share, and `apps/` is what runs at yozz.app; both AGPL-3.0.
 | [`internal/mail`](internal/mail/) | The mail logic every client runs: threading, sync, MIME bodies, the vault's draft and sent records, reply seeding and the send state machine, behind ports for the IMAP session, the mail cache and the vault API. | AGPL-3.0 |
 | [`apps/worker-api`](apps/worker-api/) | Hono + Better Auth on Cloudflare Workers: the vault routes, the D1 migrations and the relay, a session-gated WebSocket-to-TCP pipe to ports 993 and 465 only. | AGPL-3.0 |
 | [`apps/web`](apps/web/) | The Vite/React app. | AGPL-3.0 |
+| [`apps/web-marketing`](apps/web-marketing/) | The landing page at yozz.app/, in Astro. | AGPL-3.0 |
+| [`apps/worker-web`](apps/worker-web/) | Serves both at yozz.app, and the app at `/` to a browser that is signed in. | AGPL-3.0 |
 
 The TLS and X.509 packages run in Node and in all three browser engines, with no native code.
 They are the parts most likely to be useful outside YOZZ, which is why they are MIT and on npm:

@@ -8,6 +8,7 @@ import {
   useRef,
   useState,
 } from 'react';
+import { forgetSignedIn, rememberSignedIn } from './signed-in';
 import { resumeSession, type UnlockedVaultSession, unlockKeysOf } from './unlock';
 import { forgetUnlockKeys, saveUnlockKeys } from './unlock-keys';
 
@@ -55,6 +56,11 @@ export const VaultProvider = ({ children }: { children: ReactNode }) => {
     };
   }, []);
 
+  // However the session opened (a resume, a login, enrolment), yozz.app/ now opens the app.
+  useEffect(() => {
+    if (session !== null) rememberSignedIn(document);
+  }, [session]);
+
   // Read through a ref so `setSession` stays stable while still seeing the session it replaces.
   // Also set where the session changes, so work that outlives one can tell before the next render.
   const sessionRef = useRef(session);
@@ -77,6 +83,7 @@ export const VaultProvider = ({ children }: { children: ReactNode }) => {
   }, []);
 
   const lock = useCallback(async () => {
+    forgetSignedIn(document);
     sessionRef.current = null;
     setSessionState(null);
     if (session === null) return;

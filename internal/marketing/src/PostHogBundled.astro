@@ -1,0 +1,22 @@
+---
+// PostHog for a page whose CSP runs only the site's own script files (YOZZ's landing page,
+// on the app's origin): posthog-js from npm, bundled into the site's own files, with nothing that
+// loads remote code (`posthog-bundled.ts`). Consent and counting are PostHog.astro's; render
+// CookieConsent.astro beside it. The page's CSP must allow `host` in `connect-src`.
+//
+// This renders the configuration only. The page starts PostHog itself, with
+// `startBundledPostHog()` from `@internal/marketing/posthog-bundled`, once it knows the visit
+// should be counted.
+
+type Props = {
+  // Public project key (phc_...).
+  apiKey: string;
+  // Ingest host, e.g. 'https://eu.i.posthog.com'. No default: the page's CSP has to name it.
+  host: string;
+};
+
+const { apiKey, host } = Astro.props;
+---
+
+<meta name="posthog-api-key" content={apiKey} />
+<meta name="posthog-host" content={host} />

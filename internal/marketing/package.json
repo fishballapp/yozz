@@ -1,0 +1,32 @@
+{
+  "name": "@internal/marketing",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./Layout.astro": "./src/Layout.astro",
+    "./PageShell.astro": "./src/PageShell.astro",
+    "./PostHog.astro": "./src/PostHog.astro",
+    "./PostHogBundled.astro": "./src/PostHogBundled.astro",
+    "./posthog-bundled": "./src/posthog-bundled.ts",
+    "./CookieConsent.astro": "./src/CookieConsent.astro",
+    "./icons": "./src/icons.ts",
+    "./integration": "./src/integration.ts",
+    "./posthog": "./src/posthog.ts"
+  },
+  "scripts": {
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@internal/cookie-consent": "workspace:*",
+    "node-html-parser": "catalog:",
+    "posthog-js": "catalog:"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "vitest": "catalog:"
+  },
+  "peerDependencies": {
+    "astro": "catalog:"
+  }
+}

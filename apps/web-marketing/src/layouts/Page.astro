@@ -1,0 +1,47 @@
+---
+import geistLatin from '@fontsource-variable/geist/files/geist-latin-wght-normal.woff2?url';
+import type { IconLink } from '@internal/marketing/icons';
+import MarketingShell from '@internal/marketing/PageShell.astro';
+import '../styles/global.css';
+
+// A page of this site with no analytics: the policies. Landing.astro is this plus PostHog and the
+// cookie banner, and only the landing response's CSP lets PostHog through (DECISIONS.md, "The
+// policies at /privacy and /terms carry no analytics").
+type Props = {
+  title: string;
+  description: string;
+  structuredData?: Record<string, unknown>;
+};
+
+const { title, description, structuredData } = Astro.props;
+
+// The app's own files, served beside this page from the same origin (apps/web/public).
+const icons: readonly IconLink[] = [
+  { rel: 'icon', type: 'image/svg+xml', href: '/favicon.svg' },
+  { rel: 'apple-touch-icon', href: '/apple-touch-icon.png' },
+];
+---
+
+<MarketingShell
+  title={title}
+  description={description}
+  ogSiteName="YOZZ"
+  ogLocale="en_GB"
+  ogImage={{
+    path: '/og.png',
+    alt: 'An opened envelope with the YOZZ inbox, drawn with demo data, sliding out of it, over the wordmark and the words: Every address you own, in one inbox. A zero-knowledge webmail client.',
+    width: 1200,
+    height: 630,
+  }}
+  themeColor="#efece7"
+  htmlLang="en"
+  fontHref={null}
+  icons={icons}
+  structuredData={structuredData}
+>
+  {/* The headline's face, fetched with the page rather than after its stylesheet. */}
+  <link slot="head" rel="preload" href={geistLatin} as="font" type="font/woff2" crossorigin />
+  <slot name="head" slot="head" />
+  <slot />
+  <slot name="end" slot="end" />
+</MarketingShell>

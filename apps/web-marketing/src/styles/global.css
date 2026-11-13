@@ -1,0 +1,154 @@
+@import "tailwindcss";
+@import "@fontsource-variable/geist";
+@import "@fontsource-variable/geist-mono";
+
+/* The app's own colours (apps/web), so the product drawn on this page is drawn from them. */
+@import "@yozz.app/web/tokens.css";
+
+/* Tailwind v4 ignores node_modules. @internal/marketing's Layout.astro sets the body classes
+   (bg-background, font-sans, text-foreground, antialiased); without this @source those utilities
+   are dropped from the built CSS and the body ships unstyled. */
+@source "../../node_modules/@internal/marketing/src";
+
+/* The page is the app inverted: the app's one loud move is a paper bar with ink reversed out of
+   it, and here that bar is the whole sheet. Everything dark on it is the product, or a thing the
+   product seals. The green only ever sits on ink. Every text colour here holds AA on paper. */
+:root {
+  --text-dim: oklch(0.4 0.012 75);
+  --text-faint: oklch(0.47 0.012 75);
+  --line: oklch(0.83 0.012 82);
+
+  /* What the shared cookie banner reads (@internal/cookie-consent): paper on a hairline, square
+     like everything else here (DESIGN.md: zero radius, zero shadow). */
+  --card: var(--paper);
+  --foreground: var(--ink);
+  --muted-foreground: var(--text-dim);
+  --border: var(--line);
+  --accent: var(--ink);
+  --radius: 0px;
+
+  --pad: clamp(20px, 5.5vw, 80px);
+  --section-gap: clamp(88px, 11vw, 168px);
+
+  color-scheme: light;
+}
+
+@theme inline {
+  --color-background: var(--paper);
+  --color-foreground: var(--ink);
+  --font-sans: "Geist Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "Geist Mono Variable", ui-monospace, "SF Mono", monospace;
+}
+
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+    scroll-padding-top: 24px;
+  }
+
+  body {
+    font-size: 1.125rem;
+    line-height: 1.55;
+    font-variant-numeric: tabular-nums;
+    text-rendering: optimizeLegibility;
+  }
+
+  ::selection {
+    background: var(--signal);
+    color: var(--signal-ink);
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--signal-deep);
+    outline-offset: 2px;
+  }
+
+  /* The skip link's target takes focus, but nothing there is a control to ring. */
+  main:focus {
+    outline: none;
+  }
+
+  @media (max-width: 760px) {
+    body {
+      font-size: 1.0625rem;
+    }
+  }
+}
+
+@layer components {
+  .wrap {
+    max-width: 1440px;
+    margin-inline: auto;
+    padding-inline: var(--pad);
+  }
+
+  /* Ink ground: the drawn app, the terminal and the privacy band. */
+  .dark {
+    background: var(--ink);
+    color: var(--paper);
+  }
+
+  .dark :focus-visible {
+    outline-color: var(--signal);
+  }
+
+  /* The mono kicker over each section. */
+  .label {
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    line-height: 1rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--text-faint);
+  }
+
+  .dark .label {
+    color: var(--paper-faint);
+  }
+
+  .section-title {
+    margin-top: 20px;
+    font-size: clamp(2.25rem, 4.4vw, 3.75rem);
+    line-height: 1.02;
+    font-weight: 600;
+    letter-spacing: -0.04em;
+    text-wrap: balance;
+  }
+
+  /* A machine value inside prose: an address, a package, a command. */
+  .code {
+    font-family: var(--font-mono);
+    font-size: 0.88em;
+  }
+
+  /* Icon.astro's sprite icons. Layered, so a component's own size or stroke for one wins. */
+  .icon {
+    width: 15px;
+    height: 15px;
+    flex: none;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.5;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  /* The caption under a drawing: what it is, and that its data is invented. */
+  .caption {
+    display: flex;
+    justify-content: space-between;
+    gap: 4px 16px;
+    flex-wrap: wrap;
+    padding-top: 12px;
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    line-height: 1rem;
+    color: var(--text-faint);
+  }
+}
+
+/* The banner's one style no token reaches: its shadow. Qualified by the element so it outranks the
+   rules the banner injects after this sheet. */
+cookie-consent .cookie-consent-bar {
+  box-shadow: none;
+}

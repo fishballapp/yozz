@@ -1,0 +1,314 @@
+---
+import { ADDRESSES, OPEN_MESSAGE, REPLYING_FROM } from '../../demo';
+import Icon from '../Icon.astro';
+
+// The composer, with a From switch that works: plain radios, and CSS shows the signature and the
+// "goes out over" line of the one picked. Nothing here sends.
+const choices = ADDRESSES.map((address, index) => ({ ...address, id: `from-${index}` }));
+
+// One rule per address, written from the same list, so the line under the body always matches
+// the From picked.
+const revealRules = choices
+  .map(({ id }) => `.composer:has(#${id}:checked) [data-for~="${id}"]`)
+  .join(',\n');
+const smtpHosts = [...new Set(choices.map(({ smtpHost }) => smtpHost))];
+const signatures = [...new Set(choices.map(({ signature }) => signature))];
+const idsWhere = (isMatch: (choice: (typeof choices)[number]) => boolean) =>
+  choices
+    .filter(isMatch)
+    .map(({ id }) => id)
+    .join(' ');
+---
+
+<div class="composer dark">
+  <div class="title"><span>New message</span><Icon name="close" class="close" /></div>
+  <p class="invite">Try it: pick a different From.</p>
+  <div class="field from">
+    <span class="field-name" id="composer-from">From</span>
+    <fieldset aria-labelledby="composer-from">
+      {
+        choices.map(({ id, address, smtpHost, unread }) => (
+          <label class="choice">
+            <input type="radio" name="from" id={id} checked={address === REPLYING_FROM} />
+            <span class="dot" />
+            <span class="address">
+              {address}
+              {unread === null && (
+                <>
+                  {' '}
+                  <span class="tag">send-only</span>
+                </>
+              )}
+            </span>
+            <span class="host">{smtpHost}:465</span>
+          </label>
+        ))
+      }
+    </fieldset>
+  </div>
+  <div class="field" aria-hidden="true">
+    <span class="field-name">To</span><span class="field-value">kate@lai-studio.example</span>
+  </div>
+  <div class="field" aria-hidden="true">
+    <span class="field-name">Subject</span><span class="field-value"
+      >Re: {OPEN_MESSAGE.subject}</span
+    >
+  </div>
+  <div class="text" aria-hidden="true">
+    Option B, with the wider margin.<br /><br />Page four can wait for the third pass.<br /><br />{
+      signatures.map(signature => (
+        <b data-for={idsWhere(choice => choice.signature === signature)}>{signature}</b>
+      ))
+    }<span class="caret"></span>
+  </div>
+  <div class="footer">
+    <span class="send" aria-hidden="true">Send</span>
+    <span class="via">
+      Goes out over {
+        smtpHosts.map(host => (
+          <b data-for={idsWhere(choice => choice.smtpHost === host)}>{host}</b>
+        ))
+      }, as {choices.map(({ id, address }) => <b data-for={id}>{address}</b>)}
+    </span>
+  </div>
+</div>
+
+<style is:inline set:html={`${revealRules} { display: inline; }`}></style>
+
+<style>
+  /* The rows lay out by the composer's own width, not the viewport's: it sits in a column of
+     its own that is narrower than the screen at laptop widths. */
+  .composer {
+    container-type: inline-size;
+    border: 1px solid var(--rule);
+    background: var(--ink-raised);
+    font-size: 15px;
+    line-height: 20px;
+  }
+
+  .title {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    height: 44px;
+    padding: 0 16px;
+    border-bottom: 1px solid var(--rule-soft);
+    font-weight: 500;
+  }
+
+  .close {
+    color: var(--paper-dim);
+  }
+
+  /* Says the drawing is live, on the drawing. */
+  .invite {
+    margin: 0;
+    padding: 8px 16px;
+    border-bottom: 1px solid var(--rule-soft);
+    color: var(--signal);
+    font-family: var(--font-mono);
+    font-size: 12px;
+    line-height: 16px;
+  }
+
+  .field {
+    display: grid;
+    grid-template-columns: 5.5rem minmax(0, 1fr);
+    align-items: start;
+    border-bottom: 1px solid var(--rule-soft);
+  }
+
+  .field-name {
+    padding-left: 16px;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    line-height: 44px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--paper-faint);
+  }
+
+  .field-value {
+    min-width: 0;
+    padding: 12px 16px 12px 0;
+    overflow-wrap: anywhere;
+  }
+
+  .from {
+    box-shadow: inset 2px 0 0 var(--signal);
+  }
+
+  fieldset {
+    min-width: 0;
+    margin: 0;
+    padding: 6px 16px 10px 0;
+    border: 0;
+  }
+
+  .choice {
+    position: relative;
+    display: grid;
+    grid-template-columns: 20px minmax(0, 1fr) auto;
+    align-items: center;
+    column-gap: 8px;
+    min-height: 44px;
+    padding: 5px 10px 5px 8px;
+    color: var(--paper-dim);
+    cursor: pointer;
+  }
+
+  .choice:hover,
+  .choice:has(input:checked) {
+    background: var(--ink-hover);
+    color: var(--paper);
+  }
+
+  .choice:has(input:focus-visible) {
+    outline: 2px solid var(--signal);
+    outline-offset: -2px;
+  }
+
+  input {
+    position: absolute;
+    inset: 0;
+    margin: 0;
+    opacity: 0;
+    cursor: pointer;
+  }
+
+  /* A round marker: one From is picked, not several. */
+  .dot {
+    width: 14px;
+    height: 14px;
+    border: 1px solid var(--paper-faint);
+    border-radius: 50%;
+  }
+
+  .choice:has(input:checked) .dot {
+    border-color: var(--signal);
+    background: radial-gradient(circle, var(--signal) 0 3.5px, transparent 4px);
+  }
+
+  /* Forced colours drop backgrounds, and the picked From is drawn with one: fill the dot with the
+     system highlight instead. */
+  @media (forced-colors: active) {
+    .choice:has(input:checked) .dot {
+      border-color: CanvasText;
+      background: Highlight;
+    }
+  }
+
+  .address {
+    min-width: 0;
+    overflow-wrap: break-word;
+  }
+
+  .tag {
+    margin-left: 8px;
+    padding: 1px 4px;
+    background: var(--signal-well);
+    color: var(--signal);
+    font-family: var(--font-mono);
+    font-size: 12px;
+    line-height: 16px;
+    white-space: nowrap;
+  }
+
+  .host {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    line-height: 16px;
+    color: var(--paper-faint);
+    white-space: nowrap;
+  }
+
+  .text {
+    min-height: 132px;
+    padding: 16px;
+    font-family: var(--font-mono);
+    font-size: 13px;
+    line-height: 22px;
+  }
+
+  .caret {
+    display: inline-block;
+    width: 7px;
+    height: 15px;
+    vertical-align: -2px;
+    background: var(--signal);
+    animation: blink 1.1s steps(1) infinite;
+  }
+
+  @keyframes blink {
+    50% {
+      opacity: 0;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .caret {
+      animation: none;
+    }
+  }
+
+  .footer {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 10px 14px;
+    padding: 12px 16px;
+    border-top: 1px solid var(--rule-soft);
+  }
+
+  .send {
+    display: flex;
+    align-items: center;
+    height: 32px;
+    padding: 0 14px;
+    background: var(--signal);
+    color: var(--signal-ink);
+    font-size: 13px;
+    font-weight: 500;
+  }
+
+  .via {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    line-height: 16px;
+    color: var(--paper-faint);
+  }
+
+  /* Hidden until the From they belong to is picked (the rules above). */
+  [data-for] {
+    display: none;
+    font-weight: 400;
+  }
+
+  .via b {
+    color: var(--paper);
+  }
+
+  /* A narrow composer: From on its own line, each address over its server. */
+  @container (max-width: 640px) {
+    .from {
+      grid-template-columns: minmax(0, 1fr);
+    }
+
+    .from .field-name {
+      line-height: 36px;
+    }
+
+    fieldset {
+      padding: 0 8px 8px;
+    }
+
+    .choice {
+      grid-template-columns: 20px minmax(0, 1fr);
+      padding-block: 8px;
+    }
+
+    .host {
+      grid-column: 2;
+    }
+  }
+</style>

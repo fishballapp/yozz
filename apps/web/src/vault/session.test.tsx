@@ -3,6 +3,7 @@ import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { useVault, VaultProvider } from './session';
+import { forgetSignedIn } from './signed-in';
 import type { UnlockedVaultSession } from './unlock';
 
 // @ts-expect-error React reads it off the global
@@ -12,10 +13,11 @@ globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 const mocks = vi.hoisted(() => ({
   stamp: Promise.withResolvers<void>(),
   saveUnlockKeys: vi.fn(async (_keys: unknown) => {}),
+  resumeSession: vi.fn(async (): Promise<UnlockedVaultSession | null> => null),
 }));
 
 vi.mock('./unlock', () => ({
-  resumeSession: async () => null,
+  resumeSession: mocks.resumeSession,
   unlockKeysOf: async (session: { userId: string }) => {
     await mocks.stamp.promise;
     return { userId: session.userId };
@@ -55,8 +57,11 @@ const mount = async () => {
   };
 };
 
+const hasSignedInCookie = () => document.cookie.split('; ').includes('yozz-signed-in=1');
+
 afterEach(async () => {
   for (const unmount of unmounts.splice(0)) await unmount();
+  forgetSignedIn(document);
   mocks.stamp = Promise.withResolvers();
   vi.clearAllMocks();
 });
@@ -83,5 +88,20 @@ describe('VaultProvider', () => {
     act(() => vault().setSession(sessionOf('user-2')));
     await act(async () => mocks.stamp.resolve());
     expect(mocks.saveUnlockKeys.mock.calls).toEqual([[{ userId: 'user-2' }]]);
+  });
+
+  it('marks the browser signed in while a session is open, and unmarks it at lock', async () => {
+    const vault = await mount();
+    expect(hasSignedInCookie()).toBe(false);
+    act(() => vault().setSession(sessionOf('user-1')));
+    expect(hasSignedInCookie()).toBe(true);
+    await act(() => vault().lock());
+    expect(hasSignedInCookie()).toBe(false);
+  });
+
+  it('marks a browser whose session resumed on load', async () => {
+    mocks.resumeSession.mockResolvedValueOnce(sessionOf('user-1'));
+    await mount();
+    expect(hasSignedInCookie()).toBe(true);
   });
 });

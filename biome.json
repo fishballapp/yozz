@@ -2,7 +2,14 @@
   "$schema": "./node_modules/@biomejs/biome/configuration_schema.json",
   "vcs": { "enabled": true, "clientKind": "git", "useIgnoreFile": true },
   "files": {
-    "includes": ["**", "!**/node_modules", "!**/dist", "!**/routeTree.gen.ts", "!**/*.gen.*"]
+    "includes": [
+      "**",
+      "!**/node_modules",
+      "!**/dist",
+      "!**/routeTree.gen.ts",
+      "!**/*.gen.*",
+      "!**/*.astro"
+    ]
   },
   "plugins": ["./biome-plugins/multiline-if-braces.grit", "./biome-plugins/no-date.grit"],
   "assist": { "enabled": true, "actions": { "source": { "organizeImports": "on" } } },

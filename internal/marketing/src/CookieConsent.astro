@@ -1,0 +1,31 @@
+---
+// The consent banner the analytics follow (`@internal/cookie-consent`). Layout.astro renders it
+// beside the PostHog snippet; a page that loads PostHogBundled.astro renders it itself.
+
+export type CookieConsentCopy = {
+  message?: string;
+  policyLabel?: string;
+  acceptLabel?: string;
+  rejectLabel?: string;
+};
+
+type Props = {
+  // Privacy policy href for the banner's link.
+  privacyPolicyHref: string;
+  // Copy overrides (e.g. for localization).
+  copy?: CookieConsentCopy;
+};
+
+const { privacyPolicyHref, copy } = Astro.props;
+---
+
+<cookie-consent
+  policy-href={privacyPolicyHref}
+  message={copy?.message}
+  policy-label={copy?.policyLabel}
+  accept-label={copy?.acceptLabel}
+  reject-label={copy?.rejectLabel}
+/>
+<script>
+  import '@internal/cookie-consent/element';
+</script>

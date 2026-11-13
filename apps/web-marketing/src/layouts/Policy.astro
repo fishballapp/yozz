@@ -1,0 +1,116 @@
+---
+import SiteFooter from '../components/SiteFooter.astro';
+import SiteHeader from '../components/SiteHeader.astro';
+import Sprite from '../components/Sprite.astro';
+import Page from './Page.astro';
+
+// The layout of a policy written in markdown (src/pages/privacy.md, terms.md): the landing page's
+// header and footer around one readable column.
+type Props = {
+  frontmatter: {
+    title: string;
+    description: string;
+    // The date the text last changed, as a reader reads it ("13 November 2026").
+    updated: string;
+  };
+};
+
+const { title, description, updated } = Astro.props.frontmatter;
+---
+
+<Page title={`${title} · YOZZ`} description={description}>
+  <Sprite />
+  <SiteHeader />
+  <main id="main" tabindex="-1" class="wrap">
+    <article>
+      <p class="label">Legal</p>
+      <h1 class="section-title">{title}</h1>
+      <p class="updated">Last updated {updated}</p>
+      <div class="prose">
+        <slot />
+      </div>
+    </article>
+  </main>
+  <SiteFooter />
+</Page>
+
+<style>
+  main {
+    padding-block: clamp(48px, 7vw, 104px) clamp(72px, 9vw, 136px);
+  }
+
+  article {
+    max-width: 42rem;
+  }
+
+  .updated {
+    margin-top: 16px;
+    font-family: var(--font-mono);
+    font-size: 0.8125rem;
+    line-height: 1.25rem;
+    color: var(--text-faint);
+  }
+
+  .prose {
+    margin-top: clamp(36px, 5vw, 56px);
+    color: var(--text-dim);
+  }
+
+  .prose :global(h2) {
+    margin-top: 56px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid var(--line);
+    font-size: 1.5rem;
+    line-height: 1.2;
+    font-weight: 600;
+    letter-spacing: -0.02em;
+    color: var(--ink);
+  }
+
+  .prose :global(h3) {
+    margin-top: 32px;
+    font-size: 1.125rem;
+    line-height: 1.4;
+    font-weight: 600;
+    color: var(--ink);
+  }
+
+  .prose :global(p),
+  .prose :global(ul),
+  .prose :global(ol) {
+    margin-top: 16px;
+  }
+
+  .prose :global(ul) {
+    padding-left: 1.2em;
+    list-style: '– ' outside;
+  }
+
+  .prose :global(ol) {
+    padding-left: 1.4em;
+    list-style: decimal outside;
+  }
+
+  .prose :global(li + li) {
+    margin-top: 8px;
+  }
+
+  .prose :global(strong) {
+    color: var(--ink);
+    font-weight: 600;
+  }
+
+  .prose :global(a) {
+    color: var(--ink);
+    text-decoration: underline;
+    text-underline-offset: 4px;
+    overflow-wrap: anywhere;
+  }
+
+  .prose :global(code) {
+    font-family: var(--font-mono);
+    font-size: 0.88em;
+    color: var(--ink);
+    overflow-wrap: anywhere;
+  }
+</style>

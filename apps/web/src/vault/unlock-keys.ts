@@ -1,4 +1,10 @@
-import { getIdbFactory, openDeviceDb, runTransaction, STORES } from './device-db';
+import {
+  getIdbFactory,
+  openDeviceDb,
+  openExistingDeviceDb,
+  runTransaction,
+  STORES,
+} from './device-db';
 
 /** `encKey` is a non-extractable `CryptoKey`, and structured clone keeps it that way after a reload. */
 export type UnlockKeys = {
@@ -41,6 +47,26 @@ export const loadUnlockKeys = (
     const req = store.get(userId);
     req.onsuccess = () => done((req.result as UnlockKeys | undefined) ?? null);
   });
+
+/** Whether any account's keys are saved here, read without creating the database. */
+export const hasAnyUnlockKeys = async (idbFactory?: IDBFactory): Promise<boolean> => {
+  const db = await openExistingDeviceDb(getIdbFactory(idbFactory));
+  if (db === null) return false;
+  try {
+    const count = await runTransaction<number>(
+      db,
+      STORES.unlockKeys.name,
+      'readonly',
+      (store, done) => {
+        const req = store.count();
+        req.onsuccess = () => done(req.result);
+      },
+    );
+    return count > 0;
+  } finally {
+    db.close();
+  }
+};
 
 export const forgetUnlockKeys = (userId: string, idbFactory?: IDBFactory): Promise<void> =>
   withDb<void>(idbFactory, 'readwrite', (store, done) => {

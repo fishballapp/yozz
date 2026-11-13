@@ -1,0 +1,39 @@
+---
+import CookieConsent, { type CookieConsentCopy } from './CookieConsent.astro';
+import PageShell, { type Props as PageShellProps } from './PageShell.astro';
+import PostHog from './PostHog.astro';
+
+// PageShell's props, and the analytics: a site with none uses PageShell.astro itself.
+type Props = PageShellProps & {
+  // PostHog public project key (phc_...). Localhost is auto-skipped. Omit it for a site with no
+  // analytics: no snippet and no consent banner.
+  posthogApiKey?: string;
+  // PostHog ingest host. Defaults to EU.
+  posthogHost?: string;
+  // Privacy policy href for the cookie consent banner. Defaults to '/privacy'.
+  privacyPolicyHref?: string;
+  // Copy overrides for the cookie consent banner (e.g. for localization).
+  cookieConsentCopy?: CookieConsentCopy;
+};
+
+const {
+  posthogApiKey,
+  posthogHost,
+  privacyPolicyHref = '/privacy',
+  cookieConsentCopy,
+  ...shellProps
+} = Astro.props;
+---
+
+<PageShell {...shellProps}>
+  <Fragment slot="head">
+    {posthogApiKey !== undefined && <PostHog apiKey={posthogApiKey} host={posthogHost} />}
+    <slot name="head" />
+  </Fragment>
+  <slot />
+  <Fragment slot="end">
+    {posthogApiKey !== undefined && (
+      <CookieConsent privacyPolicyHref={privacyPolicyHref} copy={cookieConsentCopy} />
+    )}
+  </Fragment>
+</PageShell>

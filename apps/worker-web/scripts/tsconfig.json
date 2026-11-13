@@ -1,0 +1,10 @@
+// The Node assembly script: node types, not the Worker's workers-types.
+{
+  "extends": "../../../tsconfig.base.json",
+  "compilerOptions": {
+    "composite": true,
+    "tsBuildInfoFile": "node_modules/.tmp/tsconfig.tsbuildinfo",
+    "types": ["node"]
+  },
+  "include": ["**/*.ts"]
+}

@@ -1,0 +1,315 @@
+---
+// The zero-knowledge claim in its permitted words, with its boundary beside it: what we cannot
+// read, what we can, and what the claim is not. Every line is checked against PRODUCT.md
+// ("Evidence on Hand") and ARCHITECTURE.md ("What is on YOZZ's servers").
+const cannotRead = [
+  'Your mail passwords and server settings',
+  'Mail crossing the relay: bodies, subjects, senders',
+];
+// Every record that comes from mail, as the code writes them (internal/mail). The list is
+// exactly this: a new one belongs here the day it ships.
+const storedSealed = [
+  'Your drafts',
+  'Mail sent from an address with no mailbox',
+  'A copy of each inbox’s list: who it is from and to, subject, flags and attachment names. No bodies',
+  'Which messages and senders you have allowed remote images for',
+];
+const canSee = [
+  'The email address you sign in to YOZZ with',
+  'Which mail servers you connect to, when, and how many bytes',
+  'How many encrypted records and files you keep, the kind of each record (an address, a draft…), their sizes and when they changed',
+  'Your passkeys’ public keys, and the name of each CLI you approve and when it was last used',
+  'Visits to this page and clicks on its “Start using YOZZ” and “Log in” links, counted with PostHog: without cookies unless you accept them. The app itself has no analytics',
+];
+const isNot = [
+  { title: 'Not end-to-end encryption.', body: 'Your mail provider keeps whatever access it already has.' },
+  {
+    title: 'Not a mathematical guarantee.',
+    body: 'We serve the code that encrypts. This describes the published code and today’s deployment, and the code is public so you can check.',
+  },
+  {
+    title: 'Not recoverable.',
+    body: 'Lose your password or passkey and the vault is gone, with your drafts and any mail you sent from an address with no mailbox. Your mail and addresses at your provider are untouched. Make a new vault and add the addresses again, with an app password only where the provider needs one.',
+  },
+  {
+    title: 'Not a background service.',
+    body: 'A service that can wake up for you is a service that holds your password, so nothing checks your mail while the tab is closed.',
+  },
+];
+---
+
+<section class="sealed dark" id="privacy">
+  <div class="wrap">
+    <p class="label">03 · A zero-knowledge webmail client</p>
+    <h2 class="section-title">Our servers cannot read your mail or your passwords.</h2>
+    <div class="say">
+      <p>
+        Your mail passwords are encrypted on your device before YOZZ stores them, with a key only
+        you hold. Our servers keep ciphertext they cannot open, and our relay forwards encrypted
+        bytes it cannot read.
+      </p>
+      <p>
+        If we were breached or subpoenaed, there is no readable mailbox or credential store to hand
+        over. <strong>YOZZ does not create another readable copy of your mailbox.</strong> Your mail
+        stays wherever it already lives.
+      </p>
+    </div>
+
+    <div class="pipe">
+      <div class="node"><h3>Your browser</h3><p>Holds your key. Opens TLS 1.3 to your mail server itself and does the IMAP and SMTP.</p></div>
+      <div class="link" aria-hidden="true"></div>
+      <div class="node relay"><h3>YOZZ relay</h3><p>Copies bytes it has no key for. Parses nothing, stores nothing.</p></div>
+      <div class="link" aria-hidden="true"></div>
+      <div class="node"><h3>Your mail provider</h3><p>The other end of the connection. Your mail stays here, as it does today.</p></div>
+    </div>
+    <p class="pipe-caption"><em>Green</em> is one encrypted connection. Its keys exist at the two ends only.</p>
+
+    <div class="bounds">
+      <div>
+        <h3>We cannot read</h3>
+        <ul>
+          {cannotRead.map(item => <li>{item}</li>)}
+          <li>
+            Stored with us, but sealed under your key:
+            <ul class="sealed-list">{storedSealed.map(item => <li>{item}</li>)}</ul>
+          </li>
+        </ul>
+      </div>
+      <div>
+        <h3>We can see</h3>
+        <ul>{canSee.map(item => <li>{item}</li>)}</ul>
+      </div>
+      <div>
+        <h3>What this is not</h3>
+        <ul>
+          {
+            isNot.map(({ title, body }) => (
+              <li>
+                <strong>{title}</strong> {body}
+              </li>
+            ))
+          }
+        </ul>
+      </div>
+    </div>
+    <p class="more">
+      All of it, with who else handles what: <a href="/privacy">the privacy policy</a>
+    </p>
+    <p class="more code-check">
+      Check it against the code: <a href="https://github.com/fishballapp/yozz">github.com/fishballapp/yozz</a>
+    </p>
+  </div>
+</section>
+
+<style>
+  .sealed {
+    --band-padding: clamp(72px, 9vw, 136px);
+
+    margin-top: var(--section-gap);
+    padding-block: var(--band-padding);
+    /* A jump to the band lands on its label, not on the padding above it. */
+    scroll-margin-top: calc(var(--band-padding) * -1);
+  }
+
+  .section-title {
+    max-width: 16em;
+    color: var(--paper);
+  }
+
+  .say {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 24px clamp(32px, 6vw, 96px);
+    margin-top: 36px;
+  }
+
+  .say p {
+    max-width: 31em;
+    color: var(--paper-dim);
+  }
+
+  .say strong {
+    color: var(--paper);
+    font-weight: 500;
+  }
+
+  /* ---------- the relay diagram ---------- */
+  .pipe {
+    display: grid;
+    grid-template-columns:
+      minmax(0, 1fr) clamp(32px, 6vw, 88px) minmax(0, 1fr) clamp(32px, 6vw, 88px)
+      minmax(0, 1fr);
+    align-items: center;
+    margin-top: clamp(48px, 6vw, 80px);
+  }
+
+  .node {
+    min-height: 148px;
+    padding: 18px 20px;
+    border: 1px solid var(--signal);
+  }
+
+  .node h3 {
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    line-height: 1rem;
+    font-weight: 400;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--signal);
+  }
+
+  .node p {
+    margin-top: 10px;
+    font-size: 0.9375rem;
+    line-height: 1.45;
+    color: var(--paper-dim);
+  }
+
+  .link {
+    height: 2px;
+    background: var(--signal);
+  }
+
+  /* The connection runs straight through the relay, which holds no end of it. */
+  .relay {
+    position: relative;
+    border-color: var(--paper-faint);
+    border-style: dashed;
+  }
+
+  .relay h3 {
+    color: var(--paper-faint);
+  }
+
+  .relay::after {
+    content: '';
+    position: absolute;
+    top: calc(50% - 1px);
+    right: -1px;
+    left: -1px;
+    height: 2px;
+    background: var(--signal);
+  }
+
+  .relay p {
+    margin-top: 44px;
+  }
+
+  .pipe-caption {
+    margin-top: 14px;
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    line-height: 1.125rem;
+    color: var(--paper-faint);
+  }
+
+  .pipe-caption em {
+    font-style: normal;
+    color: var(--signal);
+  }
+
+  /* ---------- the boundary ---------- */
+  .bounds {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 40px clamp(24px, 4vw, 56px);
+    margin-top: clamp(56px, 7vw, 96px);
+  }
+
+  .bounds h3 {
+    padding-bottom: 12px;
+    border-bottom: 1px solid var(--paper-faint);
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    line-height: 1rem;
+    font-weight: 400;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--paper);
+  }
+
+  .bounds li {
+    padding: 13px 0;
+    border-bottom: 1px solid var(--rule-soft);
+    font-size: 1rem;
+    line-height: 1.45;
+    color: var(--paper-dim);
+  }
+
+  .bounds strong {
+    color: var(--paper);
+    font-weight: 500;
+  }
+
+  .bounds .sealed-list {
+    margin-top: 8px;
+  }
+
+  .bounds .sealed-list li {
+    display: list-item;
+    margin-left: 1.2em;
+    padding: 4px 0;
+    border-bottom: 0;
+    list-style: '– ' outside;
+    font-size: 0.9375rem;
+  }
+
+  .more {
+    margin-top: 32px;
+    font-family: var(--font-mono);
+    font-size: 0.8125rem;
+    line-height: 1.25rem;
+    color: var(--paper-faint);
+  }
+
+  .code-check {
+    margin-top: 0;
+  }
+
+  .more a {
+    display: inline-block;
+    padding-block: 12px;
+    color: var(--paper);
+    text-decoration: underline;
+    text-underline-offset: 4px;
+  }
+
+  @media (max-width: 900px) {
+    .say,
+    .bounds {
+      grid-template-columns: minmax(0, 1fr);
+    }
+
+    .pipe {
+      grid-template-columns: minmax(0, 1fr);
+    }
+
+    .link {
+      width: 2px;
+      height: 28px;
+      margin-left: 28px;
+    }
+
+    .node {
+      min-height: 0;
+    }
+
+    .relay {
+      padding-left: 48px;
+    }
+
+    .relay::after {
+      top: -1px;
+      bottom: -1px;
+      left: 28px;
+      right: auto;
+      width: 2px;
+      height: auto;
+    }
+
+    .relay p {
+      margin-top: 10px;
+    }
+  }
+</style>
