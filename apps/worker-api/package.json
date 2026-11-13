@@ -26,14 +26,14 @@
     "zod": "catalog:"
   },
   "devDependencies": {
-    "@cloudflare/vitest-pool-workers": "catalog:",
+    "@cloudflare/vitest-plugin": "catalog:",
     "@cloudflare/workers-types": "catalog:",
     "@types/node": "catalog:",
     "@varlock/1password-plugin": "catalog:",
     "@yozz.app/vault": "workspace:*",
     "kysely": "catalog:",
     "varlock": "catalog:",
-    "vitest": "catalog:workers-pool",
+    "vitest": "catalog:",
     "wrangler": "catalog:"
   }
 }

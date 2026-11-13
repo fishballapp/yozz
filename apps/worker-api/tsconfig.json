@@ -3,7 +3,7 @@
   "compilerOptions": {
     "composite": true,
     "tsBuildInfoFile": "node_modules/.tmp/tsconfig.tsbuildinfo",
-    "types": ["@cloudflare/workers-types", "@cloudflare/vitest-pool-workers"],
+    "types": ["@cloudflare/workers-types", "@cloudflare/vitest-plugin"],
     "allowImportingTsExtensions": true
   },
   "include": ["src/**/*.ts", "test/**/*.ts", "worker-configuration.d.ts", "vitest.config.mts"]
