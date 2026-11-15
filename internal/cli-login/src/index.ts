@@ -44,11 +44,7 @@ const page = (product: string, title: string, body: string): string =>
 <script>setTimeout(function(){try{window.close()}catch(e){}},250)</script>`;
 
 const successHtml = (product: string) =>
-  page(
-    product,
-    'You’re all set',
-    `The ${product} CLI is authorized. You can close this tab and return to your terminal.`,
-  );
+  page(product, `${product} CLI authorized`, 'Return to your terminal.');
 const deniedHtml = (product: string) =>
   page(
     product,

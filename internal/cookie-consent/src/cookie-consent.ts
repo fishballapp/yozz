@@ -146,7 +146,7 @@ const attachDelegatedListener = () => {
   });
 };
 
-const DEFAULT_MESSAGE = 'We use cookies for analytics, to see how people use this site.';
+const DEFAULT_MESSAGE = 'Allow cookies to see how people use this site?';
 const DEFAULT_POLICY_LABEL = 'Privacy Policy';
 const DEFAULT_REJECT_LABEL = 'Reject';
 const DEFAULT_ACCEPT_LABEL = 'Accept';
