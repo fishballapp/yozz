@@ -227,6 +227,14 @@ describe('AddAddress', () => {
     );
   });
 
+  it('says, where the password is handed over, that it is encrypted before YOZZ stores it', async () => {
+    const page = await mount();
+    await toPassword(page);
+    expect(page.querySelector('#connect-password-hint')?.textContent).toContain(
+      'Encrypted on this device before YOZZ stores it. Only you hold the key.',
+    );
+  });
+
   it('says nothing of Google for another provider', async () => {
     const page = await mount();
     await toPassword(page);

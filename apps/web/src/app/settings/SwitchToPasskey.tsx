@@ -63,7 +63,7 @@ export const SwitchToPasskey = () => {
                   // Switched on the server; the next sign-in asks for the passkey.
                   if (switched.outcome !== 'switched') return;
                   setSession(switched.session);
-                  void navigate({ to: '/settings/account', search: { notice: 'switched' } });
+                  void navigate({ to: '/settings/account' });
                 })
               }
             >

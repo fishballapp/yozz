@@ -25,11 +25,13 @@ const DELETE_WORD = 'DELETE';
 const DELETE_FRESH_SIGN_IN =
   'You logged in more than a day ago. Deleting your account needs a fresh login, so a session someone else got hold of cannot do it. It is deleted right after.';
 
-/** The notice a change leaves behind, read from the URL the change returns to. */
-export type SignInNotice = 'switched' | 'changed';
+/**
+ * The notice a change leaves behind, read from the URL the change returns to. Only an invisible
+ * result gets one: a changed password shows nowhere, a switched method shows in the sentence above.
+ */
+export type SignInNotice = 'changed';
 
 const NOTICE_TEXT: Record<SignInNotice, string> = {
-  switched: 'Switched.',
   changed: 'Password changed.',
 };
 

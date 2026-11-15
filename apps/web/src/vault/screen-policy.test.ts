@@ -49,14 +49,12 @@ describe('vaultErrorMessage', () => {
 
   it('maps each branch to the screen copy', () => {
     expect(vaultErrorMessage(new VaultApiError('NETWORK_ERROR', 'x'))).toBe(
-      'The YOZZ API did not answer. Check that it is running and reachable.',
+      "Couldn't reach YOZZ. Check your connection and try again.",
     );
     expect(vaultErrorMessage(new VaultApiError('UNAUTHORIZED', 'x'))).toBe(
       'Your login has expired. Request a new link.',
     );
-    expect(vaultErrorMessage(new VaultApiError('FORBIDDEN', 'x'))).toBe(
-      'The server refused that request.',
-    );
+    expect(vaultErrorMessage(new VaultApiError('FORBIDDEN', 'x'))).toBe("That isn't allowed.");
     expect(vaultErrorMessage(new VaultApiError('NOT_FOUND', 'x'))).toBe(
       'This passkey is not set up for your account. Log in on a device that already works, then add this one from Settings.',
     );
@@ -64,26 +62,26 @@ describe('vaultErrorMessage', () => {
       'Another tab or device set up your account first. Log in there instead of setting it up again.',
     );
     expect(vaultErrorMessage(new VaultApiError('BAD_REQUEST', 'x'))).toBe(
-      'The server rejected that request as malformed.',
+      'Something went wrong. Try again.',
     );
     expect(vaultErrorMessage(new VaultApiError('PAYLOAD_TOO_LARGE', 'x'))).toBe(
-      'That was too large to store.',
+      'That is too large to save. Remove some of it and try again.',
     );
     expect(vaultErrorMessage(new VaultApiError('INTERNAL_ERROR', 'x'))).toBe(
-      'The server failed on that request. Try again.',
+      'Something went wrong on our side. Try again.',
     );
     expect(vaultErrorMessage(new VaultApiError('INVALID_MODE', 'x'))).toBe(
-      'This account is not in that login method.',
+      "This account doesn't log in that way. Reload the page and try again.",
     );
 
     expect(vaultErrorMessage(new VaultError('unreadable', 'x'))).toBe(
-      'That did not unlock your saved addresses. With a password, that usually means the password was wrong, and nothing more can be said about it.',
+      'That did not unlock your saved addresses. Try again, and check your password if you used one.',
     );
     expect(vaultErrorMessage(new VaultError('malformed', 'x'))).toBe(
-      'A stored value was not the shape it should be.',
+      'Something went wrong reading your saved addresses. Reload and try again.',
     );
     expect(vaultErrorMessage(new VaultError('stale', 'x'))).toBe(
-      'The server answered with an older version of a record than this device has already seen. Nothing was read.',
+      'YOZZ returned an older copy of your saved addresses than this device has seen, so nothing was read. Reload and try again.',
     );
 
     const prfMessage = 'PRF refused on this authenticator.';
@@ -107,6 +105,6 @@ describe('vaultErrorMessage', () => {
     // Better Auth's passkey sign-in swaps the browser's error for its own AUTH_CANCELLED copy.
     expect(vaultErrorMessage(new PasskeyPrfError('Auth cancelled'))).toBe(cancelled);
     expect(vaultErrorMessage(new Error('plain failure'))).toBe('plain failure');
-    expect(vaultErrorMessage('thrown string')).toBe('Something failed and gave no reason.');
+    expect(vaultErrorMessage('thrown string')).toBe('Something went wrong. Try again.');
   });
 });

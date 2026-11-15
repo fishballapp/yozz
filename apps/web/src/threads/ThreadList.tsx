@@ -45,9 +45,9 @@ type EmptyCopy = { readonly title: string; readonly body?: string };
 
 /** What a view with no mail in it says: "nothing here" means something else in each. */
 const EMPTY_VIEW = {
-  unified: { title: 'Inbox zero', body: 'Nothing new.' },
+  unified: { title: 'Inbox zero' },
   starred: { title: 'Nothing starred' },
-  drafts: { title: 'No drafts', body: "Close a message without sending and it's saved here." },
+  drafts: { title: 'No drafts' },
   sent: { title: 'Nothing sent yet' },
   archive: { title: 'Nothing archived' },
   trash: { title: 'Trash is empty' },

@@ -111,12 +111,7 @@ const SettingsNav = () => {
       <h2 className="label-rule px-5 pt-8 pb-2">Reading</h2>
       <ul className="border-t border-rule-soft">
         <NavRow to="/settings/images" isActive={pathname === '/settings/images'}>
-          <span className="min-w-0">
-            <span className="block truncate text-base">Remote images</span>
-            <span className="mt-0.5 block truncate text-2xs text-paper-faint">
-              Senders whose pictures always load
-            </span>
-          </span>
+          <span className="block min-w-0 truncate text-base">Remote images</span>
           <span />
         </NavRow>
       </ul>
@@ -124,12 +119,7 @@ const SettingsNav = () => {
       <h2 className="label-rule px-5 pt-8 pb-2">Account</h2>
       <ul className="border-t border-rule-soft pb-8">
         <NavRow to="/settings/account" isActive={pathname.startsWith('/settings/account')}>
-          <span className="min-w-0">
-            <span className="block truncate text-base">Account</span>
-            <span className="mt-0.5 block truncate text-2xs text-paper-faint">
-              Password, passkeys, CLI keys, log out, delete
-            </span>
-          </span>
+          <span className="block min-w-0 truncate text-base">Account</span>
           <span />
         </NavRow>
       </ul>

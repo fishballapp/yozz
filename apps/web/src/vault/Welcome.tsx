@@ -25,32 +25,16 @@ const sendSignupLink = async (email: string): Promise<string | null> => {
 };
 
 /**
- * Why it is safe to hand this product a mail password, within what ARCHITECTURE.md ("What YOZZ may
- * claim") permits, with the boundary it requires beside any such claim. The password does leave the
- * device (to the mail server, inside the browser's own TLS), so the lines say where it is encrypted
- * and who holds the key, not that it stays put.
+ * What this screen says about the mail itself, within what ARCHITECTURE.md ("What YOZZ may claim")
+ * permits, with the boundary PRODUCT.md requires beside it. What happens to the mail password is
+ * said at the password field in Settings, where it is handed over.
  */
-const TRUST_LINES = [
-  'Your mail stays wherever it already lives.',
-  'Your mail passwords are encrypted on your device before YOZZ stores them.',
-  "Only you hold the key, so we can't read them.",
-] as const;
-
 const trust = (
   <div className="mb-8">
-    <ul className="space-y-1.5">
-      {TRUST_LINES.map(line => (
-        <li key={line} className={cn('flex items-baseline gap-2.5', authProseClass)}>
-          <CheckIcon
-            size={12}
-            weight="bold"
-            aria-hidden
-            className="shrink-0 self-center text-signal"
-          />
-          {line}
-        </li>
-      ))}
-    </ul>
+    <p className={cn('flex items-baseline gap-2.5', authProseClass)}>
+      <CheckIcon size={12} weight="bold" aria-hidden className="shrink-0 self-center text-signal" />
+      Your mail stays wherever it already lives.
+    </p>
     <p className="mt-3 text-2xs text-paper-faint">
       YOZZ doesn't add end-to-end encryption. Your provider keeps the access it already has.
     </p>
@@ -100,7 +84,7 @@ export const Welcome = () => {
   return (
     <AuthColumn
       title="Create your YOZZ account"
-      description="Read and send from every address you own, in one inbox. We'll email you a link to confirm it's you."
+      description="We'll email you a link to confirm it's you."
       progress={<SetupSteps current={1} />}
       footer={footer}
     >

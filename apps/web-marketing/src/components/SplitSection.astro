@@ -1,8 +1,8 @@
 ---
-// The page's light-sheet section: a numbered label, a headline and its copy on the left, the
+// The page's light-sheet section: a label where the headline does not carry it, a headline and its copy on the left, the
 // drawing or list it argues from on the right (slot "aside"), and optionally a full-width row
 // under both (slot "below"). One column below 900px.
-type Props = { id: string; label: string; title: string };
+type Props = { id: string; label?: string; title: string };
 
 const { id, label, title } = Astro.props;
 ---
@@ -10,7 +10,7 @@ const { id, label, title } = Astro.props;
 <section class="wrap section" id={id}>
   <div class="split">
     <div class="copy">
-      <p class="label">{label}</p>
+      {label !== undefined && <p class="label">{label}</p>}
       <h2 class="section-title">{title}</h2>
       <slot />
     </div>

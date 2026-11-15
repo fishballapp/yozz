@@ -557,22 +557,25 @@ export const AddAddress = ({ isFirst = false }: { isFirst?: boolean }) => {
                     label="Password"
                     htmlFor="connect-password"
                     hint={
-                      isGoogleMail(lookedUpFor ?? '', servers) ? (
-                        <>
-                          Gmail needs an app password, not your Google password.{' '}
-                          <a
-                            href={GOOGLE_APP_PASSWORDS}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="text-paper-dim underline underline-offset-2 hover:text-paper"
-                          >
-                            Make one at Google
-                          </a>
-                          .
-                        </>
-                      ) : (
-                        'An app password if your provider issues them. iCloud requires one.'
-                      )
+                      <>
+                        {isGoogleMail(lookedUpFor ?? '', servers) ? (
+                          <>
+                            Gmail needs an app password, not your Google password.{' '}
+                            <a
+                              href={GOOGLE_APP_PASSWORDS}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="text-paper-dim underline underline-offset-2 hover:text-paper"
+                            >
+                              Make one at Google
+                            </a>
+                            .
+                          </>
+                        ) : (
+                          'An app password if your provider issues them. iCloud requires one.'
+                        )}{' '}
+                        Encrypted on this device before YOZZ stores it. Only you hold the key.
+                      </>
                     }
                   >
                     <PasswordInput

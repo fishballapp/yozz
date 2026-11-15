@@ -128,7 +128,7 @@ describe('SwitchToPassword', () => {
     expect(switchModeToPassword).not.toHaveBeenCalled();
   });
 
-  it('goes back to Account with the notice once it is switched', async () => {
+  it('goes back to Account, with no notice, once it is switched', async () => {
     vi.mocked(switchModeToPassword).mockResolvedValueOnce({
       outcome: 'switched',
       session: sessionOf('password'),
@@ -139,9 +139,6 @@ describe('SwitchToPassword', () => {
     await submitFormAround('switch-password');
 
     expect(mocks.setSession).toHaveBeenCalledWith(expect.objectContaining({ mode: 'password' }));
-    expect(mocks.navigate).toHaveBeenCalledWith({
-      to: '/settings/account',
-      search: { notice: 'switched' },
-    });
+    expect(mocks.navigate).toHaveBeenCalledWith({ to: '/settings/account' });
   });
 });

@@ -163,7 +163,7 @@ const unmounts: (() => Promise<void>)[] = [];
 
 let rerender = async () => {};
 
-const mount = async (notice?: 'switched' | 'changed') => {
+const mount = async (notice?: 'changed') => {
   const host = document.createElement('div');
   document.body.append(host);
   const root = createRoot(host);
@@ -240,16 +240,14 @@ describe('Account', () => {
     );
   });
 
-  it('says in a word what the change that brought it here did, politely', async () => {
-    await mount('switched');
-    const notice = document.querySelector('[role="status"]');
-    expect(notice?.textContent).toBe('Switched.');
-    expect(notice?.getAttribute('aria-live')).toBe('polite');
-    // Said once: the sentence above it already says how you sign in now.
-    expect(document.body.textContent).not.toContain('You now log in with');
+  it('says in a word that a password changed, politely, and says nothing of a switch', async () => {
+    await mount();
+    expect(document.querySelector('[role="status"]')).toBeNull();
 
     await mount('changed');
-    expect(document.body.textContent).toContain('Password changed.');
+    const notice = document.querySelector('[role="status"]');
+    expect(notice?.textContent).toBe('Password changed.');
+    expect(notice?.getAttribute('aria-live')).toBe('polite');
   });
 
   it('is titled by what it holds, and has no reset', async () => {

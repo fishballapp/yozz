@@ -42,7 +42,7 @@ export const SwitchToPassword = () => {
       // Switched on the server, so the next sign-in takes the password.
       if (switched.outcome === 'ended') return;
       setSession(switched.session);
-      void navigate({ to: '/settings/account', search: { notice: 'switched' } });
+      void navigate({ to: '/settings/account' });
     });
   };
 

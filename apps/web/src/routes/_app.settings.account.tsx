@@ -6,7 +6,7 @@ import { Account } from '../app/settings/Account';
 export const Route = createFileRoute('/_app/settings/account')({
   staticData: { title: 'Account' },
   validateSearch: z.object({
-    notice: z.enum(['switched', 'changed']).optional().catch(undefined),
+    notice: z.enum(['changed']).optional().catch(undefined),
   }),
   component: AccountRoute,
 });

@@ -21,34 +21,34 @@ export const PASSKEY_OFFER: Record<
 };
 
 const API_ERROR_MESSAGES: Record<ApiErrorCode | 'NETWORK_ERROR', string> = {
-  NETWORK_ERROR: 'The YOZZ API did not answer. Check that it is running and reachable.',
+  NETWORK_ERROR: "Couldn't reach YOZZ. Check your connection and try again.",
   UNAUTHORIZED: 'Your login has expired. Request a new link.',
-  FORBIDDEN: 'The server refused that request.',
+  FORBIDDEN: "That isn't allowed.",
   NOT_FOUND:
     'This passkey is not set up for your account. Log in on a device that already works, then add this one from Settings.',
   CONFLICT:
     'Another tab or device set up your account first. Log in there instead of setting it up again.',
-  BAD_REQUEST: 'The server rejected that request as malformed.',
-  PAYLOAD_TOO_LARGE: 'That was too large to store.',
-  FILE_TOO_LARGE: 'That file is too large to attach.',
-  STORAGE_FULL: 'Your file storage is full.',
-  INTERNAL_ERROR: 'The server failed on that request. Try again.',
-  INVALID_MODE: 'This account is not in that login method.',
+  BAD_REQUEST: 'Something went wrong. Try again.',
+  PAYLOAD_TOO_LARGE: 'That is too large to save. Remove some of it and try again.',
+  FILE_TOO_LARGE: 'That file is too large to attach. Choose a smaller one.',
+  STORAGE_FULL: 'Your file storage is full. Remove an attachment and try again.',
+  INTERNAL_ERROR: 'Something went wrong on our side. Try again.',
+  INVALID_MODE: "This account doesn't log in that way. Reload the page and try again.",
   SESSION_NOT_FRESH: 'Log in again to change how you log in.',
   WRONG_PASSWORD: 'That is not your current password.',
   ACCOUNT_MISMATCH:
     'This browser logged in to another account since this page opened, so nothing was changed. Log in again to go on.',
-  UPGRADE_REQUIRED: 'A WebSocket connection is required.',
-  RATE_LIMITED: 'Too many requests. Please wait a moment and try again.',
-  UPSTREAM_UNREACHABLE: 'Could not reach the upstream mail server. Check the host and port.',
+  UPGRADE_REQUIRED: 'Something went wrong. Try again.',
+  RATE_LIMITED: 'Too many requests. Try again in a moment.',
+  UPSTREAM_UNREACHABLE: "Couldn't reach your mail server. Check the host and port.",
 };
 
 const VAULT_ERROR_MESSAGES: Record<VaultFailureCode, string> = {
   unreadable:
-    'That did not unlock your saved addresses. With a password, that usually means the password was wrong, and nothing more can be said about it.',
-  malformed: 'A stored value was not the shape it should be.',
+    'That did not unlock your saved addresses. Try again, and check your password if you used one.',
+  malformed: 'Something went wrong reading your saved addresses. Reload and try again.',
   stale:
-    'The server answered with an older version of a record than this device has already seen. Nothing was read.',
+    'YOZZ returned an older copy of your saved addresses than this device has seen, so nothing was read. Reload and try again.',
 };
 
 const PASSKEY_CANCELLED = 'The passkey prompt was cancelled or timed out. Try again.';
@@ -83,5 +83,5 @@ export const vaultErrorMessage = (error: unknown): string => {
   if (error instanceof Error) {
     return error.message;
   }
-  return 'Something failed and gave no reason.';
+  return 'Something went wrong. Try again.';
 };

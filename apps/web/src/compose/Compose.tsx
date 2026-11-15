@@ -673,7 +673,6 @@ export const Compose = () => {
                       ref={bodyInput}
                       value={draft.body}
                       onChange={event => updateDraft({ body: event.target.value })}
-                      placeholder="Write your message."
                       aria-label="Message body, markdown"
                       className={cn(
                         'min-h-0 w-full flex-1 resize-none bg-ink-raised px-4 py-4 font-mono text-[16px]/[1.6] text-paper outline-none placeholder:text-paper-faint lg:text-[14px]/[1.6]',

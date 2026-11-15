@@ -58,7 +58,6 @@ const AddressPane = ({
         {!isInbound(record) && <SendOnlyTag />}
       </span>
     }
-    subline={isInbound(record) ? 'Reads and sends' : 'Sends only'}
   >
     <DisplayNameSection record={record} />
     <ServersSection record={record} />

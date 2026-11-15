@@ -153,13 +153,14 @@ afterEach(async () => {
 });
 
 describe('Address header', () => {
-  it('says what the address does', async () => {
+  it('tags a send-only address and says nothing more of what it does', async () => {
     const send = await mount();
-    expect(send.querySelector('header p')?.textContent).toBe('Sends only');
+    expect(send.querySelector('header p')).toBeNull();
     expect(send.querySelector('header')?.textContent).toContain('send-only');
 
     await act(async () => setIdentities([INBOUND]));
-    expect(send.querySelector('header p')?.textContent).toBe('Reads and sends');
+    expect(send.querySelector('header p')).toBeNull();
+    expect(send.querySelector('header')?.textContent).not.toContain('send-only');
   });
 });
 

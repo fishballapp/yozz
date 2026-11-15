@@ -433,6 +433,7 @@ describe('the composer’s footer', () => {
   it('asks nothing of the Subject field until it is empty and focused', async () => {
     await showing(DRAFT);
     expect(document.getElementById('compose-subject')?.getAttribute('placeholder')).toBeNull();
+    expect(document.querySelector('textarea')?.getAttribute('placeholder')).toBeNull();
   });
 
   it('keeps Discard quiet: a ghost that only turns red on hover', async () => {

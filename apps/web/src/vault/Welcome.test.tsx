@@ -69,7 +69,8 @@ describe('Welcome', () => {
     expect(page.querySelector('ol [aria-current="step"]')?.textContent).toBe('1Email');
     // Why it is safe, within what ARCHITECTURE.md permits, with its boundary beside it.
     expect(page.textContent).toContain('Your mail stays wherever it already lives.');
-    expect(page.textContent).toContain('encrypted on your device before YOZZ stores them');
+    // What happens to a mail password is said at the password field, not here.
+    expect(page.textContent).not.toContain('encrypted on your device');
     // The password does reach the mail server, so no line may say it never leaves the device.
     expect(page.textContent).not.toContain('never leave');
     expect(page.textContent).toContain("YOZZ doesn't add end-to-end encryption.");

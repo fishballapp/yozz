@@ -660,8 +660,8 @@ describe('ThreadList', () => {
 
   describe('an empty view', () => {
     it.each([
-      ['unified', 'in:inbox', 'Inbox zeroNothing new.'],
-      ['drafts', 'in:drafts', "No draftsClose a message without sending and it's saved here."],
+      ['unified', 'in:inbox', 'Inbox zero'],
+      ['drafts', 'in:drafts', 'No drafts'],
       ['starred', 'is:starred', 'Nothing starred'],
       ['sent', 'in:sent', 'Nothing sent yet'],
       ['archive', 'in:archive', 'Nothing archived'],
@@ -675,6 +675,10 @@ describe('ThreadList', () => {
     ] as const)('%s says its own', async (view, query, copy) => {
       await show([], query, view);
       expect(host.textContent).toContain(copy);
+      // The two views that once explained themselves under the title now stand on the title alone.
+      if (view === 'unified' || view === 'drafts') {
+        expect(host.querySelector('p.max-w-xs')).toBeNull();
+      }
     });
 
     it('says a search narrowed to a folder found nothing there, with no word of all mail', async () => {
