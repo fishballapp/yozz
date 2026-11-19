@@ -27,7 +27,17 @@ describe('capture', () => {
   it('sends the event before the visitor has chosen', () => {
     capture('cta_clicked', { cta: 'hero' });
 
-    expect(posthog.capture).toHaveBeenCalledWith('cta_clicked', { cta: 'hero' });
+    expect(posthog.capture).toHaveBeenCalledWith('cta_clicked', { cta: 'hero' }, undefined);
+  });
+
+  it('passes PostHog its options, to send an event at once', () => {
+    capture('cta_clicked', { cta: 'hero' }, { send_instantly: true });
+
+    expect(posthog.capture).toHaveBeenCalledWith(
+      'cta_clicked',
+      { cta: 'hero' },
+      { send_instantly: true },
+    );
   });
 });
 
