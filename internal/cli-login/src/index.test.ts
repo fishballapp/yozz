@@ -7,6 +7,7 @@ import * as Fiber from 'effect/Fiber';
 import * as FetchHttpClient from 'effect/http/FetchHttpClient';
 import * as HttpClient from 'effect/http/HttpClient';
 import * as Layer from 'effect/Layer';
+import * as Option from 'effect/Option';
 import * as PlatformError from 'effect/PlatformError';
 import * as ChildProcess from 'effect/process/ChildProcess';
 import * as ChildProcessSpawner from 'effect/process/ChildProcessSpawner';
@@ -120,6 +121,27 @@ layer(NodeServices.layer)(it => {
         }).pipe(Effect.provide(FetchHttpClient.layer)),
     );
 
+    it.effect('says where to approve through `announce`, and prints nothing itself', () =>
+      Effect.gen(function* () {
+        const opened = yield* Deferred.make<string>();
+        const announced = yield* Deferred.make<string>();
+        const login = yield* approveInBrowser({
+          product: 'example.com',
+          consentUrl: 'https://example.com/cli/approve',
+          announce: url => Deferred.succeed(announced, url).pipe(Effect.asVoid),
+          accept: ({ query }) => Effect.succeed(Option.fromNullishOr(query.sealed)),
+        }).pipe(Effect.provide(failingOpener(opened)), Effect.forkChild);
+        const url = new URL(yield* Deferred.await(opened));
+        // What was announced is the page the browser is opened on.
+        assert.strictEqual(yield* Deferred.await(announced), url.toString());
+        const state = url.searchParams.get('state') ?? '';
+        yield* HttpClient.get(
+          `http://127.0.0.1:${url.searchParams.get('port')}/?state=${state}&sealed=ok`,
+        );
+        assert.strictEqual(yield* Fiber.join(login), 'ok');
+      }).pipe(Effect.provide(FetchHttpClient.layer)),
+    );
+
     it.effect('refuses a request that is no URL, and keeps listening', () =>
       Effect.gen(function* () {
         const { login, callback, state, url } = yield* startLogin;
@@ -143,6 +165,97 @@ layer(NodeServices.layer)(it => {
         assert.strictEqual(Redacted.value(yield* Fiber.join(login)), 'key_browser');
         yield* Effect.promise(() => closed);
       }).pipe(Effect.provide(FetchHttpClient.layer)),
+    );
+
+    /** A machine whose opener records the command and arguments it is asked to run. */
+    const recordingOpener = (spawned: { command: string; args: readonly string[] }[]) =>
+      Layer.succeed(
+        ChildProcessSpawner.ChildProcessSpawner,
+        ChildProcessSpawner.make(command => {
+          if (ChildProcess.isStandardCommand(command)) {
+            spawned.push({ command: command.command, args: command.args });
+          }
+          return Effect.fail(
+            PlatformError.systemError({
+              _tag: 'NotFound',
+              module: 'ChildProcess',
+              method: 'spawn',
+            }),
+          );
+        }),
+      );
+
+    it.effect('opens and announces nothing but an http(s) page, whoever names it', () =>
+      Effect.gen(function* () {
+        for (const consentUrl of [
+          'file:///etc/passwd',
+          'javascript:alert(1)',
+          'ms-settings:',
+          '/cli-auth',
+          '--help',
+        ]) {
+          const spawned: { command: string; args: readonly string[] }[] = [];
+          const announced: string[] = [];
+          const error = yield* approveInBrowser({
+            product: 'example.com',
+            consentUrl,
+            announce: url => Effect.sync(() => void announced.push(url)),
+            accept: () => Effect.succeedNone,
+          }).pipe(Effect.provide(recordingOpener(spawned)), Effect.flip);
+          assert.strictEqual(error._tag, 'CliLoginError');
+          assert.deepStrictEqual({ spawned, announced }, { spawned: [], announced: [] });
+        }
+      }),
+    );
+
+    it.effect('opens the page on Windows with no shell to read its `&`s', () =>
+      Effect.gen(function* () {
+        const opened = yield* Deferred.make<{ command: string; args: readonly string[] }>();
+        const platform = Object.getOwnPropertyDescriptor(process, 'platform');
+        Object.defineProperty(process, 'platform', { value: 'win32' });
+        const login = yield* approveInBrowser({
+          product: 'example.com',
+          consentUrl: 'https://example.com/cli/approve?from=cli',
+          params: { name: 'a&calc' },
+          accept: () => Effect.succeedNone,
+        }).pipe(
+          Effect.provide(
+            Layer.succeed(
+              ChildProcessSpawner.ChildProcessSpawner,
+              ChildProcessSpawner.make(command =>
+                Deferred.succeed(opened, {
+                  command: ChildProcess.isStandardCommand(command) ? command.command : '',
+                  args: ChildProcess.isStandardCommand(command) ? command.args : [],
+                }).pipe(
+                  Effect.andThen(
+                    Effect.fail(
+                      PlatformError.systemError({
+                        _tag: 'NotFound',
+                        module: 'ChildProcess',
+                        method: 'spawn',
+                      }),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+          Effect.forkChild,
+        );
+        const { command, args } = yield* Deferred.await(opened).pipe(
+          Effect.ensuring(
+            Effect.sync(() => {
+              if (platform !== undefined) Object.defineProperty(process, 'platform', platform);
+            }),
+          ),
+        );
+        yield* Fiber.interrupt(login);
+        assert.strictEqual(command, 'rundll32');
+        assert.strictEqual(args[0], 'url.dll,FileProtocolHandler');
+        const url = new URL(args[1] ?? '');
+        assert.strictEqual(url.searchParams.get('from'), 'cli');
+        assert.strictEqual(url.searchParams.get('name'), 'a&calc');
+      }),
     );
 
     // On its own clock: `layer(…)` shares one test clock across the block's tests.

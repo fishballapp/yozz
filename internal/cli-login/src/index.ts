@@ -58,14 +58,25 @@ const failedHtml = (product: string) =>
     `The ${product} CLI couldn’t use this approval. Your terminal says why.`,
   );
 
-/** Best-effort open in the default browser; a failure is silent because the URL is printed too. */
+/** The schemes a consent page may have: the system opener would run anything else it is handed
+ * (`file:`, an app's own scheme, a script). */
+const WEB_SCHEMES = new Set(['http:', 'https:']);
+
+/**
+ * Best-effort open in the default browser; a failure is silent because the URL is printed too. Only
+ * a web URL, checked by the caller, reaches here, and no shell parses it: Windows' `cmd /c start`
+ * would read `&` in a query as the start of another command, so `rundll32` hands it over instead.
+ */
 const openBrowser = Effect.fnUntraced(
-  function* (url: string) {
+  function* (url: URL) {
+    if (!WEB_SCHEMES.has(url.protocol)) return;
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
     const [command, args] = ((): readonly [string, ReadonlyArray<string>] => {
-      if (process.platform === 'darwin') return ['open', [url]];
-      if (process.platform === 'win32') return ['cmd', ['/c', 'start', '', url]];
-      return ['xdg-open', [url]];
+      if (process.platform === 'darwin') return ['open', [url.href]];
+      if (process.platform === 'win32') {
+        return ['rundll32', ['url.dll,FileProtocolHandler', url.href]];
+      }
+      return ['xdg-open', [url.href]];
     })();
     const opener = yield* spawner.spawn(
       ChildProcess.make(command, args, { stdin: 'ignore', stdout: 'ignore', stderr: 'ignore' }),
@@ -161,20 +172,42 @@ export const approveInBrowser = Effect.fn('login.approveInBrowser')(function* <A
   product,
   consentUrl,
   params = {},
+  announce,
   accept,
 }: {
   /** The name the landing page shows: `example.com`. */
   readonly product: string;
+  /** An `http:` or `https:` URL; anything else fails the login before anything is opened. */
   readonly consentUrl: string;
   readonly params?: Readonly<Record<string, string>>;
+  /**
+   * Says where to approve, in place of the two lines this prints to stderr: a CLI whose caller is a
+   * program (an agent) prints it as data. It runs before the browser is opened.
+   */
+  readonly announce?: (authUrl: string) => Effect.Effect<void>;
   readonly accept: (callback: Callback) => Effect.Effect<Option.Option<A>, E>;
 }) {
+  // The consent page may come from a server's answer: nothing but a web page is printed or opened.
+  const consent = URL.parse(consentUrl);
+  if (consent === null || !WEB_SCHEMES.has(consent.protocol)) {
+    return yield* new CliLoginError({
+      reason: 'Unavailable',
+      message: 'The page to approve this login at is not an http(s) URL, so nothing was opened.',
+    });
+  }
   const crypto = yield* Crypto.Crypto;
   const state = Base64Url.encode(yield* crypto.randomBytes(32).pipe(Effect.orDie));
   const { port, requests } = yield* listen(state);
-  const authUrl = `${consentUrl}?${new URLSearchParams({ port: String(port), state, ...params })}`;
-  yield* Console.error(`Opening your browser to authorize:\n  ${authUrl}`);
-  yield* Console.error('Waiting for you to approve… (Ctrl-C to cancel)');
+  const authUrl = new URL(consent);
+  for (const [key, value] of Object.entries({ port: String(port), state, ...params })) {
+    authUrl.searchParams.set(key, value);
+  }
+  if (announce === undefined) {
+    yield* Console.error(`Opening your browser to authorize:\n  ${authUrl.href}`);
+    yield* Console.error('Waiting for you to approve… (Ctrl-C to cancel)');
+  } else {
+    yield* announce(authUrl.href);
+  }
   yield* openBrowser(authUrl);
 
   const answer = Effect.fnUntraced(function* ({ query, response }: Request) {
