@@ -207,8 +207,8 @@ catalogs:
       specifier: ^4.3.3
       version: 4.3.3
     '@tanstack/markdown':
-      specifier: ^0.0.15
-      version: 0.0.15
+      specifier: ^1.2.0
+      version: 1.2.0
     '@tanstack/react-router':
       specifier: ^1.170.36
       version: 1.170.36
@@ -421,7 +421,7 @@ importers:
         version: 2.1.10(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
       '@tanstack/markdown':
         specifier: 'catalog:'
-        version: 0.0.15(react@19.3.0)
+        version: 1.2.0(react@19.3.0)
       '@tanstack/react-router':
         specifier: 'catalog:'
         version: 1.170.36(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
@@ -678,7 +678,7 @@ importers:
     dependencies:
       '@tanstack/markdown':
         specifier: 'catalog:'
-        version: 0.0.15(react@19.3.0)
+        version: 1.2.0(react@19.3.0)
       '@yozz.app/imap':
         specifier: workspace:*
         version: link:../../packages/imap
@@ -3127,8 +3127,8 @@ packages:
     resolution: {integrity: sha512-utTS5L2OkeYUzXGohL1Z8sefu1GLNOJcxe8Hd6iIdc/Xo1K1nDB2JEp4iSFhvYh33xKC9V91TxrS8qfrpoKobQ==}
     engines: {node: '>=20.19'}
 
-  '@tanstack/markdown@0.0.15':
-    resolution: {integrity: sha512-8hZFgCxGzYcBogffndvOm/prhdDt8nATQ4jzd9b0ziU0j4ofW/5guC1sknO2JyBNSXPgeLrrdXlJA8sbb1zw8w==}
+  '@tanstack/markdown@1.2.0':
+    resolution: {integrity: sha512-8ZaMDLvp7iUuo7R5Ot+yvX/h1ZN8Cq2p38iL+X9uOkIKVFw3IjgP62dXT6+dp/Nk522qsuSDCJNdt2F4fZvVXQ==}
     peerDependencies:
       octane: '>=0.1.12'
       react: '>=18'
@@ -9766,7 +9766,7 @@ snapshots:
 
   '@tanstack/history@1.162.4': {}
 
-  '@tanstack/markdown@0.0.15(react@19.3.0)':
+  '@tanstack/markdown@1.2.0(react@19.3.0)':
     optionalDependencies:
       react: 19.3.0
 

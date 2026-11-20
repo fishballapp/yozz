@@ -11,6 +11,7 @@ import { type AddressRecord, isInbound } from '../addresses/record.ts';
 import type { MailConnectionFailure, Result, RunTask } from '../connection.ts';
 import { addressList, MAX_ATTACHMENT_BYTES } from './draft.ts';
 import type { DraftRecord, FileReference, FrozenMessage } from './draft-record.ts';
+import { MAIL_MARKDOWN } from './markdown.ts';
 
 export type OutgoingMail = {
   readonly to: readonly string[];
@@ -65,7 +66,7 @@ export const buildOutgoing = (
     text: mail.text,
     // A whole document: a bare fragment is what filters see from templating tools
     // (docs/knowledge/email-deliverability.md).
-    html: `<!DOCTYPE html><html><head><meta charset="utf-8"></head><body>${renderHtml(mail.text)}</body></html>`,
+    html: `<!DOCTYPE html><html><head><meta charset="utf-8"></head><body>${renderHtml(mail.text, MAIL_MARKDOWN)}</body></html>`,
     inReplyTo: mail.inReplyTo,
     references: mail.references,
     attachments: mail.attachments.map(({ name, mimeType }) => ({

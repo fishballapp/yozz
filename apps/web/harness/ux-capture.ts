@@ -74,7 +74,7 @@ const DEMO_SCENES: readonly Scene[] = [
       await page
         .getByLabel('Message body, markdown')
         .fill(
-          'Hi Kate,\n\nStill on for **Thursday at 10**? Two things before then:\n\n- the revised quote\n- the [venue shortlist](https://example.com/venues)\n\nThanks,\nJason',
+          'Hi Kate,\n\nStill on for **Thursday at 10**? Two things before then:\n\n- the revised quote\n- the [venue shortlist](https://example.com/venues)\n\nParking is booked at https://example.com/parking/thursday\n\nThanks,\nJason',
         );
       await page.getByRole('tab', { name: 'Preview' }).click();
     },

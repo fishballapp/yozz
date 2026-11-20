@@ -61,7 +61,7 @@ catalog:
   "@phosphor-icons/react": ^2.1.10
   "@playwright/test": 1.64.1
   "@tailwindcss/vite": ^4.3.3
-  "@tanstack/markdown": ^0.0.15
+  "@tanstack/markdown": ^1.2.0
   "@tanstack/react-router": ^1.170.36
   "@tanstack/react-virtual": ^3.14.13
   "@tanstack/router-plugin": ^1.168.38

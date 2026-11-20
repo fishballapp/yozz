@@ -1,4 +1,5 @@
 import { Markdown, type MarkdownComponents } from '@tanstack/markdown/react';
+import { MAIL_MARKDOWN } from '@yozz.app/mail/compose/markdown';
 
 /** Renders a markdown draft the way the recipient will read it. Every element is mapped: an unmapped tag would render with browser defaults and lie about what gets sent. */
 const COMPONENTS: MarkdownComponents = {
@@ -52,6 +53,8 @@ const COMPONENTS: MarkdownComponents = {
 
 export const MarkdownView = ({ source }: { source: string }) => (
   <div className="max-w-[60ch] text-[16px]/[1.55] text-paper lg:text-[15px]/[1.6]">
-    <Markdown components={COMPONENTS}>{source}</Markdown>
+    <Markdown {...MAIL_MARKDOWN} components={COMPONENTS}>
+      {source}
+    </Markdown>
   </div>
 );
