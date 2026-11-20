@@ -44,6 +44,16 @@ const tickRows = async (page: Page, viewport: ViewportName) => {
   }
 };
 
+const fillDraft = async (page: Page) => {
+  await page.locator('#compose-to').fill('kate@harbourlight.example');
+  await page.locator('#compose-subject').fill('Thursday still good?');
+  await page
+    .getByLabel('Message body, markdown')
+    .fill(
+      'Hi Kate,\n\nStill on for **Thursday at 10**? Two things before then:\n\n- the revised quote (2 * 340 = 680)\n- the [venue shortlist](https://example.com/venues)\n\nParking is booked at https://example.com/parking/thursday\n\nThanks,\nJason',
+    );
+};
+
 const DEMO_SCENES: readonly Scene[] = [
   { name: 'inbox', path: '/m/unified' },
   { name: 'inbox-selection', path: '/m/unified', prepare: tickRows },
@@ -65,18 +75,13 @@ const DEMO_SCENES: readonly Scene[] = [
   { name: 'thread-missing', path: '/m/unified/t/t-does-not-exist' },
   { name: 'compose-new', path: '/m/unified?compose=new' },
   { name: 'compose-reply', path: '/m/unified/t/t-dune?compose=reply:m-dune-1' },
+  { name: 'compose-filled', path: '/m/unified?compose=new', prepare: fillDraft },
   {
     name: 'compose-filled-preview',
     path: '/m/unified?compose=new',
     prepare: async page => {
-      await page.locator('#compose-to').fill('kate@harbourlight.example');
-      await page.locator('#compose-subject').fill('Thursday still good?');
-      await page
-        .getByLabel('Message body, markdown')
-        .fill(
-          'Hi Kate,\n\nStill on for **Thursday at 10**? Two things before then:\n\n- the revised quote\n- the [venue shortlist](https://example.com/venues)\n\nParking is booked at https://example.com/parking/thursday\n\nThanks,\nJason',
-        );
-      await page.getByRole('tab', { name: 'Preview' }).click();
+      await fillDraft(page);
+      await page.getByRole('button', { name: 'Preview' }).click();
     },
   },
   {
@@ -149,6 +154,7 @@ const DEMO_SCENES: readonly Scene[] = [
     name: 'compose-cheat-sheet',
     path: '/m/unified?compose=new',
     prepare: async page => {
+      await page.getByRole('button', { name: 'Preview' }).click();
       await page.getByRole('button', { name: 'Markdown supported' }).click();
     },
   },

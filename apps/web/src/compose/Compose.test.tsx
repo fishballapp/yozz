@@ -445,15 +445,38 @@ describe('the composer’s footer', () => {
     expect(discard?.className).toContain('hover:text-danger');
   });
 
-  it('offers a Markdown cheat sheet instead of a bare label', async () => {
-    await showing(DRAFT);
-    const trigger = [...document.querySelectorAll('button')].find(
-      ({ textContent }) => textContent === 'Markdown supported',
+  const press = async (label: string) => {
+    const button = [...document.querySelectorAll('button')].find(
+      ({ textContent }) => textContent === label,
     );
+    if (button === undefined) throw new Error(`no ${label} button`);
     await act(async () => {
-      trigger?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
-      trigger?.click();
+      button.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+      button.click();
     });
+  };
+
+  it('has one write surface, set as the message is read', async () => {
+    await showing(DRAFT);
+    expect(document.querySelector('[role="tab"]')).toBeNull();
+    expect(document.querySelector('textarea')?.className).not.toContain('font-mono');
+  });
+
+  it('opens the message as it will be read, over the draft', async () => {
+    await showing({ ...DRAFT, body: 'Due **Friday**, 2 * 3 boxes.' });
+    await press('Preview');
+    const preview = document.querySelector('[role="dialog"] strong')?.closest('[role="dialog"]');
+    expect(preview?.querySelector('strong')?.textContent).toBe('Friday');
+    expect(preview?.textContent).toContain('2 * 3 boxes.');
+    expect(document.querySelector('textarea')?.value).toBe('Due **Friday**, 2 * 3 boxes.');
+    await press('Back to draft');
+    expect(document.querySelector('[role="dialog"] strong')).toBeNull();
+  });
+
+  it('offers a Markdown cheat sheet in the preview', async () => {
+    await showing(DRAFT);
+    await press('Preview');
+    await press('Markdown supported');
     const sheet = document.querySelector('[aria-label="Markdown cheat sheet"]')?.textContent;
     expect(sheet).toContain('**bold**');
     expect(sheet).toContain('[text](url)a link');

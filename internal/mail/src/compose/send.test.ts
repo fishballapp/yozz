@@ -326,6 +326,7 @@ describe('buildOutgoing', () => {
     expect(message).toContain('Content-Type: text/html');
     expect(message).toContain('<!DOCTYPE html><html>');
     expect(message).toContain('<strong>paid</strong>');
+    expect(message).toContain('font-family:Arial,Helvetica,sans-serif');
   });
 });
 

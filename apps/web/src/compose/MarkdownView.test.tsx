@@ -33,8 +33,9 @@ describe('MarkdownView', () => {
 
   it('previews the same elements, in the same order, that are sent', () => {
     const source = [
-      '# Invoice',
-      'Thanks,\nJason',
+      '# Invoice\nfor *March*',
+      '| item | cost |\n|---|---|\n| desk | 120 |',
+      'Thanks, **paid**.\nJason',
       '> 12 Mill Lane\n> Leeds',
       '- [ ] book\n- [x] pay',
       'Paid[^a] at https://example.com.',
@@ -50,6 +51,7 @@ describe('MarkdownView', () => {
       sentOf(source).body.textContent?.replace(/\s+/g, ''),
     );
     expect(tagsOf(preview)).toContain('BR');
-    expect(preview.querySelector('input, [id]')).toBeNull();
+    expect(tagsOf(preview)).toContain('STRONG');
+    expect(preview.querySelector('input, [id], h1, em, table')).toBeNull();
   });
 });

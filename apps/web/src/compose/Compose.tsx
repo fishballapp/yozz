@@ -1,14 +1,5 @@
 import { Dialog } from '@base-ui/react/dialog';
-import { Popover } from '@base-ui/react/popover';
-import { Tabs } from '@base-ui/react/tabs';
-import {
-  EyeIcon,
-  PaperclipIcon,
-  PaperPlaneRightIcon,
-  PencilSimpleIcon,
-  TrashIcon,
-  XIcon,
-} from '@phosphor-icons/react';
+import { PaperclipIcon, PaperPlaneRightIcon, TrashIcon, XIcon } from '@phosphor-icons/react';
 import { useLocation, useNavigate, useSearch } from '@tanstack/react-router';
 import { type DraftFile, MAX_ATTACHMENT_BYTES } from '@yozz.app/mail/compose/draft';
 import type { DeleteOutcome } from '@yozz.app/mail/compose/draft-vault';
@@ -28,6 +19,7 @@ import { reportProblem, toast } from '../ui/Toast';
 import { Tooltip } from '../ui/Tooltip';
 import { useVault } from '../vault/session';
 import type { SessionEnded } from '../vault/unlock';
+import { DraftPreview } from './DraftPreview';
 import { readAttachments, type SendReport } from './draft';
 import { FromSwitch } from './FromSwitch';
 import {
@@ -39,7 +31,6 @@ import {
   withCompose,
   withoutCompose,
 } from './intent';
-import { MarkdownView } from './MarkdownView';
 
 /**
  * `?compose=` says whether the composer is open and the store holds the text; the store follows the
@@ -51,50 +42,6 @@ const FieldLabel = ({ children, htmlFor }: { children: string; htmlFor?: string 
     {children}
   </label>
 );
-
-/** The four marks most mail needs, as a popover: the tab bar says Markdown works, this says how. */
-const MarkdownCheatSheet = () => (
-  <Popover.Root>
-    <Popover.Trigger className="ml-auto self-stretch text-2xs text-paper-faint underline underline-offset-4 outline-none transition-colors hover:text-paper focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-signal data-[popup-open]:text-paper">
-      Markdown supported
-    </Popover.Trigger>
-    <Popover.Portal>
-      <Popover.Positioner
-        side="bottom"
-        align="end"
-        sideOffset={4}
-        collisionPadding={12}
-        className="z-[60]"
-      >
-        <Popover.Popup
-          aria-label="Markdown cheat sheet"
-          className="border border-rule bg-ink-raised px-4 py-3 outline-none"
-        >
-          <dl className="grid grid-cols-[auto_auto] items-baseline gap-x-6 gap-y-1.5 text-base">
-            {MARKDOWN_MARKS.map(({ mark, result }) => (
-              <div key={mark} className="contents">
-                <dt className="font-mono text-paper">{mark}</dt>
-                <dd className="text-paper-dim">{result}</dd>
-              </div>
-            ))}
-          </dl>
-        </Popover.Popup>
-      </Popover.Positioner>
-    </Popover.Portal>
-  </Popover.Root>
-);
-
-const MARKDOWN_MARKS = [
-  { mark: '**bold**', result: 'bold' },
-  { mark: '- item', result: 'a bulleted list' },
-  { mark: '> quote', result: 'an indented quote' },
-  { mark: '[text](url)', result: 'a link' },
-] as const;
-
-const TABS = [
-  { value: 'write', label: 'Write', Icon: PencilSimpleIcon },
-  { value: 'preview', label: 'Preview', Icon: EyeIcon },
-] as const;
 
 /** A send outlives the composer, so its result is a toast. None of these time out. */
 const reportSend = (settled: Promise<SendReport>, reopen: (draftKey: string) => void) => {
@@ -489,10 +436,11 @@ export const Compose = () => {
               'transition-[opacity,translate] duration-150 data-ending-style:translate-y-1 data-ending-style:opacity-0 data-starting-style:translate-y-1 data-starting-style:opacity-0',
             )}
           >
-            <div className="flex h-11 shrink-0 items-center justify-between gap-3 border-b border-rule-soft pr-1 pl-4">
-              <Dialog.Title className="label-rule truncate text-paper-dim">
+            <div className="flex h-11 shrink-0 items-center gap-1 border-b border-rule-soft pr-1 pl-4">
+              <Dialog.Title className="label-rule mr-auto truncate text-paper-dim">
                 {frame.title}
               </Dialog.Title>
+              {draft !== null && <DraftPreview body={draft.body} />}
               {/* Close keeps the draft. Discard, in the footer, is the only thing that does not. */}
               <Dialog.Close
                 render={
@@ -652,50 +600,19 @@ export const Compose = () => {
                   </div>
                 </div>
 
-                <Tabs.Root defaultValue="write" className="flex min-h-0 flex-1 flex-col">
-                  <Tabs.List className="flex shrink-0 items-center gap-4 border-b border-rule-soft px-4">
-                    {TABS.map(({ value, label, Icon }) => (
-                      <Tabs.Tab
-                        key={value}
-                        value={value}
-                        className="label-rule -mb-px flex items-center gap-1.5 border-b-2 border-transparent py-2.5 outline-none transition-colors hover:text-paper focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-signal data-active:border-signal data-active:text-paper"
-                      >
-                        <Icon size={13} />
-                        {label}
-                      </Tabs.Tab>
-                    ))}
-                    <MarkdownCheatSheet />
-                  </Tabs.List>
-
-                  {/* A flex column, not `h-full`: below `sm` the dialog only has a min-height, which a percentage cannot resolve against. */}
-                  <Tabs.Panel value="write" className="flex min-h-0 flex-1 flex-col outline-none">
-                    <textarea
-                      ref={bodyInput}
-                      value={draft.body}
-                      onChange={event => updateDraft({ body: event.target.value })}
-                      aria-label="Message body, markdown"
-                      className={cn(
-                        'min-h-0 w-full flex-1 resize-none bg-ink-raised px-4 py-4 font-mono text-[16px]/[1.6] text-paper outline-none placeholder:text-paper-faint lg:text-[14px]/[1.6]',
-                        // A docked composer is as wide as the rail and the list together; a line of
-                        // mail still wants a measure, as the reader beside it has.
-                        isDocked && 'max-w-[80ch]',
-                      )}
-                    />
-                  </Tabs.Panel>
-
-                  <Tabs.Panel
-                    value="preview"
-                    className="min-h-0 flex-1 overflow-y-auto px-4 py-4 outline-none"
-                  >
-                    {draft.body.trim() === '' ? (
-                      <p className="text-base text-paper-faint">Nothing to preview yet.</p>
-                    ) : (
-                      <div className={cn(isDocked && 'max-w-[80ch]')}>
-                        <MarkdownView source={draft.body} />
-                      </div>
-                    )}
-                  </Tabs.Panel>
-                </Tabs.Root>
+                {/* Sans, at the reading size: plain text is the message, so it is written as it is read. */}
+                <textarea
+                  ref={bodyInput}
+                  value={draft.body}
+                  onChange={event => updateDraft({ body: event.target.value })}
+                  aria-label="Message body, markdown"
+                  className={cn(
+                    'min-h-0 w-full flex-1 resize-none bg-ink-raised px-4 py-4 text-[16px]/[1.55] text-paper outline-none lg:text-[15px]/[1.6]',
+                    // A docked composer is as wide as the rail and the list together; a line of
+                    // mail still wants a measure, as the reader beside it has.
+                    isDocked && 'max-w-[80ch]',
+                  )}
+                />
 
                 {draft.attachments.length > 0 && (
                   <div className="shrink-0 border-t border-rule-soft px-4 py-2.5">

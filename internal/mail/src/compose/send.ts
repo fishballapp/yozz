@@ -66,7 +66,8 @@ export const buildOutgoing = (
     text: mail.text,
     // A whole document: a bare fragment is what filters see from templating tools
     // (docs/knowledge/email-deliverability.md).
-    html: `<!DOCTYPE html><html><head><meta charset="utf-8"></head><body>${renderHtml(mail.text, MAIL_MARKDOWN)}</body></html>`,
+    // A named face too: with none, desktop Outlook sets the message in Times New Roman.
+    html: `<!DOCTYPE html><html><head><meta charset="utf-8"></head><body><div style="font-family:Arial,Helvetica,sans-serif">${renderHtml(mail.text, MAIL_MARKDOWN)}</div></body></html>`,
     inReplyTo: mail.inReplyTo,
     references: mail.references,
     attachments: mail.attachments.map(({ name, mimeType }) => ({
