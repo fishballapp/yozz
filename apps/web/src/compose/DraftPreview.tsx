@@ -1,7 +1,8 @@
-import { Dialog } from '@base-ui/react/dialog';
 import { Popover } from '@base-ui/react/popover';
-import { ArrowLeftIcon, EyeIcon } from '@phosphor-icons/react';
-import { Button } from '../ui/Button';
+import { type AddressRecord, isInbound } from '@yozz.app/mail/addresses/record';
+import type { ComposeDraft } from '@yozz.app/mail/compose/draft';
+import type { ReactNode, Ref } from 'react';
+import { SendOnlyTag } from '../ui/SendOnlyTag';
 import { MarkdownView } from './MarkdownView';
 
 const MARKDOWN_MARKS = [
@@ -11,8 +12,8 @@ const MARKDOWN_MARKS = [
   { mark: '[text](url)', result: 'a link' },
 ] as const;
 
-/** The four marks mail keeps, beside the message they were typed into. */
-const MarkdownCheatSheet = () => (
+/** The four marks mail keeps, beside the message they are typed into. */
+export const MarkdownCheatSheet = () => (
   <Popover.Root>
     <Popover.Trigger className="self-stretch px-2 text-2xs text-paper-faint underline underline-offset-4 outline-none transition-colors hover:text-paper focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-signal data-[popup-open]:text-paper">
       Markdown supported
@@ -43,47 +44,91 @@ const MarkdownCheatSheet = () => (
   </Popover.Root>
 );
 
-/**
- * The message as it will be read, opened over the draft and closed back to it. Most mail is plain
- * text, which the write surface already shows as it is sent, so this is a look and not a mode.
- */
-export const DraftPreview = ({ body }: { body: string }) => (
-  <Dialog.Root>
-    <Dialog.Trigger
-      render={
-        <Button variant="ghost" size="sm" className="h-11 lg:h-7">
-          <EyeIcon size={13} />
-          Preview
-        </Button>
-      }
-    />
-    <Dialog.Portal>
-      <Dialog.Viewport className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto sm:p-6 lg:p-10">
-        <Dialog.Popup className="flex min-h-dvh w-full flex-col bg-ink-raised outline-none transition-[opacity,translate] duration-150 data-ending-style:translate-y-1 data-ending-style:opacity-0 data-starting-style:translate-y-1 data-starting-style:opacity-0 sm:h-[min(46rem,calc(100dvh-3rem))] sm:min-h-0 sm:max-w-3xl sm:border sm:border-rule">
-          <div className="flex h-11 shrink-0 items-center gap-3 border-b border-rule-soft pr-1 pl-4">
-            <Dialog.Title className="label-rule mr-auto truncate text-paper-dim">
-              Preview
-            </Dialog.Title>
-            <MarkdownCheatSheet />
-            {/* Named, not an ✕: this plate covers the composer, whose ✕ closes the draft. */}
-            <Dialog.Close
-              render={
-                <Button variant="ghost" size="sm" className="h-11 lg:h-7">
-                  <ArrowLeftIcon size={13} />
-                  Back to draft
-                </Button>
-              }
-            />
-          </div>
-          <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
-            {body.trim() === '' ? (
-              <p className="text-base text-paper-faint">Nothing to preview yet.</p>
-            ) : (
-              <MarkdownView source={body} />
-            )}
-          </div>
-        </Dialog.Popup>
-      </Dialog.Viewport>
-    </Dialog.Portal>
-  </Dialog.Root>
+/** One envelope line, its term in the write step's label column so the two steps align. */
+const EnvelopeRow = ({ term, children }: { term: string; children: ReactNode }) => (
+  <div className="flex items-baseline">
+    <dt className="label-rule w-20 shrink-0 pl-4">{term}</dt>
+    <dd className="relative min-w-0 flex-1 py-1 pr-4 pl-3">{children}</dd>
+  </div>
 );
+
+const Addresses = ({ list }: { list: string }) => (
+  <span className="font-mono text-2xs text-paper-dim [overflow-wrap:anywhere]">{list}</span>
+);
+
+/**
+ * The message as it will be read: who it goes from and to, its subject, and the body rendered as
+ * the HTML part renders it. The step before Send, so a missing From or recipient shows here.
+ */
+export const DraftPreview = ({
+  draft,
+  from,
+  ref,
+}: {
+  draft: ComposeDraft;
+  /** The address the draft names, `undefined` when it names none this vault holds. */
+  from: AddressRecord | undefined;
+  ref?: Ref<HTMLDivElement>;
+}) => {
+  const hasCopies = draft.cc.trim() !== '' || draft.bcc.trim() !== '';
+  return (
+    // Focused on arrival, so the keyboard scrolls a long message.
+    <div ref={ref} tabIndex={-1} className="min-h-0 flex-1 overflow-y-auto outline-none">
+      <dl className="border-b border-rule-soft py-2">
+        <EnvelopeRow term="From">
+          {from === undefined ? (
+            <span className="text-base text-paper-faint">(no address selected)</span>
+          ) : (
+            <>
+              {/* The identity channel, as the From switch marks it. */}
+              <span className="absolute inset-y-0 left-0 w-0.5 bg-signal" />
+              <span className="flex items-center gap-2">
+                <span className="truncate text-base text-paper">{from.address}</span>
+                {!isInbound(from) && <SendOnlyTag />}
+              </span>
+              <span className="mt-0.5 block truncate font-mono text-2xs text-paper-faint">
+                {from.senderName !== undefined && `${from.senderName} · `}via {from.smtp.host}
+              </span>
+            </>
+          )}
+        </EnvelopeRow>
+        {draft.to.trim() !== '' && (
+          <EnvelopeRow term="To">
+            <Addresses list={draft.to} />
+          </EnvelopeRow>
+        )}
+        {draft.to.trim() === '' && !hasCopies && (
+          <EnvelopeRow term="To">
+            <span className="text-base text-paper-faint">(no recipient)</span>
+          </EnvelopeRow>
+        )}
+        {draft.cc.trim() !== '' && (
+          <EnvelopeRow term="Cc">
+            <Addresses list={draft.cc} />
+          </EnvelopeRow>
+        )}
+        {draft.bcc.trim() !== '' && (
+          <EnvelopeRow term="Bcc">
+            <Addresses list={draft.bcc} />
+          </EnvelopeRow>
+        )}
+        <EnvelopeRow term="Subject">
+          {draft.subject.trim() === '' ? (
+            <span className="text-base text-paper-faint">(no subject)</span>
+          ) : (
+            <span dir="auto" className="text-base font-medium text-paper">
+              {draft.subject}
+            </span>
+          )}
+        </EnvelopeRow>
+      </dl>
+      <div className="px-4 py-4">
+        {draft.body.trim() === '' ? (
+          <p className="text-base text-paper-faint">(no message)</p>
+        ) : (
+          <MarkdownView source={draft.body} />
+        )}
+      </div>
+    </div>
+  );
+};

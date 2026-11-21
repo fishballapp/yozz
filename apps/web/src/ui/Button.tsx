@@ -1,6 +1,6 @@
 import { cva, type VariantProps } from 'class-variance-authority';
 import { cn } from 'cn';
-import type { ButtonHTMLAttributes } from 'react';
+import type { ComponentProps } from 'react';
 import { Tooltip } from './Tooltip';
 
 /**
@@ -48,8 +48,7 @@ export const buttonClass = cva(
   },
 );
 
-export type ButtonProps = ButtonHTMLAttributes<HTMLButtonElement> &
-  VariantProps<typeof buttonClass>;
+export type ButtonProps = ComponentProps<'button'> & VariantProps<typeof buttonClass>;
 
 /** An icon button's `aria-label` is also its tooltip: the pointer has no other way to read it. */
 export const Button = ({ className, variant, size, type = 'button', ...props }: ButtonProps) => {
@@ -68,10 +67,6 @@ export const Button = ({ className, variant, size, type = 'button', ...props }: 
 export const linkClass =
   'text-left text-base text-paper-dim underline underline-offset-4 transition-colors hover:text-paper disabled:pointer-events-none disabled:text-paper-faint disabled:no-underline';
 
-export const LinkButton = ({
-  className,
-  type = 'button',
-  ...props
-}: ButtonHTMLAttributes<HTMLButtonElement>) => (
+export const LinkButton = ({ className, type = 'button', ...props }: ComponentProps<'button'>) => (
   <button type={type} className={cn(linkClass, className)} {...props} />
 );

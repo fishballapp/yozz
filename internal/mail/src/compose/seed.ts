@@ -33,9 +33,9 @@ export const replyAllCc = (
   return [...new Set(addressed)].filter(address => !drop.has(address));
 };
 
-/** The identity that answers a message: the address it was delivered to, else the first you own. */
+/** The identity that answers a message: the address it was delivered to, when it is one you own. Inbound mail records its receiving mailbox as `toAddress`, so none matches only for mail that arrived on none of your current addresses (your own sent message answered or forwarded, or mail to a removed address), and From is left for the person to pick. */
 const identityOf = (message: Message, identities: readonly AddressRecord[]): string | undefined =>
-  (identities.find(identity => identity.address === message.toAddress) ?? identities[0])?.address;
+  identities.find(identity => identity.address === message.toAddress)?.address;
 
 /** A message to answer, pass on or unsubscribe from, named by its id in the thread graph. */
 export type SeedRequest = {

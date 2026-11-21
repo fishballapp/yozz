@@ -1,5 +1,9 @@
 import { MAX_ATTACHMENT_BYTES, ownerMailboxFor } from '@yozz.app/mail/compose/draft';
-import type { DraftRecord, FileReference } from '@yozz.app/mail/compose/draft-record';
+import {
+  type DraftRecord,
+  draftIdOf,
+  type FileReference,
+} from '@yozz.app/mail/compose/draft-record';
 import { createDraft, replaceDraft } from '@yozz.app/mail/compose/draft-vault';
 import { type SeedRequest, seedFor } from '@yozz.app/mail/compose/seed';
 import { attachmentKindOf } from '@yozz.app/mail/threads/attachments';
@@ -26,6 +30,7 @@ import { Settings } from '../settings.ts';
 import { Vault } from '../vault/vault.ts';
 import {
   claimFor,
+  conflictOf,
   draftJson,
   goneDraft,
   identityOf,
@@ -218,7 +223,10 @@ const startDraft = Effect.fnUntraced(function* ({
   const address = Option.getOrUndefined(from) ?? seed.identityId;
   if (address === undefined) {
     return yield* new UsageError({
-      message: 'A new message needs --from, one of your addresses; yozz whoami lists them',
+      message:
+        request === null
+          ? 'A new message needs --from, one of your addresses; yozz whoami lists them'
+          : 'That message was not delivered to one of your addresses, so --from is needed, one of your addresses; yozz whoami lists them',
     });
   }
   const identity = yield* identityOf(identities, address);
@@ -292,7 +300,7 @@ export const draftCommand = Command.make(
 
     if (Option.isSome(edit)) {
       const draftId = edit.value;
-      const { key, record } = yield* readDraft(draftId);
+      const { key, version, record } = yield* readDraft(draftId);
       if (record.deletedAt !== undefined) return yield* goneDraft(draftId, record);
       // Whatever its age: a claim left behind may have reached SMTP, and an edit would clear it.
       if (record.send !== undefined || record.unconfirmedSend !== undefined) {
@@ -300,9 +308,18 @@ export const draftCommand = Command.make(
           message: `The draft ${draftId} holds a send that is in flight or unsettled; settle it in yozz.app before editing`,
         });
       }
+      if (version !== record.contentVersion) {
+        return yield* conflictOf(draftId, draftIdOf(key, record.contentVersion));
+      }
       const changes = [fields.from, fields.to, fields.cc, fields.bcc, fields.subject, text];
       if (changes.every(Option.isNone) && added.length === 0) {
         return yield* new UsageError({ message: 'Give at least one field to change' });
+      }
+      if (Option.isNone(fields.from) && record.from === '') {
+        return yield* new UsageError({
+          message:
+            'The draft has no From address yet; pass --from, one of your addresses (yozz whoami lists them)',
+        });
       }
       const identity = yield* identityOf(
         identities,
@@ -373,9 +390,11 @@ export const draftCommand = Command.make(
   Command.withDescription(`Write a draft, or change one, and print it whole: exactly what \`yozz send\` will send. Every write makes a new version, so send the draftId the last draft printed.
 
 --reply, --reply-all and --forward seed it as yozz.app's buttons do: the recipients (Reply-To
-first), the address the mail came to as From, "Re:" or "Fwd:", the quote, the reply headers, and a
-forward's attachments. --text is what you write above the quote. --from, --to, --cc, --bcc and
---subject override the seed. Without any of them it is a new message, and --from is required.
+first), the address the mail came to as From (--from is required when that is none of yours),
+"Re:" or "Fwd:", the quote, the reply headers, and a forward's attachments. --text is what you
+write above the quote. --from, --to, --cc, --bcc and --subject override the seed. Without any of
+them it is a new message, and --from is required. --edit on a draft that has no From address yet
+(one yozz.app started blank) needs --from too.
 
 --edit changes only the fields given; --text replaces what is written above the quote, and
 --attach adds files. A draft changed since that draftId (in yozz.app, say) is a Conflict naming

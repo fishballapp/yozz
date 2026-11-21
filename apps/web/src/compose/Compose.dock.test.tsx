@@ -175,3 +175,19 @@ describe('how wide a line of the body runs', () => {
     expect(body()).not.toContain('max-w-[80ch]');
   });
 });
+
+describe('the preview step', () => {
+  it('stays in the docked frame, beside the message it answers', async () => {
+    mountReaderPane();
+    await open('reply:m-1', { isWide: true });
+    const preview = [...document.querySelectorAll('button')].find(
+      ({ textContent }) => textContent === 'Preview',
+    );
+    await act(async () => preview?.click());
+    const popups = document.querySelectorAll<HTMLElement>('[role="dialog"]');
+    expect(popups).toHaveLength(1);
+    expect(popups[0]?.dataset.docked).toBe('');
+    expect(popups[0]?.parentElement?.style.width).toBe(`${PANE_LEFT}px`);
+    expect(popups[0]?.querySelector('h2')?.textContent).toBe('Preview');
+  });
+});

@@ -159,6 +159,11 @@ export const sendCommand = Command.make(
           currentDraftId: draftIdOf(key, record.contentVersion),
         });
       }
+      if (record.from === '') {
+        return yield* new UsageError({
+          message: `The draft ${draftId} has no From address; set one with yozz draft --edit '${draftId}' --from <address>`,
+        });
+      }
       if (identity === undefined) {
         return yield* new UsageError({
           message: `${record.from} is no longer one of your addresses; yozz whoami lists them`,

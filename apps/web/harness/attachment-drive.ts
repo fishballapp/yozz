@@ -458,6 +458,12 @@ const waitForUpload = (page: Page, name: string) =>
 const press = (page: Page, name: string) =>
   page.getByRole('dialog').getByRole('button', { name, exact: true }).click();
 
+/** Write, then Preview, then Send: Send is only on the preview step. */
+const sendDraft = async (page: Page) => {
+  await press(page, 'Preview');
+  await press(page, 'Send');
+};
+
 const savedBytes = async (download: Download) => {
   const path = await download.path();
   return readFileSync(path);
@@ -789,7 +795,7 @@ const main = async () => {
     await secondDevice.close();
 
     // ---- Send from the tab that reloaded: the bytes come from R2 ----
-    await press(page, 'Send');
+    await sendDraft(page);
     await untilReceived(received, 1);
     const [first] = received;
     if (first === undefined) throw new Error('nothing received');
@@ -839,7 +845,7 @@ const main = async () => {
     await openComposer(page, { from: SEND_ONLY, subject: 'Oversized' });
     await pick(page, [oversized]);
     await waitForUpload(page, oversized.name);
-    await press(page, 'Send');
+    await sendDraft(page);
     const refusal = page.getByText('accepts messages up to 1 MB, and this one is larger');
     await refusal.first().waitFor({ timeout: 60_000 });
     ok('a message over the server’s SIZE is refused with its own sentence');
@@ -859,7 +865,7 @@ const main = async () => {
     await waitForUpload(page, oversized.name);
     ok('the draft comes back, with its chip');
     declared.limit = 35_882_577;
-    await press(page, 'Send');
+    await sendDraft(page);
     await untilReceived(received, 2);
     const oversizedSent = received[1];
     if (oversizedSent === undefined) throw new Error('nothing received');
@@ -883,7 +889,7 @@ const main = async () => {
       intercepted.request().method() === 'GET' ? intercepted.abort() : intercepted.fallback(),
     );
     const receivedBefore = received.length;
-    await press(page, 'Send');
+    await sendDraft(page);
     await page
       .getByText(`Couldn’t download ${unreachable.name}. Reopen the draft and try again.`)
       .first()
@@ -912,7 +918,7 @@ const main = async () => {
     await openComposer(page, { from: SEND_ONLY, subject: 'Invoice' });
     await pick(page, [invoice]);
     await waitForUpload(page, invoice.name);
-    await press(page, 'Send');
+    await sendDraft(page);
     await untilReceived(received, 3);
     const invoiceSent = received[2];
     if (invoiceSent === undefined) throw new Error('nothing received');
@@ -927,7 +933,7 @@ const main = async () => {
     await openComposer(page, { from: SEND_ONLY, subject: 'Largest allowed' });
     await pick(page, [largest]);
     await waitForUpload(page, largest.name);
-    await press(page, 'Send');
+    await sendDraft(page);
     await untilReceived(received, 4);
     const largestSent = received[3];
     if (largestSent === undefined) throw new Error('nothing received');
@@ -941,7 +947,7 @@ const main = async () => {
     await openComposer(page, { from: MAILBOX, subject: 'Notes' });
     await pick(page, [notes]);
     await waitForUpload(page, notes.name);
-    await press(page, 'Send');
+    await sendDraft(page);
     await untilReceived(received, 5);
     const notesSent = received[4];
     if (notesSent === undefined) throw new Error('nothing received');
@@ -1001,12 +1007,14 @@ const main = async () => {
       .waitFor();
     ok('a failed upload says so on its chip');
     await withViewports(page, width => capture(page, `failed-${width}`, composerFoot));
-    await press(page, 'Send');
+    await sendDraft(page);
     await page
       .getByRole('dialog')
       .getByText('budget.xlsx failed to upload. Retry or remove it before sending.')
       .waitFor();
     ok('Send refuses over a failed upload, and says why');
+    // Files are removed on the write step.
+    await press(page, 'Back to writing');
     await page.unroute(route);
     const putsBeforeRetry = filesTraffic().filter(({ method }) => method === 'PUT');
     await page
@@ -1058,7 +1066,7 @@ const main = async () => {
 
     // ---- Text too long for the claim's record ----
     await page.getByLabel('Message body, markdown').fill('x '.repeat(200_000));
-    await press(page, 'Send');
+    await sendDraft(page);
     await page
       .getByRole('dialog')
       .getByText('This message’s text is too long to send. Shorten it or trim the quoted thread.')
@@ -1067,6 +1075,7 @@ const main = async () => {
     await withViewports(page, width =>
       capture(page, `too-long-${width}`, current => current.getByRole('dialog').getByRole('alert')),
     );
+    await press(page, 'Back to writing');
     await page.getByLabel('Message body, markdown').fill('Short again.');
 
     // ---- Collection against the real Worker ----

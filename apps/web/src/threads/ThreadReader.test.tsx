@@ -80,6 +80,22 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+describe('the sender line', () => {
+  const senderLine = () => document.querySelector('p[dir="auto"]')?.textContent;
+
+  it('says a draft with no From has none', async () => {
+    await mount(received({ isDraft: true, fromName: '', fromAddress: '' }), { shouldOpen: false });
+    expect(senderLine()).toBe('(no From address)');
+  });
+
+  it('still names a received message whose address is empty', async () => {
+    await mount(received({ fromName: 'Undisclosed sender', fromAddress: '' }), {
+      shouldOpen: false,
+    });
+    expect(senderLine()).toBe('Undisclosed sender');
+  });
+});
+
 describe('the message details panel: signed by', () => {
   it('names the domain whose signature vouches for the sender', async () => {
     const reader = await mount(

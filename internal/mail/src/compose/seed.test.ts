@@ -334,18 +334,19 @@ describe('seedFor — unsubscribe', () => {
     expect(unsubscribeSeed(NEWSLETTER, 'm-news-1').identityId).toBe('jason@northlane.example');
   });
 
-  it('falls back to the first address as a reply does when the delivery address is not one of yours', () => {
+  it('leaves From blank, as a reply does, when the delivery address is not one of yours', () => {
     const [message] = NEWSLETTER.messages;
     if (message === undefined) throw new Error('fixture has no message');
     const bcc: Thread = {
       ...NEWSLETTER,
       messages: [{ ...message, toAddress: 'list@picks.example' }],
     };
-    expect(unsubscribeSeed(bcc, 'm-news-1').identityId).toBe('jason@jyu.example');
-    expect(
-      seedFor({ kind: 'reply', messageId: 'm-news-1' }, [bcc], ADDRESSES, ownedAddresses)
-        .identityId,
-    ).toBe('jason@jyu.example');
+    expect(unsubscribeSeed(bcc, 'm-news-1').identityId).toBeUndefined();
+    for (const kind of ['reply', 'reply-all', 'forward'] as const) {
+      expect(
+        seedFor({ kind, messageId: 'm-news-1' }, [bcc], ADDRESSES, ownedAddresses).identityId,
+      ).toBeUndefined();
+    }
   });
 
   it('is the message it is pressed on, not the thread’s newest arrival', () => {

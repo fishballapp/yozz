@@ -789,10 +789,17 @@ export const ThreadReader = ({
                 dir="auto"
                 className={cn('text-base font-medium text-paper', hasMenu(index) && 'pr-9 lg:pr-0')}
               >
-                {message.fromName}
-                <span className="ml-2 font-mono text-2xs font-normal text-paper-faint">
-                  {message.fromAddress}
-                </span>
+                {/* A draft nobody has chosen a From for has neither a name nor an address. */}
+                {message.isDraft === true && message.fromAddress === '' ? (
+                  <span className="font-normal text-paper-faint">(no From address)</span>
+                ) : (
+                  <>
+                    {message.fromName}
+                    <span className="ml-2 font-mono text-2xs font-normal text-paper-faint">
+                      {message.fromAddress}
+                    </span>
+                  </>
+                )}
               </p>
               <div className="flex items-center gap-2">
                 <p className="font-mono text-2xs text-paper-faint">{fullTime(message.at)}</p>

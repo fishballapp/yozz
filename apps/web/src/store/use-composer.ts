@@ -333,14 +333,14 @@ export const useComposerStore = ({
   const sessionGeneration = useRef(0);
   /** Read by the mirror's erase after its awaits; a later session's list is harmless there, since the runner it is handed refuses once its own session has ended. */
 
-  // A pasted `?compose=` URL seeds the draft before the vault has answered, so heal the sender
-  // once identities exist without touching anything else typed.
+  // An address removed while the draft is open leaves From blank, never another address. Waits for
+  // identities to exist: a draft restored on boot names its sender before the vault has answered.
   useEffect(() => {
+    if (identities.length === 0) return;
     setDraft(current => {
-      if (current === null) return current;
+      if (current === null || current.identityId === '') return current;
       if (identities.some(identity => identity.address === current.identityId)) return current;
-      const fallback = identities[0]?.address ?? '';
-      return fallback === current.identityId ? current : { ...current, identityId: fallback };
+      return { ...current, identityId: '' };
     });
   }, [identities]);
 
@@ -932,6 +932,8 @@ export const useComposerStore = ({
       draft.body === '' &&
       draft.subject === '' &&
       draft.to === '' &&
+      draft.cc === '' &&
+      draft.bcc === '' &&
       !draft.attachments.some(({ upload }) => upload === 'uploaded')
     ) {
       return;
@@ -1477,7 +1479,7 @@ export const useComposerStore = ({
           attachments: seeded.map(file => draftFileOfSeed(file, demo)),
           ...merged,
           // Resolved last: an identity can be deleted, and a seed may pass `undefined`.
-          identityId: merged.identityId ?? identities[0]?.address ?? '',
+          identityId: merged.identityId ?? '',
         };
         const opening = composeOf(intent, next, stored === null);
         composeRef.current = opening;
@@ -1581,7 +1583,6 @@ export const useComposerStore = ({
       backToEditing,
       send,
       demo,
-      identities,
       bindRunOn,
       expungeMirrorCopy,
       ownerMailboxOf,

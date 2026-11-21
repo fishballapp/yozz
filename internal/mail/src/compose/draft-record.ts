@@ -65,7 +65,8 @@ const sendSchema = z.object({
 });
 
 export const draftRecordSchema = z.object({
-  from: z.string().min(1),
+  /** Empty until the person picks an address: a new message starts with no From. */
+  from: z.string(),
   /** Chosen once at creation, then persisted. */
   ownerAccount: z.string().min(1).optional(),
   to: z.string(),

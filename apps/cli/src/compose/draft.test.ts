@@ -209,10 +209,87 @@ layer(NodeServices.layer)(it => {
         assert.isTrue(Exit.isFailure(noFrom.exit));
         expect(failureOf(noFrom.stderr)).toMatchObject({ code: 'UsageError' });
 
+        const empty = yield* run(['draft', '--from', '', '--to', 'kate@example.com']);
+        assert.isTrue(Exit.isFailure(empty.exit));
+        expect(failureOf(empty.stderr)).toMatchObject({
+          code: 'UsageError',
+          message: '"" is not one of your addresses; yozz whoami lists them',
+        });
+
         const notMine = yield* run(['draft', '--from', 'ceo@stripe.com']);
         expect(failureOf(notMine.stderr)).toMatchObject({
           code: 'UsageError',
-          message: 'ceo@stripe.com is not one of your addresses; yozz whoami lists them',
+          message: '"ceo@stripe.com" is not one of your addresses; yozz whoami lists them',
+        });
+      }),
+    );
+
+    it.effect(
+      'needs --from for a reply to your own message, which arrived on no address of yours',
+      () =>
+        Effect.gen(function* () {
+          const { server, run } = yield* makeComposeWorld();
+          server.deliver('Sent', mail(1, { from: ADDRESS, to: 'billing@stripe.com' }));
+
+          const noFrom = yield* run(['draft', '--reply', 'mid/<m1@stripe.com>']);
+          assert.isTrue(Exit.isFailure(noFrom.exit));
+          expect(failureOf(noFrom.stderr)).toMatchObject({
+            code: 'UsageError',
+            message: expect.stringContaining('not delivered to one of your addresses'),
+          });
+
+          const withFrom = yield* run([
+            'draft',
+            '--reply',
+            'mid/<m1@stripe.com>',
+            '--from',
+            ADDRESS,
+          ]);
+          expect(JSON.parse(withFrom.stdout).draft, withFrom.stderr).toMatchObject({
+            from: ADDRESS,
+          });
+        }),
+    );
+
+    it.effect('edits a draft that has no From only once --from names one', () =>
+      Effect.gen(function* () {
+        const { run, rewriteDraft } = yield* makeComposeWorld();
+        const { draft } = JSON.parse(
+          (yield* run(['draft', '--from', ADDRESS, '--to', 'kate@example.com'])).stdout,
+        );
+        const draftId = yield* rewriteDraft(draft.id.slice('draft/'.length), record => ({
+          ...record,
+          from: '',
+        }));
+
+        const noFrom = yield* run(['draft', '--edit', draftId, '--subject', 'Hi']);
+        assert.isTrue(Exit.isFailure(noFrom.exit));
+        expect(failureOf(noFrom.stderr)).toMatchObject({
+          code: 'UsageError',
+          message: expect.stringContaining('has no From address yet'),
+        });
+
+        const withFrom = yield* run(['draft', '--edit', draftId, '--from', ADDRESS]);
+        expect(JSON.parse(withFrom.stdout).draft, withFrom.stderr).toMatchObject({ from: ADDRESS });
+      }),
+    );
+
+    it.effect('names the newer version of a draft with no From before asking for --from', () =>
+      Effect.gen(function* () {
+        const { run, rewriteDraft } = yield* makeComposeWorld();
+        const { draft } = JSON.parse(
+          (yield* run(['draft', '--from', ADDRESS, '--to', 'kate@example.com'])).stdout,
+        );
+        const current = yield* rewriteDraft(draft.id.slice('draft/'.length), record => ({
+          ...record,
+          from: '',
+        }));
+
+        const stale = yield* run(['draft', '--edit', draft.draftId, '--subject', 'Hi']);
+        assert.isTrue(Exit.isFailure(stale.exit));
+        expect(failureOf(stale.stderr)).toMatchObject({
+          code: 'Conflict',
+          currentDraftId: current,
         });
       }),
     );

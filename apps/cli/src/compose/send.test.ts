@@ -270,6 +270,27 @@ layer(NodeServices.layer)(it => {
       }),
     );
 
+    it.effect('refuses a draft with no From address, naming the command that sets one', () =>
+      Effect.gen(function* () {
+        const { smtp, run, rewriteDraft } = yield* makeComposeWorld();
+        const { draft } = JSON.parse(
+          (yield* run(['draft', '--from', ADDRESS, '--to', 'kate@example.com'])).stdout,
+        );
+        const draftId = yield* rewriteDraft(draft.id.slice('draft/'.length), record => ({
+          ...record,
+          from: '',
+        }));
+
+        const refused = yield* run(['send', draftId]);
+
+        expect(failureOf(refused.stderr)).toEqual({
+          code: 'UsageError',
+          message: `The draft ${draftId} has no From address; set one with yozz draft --edit '${draftId}' --from <address>`,
+        });
+        expect(smtp.commands).toEqual([]);
+      }),
+    );
+
     it.effect('finishes a send with no Sent folder, and says no copy was kept, every time', () =>
       Effect.gen(function* () {
         const { server, smtp, run, drafts } = yield* makeComposeWorld();

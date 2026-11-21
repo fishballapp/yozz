@@ -97,7 +97,7 @@ export const identityOf = (identities: readonly AddressRecord[], address: string
   return identity === undefined
     ? Effect.fail(
         new UsageError({
-          message: `${address} is not one of your addresses; yozz whoami lists them`,
+          message: `${JSON.stringify(address)} is not one of your addresses; yozz whoami lists them`,
         }),
       )
     : Effect.succeed(identity);

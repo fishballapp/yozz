@@ -2,16 +2,15 @@ import { Select } from '@base-ui/react/select';
 import { CaretUpDownIcon, CheckIcon } from '@phosphor-icons/react';
 import { type AddressRecord, isInbound } from '@yozz.app/mail/addresses/record';
 import { cn } from 'cn';
+import { type RefObject, useId } from 'react';
 import { useMail } from '../store/MailProvider';
 import { SendOnlyTag } from '../ui/SendOnlyTag';
 
 /**
  * The first and largest control in the composer; it always states the SMTP host it will use (which
  * tells the person which provider sends; the port is Settings' to show), and a send-only address is
- * labelled, not hidden.
+ * labelled, not hidden. A new message starts with no address chosen, and the well says so quietly.
  */
-
-const smtpVia = (identity: AddressRecord) => identity.smtp.host;
 
 const IdentityOption = ({ identity }: { identity: AddressRecord }) => (
   <>
@@ -28,7 +27,7 @@ const IdentityOption = ({ identity }: { identity: AddressRecord }) => (
         {!isInbound(identity) && <SendOnlyTag />}
       </span>
       <span className="mt-0.5 block truncate font-mono text-2xs text-paper-faint">
-        {identity.senderName !== undefined && `${identity.senderName} · `}via {smtpVia(identity)}
+        {identity.senderName !== undefined && `${identity.senderName} · `}via {identity.smtp.host}
       </span>
     </span>
   </>
@@ -37,16 +36,22 @@ const IdentityOption = ({ identity }: { identity: AddressRecord }) => (
 export const FromSwitch = ({
   value,
   onChange,
+  triggerRef,
 }: {
   value: string;
   onChange: (identityId: string) => void;
+  triggerRef?: RefObject<HTMLButtonElement | null>;
 }) => {
   const { identities } = useMail();
-  const selected = identities.find(identity => identity.address === value) ?? identities[0];
+  // The trigger is named by the label and the value it shows, which a bare `aria-label` would
+  // replace.
+  const labelId = useId();
+  const valueId = useId();
+  const selected = identities.find(identity => identity.address === value);
   const withInbox = identities.filter(isInbound);
   const sendOnly = identities.filter(identity => !isInbound(identity));
 
-  if (selected === undefined) {
+  if (identities.length === 0) {
     return (
       <div className="flex items-stretch">
         <span className="label-rule flex w-20 shrink-0 items-center pl-4">From</span>
@@ -63,27 +68,45 @@ export const FromSwitch = ({
 
   return (
     <div className="flex items-stretch">
-      <span className="label-rule flex w-20 shrink-0 items-center pl-4">From</span>
-      <Select.Root value={value} onValueChange={next => onChange(String(next))}>
+      <span id={labelId} className="label-rule flex w-20 shrink-0 items-center pl-4">
+        From
+      </span>
+      <Select.Root
+        value={selected?.address ?? null}
+        onValueChange={next => {
+          if (next !== null) onChange(next);
+        }}
+      >
         <Select.Trigger
+          ref={triggerRef}
+          aria-labelledby={`${labelId} ${valueId}`}
           className={cn(
-            'group relative flex min-w-0 flex-1 items-center gap-2 border-b border-rule bg-ink-sunken py-2 pr-2.5 pl-3 text-left outline-none transition-colors',
-            'hover:border-paper-faint data-[popup-open]:border-signal',
+            'group relative flex min-w-0 flex-1 items-center gap-2 border-b bg-ink-sunken py-2 pr-2.5 pl-3 text-left outline-none transition-colors',
+            'focus:border-signal focus:shadow-[inset_0_-1px_0_var(--signal)] data-[popup-open]:border-signal data-[popup-open]:shadow-[inset_0_-1px_0_var(--signal)]',
+            selected === undefined
+              ? 'border-paper-faint hover:border-paper-dim'
+              : 'border-rule hover:border-paper-faint',
           )}
         >
           {/* The identity channel is marked in signal so the composer's loudest edge is the
-              address it will send from. */}
-          <span className="absolute inset-y-0 left-0 w-0.5 bg-signal" />
-          <span className="min-w-0 flex-1">
-            <span className="flex items-center gap-2">
-              <span className="truncate text-base text-paper">{selected.address}</span>
-              {!isInbound(selected) && <SendOnlyTag />}
+              address it will send from; with none chosen yet, there is no channel to mark. */}
+          {selected !== undefined && <span className="absolute inset-y-0 left-0 w-0.5 bg-signal" />}
+          {selected === undefined ? (
+            <span id={valueId} className="min-w-0 flex-1 truncate text-base text-paper-faint">
+              Choose an address
             </span>
-            <span className="mt-0.5 block truncate font-mono text-2xs text-paper-faint">
-              {selected.senderName !== undefined && `${selected.senderName} · `}via{' '}
-              {smtpVia(selected)}
+          ) : (
+            <span id={valueId} className="min-w-0 flex-1">
+              <span className="flex items-center gap-2">
+                <span className="truncate text-base text-paper">{selected.address}</span>
+                {!isInbound(selected) && <SendOnlyTag />}
+              </span>
+              <span className="mt-0.5 block truncate font-mono text-2xs text-paper-faint">
+                {selected.senderName !== undefined && `${selected.senderName} · `}via{' '}
+                {selected.smtp.host}
+              </span>
             </span>
-          </span>
+          )}
           <Select.Icon className="shrink-0 text-paper-faint group-hover:text-paper">
             <CaretUpDownIcon size={13} />
           </Select.Icon>
@@ -100,24 +123,31 @@ export const FromSwitch = ({
             className="z-50"
           >
             <Select.Popup className="max-h-[min(28rem,var(--available-height))] w-[var(--anchor-width)] min-w-72 overflow-y-auto border border-rule bg-ink-raised pt-1 pb-1.5 outline-none">
-              <Select.Group>
-                <Select.GroupLabel className="label-rule block px-2.5 pt-2 pb-1">
-                  Addresses
-                </Select.GroupLabel>
-                {withInbox.map(identity => (
-                  <Select.Item
-                    key={identity.address}
-                    value={identity.address}
-                    className="flex cursor-default items-start gap-1 px-2.5 py-1.5 outline-none data-[highlighted]:bg-ink-hover"
-                  >
-                    <IdentityOption identity={identity} />
-                  </Select.Item>
-                ))}
-              </Select.Group>
+              {withInbox.length > 0 && (
+                <Select.Group>
+                  <Select.GroupLabel className="label-rule block px-2.5 pt-2 pb-1">
+                    Addresses
+                  </Select.GroupLabel>
+                  {withInbox.map(identity => (
+                    <Select.Item
+                      key={identity.address}
+                      value={identity.address}
+                      className="flex cursor-default items-start gap-1 px-2.5 py-1.5 outline-none data-[highlighted]:bg-ink-hover"
+                    >
+                      <IdentityOption identity={identity} />
+                    </Select.Item>
+                  ))}
+                </Select.Group>
+              )}
 
               {sendOnly.length > 0 && (
                 <Select.Group>
-                  <Select.GroupLabel className="label-rule mt-1 block border-t border-rule-soft px-2.5 pt-2.5 pb-1">
+                  <Select.GroupLabel
+                    className={cn(
+                      'label-rule block px-2.5 pb-1',
+                      withInbox.length > 0 ? 'mt-1 border-t border-rule-soft pt-2.5' : 'pt-2',
+                    )}
+                  >
                     Send-only
                   </Select.GroupLabel>
                   {sendOnly.map(identity => (

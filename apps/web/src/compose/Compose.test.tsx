@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+import type { AddressRecord } from '@yozz.app/mail/addresses/record';
 import type { ComposeDraft } from '@yozz.app/mail/compose/draft';
 import type { Attachment } from '@yozz.app/mail/threads/thread';
 import { act } from 'react';
@@ -9,6 +10,9 @@ import type { Composer } from '../store/use-composer';
 import { toast } from '../ui/Toast';
 import { Compose } from './Compose';
 import type { SendReport } from './draft';
+
+// @ts-expect-error React reads it off the global
+globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
 type SendAnswer = Awaited<ReturnType<Composer['send']>>;
 
@@ -23,9 +27,22 @@ const DRAFT: ComposeDraft = {
   attachments: [],
 };
 
+const ME: AddressRecord = {
+  address: 'me@x.test',
+  senderName: 'Me Myself',
+  smtp: { host: 'smtp.x.test', port: 465, username: 'me', password: 'pw' },
+  imap: { host: 'imap.x.test', port: 993, username: 'me', password: 'pw' },
+};
+
+const RELAY: AddressRecord = {
+  address: 'news@relay.test',
+  smtp: { host: 'smtp.relay.test', port: 587, username: 'news', password: 'pw' },
+};
+
 /** The store as the composer sees it; `generation` is what a lock or a sign-in moves on. */
 const mail = vi.hoisted(() => ({
   generation: 0,
+  identities: [] as AddressRecord[],
   send: vi.fn(),
   attach: vi.fn(),
   retryUpload: vi.fn(),
@@ -73,7 +90,7 @@ vi.mock('../store/MailProvider', () => ({
   }),
   useMail: () => ({
     threads: [],
-    identities: [],
+    identities: mail.identities,
     ownedAddresses: [],
     drafts: [],
     readStoredFile: async () => null,
@@ -86,8 +103,31 @@ vi.mock('../store/MailProvider', () => ({
 
 const root = createRoot(document.createElement('div'));
 
+const buttonNamed = (label: string) =>
+  [...document.querySelectorAll('button')].find(({ textContent }) => textContent === label);
+
+const press = async (label: string) => {
+  const button = buttonNamed(label);
+  if (button === undefined) throw new Error(`no ${label} button`);
+  await act(async () => {
+    button.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+    button.click();
+  });
+};
+
+// The From select's trigger is the combobox of the dialog.
+const isFromFocused = () => document.activeElement?.getAttribute('role') === 'combobox';
+
+const nextFrame = () =>
+  act(async () => {
+    await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
+  });
+
+const alerts = () => [...document.querySelectorAll('[role="alert"]')].map(node => node.textContent);
+
 beforeEach(async () => {
   mail.generation = 0;
+  mail.identities = [ME, RELAY];
   // jsdom has no matchMedia; a phone-width window, where the composer is never docked.
   vi.stubGlobal('matchMedia', () => ({
     matches: false,
@@ -105,6 +145,7 @@ afterEach(async () => {
   mail.openSendState = null;
   mail.isOpenSendOver = false;
   mail.sendAgain.mockReset();
+  mail.backToEditing.mockReset();
   navigate.mockReset();
   reading.files = null;
 });
@@ -137,15 +178,13 @@ describe('a send on the open draft', () => {
     );
     await act(async () => finish?.click());
     expect(mail.finishWithoutCopy).toHaveBeenCalledTimes(1);
-    const send = [...document.querySelectorAll('button')].find(
-      button => button.textContent === 'Send',
-    );
-    expect(send?.disabled).toBe(true);
+    await press('Preview');
+    expect(buttonNamed('Send')?.disabled).toBe(true);
   });
 });
 
 describe('a takeover from the banner', () => {
-  const press = async (label: string) => {
+  const pressOnBanner = async (label: string) => {
     mail.openSendState = label === 'Save to Sent' ? 'accepted' : 'unconfirmed';
     await act(async () => root.render(<Compose />));
     const button = [...document.querySelectorAll('button')].find(
@@ -159,7 +198,7 @@ describe('a takeover from the banner', () => {
     const settled = Promise.withResolvers<SendReport>();
     mail.sendAgain.mockResolvedValue({ ok: true, value: { settled: settled.promise } });
     const added = vi.spyOn(toast, 'add');
-    await press(label);
+    await pressOnBanner(label);
     expect(navigate).toHaveBeenCalledTimes(1);
     expect(added).toHaveBeenCalledWith(expect.objectContaining({ title: 'Sending…' }));
     settled.resolve({ state: 'sent' });
@@ -168,7 +207,7 @@ describe('a takeover from the banner', () => {
   it('stays open and adds nothing when the send is running after all', async () => {
     mail.sendAgain.mockResolvedValue(null);
     const added = vi.spyOn(toast, 'add');
-    await press('Send again');
+    await pressOnBanner('Send again');
     expect(navigate).not.toHaveBeenCalled();
     expect(added).not.toHaveBeenCalled();
   });
@@ -178,7 +217,7 @@ describe('a takeover from the banner', () => {
       ok: false,
       error: { kind: 'error', detail: 'That address was removed' },
     });
-    await press('Save to Sent');
+    await pressOnBanner('Save to Sent');
     expect(navigate).not.toHaveBeenCalled();
     expect(alerts()).toContain('That address was removed');
   });
@@ -192,15 +231,12 @@ describe('a send that ends on screen', () => {
   });
 });
 
-const alerts = () => [...document.querySelectorAll('[role="alert"]')].map(node => node.textContent);
-
 /** Presses Send with the claim held, ends the session, then lets the claim answer. */
 const sendAcrossSessionEnd = async (answer: (claim: PromiseWithResolvers<SendAnswer>) => void) => {
   const claim = Promise.withResolvers<SendAnswer>();
   mail.send.mockReturnValue(claim.promise);
-  const sendButton = [...document.querySelectorAll('button')].find(
-    button => button.textContent === 'Send',
-  );
+  await press('Preview');
+  const sendButton = buttonNamed('Send');
   if (sendButton === undefined) throw new Error('the composer offers no Send');
   await act(async () => sendButton.click());
   expect(mail.send).toHaveBeenCalledTimes(1);
@@ -248,6 +284,7 @@ describe('an edit from another device while a Send waits on uploads', () => {
     const claim = Promise.withResolvers<SendAnswer>();
     mail.send.mockReturnValue(claim.promise);
     await act(async () => root.render(<Compose />));
+    await press('Preview');
     expect(resolver('Load theirs')?.disabled).toBe(false);
     expect(resolver('Keep mine')?.disabled).toBe(false);
 
@@ -273,10 +310,8 @@ describe('a send the server refused', () => {
         settled: Promise.resolve({ state: 'refused', detail: 'too large', draftKey: 'k-1' }),
       },
     });
-    const sendButton = [...document.querySelectorAll('button')].find(
-      button => button.textContent === 'Send',
-    );
-    await act(async () => sendButton?.click());
+    await press('Preview');
+    await act(async () => buttonNamed('Send')?.click());
     await act(async () => {});
     const refused = updated.mock.calls.at(-1);
     if (refused === undefined) throw new Error('the refusal was never reported');
@@ -369,48 +404,145 @@ describe("a draft's file chips", () => {
   });
 });
 
-describe('the composer’s footer', () => {
-  const showing = async (draft: ComposeDraft) => {
-    mail.draft = draft;
+describe('a file chip on the preview', () => {
+  const failed = {
+    id: 'file-1',
+    name: 'plan.pdf',
+    size: 2048,
+    kind: 'pdf',
+    upload: 'failed',
+    content: new Uint8Array(1),
+  } as const;
+
+  afterEach(() => {
+    mail.draft = null;
+    mail.retryUpload.mockReset();
+  });
+
+  it('shows what goes, with no Remove, and still retries a failed upload', async () => {
+    mail.draft = { ...DRAFT, attachments: [failed] };
     await act(async () => root.render(<Compose />));
-  };
-  const send = () =>
-    [...document.querySelectorAll('button')].find(({ textContent }) => textContent === 'Send');
+    await press('Preview');
+    expect(document.querySelector('li')?.textContent).toContain('plan.pdf');
+    expect(document.querySelector('[aria-label="Remove plan.pdf"]')).toBeNull();
+    expect(alerts()).toEqual(['Failed to upload. Retry or remove the file.']);
+    const retry = document.querySelector<HTMLButtonElement>('[aria-label="Retry plan.pdf"]');
+    await act(async () => retry?.click());
+    expect(mail.retryUpload).toHaveBeenCalledWith('file-1');
+  });
+});
+
+/** Opens the composer afresh on `draft`, as seeding it does. */
+const opening = async (draft: ComposeDraft) => {
+  mail.draft = draft;
+  await act(async () => root.render(null));
+  await act(async () => root.render(<Compose />));
+};
+
+describe('the write step', () => {
+  const showing = opening;
 
   afterEach(() => {
     mail.draft = null;
   });
 
-  it('says why Send is off until someone is addressed', async () => {
-    await showing({ ...DRAFT, to: '' });
-    expect(send()?.disabled).toBe(true);
-    expect(document.body.textContent).toContain('Add a recipient to send.');
+  it('ends in Preview, the primary action, and offers no Send', async () => {
+    await showing(DRAFT);
+    expect(buttonNamed('Preview')?.className).toContain('bg-signal');
+    expect(buttonNamed('Send')).toBeUndefined();
   });
 
-  it('keeps the reason beside Send, in the row the buttons are in, so the foot does not move', async () => {
-    await showing({ ...DRAFT, to: '' });
-    const reason = [...document.querySelectorAll('p')].find(
-      ({ textContent }) => textContent === 'Add a recipient to send.',
-    );
-    expect(reason?.parentElement).toBe(send()?.parentElement);
-    // Below `sm` its line is kept even when it is silent.
-    await showing({ ...DRAFT, to: 'you@x.test' });
-    const silent = [...document.querySelectorAll('p')].find(({ className }) =>
-      className.includes('min-h-4'),
-    );
-    expect(silent?.textContent).toBe('');
+  it('offers Preview with nothing chosen or addressed, and blames nothing yet', async () => {
+    await showing({ ...DRAFT, identityId: '', to: '', subject: '', body: '' });
+    expect(buttonNamed('Preview')?.disabled).toBe(false);
+    expect(document.body.textContent).not.toContain('to send.');
   });
 
-  it('says nothing once there is a recipient, a Bcc counting as one', async () => {
-    await showing({ ...DRAFT, to: '', bcc: 'you@x.test' });
-    expect(send()?.disabled).toBe(false);
-    expect(document.body.textContent).not.toContain('Add a recipient to send.');
+  it('starts a new message at its blank From', async () => {
+    await showing({ ...DRAFT, identityId: '', to: '' });
+    await act(async () => {
+      await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
+    });
+    expect(isFromFocused()).toBe(true);
   });
 
-  it('does not blame the recipient for a frozen draft', async () => {
-    mail.openSendState = 'sending';
+  it('focuses the blank From once the addresses load, and never again for that opening', async () => {
+    mail.identities = [];
+    await showing({ ...DRAFT, identityId: '', to: '' });
+    await nextFrame();
+    expect(isFromFocused()).toBe(false);
+
+    mail.identities = [ME, RELAY];
+    await act(async () => root.render(<Compose />));
+    await nextFrame();
+    expect(isFromFocused()).toBe(true);
+
+    // Picking an address and moving on to the body leaves the caret where the person put it.
+    const body = document.querySelector('textarea');
+    body?.focus();
+    mail.draft = { ...DRAFT, to: '' };
+    await act(async () => root.render(<Compose />));
+    await nextFrame();
+    expect(document.activeElement).toBe(body);
+  });
+
+  it('starts a reply with no From at From, not the body', async () => {
+    await showing({ ...DRAFT, identityId: '', startedAsReply: true });
+    await nextFrame();
+    expect(isFromFocused()).toBe(true);
+  });
+
+  it('starts a reopened draft whose address was removed at From', async () => {
+    await showing({ ...DRAFT, identityId: 'gone@x.test' });
+    await nextFrame();
+    expect(isFromFocused()).toBe(true);
+  });
+
+  it('leaves focus where it is when a field was clicked into while the addresses loaded', async () => {
+    mail.identities = [];
+    await showing({ ...DRAFT, identityId: '', to: '' });
+    const toField = document.getElementById('compose-to');
+    toField?.focus();
+    mail.identities = [ME, RELAY];
+    await act(async () => root.render(<Compose />));
+    await nextFrame();
+    expect(document.activeElement).toBe(toField);
+    expect(isFromFocused()).toBe(false);
+  });
+
+  it('starts a draft whose From is set in To', async () => {
     await showing({ ...DRAFT, to: '' });
-    expect(document.body.textContent).not.toContain('Add a recipient to send.');
+    await act(async () => {
+      await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
+    });
+    expect(document.activeElement?.id).toBe('compose-to');
+  });
+
+  it('offers the Markdown cheat sheet in its header, where the message is written', async () => {
+    await showing(DRAFT);
+    await press('Markdown supported');
+    const sheet = document.querySelector('[aria-label="Markdown cheat sheet"]')?.textContent;
+    expect(sheet).toContain('**bold**');
+    expect(sheet).toContain('[text](url)a link');
+  });
+
+  it('has one write surface, set as the message is read', async () => {
+    await showing(DRAFT);
+    expect(document.querySelector('[role="tab"]')).toBeNull();
+    expect(document.querySelector('textarea')?.className).not.toContain('font-mono');
+  });
+
+  it('asks nothing of the Subject field until it is empty and focused', async () => {
+    await showing(DRAFT);
+    expect(document.getElementById('compose-subject')?.getAttribute('placeholder')).toBeNull();
+    expect(document.querySelector('textarea')?.getAttribute('placeholder')).toBeNull();
+  });
+
+  it('keeps Discard quiet: a ghost that only turns red on hover', async () => {
+    await showing(DRAFT);
+    const discard = buttonNamed('Discard');
+    expect(discard?.className).toContain('text-paper-dim');
+    expect(discard?.className).toContain('hover:text-danger');
   });
 
   it('prints an upload problem as an error, not in the accent', async () => {
@@ -429,56 +561,143 @@ describe('the composer’s footer', () => {
     });
     expect(document.querySelector('p[role="alert"]')?.className).toContain('text-danger');
   });
+});
 
-  it('asks nothing of the Subject field until it is empty and focused', async () => {
-    await showing(DRAFT);
-    expect(document.getElementById('compose-subject')?.getAttribute('placeholder')).toBeNull();
-    expect(document.querySelector('textarea')?.getAttribute('placeholder')).toBeNull();
-  });
-
-  it('keeps Discard quiet: a ghost that only turns red on hover', async () => {
-    await showing(DRAFT);
-    const discard = [...document.querySelectorAll('button')].find(
-      ({ textContent }) => textContent === 'Discard',
-    );
-    expect(discard?.className).toContain('text-paper-dim');
-    expect(discard?.className).toContain('hover:text-danger');
-  });
-
-  const press = async (label: string) => {
-    const button = [...document.querySelectorAll('button')].find(
-      ({ textContent }) => textContent === label,
-    );
-    if (button === undefined) throw new Error(`no ${label} button`);
-    await act(async () => {
-      button.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
-      button.click();
-    });
+describe('the preview step', () => {
+  const previewing = async (draft: ComposeDraft) => {
+    await opening(draft);
+    await press('Preview');
   };
+  const envelope = () =>
+    Object.fromEntries(
+      [...document.querySelectorAll('dl > div')].map(row => [
+        row.querySelector('dt')?.textContent,
+        row.querySelector('dd')?.textContent,
+      ]),
+    );
+  const title = () => document.querySelector('[role="dialog"] h2')?.textContent;
 
-  it('has one write surface, set as the message is read', async () => {
-    await showing(DRAFT);
-    expect(document.querySelector('[role="tab"]')).toBeNull();
-    expect(document.querySelector('textarea')?.className).not.toContain('font-mono');
+  afterEach(() => {
+    mail.draft = null;
   });
 
-  it('opens the message as it will be read, over the draft', async () => {
-    await showing({ ...DRAFT, body: 'Due **Friday**, 2 * 3 boxes.' });
-    await press('Preview');
-    const preview = document.querySelector('[role="dialog"] strong')?.closest('[role="dialog"]');
-    expect(preview?.querySelector('strong')?.textContent).toBe('Friday');
-    expect(preview?.textContent).toContain('2 * 3 boxes.');
-    expect(document.querySelector('textarea')?.value).toBe('Due **Friday**, 2 * 3 boxes.');
-    await press('Back to draft');
-    expect(document.querySelector('[role="dialog"] strong')).toBeNull();
+  it('shows the message as it will be read, in place of the write step', async () => {
+    await previewing({ ...DRAFT, body: 'Due **Friday**, 2 * 3 boxes.' });
+    expect(title()).toBe('Preview');
+    expect(document.querySelectorAll('[role="dialog"]')).toHaveLength(1);
+    expect(document.querySelector('textarea')).toBeNull();
+    expect(document.querySelector('[role="dialog"] strong')?.textContent).toBe('Friday');
+    expect(document.body.textContent).toContain('2 * 3 boxes.');
+    expect(buttonNamed('Markdown supported')).toBeUndefined();
   });
 
-  it('offers a Markdown cheat sheet in the preview', async () => {
-    await showing(DRAFT);
-    await press('Preview');
-    await press('Markdown supported');
-    const sheet = document.querySelector('[aria-label="Markdown cheat sheet"]')?.textContent;
-    expect(sheet).toContain('**bold**');
-    expect(sheet).toContain('[text](url)a link');
+  it('shows the envelope: From with its sender and host, To, Subject', async () => {
+    await previewing(DRAFT);
+    expect(envelope()).toEqual({
+      From: 'me@x.testMe Myself · via smtp.x.test',
+      To: 'you@x.test',
+      Subject: 'Plans',
+    });
+  });
+
+  it('tags a send-only From', async () => {
+    await previewing({ ...DRAFT, identityId: 'news@relay.test' });
+    expect(envelope().From).toBe('news@relay.testsend-onlyvia smtp.relay.test');
+  });
+
+  it('shows Cc and Bcc only when set, and an empty To only when nobody is addressed', async () => {
+    await previewing({ ...DRAFT, to: '', cc: 'a@x.test', bcc: 'b@x.test' });
+    expect(Object.keys(envelope())).toEqual(['From', 'Cc', 'Bcc', 'Subject']);
+    mail.draft = { ...DRAFT, to: '', subject: '', body: '' };
+    await act(async () => root.render(<Compose />));
+    expect(envelope()).toMatchObject({ To: '(no recipient)', Subject: '(no subject)' });
+    expect(document.body.textContent).toContain('(no message)');
+  });
+
+  it('says quietly that no From is chosen', async () => {
+    await previewing({ ...DRAFT, identityId: '' });
+    expect(envelope().From).toBe('(no address selected)');
+  });
+
+  it('sends, when everything is there', async () => {
+    mail.send.mockResolvedValue({
+      ok: true,
+      value: { settled: Promise.resolve({ state: 'sent' }) },
+    });
+    await previewing(DRAFT);
+    expect(buttonNamed('Send')?.disabled).toBe(false);
+    await press('Send');
+    expect(mail.send).toHaveBeenCalledTimes(1);
+    expect(navigate).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    [{ identityId: '' }, 'Choose a From address to send.'],
+    [{ identityId: 'gone@x.test' }, 'Choose a From address to send.'],
+    [{ to: '' }, 'Add a recipient to send.'],
+    [{ identityId: '', to: '' }, 'Choose a From address and add a recipient to send.'],
+  ])('holds Send for %o and says why', async (change, reason) => {
+    await previewing({ ...DRAFT, ...change });
+    expect(buttonNamed('Send')?.disabled).toBe(true);
+    const line = [...document.querySelectorAll('p')].find(
+      ({ textContent }) => textContent === reason,
+    );
+    // Beside Send, in the row the buttons are in, so the foot does not move when it goes.
+    expect(line?.parentElement).toBe(buttonNamed('Send')?.parentElement);
+  });
+
+  it('counts a Bcc as a recipient', async () => {
+    await previewing({ ...DRAFT, to: '', bcc: 'you@x.test' });
+    expect(buttonNamed('Send')?.disabled).toBe(false);
+    const silent = [...document.querySelectorAll('p')].find(({ className }) =>
+      className.includes('min-h-4'),
+    );
+    // Below `sm` its line is kept even when it is silent.
+    expect(silent?.textContent).toBe('');
+  });
+
+  it('does not blame the From or the recipient for a frozen draft', async () => {
+    mail.openSendState = 'sending';
+    await previewing({ ...DRAFT, identityId: '', to: '' });
+    expect(buttonNamed('Send')?.disabled).toBe(true);
+    expect(document.body.textContent).not.toContain('to send.');
+  });
+
+  it('goes back to the write step as it was left', async () => {
+    await previewing({ ...DRAFT, cc: 'a@x.test' });
+    await press('Back to writing');
+    expect(title()).toBe('New message');
+    expect(document.querySelector('textarea')?.value).toBe('Hello');
+    expect(document.getElementById('compose-cc')).not.toBeNull();
+    expect(document.activeElement).toBe(buttonNamed('Preview'));
+    expect(navigate).not.toHaveBeenCalled();
+  });
+
+  it('returns to the write step from Back to editing on a send nobody saw the answer to', async () => {
+    mail.openSendState = 'unconfirmed';
+    await previewing(DRAFT);
+    expect(title()).toBe('Preview');
+    await press('Back to editing');
+    expect(mail.backToEditing).toHaveBeenCalledTimes(1);
+    expect(title()).toBe('New message');
+    expect(document.querySelector('textarea')).not.toBeNull();
+  });
+
+  it('steps back on Escape instead of closing', async () => {
+    await previewing(DRAFT);
+    await act(async () => {
+      document.activeElement?.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }),
+      );
+    });
+    expect(title()).toBe('New message');
+    expect(navigate).not.toHaveBeenCalled();
+  });
+
+  it('closes, keeping the draft, on ✕', async () => {
+    await previewing(DRAFT);
+    const close = document.querySelector<HTMLButtonElement>('[aria-label="Close draft"]');
+    await act(async () => close?.click());
+    expect(navigate).toHaveBeenCalledTimes(1);
   });
 });

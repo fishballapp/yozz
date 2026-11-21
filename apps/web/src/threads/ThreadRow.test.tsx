@@ -183,6 +183,22 @@ describe('what a row says beside the subject', () => {
     expect(host.textContent).toContain('To: no one yet');
   });
 
+  it('says a draft-only thread is to its recipient in search too, with no From to name', async () => {
+    const thread = threadIn([]);
+    await show('unified', {
+      ...thread,
+      messages: thread.messages.map(message => ({
+        ...message,
+        isDraft: true,
+        fromName: '',
+        fromAddress: '',
+        toAddress: 'dad@example.org',
+        to: [{ address: 'dad@example.org' }],
+      })),
+    });
+    expect(host.textContent).toContain('To: dad@example.org');
+  });
+
   it('says which address it came to only in a named view with more than one mailbox', async () => {
     await show('unified', threadIn(['inbox']));
     expect(host.textContent).not.toContain('example');

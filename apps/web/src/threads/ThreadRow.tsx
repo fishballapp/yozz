@@ -56,9 +56,12 @@ const useRecord = (thread: ThreadState, view: ViewId) => {
   const { ownedAddresses, mailboxes } = useMail();
   const latest = latestOf(thread);
   const inbound = inboundOf(thread, ownedAddresses);
-  // Sent and Drafts list what you wrote, so the other party is who it is to.
+  // Sent and Drafts list what you wrote, so the other party is who it is to. So does a thread of
+  // nothing but drafts wherever it turns up, as in search: its draft may have no From to name.
   const outbound = (() => {
-    if (view === 'drafts') return thread.messages.findLast(message => message.isDraft === true);
+    if (view === 'drafts' || thread.messages.every(message => message.isDraft === true)) {
+      return thread.messages.findLast(message => message.isDraft === true);
+    }
     if (view !== 'sent') return undefined;
     return thread.messages.findLast(
       message => message.isDraft !== true && ownedAddresses.includes(message.fromAddress),

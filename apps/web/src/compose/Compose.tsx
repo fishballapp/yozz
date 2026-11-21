@@ -1,5 +1,12 @@
 import { Dialog } from '@base-ui/react/dialog';
-import { PaperclipIcon, PaperPlaneRightIcon, TrashIcon, XIcon } from '@phosphor-icons/react';
+import {
+  ArrowLeftIcon,
+  EyeIcon,
+  PaperclipIcon,
+  PaperPlaneRightIcon,
+  TrashIcon,
+  XIcon,
+} from '@phosphor-icons/react';
 import { useLocation, useNavigate, useSearch } from '@tanstack/react-router';
 import { type DraftFile, MAX_ATTACHMENT_BYTES } from '@yozz.app/mail/compose/draft';
 import type { DeleteOutcome } from '@yozz.app/mail/compose/draft-vault';
@@ -7,6 +14,7 @@ import { seedFor } from '@yozz.app/mail/compose/seed';
 import { describeMailFailure } from '@yozz.app/mail/describe-failure';
 import { cn } from 'cn';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { flushSync } from 'react-dom';
 import { useComposer, useMail } from '../store/MailProvider';
 import type { LoadStoredFile } from '../threads/AttachmentList';
 import { displayName, download } from '../threads/attachment-preview';
@@ -19,7 +27,7 @@ import { reportProblem, toast } from '../ui/Toast';
 import { Tooltip } from '../ui/Tooltip';
 import { useVault } from '../vault/session';
 import type { SessionEnded } from '../vault/unlock';
-import { DraftPreview } from './DraftPreview';
+import { DraftPreview, MarkdownCheatSheet } from './DraftPreview';
 import { readAttachments, type SendReport } from './draft';
 import { FromSwitch } from './FromSwitch';
 import {
@@ -80,7 +88,7 @@ const reportSend = (settled: Promise<SendReport>, reopen: (draftKey: string) => 
       timeout: 0,
       priority: 'high',
       // Nothing else on screen knows which draft this was.
-      // Closed too: it stays until told otherwise, and would sit on the Send button it reopens.
+      // Closed too: it stays until told otherwise, and would sit over the composer it reopens.
       actionProps: {
         children: 'Reopen',
         onClick: () => {
@@ -297,6 +305,8 @@ export const Compose = () => {
   const [pendingReads, setPendingReads] = useState(0);
   // Cc and Bcc are folded away until asked for; a reply-all opens with them out.
   const [showCopies, setShowCopies] = useState(false);
+  // Write, then Preview, then Send: Send is only offered on the message as it will be read.
+  const [step, setStep] = useState<'write' | 'preview'>('write');
   // Above the vault gate, so on screen while the session resumes; the seed waits for one.
   const { session } = useVault();
   const canSeed = isDemo() || session !== null;
@@ -314,6 +324,8 @@ export const Compose = () => {
     if (draftKey !== null && !drafts.some(candidate => candidate.draftKey === draftKey)) return;
     seeded.current = seedKey;
     setSendError(null);
+    // Closing changes the intent too, so this also puts a closed composer back on Write.
+    setStep('write');
     const opened = seedDraft(compose, seed);
     setShowCopies(opened !== null && (opened.cc !== '' || opened.bcc !== ''));
   }, [compose, seedKey, canSeed, seedDraft, threads, identities, ownedAddresses, drafts]);
@@ -321,14 +333,44 @@ export const Compose = () => {
   const fileInput = useRef<HTMLInputElement>(null);
   const bodyInput = useRef<HTMLTextAreaElement>(null);
   const toInput = useRef<HTMLInputElement>(null);
+  const fromTrigger = useRef<HTMLButtonElement>(null);
+  const previewButton = useRef<HTMLButtonElement>(null);
+  const previewContent = useRef<HTMLDivElement>(null);
 
-  // You write above a quote, so a reply starts at position 0; a blank draft starts in To. Keyed on open/close only.
+  // You write above a quote, so a reply starts at position 0; a message with no From chosen starts
+  // at From, and a forward, whose From is set, in To. Once per opening: a later pick or edit never
+  // moves the caret.
   const isOpen = draft !== null;
+  // Against the vault's addresses, not merely non-empty: a removed address can't send either.
+  const selectedIdentity = identities.find(identity => identity.address === draft?.identityId);
+  const hasFrom = selectedIdentity !== undefined;
   // A forward has a quote but no recipient yet.
   const startedAsReply = (draft?.startedAsReply ?? false) && (draft?.to ?? '') !== '';
+  const focusedFor = useRef<string | null>(null);
   useEffect(() => {
-    if (!isOpen) return;
+    if (!isOpen) {
+      focusedFor.current = null;
+      return;
+    }
+    if (focusedFor.current === seedKey) return;
+    // On a cold load the draft can open before the addresses do, while From is still the
+    // disabled stand-in with nothing to focus.
+    if (!hasFrom && identities.length === 0) return;
     const frame = requestAnimationFrame(() => {
+      // Marked here, not before: a re-render that cancels this frame must leave it to the next.
+      focusedFor.current = seedKey;
+      // Someone who clicked into a field while the addresses loaded is already writing.
+      const active = document.activeElement;
+      if (
+        active?.closest('[role="dialog"]') &&
+        active.matches('input, textarea, [role="combobox"]')
+      ) {
+        return;
+      }
+      if (!hasFrom) {
+        fromTrigger.current?.focus();
+        return;
+      }
       if (startedAsReply) {
         bodyInput.current?.focus();
         bodyInput.current?.setSelectionRange(0, 0);
@@ -337,8 +379,14 @@ export const Compose = () => {
       toInput.current?.focus();
     });
     return () => cancelAnimationFrame(frame);
-    // Both deps are fixed for the life of a draft.
-  }, [isOpen, startedAsReply]);
+  }, [isOpen, seedKey, startedAsReply, hasFrom, identities.length]);
+
+  /** Swaps the step in place, and puts focus where the step change left the person. */
+  const showStep = (next: 'write' | 'preview') => {
+    setSendError(null);
+    flushSync(() => setStep(next));
+    (next === 'preview' ? previewContent : previewButton).current?.focus();
+  };
 
   /** Send, and a takeover, which goes on the same way once it is claimed. */
   const pressSend = (press: () => Promise<Awaited<ReturnType<typeof send>> | null>) => {
@@ -376,7 +424,16 @@ export const Compose = () => {
   // A Bcc-only send is a real message.
   const isMissingRecipient =
     draft !== null && [draft.to, draft.cc, draft.bcc].every(field => field.trim() === '');
-  const canSend = !isSending && !isOpenDraftFrozen && pendingReads === 0 && !isMissingRecipient;
+  const canSend =
+    !isSending && !isOpenDraftFrozen && pendingReads === 0 && hasFrom && !isMissingRecipient;
+  // Only what the person can fix by going Back; a frozen draft is the banner's to explain.
+  const missingForSend = (() => {
+    if (isSending || isOpenDraftFrozen) return null;
+    if (!hasFrom && isMissingRecipient) return 'Choose a From address and add a recipient to send.';
+    if (!hasFrom) return 'Choose a From address to send.';
+    if (isMissingRecipient) return 'Add a recipient to send.';
+    return null;
+  })();
   const sendLabel = (() => {
     if (!isSending) return 'Send';
     return draft?.attachments.some(({ upload }) => upload === 'uploading')
@@ -391,14 +448,25 @@ export const Compose = () => {
   const readerLeft = useReaderPaneLeft(isShown && isWide && answersMessage(compose));
   // Held through the closing transition, which runs after the intent has left the URL: the
   // composer leaves in the shape and under the title it had.
-  const frameRef = useRef<{ title: string; readerLeft: number | null }>({
+  const frameRef = useRef<{ title: string; isWriteStep: boolean; readerLeft: number | null }>({
     title: '',
+    isWriteStep: true,
     readerLeft: null,
   });
   if (isShown) {
-    frameRef.current = { title: composeTitleOf(compose, threads, ownedAddresses), readerLeft };
+    frameRef.current = {
+      title: step === 'write' ? composeTitleOf(compose, threads, ownedAddresses) : 'Preview',
+      isWriteStep: step === 'write',
+      readerLeft,
+    };
   }
   const frame = frameRef.current;
+  // Under either step's footer controls, across the whole grid.
+  const sendErrorLine = sendError !== null && (
+    <p className="col-span-full text-base text-danger" role="alert">
+      {sendError}
+    </p>
+  );
   const isDocked = frame.readerLeft !== null;
 
   return (
@@ -406,8 +474,15 @@ export const Compose = () => {
       // Open once there is a draft to show, not merely an intent: the intent is there during the
       // resume too. A stray click closes, since closing keeps the draft.
       open={isShown}
-      onOpenChange={open => {
-        if (!open) close();
+      onOpenChange={(open, { reason, cancel }) => {
+        if (open) return;
+        // Escape steps back out of Preview, as Back does; ✕ and the scrim still close from either.
+        if (step === 'preview' && reason === 'escape-key') {
+          cancel();
+          if (!isSending) showStep('write');
+          return;
+        }
+        close();
       }}
       // Docked, focus stays in the composer while the pointer and the wheel still reach the
       // reader; a click there is reading, not a stray click, so it does not close.
@@ -440,7 +515,8 @@ export const Compose = () => {
               <Dialog.Title className="label-rule mr-auto truncate text-paper-dim">
                 {frame.title}
               </Dialog.Title>
-              {draft !== null && <DraftPreview body={draft.body} />}
+              {/* Consulted while writing, so it is on the write step's header. */}
+              {frame.isWriteStep && <MarkdownCheatSheet />}
               {/* Close keeps the draft. Discard, in the footer, is the only thing that does not. */}
               <Dialog.Close
                 render={
@@ -507,7 +583,15 @@ export const Compose = () => {
                     >
                       Send again
                     </Button>
-                    <Button variant="ghost" size="sm" onClick={() => void backToEditing()}>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => {
+                        void backToEditing();
+                        // Editing happens on the write step.
+                        if (step === 'preview') showStep('write');
+                      }}
+                    >
                       Back to editing
                     </Button>
                   </>
@@ -530,12 +614,17 @@ export const Compose = () => {
               </div>
             )}
 
-            {draft !== null && (
+            {draft !== null && step === 'preview' && (
+              <DraftPreview ref={previewContent} draft={draft} from={selectedIdentity} />
+            )}
+
+            {draft !== null && step === 'write' && (
               <>
                 <div className="shrink-0">
                   <FromSwitch
                     value={draft.identityId}
                     onChange={identityId => updateDraft({ identityId })}
+                    triggerRef={fromTrigger}
                   />
                   {/* The Cc/Bcc cell is part of the To row, so the row's focus rule runs under it too. */}
                   <div className="group/to flex items-stretch">
@@ -613,7 +702,11 @@ export const Compose = () => {
                     isDocked && 'max-w-[80ch]',
                   )}
                 />
+              </>
+            )}
 
+            {draft !== null && (
+              <>
                 {draft.attachments.length > 0 && (
                   <div className="shrink-0 border-t border-rule-soft px-4 py-2.5">
                     <ul className="flex flex-wrap gap-2">
@@ -621,7 +714,8 @@ export const Compose = () => {
                         <DraftFileChip
                           key={file.id}
                           file={file}
-                          isFrozen={isSending || isOpenDraftFrozen}
+                          // The preview shows what goes; a file changes on the write step.
+                          isFrozen={step === 'preview' || isSending || isOpenDraftFrozen}
                           loadFile={readStoredFile}
                           onRemove={() => detach(file.id)}
                           onRetry={() => retryUpload(file.id)}
@@ -636,118 +730,141 @@ export const Compose = () => {
                   </div>
                 )}
 
-                {/* One grid, so the reason Send is off sits beside Send from `sm` and above the row
-                    below it, in a line whose height is kept: the foot never moves when it goes. */}
-                <div className="grid shrink-0 grid-cols-[1fr_auto] items-center gap-x-3 gap-y-2 border-t border-rule-soft px-4 py-3 sm:grid-cols-[1fr_auto_auto]">
-                  <div className="flex items-center gap-3">
-                    <input
-                      ref={fileInput}
-                      type="file"
-                      multiple
-                      className="sr-only"
-                      onChange={event => {
-                        const files = [...(event.target.files ?? [])];
-                        event.target.value = '';
-                        // Sizes are known before a byte is read. Same dedupe as `attach`.
-                        const kept = draft.attachments.filter(
-                          file => !files.some(next => next.name === file.name),
-                        );
-                        const total = [...kept, ...files].reduce((sum, file) => sum + file.size, 0);
-                        if (total > MAX_ATTACHMENT_BYTES) {
-                          setSendError(
-                            `Attachments must total under ${formatBytes(MAX_ATTACHMENT_BYTES)}.`,
+                {step === 'write' ? (
+                  <div className="grid shrink-0 grid-cols-[1fr_auto] items-center gap-x-3 gap-y-2 border-t border-rule-soft px-4 py-3">
+                    <div className="flex items-center gap-3">
+                      <input
+                        ref={fileInput}
+                        type="file"
+                        multiple
+                        className="sr-only"
+                        onChange={event => {
+                          const files = [...(event.target.files ?? [])];
+                          event.target.value = '';
+                          // Sizes are known before a byte is read. Same dedupe as `attach`.
+                          const kept = draft.attachments.filter(
+                            file => !files.some(next => next.name === file.name),
                           );
-                          return;
-                        }
-                        setSendError(null);
-                        // A send snapshotted mid-read would go out without the file.
-                        setPendingReads(count => count + files.length);
-                        // A lock during the read hands this composer to the next session, whose
-                        // draft must not gain this person's files.
-                        const isCurrent = watchSession();
-                        void (async () => {
-                          try {
-                            const read = await readAttachments(files);
-                            if (isCurrent()) attach(read);
-                          } catch (err) {
-                            if (isCurrent()) {
-                              setSendError(err instanceof Error ? err.message : String(err));
-                            }
-                          } finally {
-                            setPendingReads(count => count - files.length);
+                          const total = [...kept, ...files].reduce(
+                            (sum, file) => sum + file.size,
+                            0,
+                          );
+                          if (total > MAX_ATTACHMENT_BYTES) {
+                            setSendError(
+                              `Attachments must total under ${formatBytes(MAX_ATTACHMENT_BYTES)}.`,
+                            );
+                            return;
                           }
-                        })();
-                      }}
-                    />
-                    {/*
+                          setSendError(null);
+                          // A send snapshotted mid-read would go out without the file.
+                          setPendingReads(count => count + files.length);
+                          // A lock during the read hands this composer to the next session, whose
+                          // draft must not gain this person's files.
+                          const isCurrent = watchSession();
+                          void (async () => {
+                            try {
+                              const read = await readAttachments(files);
+                              if (isCurrent()) attach(read);
+                            } catch (err) {
+                              if (isCurrent()) {
+                                setSendError(err instanceof Error ? err.message : String(err));
+                              }
+                            } finally {
+                              setPendingReads(count => count - files.length);
+                            }
+                          })();
+                        }}
+                      />
+                      {/*
                         The footer's controls are the one row a thumb uses, so they carry the 44px
                         target on a phone and the compact one from `lg` up — the same shape the
                         header's Close already had, and the reason it was the only control here
                         that met the rule.
                       */}
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="h-11 lg:h-7"
-                      disabled={isSending || isOpenDraftFrozen}
-                      onClick={() => fileInput.current?.click()}
-                    >
-                      <PaperclipIcon size={13} />
-                      Attach
-                    </Button>
-                    {/*
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-11 lg:h-7"
+                        disabled={isSending || isOpenDraftFrozen}
+                        onClick={() => fileInput.current?.click()}
+                      >
+                        <PaperclipIcon size={13} />
+                        Attach
+                      </Button>
+                      {/*
                         The one control that destroys writing, so it sits at the opposite end of
-                        the bar from Send and asks before it acts. The record is tombstoned rather
+                        the bar from Preview and asks before it acts. The record is tombstoned rather
                         than deleted, but no screen in the app brings one back — so from here it
                         is irreversible, and it takes the same sheet Remove address and Reset
                         vault take (DECISIONS.md).
                       */}
-                    <ConfirmDialog
-                      trigger={
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="h-11 hover:text-danger focus-visible:text-danger lg:h-7"
-                          // Frozen as Send is: the bytes may already be on the wire.
-                          disabled={isSending || isOpenDraftFrozen}
-                        >
-                          <TrashIcon size={13} />
-                          Discard
-                        </Button>
-                      }
-                      title="Discard this draft?"
-                      description={DISCARD_WARNING}
-                      confirmLabel="Discard"
-                      busyLabel="Discarding…"
-                      onConfirm={async () => {
-                        const discarded = discardDraft();
-                        close();
-                        void reportDiscard(discarded);
-                      }}
-                    />
+                      <ConfirmDialog
+                        trigger={
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-11 hover:text-danger focus-visible:text-danger lg:h-7"
+                            // Frozen as Send is: the bytes may already be on the wire.
+                            disabled={isSending || isOpenDraftFrozen}
+                          >
+                            <TrashIcon size={13} />
+                            Discard
+                          </Button>
+                        }
+                        title="Discard this draft?"
+                        description={DISCARD_WARNING}
+                        confirmLabel="Discard"
+                        busyLabel="Discarding…"
+                        onConfirm={async () => {
+                          const discarded = discardDraft();
+                          close();
+                          void reportDiscard(discarded);
+                        }}
+                      />
+                    </div>
+                    {/* Never disabled: the preview is where a half-written draft says what it lacks. */}
+                    <Button
+                      ref={previewButton}
+                      variant="primary"
+                      className="h-11 lg:h-8"
+                      onClick={() => showStep('preview')}
+                    >
+                      <EyeIcon size={13} />
+                      Preview
+                    </Button>
+                    {sendErrorLine}
                   </div>
-                  {/* A disabled button shows no tooltip and takes no focus or touch, so the reason is
-                      a line of its own. Only for the one cause the person can fix by typing. */}
-                  <p className="order-first col-span-2 min-h-4 text-2xs text-paper-faint sm:order-none sm:col-span-1 sm:min-h-0 sm:text-right">
-                    {isMissingRecipient && !isSending && !isOpenDraftFrozen
-                      ? 'Add a recipient to send.'
-                      : null}
-                  </p>
-                  <Button
-                    variant="primary"
-                    className="h-11 lg:h-8"
-                    onClick={() => pressSend(send)}
-                    disabled={!canSend}
-                  >
-                    <PaperPlaneRightIcon size={13} weight="fill" />
-                    {sendLabel}
-                  </Button>
-                  {sendError !== null && (
-                    <p className="col-span-full text-base text-danger" role="alert">
-                      {sendError}
+                ) : (
+                  // One grid, so the reason Send is off sits beside Send from `sm` and above the
+                  // row below it, in a line whose height is kept: the foot never moves when it goes.
+                  <div className="grid shrink-0 grid-cols-[1fr_auto] items-center gap-x-3 gap-y-2 border-t border-rule-soft px-4 py-3 sm:grid-cols-[1fr_auto_auto]">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-11 justify-self-start lg:h-7"
+                      disabled={isSending}
+                      onClick={() => showStep('write')}
+                    >
+                      <ArrowLeftIcon size={13} />
+                      Back to writing
+                    </Button>
+                    {/* A disabled button shows no tooltip and takes no focus or touch, so the
+                        reason is a line of its own. */}
+                    <p className="order-first col-span-2 min-h-4 text-2xs text-paper-faint sm:order-none sm:col-span-1 sm:min-h-0 sm:text-right">
+                      {missingForSend}
                     </p>
-                  )}
-                </div>
+                    <Button
+                      variant="primary"
+                      className="h-11 lg:h-8"
+                      onClick={() => pressSend(send)}
+                      disabled={!canSend}
+                    >
+                      <PaperPlaneRightIcon size={13} weight="fill" />
+                      {sendLabel}
+                    </Button>
+                    {sendErrorLine}
+                  </div>
+                )}
               </>
             )}
           </Dialog.Popup>

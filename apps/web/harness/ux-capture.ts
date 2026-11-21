@@ -44,14 +44,16 @@ const tickRows = async (page: Page, viewport: ViewportName) => {
   }
 };
 
+const BODY =
+  'Hi Kate,\n\nStill on for **Thursday at 10**? Two things before then:\n\n- the revised quote (2 * 340 = 680)\n- the [venue shortlist](https://example.com/venues)\n\nParking is booked at https://example.com/parking/thursday\n\nThanks,\nJason';
+
+/** A new message starts with no From; this picks the first fixture address. */
 const fillDraft = async (page: Page) => {
+  await page.getByRole('dialog').getByRole('combobox').click();
+  await page.getByRole('option', { name: /jason@jyu\.example/u }).click();
   await page.locator('#compose-to').fill('kate@harbourlight.example');
   await page.locator('#compose-subject').fill('Thursday still good?');
-  await page
-    .getByLabel('Message body, markdown')
-    .fill(
-      'Hi Kate,\n\nStill on for **Thursday at 10**? Two things before then:\n\n- the revised quote (2 * 340 = 680)\n- the [venue shortlist](https://example.com/venues)\n\nParking is booked at https://example.com/parking/thursday\n\nThanks,\nJason',
-    );
+  await page.getByLabel('Message body, markdown').fill(BODY);
 };
 
 const DEMO_SCENES: readonly Scene[] = [
@@ -81,6 +83,24 @@ const DEMO_SCENES: readonly Scene[] = [
     path: '/m/unified?compose=new',
     prepare: async page => {
       await fillDraft(page);
+      await page.getByRole('button', { name: 'Preview' }).click();
+    },
+  },
+  {
+    // A body with no From and no recipient: Send held, and the footer says what is missing.
+    name: 'compose-preview-incomplete',
+    path: '/m/unified?compose=new',
+    prepare: async page => {
+      await page.getByLabel('Message body, markdown').fill(BODY);
+      await page.getByRole('button', { name: 'Preview' }).click();
+    },
+  },
+  {
+    // The preview keeps the docked frame, beside the message it answers.
+    name: 'compose-reply-preview',
+    path: '/m/unified/t/t-dune?compose=reply:m-dune-1',
+    only: 'desktop',
+    prepare: async page => {
       await page.getByRole('button', { name: 'Preview' }).click();
     },
   },
@@ -143,18 +163,9 @@ const DEMO_SCENES: readonly Scene[] = [
     },
   },
   {
-    name: 'compose-send-ready',
-    path: '/m/unified?compose=new',
-    only: 'desktop',
-    prepare: async page => {
-      await page.locator('#compose-to').fill('kate@harbourlight.example');
-    },
-  },
-  {
     name: 'compose-cheat-sheet',
     path: '/m/unified?compose=new',
     prepare: async page => {
-      await page.getByRole('button', { name: 'Preview' }).click();
       await page.getByRole('button', { name: 'Markdown supported' }).click();
     },
   },

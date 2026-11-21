@@ -1947,3 +1947,92 @@ describe('an answer that lands after its session ended', () => {
     },
   );
 });
+
+describe('the From of a draft', () => {
+  const second: InboundAddress = { ...MAILBOX, address: 'second@x.test' };
+
+  it('starts blank on a new message, however few addresses are connected', async () => {
+    const single = await mount(fakeRecordStore().store);
+    await act(async () => single.hook().composer.seedDraft('new', {}));
+    expect(single.hook().composer.draft?.identityId).toBe('');
+
+    const several = await mount(fakeRecordStore().store);
+    await several.rerender({ identities: [MAILBOX, second] });
+    await act(async () => several.hook().composer.seedDraft('new', {}));
+    expect(several.hook().composer.draft?.identityId).toBe('');
+  });
+
+  it('keeps the sender a reply was seeded with', async () => {
+    const mounted = await mount(fakeRecordStore().store);
+    await act(async () =>
+      mounted.hook().composer.seedDraft('new', { identityId: MAILBOX.address }),
+    );
+    expect(mounted.hook().composer.draft?.identityId).toBe(MAILBOX.address);
+  });
+
+  it('is cleared, not swapped for another address, when its address is removed while open', async () => {
+    const mounted = await mount(fakeRecordStore().store);
+    await mounted.rerender({ identities: [MAILBOX, second] });
+    await act(async () =>
+      mounted.hook().composer.seedDraft('new', { identityId: MAILBOX.address }),
+    );
+    await mounted.rerender({ identities: [second] });
+    expect(mounted.hook().composer.draft?.identityId).toBe('');
+  });
+
+  it('is not wiped by a vault that has no addresses yet', async () => {
+    const mounted = await mount(fakeRecordStore().store);
+    await mounted.rerender({ identities: [] });
+    await act(async () =>
+      mounted.hook().composer.seedDraft('new', { identityId: MAILBOX.address }),
+    );
+    expect(mounted.hook().composer.draft?.identityId).toBe(MAILBOX.address);
+  });
+
+  it('refuses a send until an address is picked', async () => {
+    const mounted = await mount(fakeRecordStore().store);
+    await act(async () => mounted.hook().composer.seedDraft('new', { to: 'you@x.test' }));
+    expect(await act(() => mounted.hook().composer.send())).toEqual({
+      ok: false,
+      error: { kind: 'error', detail: 'Pick an address to send as.' },
+    });
+  });
+
+  describe('left blank', () => {
+    beforeEach(() => {
+      vi.useFakeTimers();
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('autosaves, lists in Drafts, and reopens still blank', async () => {
+      const vault = vaultOver(fakeRecordStore().store);
+      const mounted = await mount(vault.store);
+      await act(async () => mounted.hook().composer.seedDraft('new', {}));
+      await act(async () => mounted.hook().composer.updateDraft({ body: 'Not yet addressed' }));
+      await act(async () => vi.advanceTimersByTimeAsync(2_000));
+
+      const [stored] = await listDrafts(vault.store);
+      expect(stored?.record).toMatchObject({ from: '', body: 'Not yet addressed' });
+      expect(mounted.hook().shared.drafts).toHaveLength(1);
+
+      await act(async () => mounted.hook().composer.seedDraft(undefined, {}));
+      await act(async () => mounted.hook().composer.seedDraft(`draft:${stored?.draftKey}`, {}));
+      expect(mounted.hook().composer.draft).toMatchObject({
+        identityId: '',
+        body: 'Not yet addressed',
+      });
+    });
+
+    it('autosaves a draft that has only a Cc', async () => {
+      const vault = vaultOver(fakeRecordStore().store);
+      const mounted = await mount(vault.store);
+      await act(async () => mounted.hook().composer.seedDraft('new', {}));
+      await act(async () => mounted.hook().composer.updateDraft({ cc: 'them@x.test' }));
+      await act(async () => vi.advanceTimersByTimeAsync(2_000));
+      expect((await listDrafts(vault.store))[0]?.record.cc).toBe('them@x.test');
+    });
+  });
+});
