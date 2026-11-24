@@ -38,6 +38,10 @@ pnpm -F @yozz.app/worker-api db:check-auth   # fails if the generated Better Aut
                                     #   drifted from the plugin set. Run after any auth.ts change
 ```
 
+One file of the web app: `pnpm -F @yozz.app/web exec vitest run src/threads/ThreadReader.test.tsx`,
+the path relative to `apps/web`. Its component tests (`*.test.tsx`) each start with
+`// @vitest-environment jsdom`; a new one without that line runs in Node and has no `document`.
+
 ## Owed when touching `packages/x509` or `packages/tls`
 
 Neither is in `pnpm test` — limbo needs a 39MB corpus and BoGo a Go toolchain plus a pinned
