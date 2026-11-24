@@ -1,7 +1,6 @@
 import {
   ATTACHMENT_NAME_CHARS,
   BODY_CHARS,
-  clip,
   OUTPUT_CHARS,
   RECIPIENTS_LISTED,
 } from '@yozz.app/mail/agent-budgets';
@@ -408,7 +407,8 @@ describe('get_threads', () => {
     expect(read?.attachments).toEqual([
       { name: 'invoice.pdf', type: 'application/pdf', size: 48213 },
       {
-        name: clip('n'.repeat(ATTACHMENT_NAME_CHARS + 50), ATTACHMENT_NAME_CHARS),
+        // The saved name, as every client shows and writes it: within 192 bytes.
+        name: 'n'.repeat(192),
         type: 'application/octet-stream',
         size: 7,
       },
@@ -419,6 +419,54 @@ describe('get_threads', () => {
     const [row] =
       (skim as { threads: { messages: Record<string, unknown>[] }[] }).threads[0]?.messages ?? [];
     expect(row).not.toHaveProperty('attachments');
+  });
+
+  it('gives each attachment the type its bytes identify and its notes, as the CLI does', async () => {
+    const program = new Uint8Array(0x48);
+    program.set([0x4d, 0x5a]);
+    new DataView(program.buffer).setUint32(0x3c, 0x40, true);
+    program.set([0x50, 0x45, 0, 0], 0x40);
+    const mail = thread('p', ['inbox'], {
+      messages: [
+        message('p/1', {
+          attachments: [
+            {
+              name: 'invoice.pdf',
+              size: 72,
+              kind: 'pdf',
+              mimeType: 'application/pdf',
+              content: program,
+            },
+            {
+              name: 'receipt.pdf',
+              size: 9,
+              kind: 'pdf',
+              mimeType: 'application/pdf',
+              content: new TextEncoder().encode('%PDF-1.7\n'),
+            },
+          ],
+        }),
+      ],
+    });
+    const { tools } = fakePort([mail]);
+    const result = await call(tools, 'get_threads', { ids: ['p'], body: 'latest' });
+    const [read] =
+      (result as { threads: { messages: Record<string, unknown>[] }[] }).threads[0]?.messages ?? [];
+    expect(read?.attachments).toEqual([
+      {
+        name: 'invoice.pdf',
+        type: 'application/pdf',
+        size: 72,
+        detectedType: 'application/vnd.microsoft.portable-executable',
+        notes: [
+          {
+            code: 'program-misnamed',
+            text: 'This file is a Windows executable, but its extension is .pdf.',
+          },
+        ],
+      },
+      { name: 'receipt.pdf', type: 'application/pdf', size: 9, detectedType: 'application/pdf' },
+    ]);
   });
 
   it("lists a draft's files, and nothing for a message with none", async () => {

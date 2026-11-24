@@ -11,7 +11,6 @@ import * as FileSystem from 'effect/FileSystem';
 import * as Path from 'effect/Path';
 import * as TestClock from 'effect/testing/TestClock';
 import { failureOf, runCli } from '../test-world.ts';
-import { safeFileName } from './attachments.ts';
 import { ADDRESS, mail, makeMailWorld, SECOND, signedByStripe } from './mail-world.ts';
 
 const reply = (n: number, to: number, text: string) =>
@@ -65,6 +64,7 @@ layer(NodeServices.layer)(it => {
               {
                 index: 0,
                 type: 'application/pdf',
+                detectedType: 'application/pdf',
                 size: 8,
                 untrusted: { name: 'invoice.pdf' },
               },
@@ -318,7 +318,8 @@ layer(NodeServices.layer)(it => {
         );
 
         const { exit, stdout, stderr } = yield* runCli(
-          ['read', 'mid/<m1@stripe.com>', '--save-attachments', dir],
+          // --save-noted, so the disguised name is written and its cleaning can be seen.
+          ['read', 'mid/<m1@stripe.com>', '--save-attachments', dir, '--save-noted'],
           { fetch: world.fetch, homes, servers },
         );
 
@@ -342,6 +343,171 @@ layer(NodeServices.layer)(it => {
         assert.strictEqual(yield* fs.readFileString(path.join(dir, 'invoice.pdf')), 'mine');
         assert.strictEqual(yield* fs.readFileString(path.join(dir, 'escape.sh')), 'rm -rf ~');
         assert.strictEqual((yield* fs.stat(path.join(dir, 'escape.sh'))).mode & 0o777, 0o600);
+      }),
+    );
+
+    it.effect('writes no attachment that has notes, and says which and why', () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const { world, homes, server, servers } = yield* makeMailWorld();
+        const dir = path.join(yield* fs.makeTempDirectoryScoped(), 'saved');
+        server.deliver(
+          'INBOX',
+          mail(1, {
+            attachments: [
+              { name: 'receipt.pdf', type: 'application/pdf', content: '%PDF-1.7' },
+              { name: 'statement.pdf', type: 'application/pdf', content: '<html><body>' },
+              { name: 'invoice.pdf.exe', type: 'application/octet-stream', content: 'x' },
+              // Saved, it is cut to 192 bytes and ends `.vbs`: the notes read that name.
+              {
+                name: `${'a'.repeat(188)}.vbs.${'x'.repeat(20)}`,
+                type: 'application/octet-stream',
+                content: 'y',
+              },
+            ],
+          }),
+        );
+
+        const { exit, stdout, stderr } = yield* runCli(
+          ['read', 'mid/<m1@stripe.com>', '--save-attachments', dir],
+          { fetch: world.fetch, homes, servers },
+        );
+
+        assert.isTrue(Exit.isSuccess(exit), stderr);
+        const out = JSON.parse(stdout);
+        const [receipt, statement, invoice, cut] = out.threads[0].messages[0].attachments;
+        expect(receipt).toMatchObject({
+          type: 'application/pdf',
+          detectedType: 'application/pdf',
+          path: path.join(dir, 'receipt.pdf'),
+        });
+        expect(receipt).not.toHaveProperty('notes');
+        expect(statement).toMatchObject({
+          type: 'application/pdf',
+          detectedType: 'text/html',
+          notes: [
+            {
+              code: 'page-misnamed',
+              text: 'This file is an HTML page, but its extension is .pdf.',
+            },
+          ],
+          notSaved:
+            'Not saved. Use --save-noted with --save-attachments to save attachments with notes.',
+        });
+        expect(statement).not.toHaveProperty('path');
+        expect(invoice).toMatchObject({
+          notes: [
+            {
+              code: 'double-extension',
+              text: 'This name contains .pdf, but its extension is .exe.',
+            },
+            {
+              code: 'runs-when-opened',
+              text: 'The .exe extension identifies a Windows executable, which may run when opened.',
+            },
+          ],
+          notSaved:
+            'Not saved. Use --save-noted with --save-attachments to save attachments with notes.',
+        });
+        expect(invoice).not.toHaveProperty('detectedType');
+        expect(cut).toMatchObject({
+          notes: [{ code: 'runs-when-opened' }],
+          untrusted: { name: `${'a'.repeat(188)}.vbs` },
+        });
+        expect(cut).not.toHaveProperty('path');
+        expect(yield* fs.readDirectory(dir)).toEqual(['receipt.pdf']);
+        expect(out.attachmentsNotSaved).toEqual([
+          { id: 'mid/<m1@stripe.com>', index: 1, reason: 'notes' },
+          { id: 'mid/<m1@stripe.com>', index: 2, reason: 'notes' },
+          { id: 'mid/<m1@stripe.com>', index: 3, reason: 'notes' },
+        ]);
+        expect(out).not.toHaveProperty('omittedAttachmentsNotSaved');
+      }),
+    );
+
+    it.effect('lists an attachment it did not save even when the budget cuts its message', () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const { world, homes, server, servers } = yield* makeMailWorld();
+        const dir = path.join(yield* fs.makeTempDirectoryScoped(), 'saved');
+        server.deliver(
+          'INBOX',
+          mail(1, {
+            text: 'first '.repeat(300),
+            attachments: [
+              { name: 'invoice.pdf.exe', type: 'application/octet-stream', content: 'x' },
+            ],
+          }),
+        );
+        for (let n = 2; n <= 8; n += 1) server.deliver('INBOX', reply(n, 1, `${n} `.repeat(400)));
+
+        const { exit, stdout, stderr } = yield* runCli(
+          ['read', 'mid/<m1@stripe.com>', '--save-attachments', dir],
+          { fetch: world.fetch, homes, servers },
+        );
+
+        assert.isTrue(Exit.isSuccess(exit), stderr);
+        const out = JSON.parse(stdout);
+        expect(out.threads[0].messages.map(({ id }: { id: string }) => id)).not.toContain(
+          'mid/<m1@stripe.com>',
+        );
+        expect(out.attachmentsNotSaved).toEqual([
+          { id: 'mid/<m1@stripe.com>', index: 0, reason: 'notes' },
+        ]);
+      }),
+    );
+
+    it.effect('names at most 20 attachments it did not save, and counts the rest', () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const { world, homes, server, servers } = yield* makeMailWorld();
+        const dir = path.join(yield* fs.makeTempDirectoryScoped(), 'saved');
+        server.deliver(
+          'INBOX',
+          mail(1, {
+            attachments: Array.from({ length: 50 }, (_, n) => ({
+              name: `setup-${n}.exe`,
+              type: 'application/octet-stream',
+              content: 'x',
+            })),
+          }),
+        );
+
+        const { exit, stdout, stderr } = yield* runCli(
+          ['read', 'mid/<m1@stripe.com>', '--save-attachments', dir],
+          { fetch: world.fetch, homes, servers },
+        );
+
+        assert.isTrue(Exit.isSuccess(exit), stderr);
+        const out = JSON.parse(stdout);
+        expect(out.attachmentsNotSaved).toHaveLength(20);
+        expect(out.attachmentsNotSaved[19]).toEqual({
+          id: 'mid/<m1@stripe.com>',
+          index: 19,
+          reason: 'notes',
+        });
+        expect(out.omittedAttachmentsNotSaved).toBe(30);
+        expect(JSON.stringify(out.attachmentsNotSaved).length).toBeLessThan(2_000);
+      }),
+    );
+
+    it.effect('--save-noted needs --save-attachments, before anything else is asked', () =>
+      Effect.gen(function* () {
+        const { world, homes, servers } = yield* makeMailWorld();
+        const { exit, stdout, stderr } = yield* runCli(
+          ['read', 'mid/<m1@stripe.com>', '--save-noted'],
+          { fetch: world.fetch, homes, servers },
+        );
+        assert.isTrue(Exit.isFailure(exit));
+        assert.strictEqual(stdout, '');
+        expect(failureOf(stderr)).toMatchObject({
+          code: 'UsageError',
+          message: '--save-noted requires --save-attachments',
+        });
+        expect(world.calls).toEqual([]);
       }),
     );
 
@@ -623,38 +789,6 @@ layer(NodeServices.layer)(it => {
           `application/${'x'.repeat(200)}`,
         ]) {
           expect(mimeTypeOf(hostile)).toBe('application/octet-stream');
-        }
-      }),
-    );
-  });
-
-  describe('safeFileName', () => {
-    it.effect('reduces a name to one bare segment', () =>
-      Effect.sync(() => {
-        expect(safeFileName('../../../etc/passwd')).toBe('passwd');
-        expect(safeFileName('..\\..\\windows\\system.ini')).toBe('system.ini');
-        expect(safeFileName('/absolute/path.txt')).toBe('path.txt');
-        expect(safeFileName('dir/')).toBe('attachment');
-        expect(safeFileName('..')).toBe('attachment');
-        expect(safeFileName('.bashrc')).toBe('bashrc');
-        expect(safeFileName('a\u0000b\u001Fc\u202Ed\u2066e.txt')).toBe('abcde.txt');
-        expect(safeFileName('C:evil.txt')).toBe('C_evil.txt');
-        expect(safeFileName('   ')).toBe('attachment');
-        expect(safeFileName('report.pdf... ')).toBe('report.pdf');
-        const bytes = (name: string) => new TextEncoder().encode(name).length;
-        const isWhole = (name: string) =>
-          new TextDecoder().decode(new TextEncoder().encode(name)) === name;
-        const long = safeFileName(`${'x'.repeat(300)}.pdf`);
-        expect(bytes(long)).toBeLessThanOrEqual(192);
-        expect(long.endsWith('.pdf')).toBe(true);
-        // 150 characters, 300 bytes: short by length, long by what the disk counts.
-        expect(bytes(safeFileName(`${'\u00e9'.repeat(150)}.pdf`))).toBeLessThanOrEqual(192);
-        // Cut by UTF-8 bytes between code points: no half character, no half surrogate pair.
-        for (const wide of ['\u00e9', '\u{1F600}', '\u4E2D']) {
-          const cut = safeFileName(`${wide.repeat(200)}.pdf`);
-          expect(bytes(cut)).toBeLessThanOrEqual(192);
-          expect(isWhole(cut)).toBe(true);
-          expect(cut.endsWith('.pdf')).toBe(true);
         }
       }),
     );

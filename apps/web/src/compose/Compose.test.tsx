@@ -54,6 +54,8 @@ const mail = vi.hoisted(() => ({
   sendAgain: vi.fn(),
   backToEditing: vi.fn(),
   finishWithoutCopy: vi.fn(),
+  readStoredFile: async (_fileId: string): Promise<Uint8Array<ArrayBuffer> | null> => null,
+  session: { userId: 'user-1' } as { userId: string } | null,
 }));
 const navigate = vi.hoisted(() => vi.fn());
 const reading = vi.hoisted(() => ({ files: null as PromiseWithResolvers<Attachment[]> | null }));
@@ -63,7 +65,7 @@ vi.mock('@tanstack/react-router', () => ({
   useNavigate: () => navigate,
   useLocation: () => '/m/unified',
 }));
-vi.mock('../vault/session', () => ({ useVault: () => ({ session: { userId: 'user-1' } }) }));
+vi.mock('../vault/session', () => ({ useVault: () => ({ session: mail.session }) }));
 vi.mock('./draft', async importOriginal => ({
   ...(await importOriginal<typeof import('./draft')>()),
   readAttachments: () => reading.files?.promise,
@@ -93,7 +95,7 @@ vi.mock('../store/MailProvider', () => ({
     identities: mail.identities,
     ownedAddresses: [],
     drafts: [],
-    readStoredFile: async () => null,
+    readStoredFile: (fileId: string) => mail.readStoredFile(fileId),
     watchSession: () => {
       const taken = mail.generation;
       return () => mail.generation === taken;
@@ -396,6 +398,109 @@ describe("a draft's file chips", () => {
     await showing([{ ...stored, upload: 'storage-full', content: new Uint8Array(1) }]);
     expect(chip()).toContain('Storage full');
     expect(alerts()).toEqual(['Failed to upload. Your file storage is full (1 GB).']);
+  });
+
+  it('asks before saving a file whose bytes carry notes, as a forward brings one', async () => {
+    const program = new Uint8Array(0x48);
+    program.set([0x4d, 0x5a]);
+    new DataView(program.buffer).setUint32(0x3c, 0x40, true);
+    program.set([0x50, 0x45, 0, 0], 0x40);
+    const made = vi.fn(() => 'blob:test/0');
+    vi.stubGlobal('URL', { ...URL, createObjectURL: made, revokeObjectURL: vi.fn() });
+    try {
+      await showing([
+        {
+          ...stored,
+          name: 'invoice.pdf',
+          mimeType: 'application/pdf',
+          upload: 'uploaded',
+          content: program,
+        },
+      ]);
+      const download = document.querySelector<HTMLButtonElement>(
+        '[aria-label="Download invoice.pdf, 2.0 KB"]',
+      );
+      if (download === null) throw new Error('no download on the chip');
+      await act(async () => download.click());
+      expect(document.querySelector('[role="alertdialog"]')?.textContent).toContain(
+        'This file is a Windows executable, but its extension is .pdf.',
+      );
+      expect(made).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  describe('the download question', () => {
+    const program = (() => {
+      const bytes = new Uint8Array(0x48);
+      bytes.set([0x4d, 0x5a]);
+      new DataView(bytes.buffer).setUint32(0x3c, 0x40, true);
+      bytes.set([0x50, 0x45, 0, 0], 0x40);
+      return bytes;
+    })();
+    const noted = {
+      ...stored,
+      name: 'invoice.pdf',
+      mimeType: 'application/pdf',
+      upload: 'uploaded',
+    } as const;
+    const made = vi.fn(() => 'blob:test/0');
+    const question = () => document.querySelector('[role="alertdialog"]');
+    const clickDownload = async () => {
+      const download = document.querySelector<HTMLButtonElement>(
+        '[aria-label="Download invoice.pdf, 2.0 KB"]',
+      );
+      if (download === null) throw new Error('no download on the chip');
+      await act(async () => download.click());
+    };
+
+    beforeEach(() => {
+      made.mockClear();
+      vi.stubGlobal('URL', { ...URL, createObjectURL: made, revokeObjectURL: vi.fn() });
+    });
+    afterEach(() => {
+      vi.unstubAllGlobals();
+      mail.session = { userId: 'user-1' };
+      mail.readStoredFile = async () => null;
+    });
+
+    it('dies with the draft: nothing is held, and the next draft is not asked', async () => {
+      await showing([{ ...noted, content: program }]);
+      await clickDownload();
+      expect(question()).not.toBeNull();
+      await showing([]);
+      expect(question()).toBeNull();
+      await showing([{ ...stored, id: 'file-9', name: 'notes.txt', upload: 'uploaded' }]);
+      expect(question()).toBeNull();
+      expect(made).not.toHaveBeenCalled();
+    });
+
+    it('dies with the session: a lock drops it', async () => {
+      await showing([{ ...noted, content: program }]);
+      await clickDownload();
+      expect(question()).not.toBeNull();
+      mail.session = null;
+      await act(async () => root.render(<Compose />));
+      expect(question()).toBeNull();
+      expect(made).not.toHaveBeenCalled();
+    });
+
+    it('saves nothing when the file is removed while it loads', async () => {
+      const loading = Promise.withResolvers<Uint8Array<ArrayBuffer> | null>();
+      mail.readStoredFile = () => loading.promise;
+      // A file with no notes, which would save at once if the chip still acted on it.
+      await showing([{ ...stored, upload: 'uploaded' }]);
+      const download = document.querySelector<HTMLButtonElement>(
+        '[aria-label="Download plan.pdf, 2.0 KB"]',
+      );
+      if (download === null) throw new Error('no download on the chip');
+      await act(async () => download.click());
+      await showing([]);
+      await act(async () => loading.resolve(new Uint8Array([1, 2, 3])));
+      expect(question()).toBeNull();
+      expect(made).not.toHaveBeenCalled();
+    });
   });
 
   it('offers no retry for a file whose bytes this device does not hold', async () => {

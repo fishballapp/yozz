@@ -1,10 +1,12 @@
 /** The browser half of the attachment gate: the real policy module and the real chips, in a page. */
 
+import * as policy from '@yozz.app/mail/threads/attachment-content';
 import type { Attachment } from '@yozz.app/mail/threads/thread';
 import { flushSync } from 'react-dom';
 import { createRoot } from 'react-dom/client';
 import { AttachmentList } from '../src/threads/AttachmentList';
-import * as policy from '../src/threads/attachment-preview';
+// The app's own styles, so the download confirmation is laid out and clicked as a person sees it.
+import '../src/styles/global.css';
 
 export type ProbeFile = {
   readonly name: string;

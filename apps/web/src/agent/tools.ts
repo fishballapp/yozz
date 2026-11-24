@@ -16,6 +16,13 @@ import {
 import type { DraftContent } from '@yozz.app/mail/compose/draft';
 import type { DeleteOutcome, DraftHandle, SaveOutcome } from '@yozz.app/mail/compose/draft-vault';
 import { quoteForReply, seedFor } from '@yozz.app/mail/compose/seed';
+import {
+  ATTACHMENT_NOTES_DESCRIPTION,
+  attachmentFactFields,
+  attachmentFactsOf,
+  DETECTED_TYPE_DESCRIPTION,
+  savedName,
+} from '@yozz.app/mail/threads/attachment-content';
 import { mimeTypeOf } from '@yozz.app/mail/threads/attachments';
 import type { BodyOutcome } from '@yozz.app/mail/threads/body-state';
 import { assembleMatches, hasMoreMatches } from '@yozz.app/mail/threads/found';
@@ -222,10 +229,11 @@ const attachmentRowsOf = (attachments: readonly Attachment[] | undefined) =>
   attachments === undefined || attachments.length === 0
     ? {}
     : {
-        attachments: attachments.map(({ name, size, mimeType }) => ({
-          name: clip(name, ATTACHMENT_NAME_CHARS),
+        attachments: attachments.map(({ name, size, mimeType, content }) => ({
+          name: clip(savedName(name), ATTACHMENT_NAME_CHARS),
           type: mimeTypeOf(mimeType),
           size,
+          ...attachmentFactFields(attachmentFactsOf({ name, mimeType, content })),
         })),
       };
 
@@ -408,7 +416,7 @@ export const buildAgentTools = (port: () => AgentPort): readonly AgentTool[] => 
           .enum(['none', 'latest', 'full'])
           .optional()
           .describe(
-            `How much of each conversation to read: 'none' (default) for rows with a snippet, 'latest' for the newest message, 'full' for all of them. Deeper means fewer conversations per call: at most ${DEPTH.none} for 'none', ${DEPTH.latest} for 'latest', ${DEPTH.full} for 'full'.`,
+            `How much of each conversation to read: 'none' (default) for rows with a snippet, 'latest' for the newest message, 'full' for all of them. Deeper means fewer conversations per call: at most ${DEPTH.none} for 'none', ${DEPTH.latest} for 'latest', ${DEPTH.full} for 'full'. ${DETECTED_TYPE_DESCRIPTION} ${ATTACHMENT_NOTES_DESCRIPTION}`,
           ),
         bodyChars: z
           .int()

@@ -12,13 +12,14 @@ import { type DraftFile, MAX_ATTACHMENT_BYTES } from '@yozz.app/mail/compose/dra
 import type { DeleteOutcome } from '@yozz.app/mail/compose/draft-vault';
 import { seedFor } from '@yozz.app/mail/compose/seed';
 import { describeMailFailure } from '@yozz.app/mail/describe-failure';
+import { savedName } from '@yozz.app/mail/threads/attachment-content';
 import { cn } from 'cn';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
 import { useComposer, useMail } from '../store/MailProvider';
 import type { LoadStoredFile } from '../threads/AttachmentList';
-import { displayName, download } from '../threads/attachment-preview';
 import { ATTACHMENT_LABEL, formatBytes } from '../threads/attachments';
+import { useIsMounted, useSaveAttachment } from '../threads/save-attachment';
 import { Button } from '../ui/Button';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
 import { isDemo, useMediaQuery } from '../ui/chrome';
@@ -147,6 +148,7 @@ const DraftFileChip = ({
   file,
   isFrozen,
   loadFile,
+  onSave,
   onRemove,
   onRetry,
 }: {
@@ -154,11 +156,14 @@ const DraftFileChip = ({
   /** A send holds the draft, so its files can't change. */
   isFrozen: boolean;
   loadFile: LoadStoredFile;
+  /** Saves the bytes, asking first when they carry notes: a forward brings a received file here. */
+  onSave: (file: DraftFile & { content: Uint8Array<ArrayBuffer> }) => void;
   onRemove: () => void;
   onRetry: () => void;
 }) => {
-  const name = displayName(file.name);
+  const name = savedName(file.name);
   const [isDownloading, setIsDownloading] = useState(false);
+  const isMounted = useIsMounted();
   const [hasDownloadFailed, setHasDownloadFailed] = useState(false);
   const facts = (
     <>
@@ -180,8 +185,10 @@ const DraftFileChip = ({
             setHasDownloadFailed(false);
             try {
               const content = file.content ?? (await loadFile(file.id));
+              // Removed, closed or locked while it loaded: nothing is saved or asked.
+              if (!isMounted()) return;
               if (content === null) throw new Error(`${file.id} is gone`);
-              download({ ...file, content });
+              onSave({ ...file, content });
             } catch {
               setHasDownloadFailed(true);
             } finally {
@@ -230,6 +237,51 @@ const DraftFileChip = ({
         </Tooltip>
       )}
     </li>
+  );
+};
+
+/**
+ * A draft's file chips, and the download question they ask. The question lives here, so it dies
+ * with the draft: nothing is held after it closes, its session changes or the vault locks.
+ */
+const DraftFiles = ({
+  files,
+  isFrozen,
+  loadFile,
+  onRemove,
+  onRetry,
+  uploadProblem,
+}: {
+  files: readonly DraftFile[];
+  isFrozen: boolean;
+  loadFile: LoadStoredFile;
+  onRemove: (fileId: string) => void;
+  onRetry: (fileId: string) => void;
+  uploadProblem: string | null;
+}) => {
+  const { save, dialog } = useSaveAttachment();
+  return (
+    <div className="shrink-0 border-t border-rule-soft px-4 py-2.5">
+      {dialog}
+      <ul className="flex flex-wrap gap-2">
+        {files.map(file => (
+          <DraftFileChip
+            key={file.id}
+            file={file}
+            isFrozen={isFrozen}
+            loadFile={loadFile}
+            onSave={save}
+            onRemove={() => onRemove(file.id)}
+            onRetry={() => onRetry(file.id)}
+          />
+        ))}
+      </ul>
+      {uploadProblem !== null && (
+        <p className="mt-2 text-base text-danger" role="alert">
+          {uploadProblem}
+        </p>
+      )}
+    </div>
   );
 };
 
@@ -708,26 +760,18 @@ export const Compose = () => {
             {draft !== null && (
               <>
                 {draft.attachments.length > 0 && (
-                  <div className="shrink-0 border-t border-rule-soft px-4 py-2.5">
-                    <ul className="flex flex-wrap gap-2">
-                      {draft.attachments.map(file => (
-                        <DraftFileChip
-                          key={file.id}
-                          file={file}
-                          // The preview shows what goes; a file changes on the write step.
-                          isFrozen={step === 'preview' || isSending || isOpenDraftFrozen}
-                          loadFile={readStoredFile}
-                          onRemove={() => detach(file.id)}
-                          onRetry={() => retryUpload(file.id)}
-                        />
-                      ))}
-                    </ul>
-                    {uploadProblem !== null && (
-                      <p className="mt-2 text-base text-danger" role="alert">
-                        {uploadProblem}
-                      </p>
-                    )}
-                  </div>
+                  // Keyed on the intent and the session: closing the draft, another draft, a
+                  // lock or another account drops any question it asked, bytes and all.
+                  <DraftFiles
+                    key={seedKey}
+                    files={draft.attachments}
+                    // The preview shows what goes; a file changes on the write step.
+                    isFrozen={step === 'preview' || isSending || isOpenDraftFrozen}
+                    loadFile={readStoredFile}
+                    onRemove={detach}
+                    onRetry={retryUpload}
+                    uploadProblem={uploadProblem}
+                  />
                 )}
 
                 {step === 'write' ? (

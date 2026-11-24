@@ -5,24 +5,44 @@ import {
   CaretLeftIcon,
   CaretRightIcon,
   DownloadSimpleIcon,
+  WarningIcon,
   XIcon,
 } from '@phosphor-icons/react';
-import type { Attachment } from '@yozz.app/mail/threads/thread';
-import { cn } from 'cn';
-import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
-import { Button, buttonClass } from '../ui/Button';
-import { Tooltip } from '../ui/Tooltip';
 import {
+  attachmentFactsOf,
+  type DetectedType,
   decodeText,
-  displayName,
-  download,
-  objectUrlFor,
+  noteText,
   type Preview,
   previewOf,
-} from './attachment-preview';
+  savedName,
+} from '@yozz.app/mail/threads/attachment-content';
+import type { Attachment } from '@yozz.app/mail/threads/thread';
+import { cn } from 'cn';
+import { type ReactNode, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { Button, buttonClass } from '../ui/Button';
+import { Tooltip } from '../ui/Tooltip';
+import { objectUrlFor } from './attachment-preview';
 import { attachmentTag, formatBytes } from './attachments';
+import { useIsMounted, useSaveAttachment } from './save-attachment';
 
 type PdfPreview = Extract<Preview, { kind: 'pdf' }>;
+
+/** What the list knows of one attachment before anything is clicked. */
+type FileFacts = {
+  readonly preview: Preview | null;
+  readonly detectedType: DetectedType | null;
+  /** Each note's sentence, as every client words it. */
+  readonly notes: readonly string[];
+};
+
+const factsOf = (file: Attachment): FileFacts => {
+  const { detectedType, notes } = attachmentFactsOf(file);
+  return { preview: previewOf(file), detectedType, notes: notes.map(noteText) };
+};
+
+/** Saves bytes in hand, asking first when they carry notes (`useSaveAttachment`). */
+type SaveAttachment = ReturnType<typeof useSaveAttachment>['save'];
 
 /**
  * One URL per PDF for as long as its message is on screen, revoked when the message goes. The new
@@ -46,14 +66,28 @@ const usePdfOpener = () => {
 };
 
 /** Tag, name and size: the facts every chip and the viewer's title bar share. */
-const Facts = ({ file, preview }: { file: Attachment; preview: Preview | null }) => (
+const Facts = ({ file, facts }: { file: Attachment; facts: FileFacts }) => (
   <>
-    <span className="shrink-0 text-paper-faint">{attachmentTag(file.kind, preview)}</span>
+    <span className="shrink-0 text-paper-faint">
+      {attachmentTag(file.kind, facts.detectedType, facts.preview)}
+    </span>
     <span dir="auto" className="min-w-0 max-w-64 truncate text-paper">
-      {displayName(file.name)}
+      {savedName(file.name)}
     </span>
     <span className="shrink-0 text-paper-faint">{formatBytes(file.size)}</span>
   </>
+);
+
+/** A file's notes, under its chip. */
+const Notes = ({ id, notes }: { id: string; notes: readonly string[] }) => (
+  <div id={id} className="mt-1 flex flex-col gap-0.5 text-2xs text-paper-dim">
+    {notes.map(note => (
+      <p key={note} className="flex items-start gap-1.5">
+        <WarningIcon size={11} className="mt-0.5 shrink-0 text-danger" aria-hidden />
+        {note}
+      </p>
+    ))}
+  </div>
 );
 
 /** Reads a file kept in R2, for a chip whose bytes are not on this device. */
@@ -63,25 +97,36 @@ export type LoadStoredFile = (fileId: string) => Promise<Uint8Array<ArrayBuffer>
 const StoredFileChip = ({
   file,
   fileId,
+  facts,
+  notesId,
   loadFile,
+  onSave,
 }: {
   file: Attachment;
   fileId: string;
+  /** From the name and the declared type alone, until a click fetches the bytes. */
+  facts: FileFacts;
+  notesId: string | undefined;
   loadFile: LoadStoredFile;
+  onSave: SaveAttachment;
 }) => {
   const [state, setState] = useState<'idle' | 'downloading' | 'failed'>('idle');
-  const name = displayName(file.name);
+  const isMounted = useIsMounted();
+  const name = savedName(file.name);
   return (
     <button
       type="button"
       disabled={state === 'downloading'}
+      aria-describedby={notesId}
       onClick={async () => {
         setState('downloading');
         try {
           const content = await loadFile(fileId);
+          if (!isMounted()) return;
           if (content === null) throw new Error(`${fileId} is gone`);
-          download({ ...file, content });
           setState('idle');
+          // Judged on the fetched bytes: a forwarded file's name may not tell what they are.
+          onSave({ ...file, content });
         } catch {
           setState('failed');
         }
@@ -89,7 +134,7 @@ const StoredFileChip = ({
       className="flex h-11 max-w-full items-center gap-2.5 border border-rule bg-ink px-2.5 text-left font-mono text-2xs transition-colors hover:bg-ink-hover disabled:cursor-default disabled:hover:bg-ink lg:h-7"
       aria-label={`Download ${name}, ${formatBytes(file.size)}`}
     >
-      <Facts file={file} preview={null} />
+      <Facts file={file} facts={facts} />
       {state === 'downloading' && <span className="shrink-0 text-paper-faint">Downloading…</span>}
       {state === 'failed' && <span className="shrink-0 text-danger">Couldn’t download</span>}
       <DownloadSimpleIcon size={12} className="shrink-0 text-paper-faint" />
@@ -103,24 +148,30 @@ const StoredFileChip = ({
  */
 const AttachmentChip = ({
   file,
-  preview,
+  facts,
+  notesId,
   onOpen,
+  onDownload,
 }: {
   file: Attachment;
-  preview: Preview | null;
+  facts: FileFacts;
+  notesId: string | undefined;
   onOpen: () => void;
+  onDownload: () => void;
 }) => {
-  const name = displayName(file.name);
+  const name = savedName(file.name);
+  const { preview } = facts;
   if (preview === null) {
     return (
       <button
         type="button"
-        onClick={() => download(file)}
+        onClick={onDownload}
         disabled={file.content === undefined}
+        aria-describedby={notesId}
         className="flex h-11 max-w-full items-center gap-2.5 border border-rule bg-ink px-2.5 text-left font-mono text-2xs transition-colors hover:bg-ink-hover disabled:cursor-default disabled:hover:bg-ink lg:h-7"
         aria-label={`Download ${name}, ${formatBytes(file.size)}`}
       >
-        <Facts file={file} preview={preview} />
+        <Facts file={file} facts={facts} />
         <DownloadSimpleIcon size={12} className="shrink-0 text-paper-faint" />
       </button>
     );
@@ -130,6 +181,7 @@ const AttachmentChip = ({
       <button
         type="button"
         onClick={onOpen}
+        aria-describedby={notesId}
         className="flex min-w-0 items-center gap-2.5 px-2.5 text-left -outline-offset-2 transition-colors hover:bg-ink-hover"
         aria-label={
           preview.kind === 'pdf'
@@ -137,7 +189,7 @@ const AttachmentChip = ({
             : `Preview ${name}, ${formatBytes(file.size)}`
         }
       >
-        <Facts file={file} preview={preview} />
+        <Facts file={file} facts={facts} />
         {/* It leaves the app, so it says so. */}
         {preview.kind === 'pdf' && (
           <ArrowSquareOutIcon size={12} className="shrink-0 text-paper-faint" />
@@ -146,7 +198,8 @@ const AttachmentChip = ({
       <Tooltip label={`Download ${name}`}>
         <button
           type="button"
-          onClick={() => download(file)}
+          onClick={onDownload}
+          aria-describedby={notesId}
           className="flex w-11 shrink-0 items-center justify-center text-paper-faint -outline-offset-2 transition-colors hover:bg-ink-hover hover:text-paper lg:w-7"
           aria-label={`Download ${name}`}
         >
@@ -250,16 +303,18 @@ const StepButton = ({
 
 const AttachmentViewer = ({
   attachments,
-  previews,
+  facts,
   index,
   isOpen,
   onIndexChange,
   onClose,
   onClosed,
   onOpenPdf,
+  onDownload,
+  children,
 }: {
   attachments: readonly Attachment[];
-  previews: readonly (Preview | null)[];
+  facts: readonly FileFacts[];
   /** Held through the closing transition, so the stage does not empty while it fades. */
   index: number | null;
   isOpen: boolean;
@@ -267,9 +322,13 @@ const AttachmentViewer = ({
   onClose: () => void;
   onClosed: () => void;
   onOpenPdf: (content: Uint8Array<ArrayBuffer>, preview: PdfPreview) => void;
+  onDownload: (index: number) => void;
+  /** The download question, rendered inside the popup so it nests: Escape closes only it. */
+  children: ReactNode;
 }) => {
   const file = index === null ? undefined : attachments[index];
-  const preview = index === null ? null : (previews[index] ?? null);
+  const fileFacts = index === null ? undefined : facts[index];
+  const preview = fileFacts?.preview ?? null;
   const step = (by: -1 | 1) => {
     if (index === null) return;
     const next = index + by;
@@ -286,7 +345,9 @@ const AttachmentViewer = ({
           action={{
             label: 'Download',
             Icon: DownloadSimpleIcon,
-            onClick: () => download(file),
+            onClick: () => {
+              if (index !== null) onDownload(index);
+            },
             isDisabled: content === undefined,
           }}
         >
@@ -297,12 +358,7 @@ const AttachmentViewer = ({
     switch (preview.kind) {
       case 'image':
         return (
-          <ImageStage
-            key={index}
-            content={content}
-            preview={preview}
-            name={displayName(file.name)}
-          />
+          <ImageStage key={index} content={content} preview={preview} name={savedName(file.name)} />
         );
       case 'text':
         return <TextStage key={index} content={content} />;
@@ -347,16 +403,16 @@ const AttachmentViewer = ({
           >
             <div className="flex h-11 shrink-0 items-center gap-3 border-b border-rule-soft pr-1 pl-4">
               <div className="flex min-w-0 flex-1 items-baseline gap-2.5 font-mono text-2xs">
-                {file !== undefined && (
+                {file !== undefined && fileFacts !== undefined && (
                   <>
                     <span className="hidden text-paper-faint sm:inline">
-                      {attachmentTag(file.kind, preview)}
+                      {attachmentTag(file.kind, fileFacts.detectedType, preview)}
                     </span>
                     <Dialog.Title
                       dir="auto"
                       className="min-w-0 truncate font-sans text-base text-paper"
                     >
-                      {displayName(file.name)}
+                      {savedName(file.name)}
                     </Dialog.Title>
                     <span className="hidden shrink-0 text-paper-faint sm:inline">
                       {formatBytes(file.size)}
@@ -391,14 +447,14 @@ const AttachmentViewer = ({
                     <span aria-hidden className="mx-1.5 h-5 w-px bg-rule" />
                   </>
                 )}
-                {file !== undefined && (
+                {file !== undefined && index !== null && (
                   <Button
                     variant="ghost"
                     size="icon"
                     className="size-11 lg:size-7"
-                    onClick={() => download(file)}
+                    onClick={() => onDownload(index)}
                     disabled={file.content === undefined}
-                    aria-label={`Download ${displayName(file.name)}`}
+                    aria-label={`Download ${savedName(file.name)}`}
                   >
                     <DownloadSimpleIcon size={15} />
                   </Button>
@@ -418,6 +474,7 @@ const AttachmentViewer = ({
               </div>
             </div>
             <div className="min-h-0 flex-1 bg-ink-sunken">{stage}</div>
+            {children}
           </Dialog.Popup>
         </Dialog.Viewport>
       </Dialog.Portal>
@@ -437,25 +494,46 @@ export const AttachmentList = ({
   attachments: readonly Attachment[];
   loadFile?: LoadStoredFile | undefined;
 }) => {
-  const previews = useMemo(() => attachments.map(previewOf), [attachments]);
+  const entries = useMemo(
+    () => attachments.map(file => ({ file, facts: factsOf(file) })),
+    [attachments],
+  );
   const openPdf = usePdfOpener();
   const [viewed, setViewed] = useState<number | null>(null);
   const [isViewerOpen, setIsViewerOpen] = useState(false);
+  const notesIdPrefix = useId();
+  const { save, dialog } = useSaveAttachment();
+  const saveAt = (index: number) => {
+    const file = attachments[index];
+    if (file?.content === undefined) return;
+    save({ ...file, content: file.content });
+  };
 
   return (
     <>
       <ul className="mt-4 flex flex-wrap gap-2">
-        {attachments.map((file, index) => {
-          const preview = previews[index] ?? null;
+        {entries.map(({ file, facts: fileFacts }, index) => {
+          const { preview } = fileFacts;
+          const notesId =
+            fileFacts.notes.length === 0 ? undefined : `${notesIdPrefix}-notes-${index}`;
           return (
             // Two parts of one message can share a name.
             <li key={`${index}-${file.name}`} className="max-w-full">
               {file.fileId !== undefined && loadFile !== undefined ? (
-                <StoredFileChip file={file} fileId={file.fileId} loadFile={loadFile} />
+                <StoredFileChip
+                  file={file}
+                  fileId={file.fileId}
+                  facts={fileFacts}
+                  notesId={notesId}
+                  loadFile={loadFile}
+                  onSave={save}
+                />
               ) : (
                 <AttachmentChip
                   file={file}
-                  preview={preview}
+                  facts={fileFacts}
+                  notesId={notesId}
+                  onDownload={() => saveAt(index)}
                   onOpen={() => {
                     if (preview?.kind === 'pdf' && file.content !== undefined) {
                       openPdf(file.content, preview);
@@ -466,20 +544,25 @@ export const AttachmentList = ({
                   }}
                 />
               )}
+              {notesId !== undefined && <Notes id={notesId} notes={fileFacts.notes} />}
             </li>
           );
         })}
       </ul>
       <AttachmentViewer
         attachments={attachments}
-        previews={previews}
+        facts={entries.map(({ facts }) => facts)}
         index={viewed}
         isOpen={isViewerOpen}
         onIndexChange={setViewed}
         onClose={() => setIsViewerOpen(false)}
         onClosed={() => setViewed(null)}
         onOpenPdf={openPdf}
-      />
+        onDownload={saveAt}
+      >
+        {isViewerOpen && dialog}
+      </AttachmentViewer>
+      {!isViewerOpen && dialog}
     </>
   );
 };

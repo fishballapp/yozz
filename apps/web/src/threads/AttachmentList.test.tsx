@@ -138,7 +138,186 @@ describe('AttachmentList', () => {
       container.querySelectorAll('li'),
       item => item.querySelector('span')?.textContent,
     );
-    expect(tags).toEqual(['IMG', 'TXT', 'PDF', 'ZIP']);
+    expect(tags).toEqual(['IMG', 'TXT', 'PDF', 'HTML']);
+  });
+
+  /** A minimal PE: `MZ`, `e_lfanew` pointing at 0x40, and `PE\0\0` there. */
+  const PROGRAM_AS_PDF: Attachment = (() => {
+    const content = new Uint8Array(0x48);
+    content.set([0x4d, 0x5a]);
+    new DataView(content.buffer).setUint32(0x3c, 0x40, true);
+    content.set([0x50, 0x45, 0, 0], 0x40);
+    return { name: 'invoice.pdf', size: 72, kind: 'pdf', mimeType: 'application/pdf', content };
+  })();
+
+  describe('a file whose bytes or name are not what they claim', () => {
+    it('still previews an image with notes, in the app, where nothing runs', () => {
+      render([{ ...PNG, name: 'chart.png.scr' }]);
+      expect(labels()).toEqual(['Preview chart.png.scr, 12 B', 'Download chart.png.scr']);
+    });
+
+    it('keeps an open question when a second stored file lands', async () => {
+      const loads = new Map(
+        ['file-a', 'file-b'].map(id => [id, Promise.withResolvers<Uint8Array<ArrayBuffer>>()]),
+      );
+      root = createRoot(container);
+      act(() =>
+        root?.render(
+          <AttachmentList
+            attachments={[
+              { name: 'setup.exe', size: 3, kind: 'other', fileId: 'file-a' },
+              { name: 'tool.scr', size: 3, kind: 'other', fileId: 'file-b' },
+            ]}
+            loadFile={fileId => {
+              const load = loads.get(fileId);
+              if (load === undefined) throw new Error(`no ${fileId}`);
+              return load.promise;
+            }}
+          />,
+        ),
+      );
+      await act(async () => button('Download setup.exe, 3 B').click());
+      await act(async () => button('Download tool.scr, 3 B').click());
+      await act(async () => loads.get('file-a')?.resolve(new Uint8Array([1, 2, 3])));
+      expect(dialog()?.textContent).toContain('Download setup.exe?');
+      await act(async () => loads.get('file-b')?.resolve(new Uint8Array([1, 2, 3])));
+      expect(dialog()?.textContent).toContain('Download setup.exe?');
+      expect(dialog()?.textContent).not.toContain('tool.scr');
+      expect(made).toEqual([]);
+    });
+
+    it('does nothing when a fetch lands after its message is gone', async () => {
+      const load = Promise.withResolvers<Uint8Array<ArrayBuffer>>();
+      root = createRoot(container);
+      act(() =>
+        root?.render(
+          <AttachmentList
+            attachments={[{ name: 'notes.txt', size: 3, kind: 'other', fileId: 'file-c' }]}
+            loadFile={() => load.promise}
+          />,
+        ),
+      );
+      await act(async () => button('Download notes.txt, 3 B').click());
+      act(() => root?.render(null));
+      await act(async () => load.resolve(new Uint8Array([1, 2, 3])));
+      expect(made).toEqual([]);
+    });
+
+    const dialog = () => document.querySelector('[role="alertdialog"]');
+
+    it('is tagged by its bytes, and its note shows with the chip', () => {
+      render([PROGRAM_AS_PDF]);
+      expect(container.querySelector('li span')?.textContent).toBe('EXE');
+      expect(container.textContent).toContain(
+        'This file is a Windows executable, but its extension is .pdf.',
+      );
+      const chip = button('Download invoice.pdf, 72 B');
+      const notes = document.getElementById(chip.getAttribute('aria-describedby') ?? '');
+      expect(notes?.textContent).toBe(
+        'This file is a Windows executable, but its extension is .pdf.',
+      );
+    });
+
+    it('downloads only once the person has read the note and agreed', async () => {
+      render([PROGRAM_AS_PDF]);
+      await act(async () => button('Download invoice.pdf, 72 B').click());
+      expect(made).toEqual([]);
+      expect(dialog()?.textContent).toContain('Download invoice.pdf?');
+      expect(dialog()?.textContent).toContain(
+        'This file is a Windows executable, but its extension is .pdf.',
+      );
+
+      const confirm = Array.from(dialog()?.querySelectorAll('button') ?? []).find(
+        each => each.textContent === 'Download',
+      );
+      await act(async () => confirm?.click());
+      await vi.waitFor(() =>
+        expect(made).toEqual([{ url: 'blob:test/0', type: 'application/octet-stream' }]),
+      );
+      // The save's URL is revoked on a timer; waiting keeps it out of the next test.
+      await vi.waitFor(() => expect(revoked).toEqual(['blob:test/0']));
+    });
+
+    it('saves nothing when the person cancels', async () => {
+      render([PROGRAM_AS_PDF]);
+      await act(async () => button('Download invoice.pdf, 72 B').click());
+      const cancel = Array.from(dialog()?.querySelectorAll('button') ?? []).find(
+        each => each.textContent === 'Cancel',
+      );
+      await act(async () => cancel?.click());
+      await vi.waitFor(() => expect(dialog()).toBeNull());
+      expect(made).toEqual([]);
+    });
+
+    it('asks from the viewer too', async () => {
+      render([PNG, PROGRAM_AS_PDF]);
+      act(() => button('Preview chart.png, 12 B').click());
+      act(() => button('Next attachment').click());
+      await act(async () => button('Download invoice.pdf').click());
+      expect(dialog()?.textContent).toContain(
+        'This file is a Windows executable, but its extension is .pdf.',
+      );
+      expect(made.filter(({ type }) => type === 'application/octet-stream')).toEqual([]);
+    });
+
+    const renderStored = (stored: Attachment, bytes: Uint8Array<ArrayBuffer>) => {
+      root = createRoot(container);
+      act(() =>
+        root?.render(<AttachmentList attachments={[stored]} loadFile={async () => bytes} />),
+      );
+    };
+
+    it('asks about a stored file once its bytes are fetched, and saves nothing before', async () => {
+      renderStored(
+        { name: 'setup.exe', size: 3, kind: 'other', fileId: 'file-2' },
+        new Uint8Array([1, 2, 3]),
+      );
+      await act(async () => button('Download setup.exe, 3 B').click());
+      expect(dialog()?.textContent).toContain(
+        'The .exe extension identifies a Windows executable, which may run when opened.',
+      );
+      expect(made).toEqual([]);
+    });
+
+    it('judges a forwarded file on its fetched bytes, not on the name its chip showed', async () => {
+      const forwarded: Attachment = {
+        name: 'invoice.pdf',
+        size: 72,
+        kind: 'pdf',
+        mimeType: 'application/pdf',
+        fileId: 'file-3',
+      };
+      renderStored(forwarded, PROGRAM_AS_PDF.content as Uint8Array<ArrayBuffer>);
+      // Nothing to say before the bytes are here.
+      expect(container.textContent).not.toContain('Windows executable');
+      await act(async () => button('Download invoice.pdf, 72 B').click());
+      expect(dialog()?.textContent).toContain(
+        'This file is a Windows executable, but its extension is .pdf.',
+      );
+      expect(made).toEqual([]);
+    });
+
+    it('never previews a real PDF that has notes, so it opens only through the question', async () => {
+      const open = vi.spyOn(window, 'open').mockReturnValue(null);
+      render([{ ...PDF, name: 'receipt.pdf.exe' }]);
+      expect(labels()).toEqual(['Download receipt.pdf.exe, 9 B']);
+      await act(async () => button('Download receipt.pdf.exe, 9 B').click());
+      expect(open).not.toHaveBeenCalled();
+      expect(dialog()?.textContent).toContain('Download receipt.pdf.exe?');
+      expect(made).toEqual([]);
+    });
+  });
+
+  it('downloads a file with no notes at once', async () => {
+    const dialog = () => document.querySelector('[role="alertdialog"]');
+    render([
+      HTML_AS_PDF,
+      { ...PDF, name: 'archive.zip', kind: 'archive', mimeType: 'application/zip' },
+    ]);
+    await act(async () => button('Download archive.zip, 9 B').click());
+    expect(dialog()).toBeNull();
+    expect(made).toEqual([{ url: 'blob:test/0', type: 'application/octet-stream' }]);
+    await vi.waitFor(() => expect(revoked).toEqual(['blob:test/0']));
   });
 
   it('shows a text file as text, never as markup', () => {

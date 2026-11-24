@@ -287,10 +287,30 @@ export const runAttachmentChecks = async (
       !rloChip.includes('\u202e') && rloChip.includes('invoicefdp.exe'),
       `${label}: a bidi override survived in the chip: ${JSON.stringify(rloChip)}`,
     );
+    // The tag follows the bytes: HTML labelled a PDF reads HTML, not PDF.
+    const tags = await page
+      .locator('#root > ul > li')
+      .evaluateAll(items => items.map(item => item.querySelector('span')?.textContent));
+    assert(
+      JSON.stringify(tags) === JSON.stringify(['IMG', 'TXT', 'PDF', 'PDF', 'HTML', 'SVG', 'FILE']),
+      `${label}: tags drifted: ${JSON.stringify(tags)}`,
+    );
+    // A file with notes saves only through a confirmation that states them.
+    await page.getByRole('button', { name: 'Download invoicefdp.exe, 2 B' }).click();
+    const question = page.getByRole('alertdialog');
+    await question.waitFor();
+    const asked = await question.innerText();
+    assert(
+      asked.includes(
+        'The .exe extension identifies a Windows executable, which may run when opened.',
+      ),
+      `${label}: the confirmation said ${JSON.stringify(asked)}`,
+    );
     const [saved] = await Promise.all([
       page.waitForEvent('download'),
-      page.getByRole('button', { name: 'Download invoicefdp.exe, 2 B' }).click(),
+      question.getByRole('button', { name: 'Download', exact: true }).click(),
     ]);
+    await question.waitFor({ state: 'detached' });
     assert(
       saved.suggestedFilename() === 'invoicefdp.exe',
       `${label}: download was named ${JSON.stringify(saved.suggestedFilename())}`,
@@ -344,6 +364,28 @@ export const runAttachmentChecks = async (
         `${label}: ${back} did not step back from the end of ${arrow}`,
       );
     }
+    await page.keyboard.press('Escape');
+    await page.locator('[role="dialog"]').waitFor({ state: 'detached' });
+
+    // The question a download from the viewer asks nests in it: Escape closes the question and
+    // leaves the viewer open, as Cancel does.
+    await page
+      .getByRole('button', { name: `Preview pixel.png, ${formatBytes(PNG_BYTES.length)}` })
+      .click();
+    const viewer = page.getByRole('dialog');
+    for (let step = 0; step < mounted.indexOf(HTML_AS_PDF); step += 1) {
+      await page.getByRole('button', { name: 'Next attachment' }).click();
+    }
+    await viewer.getByRole('button', { name: 'Download statement.pdf', exact: true }).click();
+    const nested = page.getByRole('alertdialog');
+    await nested.waitFor();
+    await page.keyboard.press('Escape');
+    await nested.waitFor({ state: 'detached' });
+    await page.waitForTimeout(300);
+    assert(
+      await viewer.isVisible(),
+      `${label}: Escape on the download question closed the viewer too`,
+    );
     await page.keyboard.press('Escape');
     await page.locator('[role="dialog"]').waitFor({ state: 'detached' });
 
@@ -419,7 +461,7 @@ export const runAttachmentChecks = async (
       `${label}: an attachment payload ran script: ${JSON.stringify(messages)}`,
     );
     console.log(
-      `✓ ${label}: attachments · policy · chips · bidi · text · image revoke · stepping · ${savesPdf(label) ? `PDFs saved (no viewer on Linux ${label})` : 'both PDFs in the viewer'} · blob types`,
+      `✓ ${label}: attachments · policy · chips · tags · notes confirm · nested question · bidi · text · image revoke · stepping · ${savesPdf(label) ? `PDFs saved (no viewer on Linux ${label})` : 'both PDFs in the viewer'} · blob types`,
     );
   } finally {
     await context.close();

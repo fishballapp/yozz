@@ -1,5 +1,5 @@
+import type { DetectedType, Preview } from '@yozz.app/mail/threads/attachment-content';
 import type { Attachment } from '@yozz.app/mail/threads/thread';
-import type { Preview } from './attachment-preview';
 
 /** Short, unpadded, never more than one decimal. */
 export const formatBytes = (bytes: number) => {
@@ -23,11 +23,33 @@ export const ATTACHMENT_LABEL: Record<Attachment['kind'], string> = {
   other: 'FILE',
 };
 
-const PREVIEW_LABEL: Record<Preview['kind'], string> = { image: 'IMG', pdf: 'PDF', text: 'TXT' };
+/** What the bytes are, named as the chip names a kind. */
+const DETECTED_LABEL: Record<DetectedType, string> = {
+  'image/png': 'IMG',
+  'image/jpeg': 'IMG',
+  'image/gif': 'IMG',
+  'image/webp': 'IMG',
+  'image/avif': 'IMG',
+  'application/pdf': 'PDF',
+  'application/vnd.microsoft.portable-executable': 'EXE',
+  'application/x-executable': 'ELF',
+  'application/x-mach-binary': 'MACH-O',
+  'application/x-ms-shortcut': 'LNK',
+  'text/html': 'HTML',
+  'image/svg+xml': 'SVG',
+};
 
 /**
- * The chip's tag. A preview names what a click will open, which the bytes decided; without one the
- * tag is the label's kind. A photo sent as `application/octet-stream` reads `IMG`, not `FILE`.
+ * The chip's tag. A text preview names what a click opens. Otherwise the bytes decide when they
+ * identify a type, so a Windows executable labelled `application/pdf` reads `EXE` and a photo sent as
+ * `application/octet-stream` reads `IMG`; failing both, the tag is the declared kind.
  */
-export const attachmentTag = (kind: Attachment['kind'], preview: Preview | null) =>
-  preview === null ? ATTACHMENT_LABEL[kind] : PREVIEW_LABEL[preview.kind];
+export const attachmentTag = (
+  kind: Attachment['kind'],
+  detectedType: DetectedType | null,
+  preview: Preview | null,
+) => {
+  if (preview?.kind === 'text') return 'TXT';
+  if (detectedType !== null) return DETECTED_LABEL[detectedType];
+  return ATTACHMENT_LABEL[kind];
+};
