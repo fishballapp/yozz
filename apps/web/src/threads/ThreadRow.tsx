@@ -10,6 +10,7 @@ import {
 } from '@phosphor-icons/react';
 import { Link } from '@tanstack/react-router';
 import { movesOffered } from '@yozz.app/mail/threads/reconcile';
+import { senderLabelOf } from '@yozz.app/mail/threads/sender-name';
 import type { Message, ThreadState } from '@yozz.app/mail/threads/thread';
 import { attachmentsOf, inboxesOf, isOnServer, newestInbound } from '@yozz.app/mail/threads/thread';
 import { isNamedView, latestOf, previewOf, type ViewId } from '@yozz.app/mail/threads/views';
@@ -24,6 +25,7 @@ import { Tooltip } from '../ui/Tooltip';
 import { listTime } from '../ui/time';
 import { discardableDraftIds, discardDrafts, discardTitle } from './discard-drafts';
 import { JUNK_COPY } from './junk-copy';
+import { TailClipped } from './TailClipped';
 import { useAdvancePast } from './use-advance';
 
 /** One record in columns: a 34px line above `lg`, two lines below. Contrast figures and rationale are in DESIGN.md. */
@@ -58,6 +60,7 @@ const useRecord = (thread: ThreadState, view: ViewId) => {
   const inbound = inboundOf(thread, ownedAddresses);
   // Sent and Drafts list what you wrote, so the other party is who it is to. So does a thread of
   // nothing but drafts wherever it turns up, as in search: its draft may have no From to name.
+  const sender = senderLabelOf(inbound);
   const outbound = (() => {
     if (view === 'drafts' || thread.messages.every(message => message.isDraft === true)) {
       return thread.messages.findLast(message => message.isDraft === true);
@@ -70,7 +73,9 @@ const useRecord = (thread: ThreadState, view: ViewId) => {
   return {
     latest,
     inbound,
-    who: outbound === undefined ? inbound.fromName : `To: ${recipientsOf(outbound)}`,
+    who: outbound === undefined ? sender : `To: ${recipientsOf(outbound)}`,
+    // An address is read from its end, which is the part that says who it is.
+    isWhoAnAddress: outbound === undefined && sender === inbound.fromAddress,
     receivedAt: receivedAtOf(thread, view, ownedAddresses, mailboxes),
     attachments: attachmentsOf(thread),
   };
@@ -152,7 +157,7 @@ const shortAddress = (address: string, mailboxes: readonly { readonly address: s
  * are decorative. It stays the current one while the open row's bar gives way to ticked rows.
  */
 const RowLink = ({ thread, view, isSelected, isBarred }: RowProps & { isBarred: boolean }) => {
-  const { latest, inbound, who, attachments } = useRecord(thread, view);
+  const { latest, inbound, who, isWhoAnAddress, attachments } = useRecord(thread, view);
 
   return (
     <Link
@@ -161,6 +166,9 @@ const RowLink = ({ thread, view, isSelected, isBarred }: RowProps & { isBarred: 
       // Spread rather than replace: opening a message must not clear the search that found it.
       search={previous => previous}
       aria-current={isSelected ? true : undefined}
+      // The spans over which the pointer sits are decorative, and this link is what it reaches: it
+      // holds an address the cell may have cut. A screen reader has it whole in the name below.
+      title={isWhoAnAddress ? who : undefined}
       // The ring is drawn inside the row; on the inverted bar a --signal outline sits on --select at 1.5:1.
       className={cn('absolute inset-0 -outline-offset-2', isBarred && 'focus-visible:outline-ink')}
       aria-label={[
@@ -449,7 +457,7 @@ export const ThreadRow = ({
 }: RowProps & CheckProps) => {
   const isBarred = isSelected && !hasSelection;
   const isUnread = thread.isUnread;
-  const { latest, who, receivedAt, attachments } = useRecord(thread, view);
+  const { latest, who, isWhoAnAddress, receivedAt, attachments } = useRecord(thread, view);
   const actions = useRowActions({ thread, view, isSelected });
   // The row's ground in each state, which the triage cluster repeats over the time.
   const ground = (() => {
@@ -533,7 +541,7 @@ export const ThreadRow = ({
           isBarred && 'font-medium',
         )}
       >
-        {who}
+        {isWhoAnAddress ? <TailClipped text={who} /> : who}
       </span>
 
       <span

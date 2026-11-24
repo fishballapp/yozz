@@ -348,6 +348,76 @@ describe('htmlToText', () => {
     const deep = `${'<span>'.repeat(200)}${svg} there${'</span>'.repeat(200)}`;
     expect(htmlToText(deep).trim()).toBe('Hello there');
   });
+
+  describe('where a link points', () => {
+    const textOf = (href: string, label = 'Pay now') =>
+      htmlToText(`<p><a href="${href}">${label}</a></p>`).trim();
+
+    it('is written beside the words, as the HTML frame would follow it', () => {
+      expect(textOf('https://example.com/pay?id=7')).toBe('Pay now (https://example.com/pay?id=7)');
+    });
+
+    it.each([
+      ['a javascript: link', 'javascript:alert(document.cookie)'],
+      ['a script link with its scheme split by a tab', 'java\tscript:alert(1)'],
+      ['a link with a name and password in it', 'https://billing.stripe.com:x@evil.top/pay'],
+      ['a link with only a name in it', 'https://billing.stripe.com@evil.top/pay'],
+      ['a link to YOZZ itself', 'https://yozz.app/m/inbox'],
+      ['a link to a subdomain of YOZZ', 'https://api.yozz.app/pay'],
+      ['a data: link', 'data:text/html,<script>alert(1)</script>'],
+      ['a file: link', 'file:///etc/passwd'],
+      ['a link with no scheme', '/pay?id=7'],
+      ['a link whose host is not a name', 'https://evil.top\u0000.example/'],
+    ])('is left out for %s, the words stay', (_what, href) => {
+      expect(textOf(href)).toBe('Pay now');
+    });
+
+    it('is written as the frame would follow it', () => {
+      expect(textOf('//example.com/pay')).toBe('Pay now (https://example.com/pay)');
+      expect(textOf('  https://example.com/pay\n')).toBe('Pay now (https://example.com/pay)');
+    });
+
+    it('is written where the words only look like it, so the real host shows', () => {
+      // A Cyrillic а in the host.
+      expect(textOf('https://p\u0430ypal.com/login', 'https://p\u0430ypal.com/login')).toBe(
+        'https://p\u0430ypal.com/login (https://xn--pypal-4ve.com/login)',
+      );
+      // An ideographic full stop, which a URL parser reads as a dot.
+      expect(
+        textOf('https://stripe.com\u3002evil.top/pay', 'https://stripe.com\u3002evil.top/pay'),
+      ).toBe('https://stripe.com\u3002evil.top/pay (https://stripe.com.evil.top/pay)');
+      expect(textOf('HTTPS://EXAMPLE.com/Pay', 'HTTPS://EXAMPLE.com/Pay')).toBe(
+        'HTTPS://EXAMPLE.com/Pay (https://example.com/Pay)',
+      );
+    });
+
+    it('is written where the words differ from the target by a slash a path gained', () => {
+      expect(textOf('https://example.org/pay/', 'https://example.org/pay')).toBe(
+        'https://example.org/pay (https://example.org/pay/)',
+      );
+      expect(textOf('https://example.org/pay?order=11/', 'https://example.org/pay?order=11')).toBe(
+        'https://example.org/pay?order=11 (https://example.org/pay?order=11/)',
+      );
+    });
+
+    it('is left out where the words are the target, with or without the slash a bare host gains', () => {
+      expect(textOf('https://example.com', 'https://example.com')).toBe('https://example.com');
+      expect(textOf('https://example.com/', 'https://example.com/')).toBe('https://example.com/');
+    });
+
+    it('is left out where the words already say it, and for mailto:', () => {
+      expect(textOf('https://example.com/pay', 'https://example.com/pay')).toBe(
+        'https://example.com/pay',
+      );
+      expect(textOf('mailto:billing@example.com', 'Email us')).toBe('Email us');
+    });
+
+    it('is not written at all when asked for none', () => {
+      expect(
+        htmlToText('<a href="https://example.com/pay">Pay now</a>', { shouldShowLinks: false }),
+      ).toBe('Pay now');
+    });
+  });
 });
 
 describe('htmlHasWordsTextLacks', () => {

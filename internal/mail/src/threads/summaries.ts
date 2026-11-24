@@ -1,6 +1,7 @@
 import type { ImapAddress, ImapMessageSummary } from '@yozz.app/imap';
 import { addressList } from '../compose/draft.ts';
 import type { DraftRecord, FileReference } from '../compose/draft-record.ts';
+import { withoutDirectionOverrides } from './direction-controls.ts';
 import {
   draftIdOf,
   FOLDERS,
@@ -117,6 +118,9 @@ const parseDate = (summary: ImapMessageSummary): number => {
 
 const upper = (flags: readonly string[]) => flags.map(f => f.toUpperCase());
 
+/** A name or subject as the sender wrote it, minus what could reorder the text around it (`withoutDirectionOverrides`). */
+const shown = (text: string | null | undefined) => withoutDirectionOverrides(text ?? '').trim();
+
 const addressOf = (address: ImapAddress | undefined) =>
   address?.mailbox && address?.host ? `${address.mailbox}@${address.host}` : null;
 
@@ -127,8 +131,8 @@ const addressOf = (address: ImapAddress | undefined) =>
 const recipientsIn = (addresses: readonly ImapAddress[] | undefined): readonly Recipient[] =>
   (addresses ?? []).flatMap(address => {
     const at = addressOf(address);
-    const name = address.name?.trim();
-    const isName = name !== undefined && name !== '' && name.toLowerCase() !== at?.toLowerCase();
+    const name = shown(address.name);
+    const isName = name !== '' && name.toLowerCase() !== at?.toLowerCase();
     return at === null ? [] : [{ address: at, ...(isName ? { name } : {}) }];
   });
 
@@ -145,7 +149,7 @@ const messageFromCopies = (
   const fromMailboxHost = addressOf(firstFrom);
   const arrived = locations.find(location => location.folder !== 'sent');
   const owner = arrived?.mailbox ?? locations[0]?.mailbox ?? '';
-  const fromName = firstFrom?.name?.trim() || fromMailboxHost || owner;
+  const fromName = shown(firstFrom?.name) || fromMailboxHost || owner;
   const outbound = arrived === undefined || fromMailboxHost?.toLowerCase() === owner.toLowerCase();
   // The server fills an absent Reply-To with From (RFC 9051 §7.5.2), so only another address is news.
   const replyTo = recipientsIn(summary.envelope?.replyTo);
@@ -175,8 +179,8 @@ const messageFromCopies = (
 };
 
 const subjectOf = (summary: ImapMessageSummary | undefined): string => {
-  const raw = summary?.envelope?.subject?.trim();
-  return raw !== undefined && raw !== '' ? raw : '(no subject)';
+  const raw = shown(summary?.envelope?.subject);
+  return raw !== '' ? raw : '(no subject)';
 };
 
 /** `name@host` as an envelope address. */

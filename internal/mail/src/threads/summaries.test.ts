@@ -144,6 +144,47 @@ describe('threadFromSummary', () => {
     ]);
   });
 
+  describe('direction controls in what the sender wrote', () => {
+    const fromEnvelope = (over: Partial<ImapMessageSummary['envelope'] & {}>) =>
+      threadFromSummary(summaryOf({ envelope: envelope(over) }), 'user@yozz.app');
+
+    it('are taken out of the subject and the sender’s name, whatever shows them', () => {
+      const thread = fromEnvelope({
+        subject: 'Invoice \u202Efdp.exe\u202C due',
+        from: [{ name: 'Stripe\u2066 Support', mailbox: 'billing', host: 'stripe.com' }],
+      });
+      expect(thread.subject).toBe('Invoice fdp.exe due');
+      expect(thread.messages[0]?.fromName).toBe('Stripe Support');
+    });
+
+    it('leave a Hebrew or Arabic name and subject as they were written', () => {
+      const thread = fromEnvelope({
+        subject: 'חשבונית מס׳ 4821\u200F (שולם)',
+        from: [{ name: 'محمد\u061C الأحمد', mailbox: 'm', host: 'example.com' }],
+      });
+      expect(thread.subject).toBe('חשבונית מס׳ 4821\u200F (שולם)');
+      expect(thread.messages[0]?.fromName).toBe('محمد\u061C الأحمد');
+    });
+
+    it('leave a name that was only controls to fall back on the address, and a subject to say so', () => {
+      const thread = fromEnvelope({
+        subject: '\u202E\u202C ',
+        from: [{ name: '\u202E', mailbox: 'billing', host: 'stripe.com' }],
+      });
+      expect(thread.subject).toBe('(no subject)');
+      expect(thread.messages[0]?.fromName).toBe('billing@stripe.com');
+    });
+
+    it('are taken out of a recipient’s name too', () => {
+      const thread = fromEnvelope({
+        to: [{ name: 'Ada\u202E', mailbox: 'user', host: 'yozz.app' }],
+        cc: [{ name: 'Tom\u2067', mailbox: 'tom', host: 'example.com' }],
+      });
+      expect(thread.messages[0]?.to).toEqual([{ name: 'Ada', address: 'user@yozz.app' }]);
+      expect(thread.messages[0]?.cc).toEqual([{ name: 'Tom', address: 'tom@example.com' }]);
+    });
+  });
+
   it('maps a summary with flags correctly', () => {
     const thread = threadFromSummary(summaryOf(), 'user@yozz.app');
     // No mailbox prefix: the same mail delivered to two of your addresses is one message.

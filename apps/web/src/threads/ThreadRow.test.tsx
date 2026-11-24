@@ -4,7 +4,7 @@ import { type Folder, type ThreadState, VAULT_UID_VALIDITY } from '@yozz.app/mai
 import type { ViewId } from '@yozz.app/mail/threads/views';
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { toast } from '../ui/Toast';
 import { addressCellWidth, ThreadRow } from './ThreadRow';
 
@@ -20,7 +20,17 @@ const mail = vi.hoisted(() => ({
   toggleStar: vi.fn(),
 }));
 
-vi.mock('@tanstack/react-router', () => ({ Link: () => null }));
+vi.mock('@tanstack/react-router', () => ({
+  // The row's link, as the plain anchor a pointer and a screen reader meet.
+  Link: ({
+    to: _to,
+    params: _params,
+    search: _search,
+    ...props
+  }: { to: string; params: unknown; search: unknown } & Record<string, unknown>) => (
+    <a {...props} />
+  ),
+}));
 vi.mock('./use-advance', () => ({ useAdvancePast: () => vi.fn() }));
 vi.mock('../store/MailProvider', () => ({ useMail: () => mail }));
 
@@ -72,9 +82,30 @@ const showRow = async (view: ViewId, folders: readonly Folder[], uidValidity = 1
   return [...host.querySelectorAll('button')].flatMap(button => button.ariaLabel ?? []);
 };
 
+/** Every element a `ResizeObserver` was asked to watch, and the callbacks to say one changed size. */
+const observed = { elements: [] as Element[], callbacks: [] as (() => void)[] };
+
+beforeEach(() => {
+  observed.elements = [];
+  observed.callbacks = [];
+  vi.stubGlobal(
+    'ResizeObserver',
+    class {
+      constructor(callback: () => void) {
+        observed.callbacks.push(callback);
+      }
+      observe(element: Element) {
+        observed.elements.push(element);
+      }
+      disconnect() {}
+    },
+  );
+});
+
 afterEach(async () => {
   await act(async () => root.render(null));
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
   mail.junkFolders = { 'me@example.com': true };
   mail.toggleArchive.mockReset();
 });
@@ -172,6 +203,93 @@ describe('what a row says beside the subject', () => {
     await show('unified', threadIn(['inbox']));
     expect(host.textContent).toContain('Ada');
     expect(host.textContent).not.toContain('To:');
+  });
+
+  it('names a sender by their address when their name carries another organisation’s', async () => {
+    const withSender = (fromName: string, fromAddress: string): ThreadState => {
+      const thread = threadIn(['inbox']);
+      return {
+        ...thread,
+        messages: thread.messages.map(message => ({ ...message, fromName, fromAddress })),
+      };
+    };
+    await show('unified', withSender('billing@stripe.com', 'scam@evil.top'));
+    expect(host.textContent).toContain('scam@evil.top');
+    expect(host.textContent).not.toContain('billing@stripe.com');
+    await show(
+      'unified',
+      withSender("'alice@gmail.com' via Some Group", 'group@lists.example.org'),
+    );
+    expect(host.textContent).toContain("'alice@gmail.com' via Some Group");
+    await show('unified', withSender('Stripe Billing', 'billing@stripe.com'));
+    expect(host.textContent).toContain('Stripe Billing');
+  });
+
+  describe('an address in the sender’s place, in a cell too narrow for it', () => {
+    const scam = (): ThreadState => {
+      const thread = threadIn(['inbox']);
+      return {
+        ...thread,
+        messages: thread.messages.map(message => ({
+          ...message,
+          fromName: 'billing@stripe.com',
+          fromAddress: 'notice@stripe-invoices.top',
+        })),
+      };
+    };
+    const widths = (text: number, cell: number) => {
+      vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockReturnValue(text);
+      vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(cell);
+    };
+
+    it('gives up its start and keeps the domain', async () => {
+      widths(200, 100);
+      await show('unified', scam());
+      const cell = host.querySelector('[dir="ltr"]');
+      expect(cell?.textContent).toBe('…notice@stripe-invoices.top');
+      // The text is laid out whole and its box clips the start: nothing is reordered.
+      expect(cell?.querySelector('.justify-end.overflow-hidden')).not.toBeNull();
+    });
+
+    it('has the whole address under the pointer and in the name a screen reader speaks', async () => {
+      widths(200, 100);
+      await show('unified', scam());
+      const link = host.querySelector('a');
+      expect(link?.getAttribute('title')).toBe('notice@stripe-invoices.top');
+      expect(link?.getAttribute('aria-label')).toContain('notice@stripe-invoices.top:');
+    });
+
+    it('measures again when the text changes size, not only the cell', async () => {
+      widths(80, 100);
+      await show('unified', scam());
+      expect(host.textContent).not.toContain('…');
+      const text = [...host.querySelectorAll('span')].find(
+        span => span.textContent === 'notice@stripe-invoices.top' && span.children.length === 0,
+      );
+      expect(observed.elements).toContain(text);
+      expect(observed.elements).toContain(text?.parentElement?.parentElement);
+      // Unread to read narrows the weight; here it is the text that grows past its cell.
+      widths(200, 100);
+      await act(async () => {
+        for (const callback of observed.callbacks) callback();
+      });
+      expect(host.textContent).toContain('…notice@stripe-invoices.top');
+    });
+
+    it('shows it plain when it fits', async () => {
+      widths(80, 100);
+      await show('unified', scam());
+      expect(host.textContent).toContain('notice@stripe-invoices.top');
+      expect(host.textContent).not.toContain('…');
+    });
+
+    it('leaves an ordinary name to be cut at its end, with no title', async () => {
+      widths(200, 100);
+      await show('unified', threadIn(['inbox']));
+      expect(host.querySelector('[title]')).toBeNull();
+      expect(host.textContent).not.toContain('…');
+      expect(host.textContent).toContain('Ada');
+    });
   });
 
   it('says a draft with no recipient is to no one yet', async () => {

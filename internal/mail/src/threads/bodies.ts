@@ -9,6 +9,7 @@ import { SAFE_INLINE_IMAGE_MIME_TYPES } from './image-types.ts';
 import type { Location } from './thread.ts';
 import { type Attachment, renumberedText, toParagraphs } from './thread.ts';
 import { type Unsubscribe, unsubscribeOf } from './unsubscribe.ts';
+import { outboundHrefOf } from './url-policy.ts';
 
 export type FetchedBody = {
   readonly paragraphs: string[];
@@ -115,6 +116,9 @@ const flatTextOf = (root: Element): string => {
   return parts.join('');
 };
 
+/** A URL with a host and no path, query or fragment. */
+const BARE_ORIGIN = /^[a-z][a-z0-9+.-]*:\/\/[^/?#]+$/i;
+
 const textOf = (node: ChildNode, shouldShowLinks: boolean, depth = 0): string => {
   if (isText(node)) return node.value.replace(/\s+/g, ' ');
   if (!isElement(node) || isDropped(node)) return '';
@@ -125,11 +129,20 @@ const textOf = (node: ChildNode, shouldShowLinks: boolean, depth = 0): string =>
     depth >= MAX_HTML_TEXT_DEPTH
       ? flatTextOf(node).replace(/\s+/g, ' ')
       : node.childNodes.map(child => textOf(child, shouldShowLinks, depth + 1)).join('');
-  // Without the destination "click here" says nothing.
+  // Without the destination "click here" says nothing. Only one the HTML frame would follow is
+  // written: a target it refuses (`javascript:`, `user:pass@host`, YOZZ's own origin) is no more
+  // fit to print for a reader, or an agent, to copy. It is left out only where the words already
+  // say exactly it: words that merely look like it (a Cyrillic `а`, a full stop of another kind)
+  // are what the target, as the frame will open it, is there to show.
   if (tagName === 'A' && shouldShowLinks) {
-    const href = node.attrs.find(attribute => attribute.name === 'href')?.value ?? '';
+    const href = outboundHrefOf(
+      node.attrs.find(attribute => attribute.name === 'href')?.value ?? '',
+    );
     const text = inner.trim();
-    return href !== '' && text !== '' && text !== href && !href.startsWith('mailto:')
+    // The one `/` a parser adds is the bare host's: `https://example.org` is `https://example.org/`.
+    const isTheWords =
+      href !== null && (text === href || (BARE_ORIGIN.test(text) && `${text}/` === href));
+    return href !== null && text !== '' && !isTheWords && !href.startsWith('mailto:')
       ? `${text} (${href})`
       : inner;
   }

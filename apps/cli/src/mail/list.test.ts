@@ -373,6 +373,23 @@ layer(NodeServices.layer)(it => {
       }),
     );
 
+    it.effect('keeps Hebrew and Arabic readable, with their marks, while it strips the rest', () =>
+      Effect.gen(function* () {
+        const { world, homes, server, servers } = yield* makeMailWorld();
+        server.deliver(
+          'INBOX',
+          mail(1, {
+            subject: 'חשבונית מס׳ 4821\u200F \u202Eשולם\u202C',
+            fromName: 'محمد\u061C الأحمد',
+          }),
+        );
+        const { stdout } = yield* runCli(['list'], { fetch: world.fetch, homes, servers });
+        const [row] = JSON.parse(stdout).threads;
+        expect(row.untrusted.subject).toBe('חשבונית מס׳ 4821\u200F שולם');
+        expect(row.untrusted.from).toBe('محمد\u061C الأحمد <billing@stripe.com>');
+      }),
+    );
+
     it.effect('answers from the cache for an address that fails, naming it beside syncedAt', () =>
       Effect.gen(function* () {
         const { world, homes, server, second, addSecond, expireSecond, servers } =
