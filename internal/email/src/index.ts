@@ -7,6 +7,8 @@ export type SendEmailInput = {
   subject: string;
   text?: string;
   html?: string;
+  // Aborts the request: a caller's timeout then frees the connection, not just the wait.
+  signal?: AbortSignal;
 };
 
 export type EmailClient = {
@@ -23,12 +25,13 @@ export const createForwardEmailClient = ({
   alias,
   password,
 }: ForwardEmailClientOptions): EmailClient => ({
-  send: async ({ from = alias, to, subject, text, html }) => {
+  send: async ({ from = alias, to, subject, text, html, signal }) => {
     if (text === undefined && html === undefined) {
       throw new TypeError('send needs at least one of text/html');
     }
     const response = await fetch('https://api.forwardemail.net/v1/emails', {
       method: 'POST',
+      ...(signal !== undefined && { signal }),
       headers: {
         Authorization: `Basic ${btoa(`${alias}:${password}`)}`,
         'Content-Type': 'application/json',
