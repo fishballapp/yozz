@@ -12,7 +12,7 @@ and never gives YOZZ's servers readable access to your mail.
 [![MIT libraries](https://img.shields.io/badge/tls%20%C2%B7%20x509%20%C2%B7%20imap%20%C2%B7%20smtp-MIT-8bf274?labelColor=0e0c09)](#licence)
 [![npm](https://img.shields.io/npm/v/@yozz.app/tls?color=8bf274&labelColor=0e0c09&label=%40yozz.app%2Ftls)](https://www.npmjs.com/package/@yozz.app/tls)
 
-[yozz.app](https://yozz.app) · [Issues](https://github.com/fishballapp/yozz/issues)
+[yozz.app](https://yozz.app) · [Blog](https://yozz.app/blog) · [Issues](https://github.com/fishballapp/yozz/issues)
 
 <img src="./assets/screenshot.png" width="960" alt="The YOZZ inbox: three addresses in one stream on the left, a thread with two attachments open on the right">
 
@@ -20,10 +20,10 @@ and never gives YOZZ's servers readable access to your mail.
 
 </div>
 
-Google removes "Send mail as" for third-party addresses in January 2027, after killing POP fetch
-and Gmailify in January 2026. If you send from a domain you own through Gmail's interface, that
-stops working. YOZZ is the client for that case: add any address with an IMAP or SMTP server and
-send from it, with no limit on how many. An address with no inbox attached is the normal case
+Google removes "Send mail as", POP fetch, and Gmailify for third-party addresses in January 2027
+(transition period in Q3–Q4 2026). If you send from a domain you own through Gmail's interface,
+that stops working. YOZZ is the client for that case: add any address with an IMAP or SMTP server
+and send from it, with no limit on how many. An address with no inbox attached is the normal case
 here, not an error.
 
 The other half is what YOZZ leaves out. It has fewer features than Gmail on purpose: one dark
@@ -100,8 +100,8 @@ share, and `apps/` is what runs at yozz.app; both AGPL-3.0.
 | [`internal/mail`](internal/mail/) | The mail logic every client runs: threading, sync, MIME bodies, the vault's draft and sent records, reply seeding and the send state machine, behind ports for the IMAP session, the mail cache and the vault API. | AGPL-3.0 |
 | [`apps/worker-api`](apps/worker-api/) | Hono + Better Auth on Cloudflare Workers: the vault routes, the D1 migrations and the relay, a session-gated WebSocket-to-TCP pipe to ports 993 and 465 only. | AGPL-3.0 |
 | [`apps/web`](apps/web/) | The Vite/React app. | AGPL-3.0 |
-| [`apps/web-marketing`](apps/web-marketing/) | The landing page at yozz.app/, in Astro. | AGPL-3.0 |
-| [`apps/worker-web`](apps/worker-web/) | Serves both at yozz.app, and the app at `/` to a browser that is signed in. | AGPL-3.0 |
+| [`apps/web-marketing`](apps/web-marketing/) | The landing page at yozz.app/, the blog at `/blog` (with RSS at `/blog/rss.xml`), and the policy pages, in Astro. | AGPL-3.0 |
+| [`apps/worker-web`](apps/worker-web/) | Serves the app, the landing page and the blog at yozz.app, serving the app at `/` to a signed-in browser and 404 for unknown `/blog/*` paths. | AGPL-3.0 |
 
 The TLS and X.509 packages run in Node and in all three browser engines, with no native code.
 They are the parts most likely to be useful outside YOZZ, which is why they are MIT and on npm:
