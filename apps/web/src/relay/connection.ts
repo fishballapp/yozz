@@ -28,8 +28,20 @@ export type SmtpConnection = {
 export const describeTlsFailure = (failure: TlsFailure): string => {
   switch (failure.kind) {
     case 'alert-sent':
+      if (failure.alert.description === 'protocol_version') {
+        return 'unsupported TLS version (protocol_version)';
+      }
       return `we sent ${failure.alert.description}`;
     case 'alert-received':
+      if (failure.alert.description === 'protocol_version') {
+        return 'unsupported TLS version (protocol_version)';
+      }
+      if (
+        failure.alert.description === 'handshake_failure' ||
+        failure.alert.description === 'insufficient_security'
+      ) {
+        return `server refused the handshake (${failure.alert.description}); it may require older TLS or a client certificate`;
+      }
       return `server sent ${failure.alert.description}`;
     case 'alert-received-unknown':
       return `server sent unknown alert ${failure.code}`;
@@ -226,7 +238,7 @@ export const connectImap = async (
   return { ok: true, value: { client, close, resumed } };
 };
 
-/** A TLS 1.3 handshake is a few KB. Past it, `@yozz.app/smtp` bounds every reply itself. */
+/** A TLS handshake is a few KB. Past it, `@yozz.app/smtp` bounds every reply itself. */
 const SMTP_HANDSHAKE_MS = 60 * 1000;
 
 /** Open, banner, EHLO, authenticate. `close` QUITs first; a 5xx on AUTH is an `auth` failure. */

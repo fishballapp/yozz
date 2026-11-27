@@ -12,7 +12,7 @@ import { IMAP_PORT, isReadyGreeting } from '../hosts.ts';
 export type HostResult = {
   readonly host: string;
   readonly ok: boolean;
-  /** The negotiated group and the scheme the server signed with, or the failure. */
+  /** The negotiated protocol version, group, and scheme the server signed with, or the failure. */
   readonly detail: string;
   readonly greeting: string;
   /** This engine's SPKI pin; the runner compares it across engines. */
@@ -145,7 +145,7 @@ const handshake = async (
     return {
       host,
       ok: true,
-      detail: `${result.negotiatedGroup} / ${result.peerSignatureScheme}`,
+      detail: `${result.protocolVersion} / ${result.negotiatedGroup} / ${result.peerSignatureScheme}`,
       greeting: line,
       pin: result.peerPublicKeyPin,
     };

@@ -32,9 +32,9 @@ something.
 
 ## How it works
 
-The browser does the mail. It opens TLS 1.3 to your IMAP and SMTP servers itself, with a TLS
-and X.509 implementation in TypeScript, and reaches them through a relay on our side that
-forwards bytes it cannot read. Your mail passwords are encrypted on your device before YOZZ
+The browser does the mail. It opens TLS 1.3 (or modern TLS 1.2) to your IMAP and SMTP servers
+itself, with a TLS and X.509 implementation in TypeScript, and reaches them through a relay on our
+side that forwards bytes it cannot read. Your mail passwords are encrypted on your device before YOZZ
 stores them, with a key only you hold, and our servers keep ciphertext they cannot open. If we were
 breached or subpoenaed, there is no readable mailbox or credential store to hand over.
 
@@ -92,7 +92,7 @@ share, and `apps/` is what runs at yozz.app; both AGPL-3.0.
 | Package | What it is | Licence |
 | --- | --- | --- |
 | [`packages/x509`](packages/x509/) | Strict DER, certificate decoding, RFC 5280 path validation, a compiled trust store built from curl's `cacert.pem`. x509-limbo: 902/902 accepts, 8827/8837 rejects, each over-accept attributed. | MIT |
-| [`packages/tls`](packages/tls/) | A TLS 1.3 client (RFC 9846): record layer, handshake state machine, key schedule, PSK resumption (never 0-RTT), `KeyUpdate`, TOFU SPKI pinning. RFC 8448 byte-exact on all five traces; BoGo 296/296. | MIT |
+| [`packages/tls`](packages/tls/) | A TLS 1.3 (RFC 9846) and modern TLS 1.2 (ECDHE + AES-GCM) client: record layer, handshake state machine, key schedules, PSK resumption (TLS 1.3, never 0-RTT), `KeyUpdate`, TOFU SPKI pinning. RFC 8448 byte-exact on all five traces; BoGo 497/497. | MIT |
 | [`packages/imap`](packages/imap/) | Transport-agnostic IMAP4rev2/rev1 client: literals, total parsing, RFC 2047, SASL PLAIN and LOGIN, `IDLE`, `UID MOVE`. | MIT |
 | [`packages/smtp`](packages/smtp/) | Transport-agnostic SMTP client plus an RFC 5322 message builder. | MIT |
 | [`internal/vault`](internal/vault/) | The key schedule, DEK wrap and AES-GCM records for the encrypted settings store. | AGPL-3.0 |

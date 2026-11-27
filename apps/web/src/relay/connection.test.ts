@@ -23,7 +23,7 @@ vi.mock('./transport', () => ({
   openRelayTransport: (...args: unknown[]) => openRelayTransport(...args),
 }));
 
-const { connectSmtp, openTlsDuplex } = await import('./connection');
+const { connectSmtp, describeTlsFailure, openTlsDuplex } = await import('./connection');
 const { peerKey, saveSession, takeSession } = await import('./session-store');
 
 const HOST = { host: 'imap.example.net', port: 993 } as const;
@@ -173,5 +173,36 @@ describe('openTlsDuplex', () => {
     expect(openRelayTransport.mock.lastCall?.[3]).toBe(onTraffic);
     await res.value.duplex.flush?.();
     expect(relayFlush).toHaveBeenCalledOnce();
+  });
+});
+
+describe('describeTlsFailure', () => {
+  it('explains protocol_version and handshake refusals without overclaiming a cause', () => {
+    expect(
+      describeTlsFailure({
+        kind: 'alert-received',
+        alert: { level: 'fatal', description: 'protocol_version' },
+      }),
+    ).toBe('unsupported TLS version (protocol_version)');
+    expect(
+      describeTlsFailure({
+        kind: 'alert-sent',
+        alert: { level: 'fatal', description: 'protocol_version' },
+      }),
+    ).toBe('unsupported TLS version (protocol_version)');
+    expect(
+      describeTlsFailure({
+        kind: 'alert-received',
+        alert: { level: 'fatal', description: 'handshake_failure' },
+      }),
+    ).toBe(
+      'server refused the handshake (handshake_failure); it may require older TLS or a client certificate',
+    );
+    expect(
+      describeTlsFailure({
+        kind: 'alert-received',
+        alert: { level: 'fatal', description: 'internal_error' },
+      }),
+    ).toBe('server sent internal_error');
   });
 });

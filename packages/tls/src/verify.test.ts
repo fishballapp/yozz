@@ -4,8 +4,15 @@ import { RFC_8448_TRACES, type Rfc8448Trace } from '../vectors/rfc8448.ts';
 import { concat } from './bytes.ts';
 import { decodeHandshakeMessage } from './handshake-messages.ts';
 import { Transcript } from './transcript.ts';
-import { importLeafKey, verifyCertificateVerify } from './verify.ts';
-import { SIGNATURE_SCHEMES, type SignatureScheme, SUPPORTED_SIGNATURE_SCHEMES } from './wire.ts';
+import { importLeafKey, verifyCertificateVerify, verifyServerKeyExchange } from './verify.ts';
+import {
+  SIGNATURE_SCHEMES,
+  type SignatureScheme,
+  SUPPORTED_SIGNATURE_SCHEMES,
+  SUPPORTED_TLS_1_2_SIGNATURE_SCHEMES,
+  TLS_1_2_SIGNATURE_SCHEMES,
+  type Tls12SignatureScheme,
+} from './wire.ts';
 
 const rsaParams = (hash: string): RsaHashedKeyGenParams => ({
   name: 'RSA-PSS',
@@ -318,5 +325,257 @@ describe('Stage 6: CertificateVerify & leaf key import against RFC 8448', () => 
         name,
       ).toEqual({ ok: true });
     }
+  });
+});
+
+type Signer = { readonly generate: Algorithm; readonly sign: AlgorithmIdentifier };
+
+const ecdsaSigner = (namedCurve: string, hash: string): Signer => ({
+  generate: { name: 'ECDSA', namedCurve } as EcKeyGenParams,
+  sign: { name: 'ECDSA', hash } as EcdsaParams,
+});
+
+const pkcs1Signer = (hash: string): Signer => ({
+  generate: { ...rsaParams(hash), name: 'RSASSA-PKCS1-v1_5' },
+  sign: { name: 'RSASSA-PKCS1-v1_5' },
+});
+
+/** Under TLS 1.2 the ECDSA codes name the hash; the key here sits on the curve the name suggests. */
+const TLS_1_2_SIGNERS: Readonly<Record<Tls12SignatureScheme, Signer>> = {
+  ecdsa_secp256r1_sha256: ecdsaSigner('P-256', 'SHA-256'),
+  ecdsa_secp384r1_sha384: ecdsaSigner('P-384', 'SHA-384'),
+  rsa_pss_rsae_sha256: { generate: rsaParams('SHA-256'), sign: pssParams(32) },
+  rsa_pss_rsae_sha384: { generate: rsaParams('SHA-384'), sign: pssParams(48) },
+  rsa_pss_rsae_sha512: { generate: rsaParams('SHA-512'), sign: pssParams(64) },
+  rsa_pkcs1_sha256: pkcs1Signer('SHA-256'),
+  rsa_pkcs1_sha384: pkcs1Signer('SHA-384'),
+  rsa_pkcs1_sha512: pkcs1Signer('SHA-512'),
+  ed25519: { generate: { name: 'Ed25519' }, sign: { name: 'Ed25519' } },
+};
+
+type SignedServerKeyExchange = {
+  readonly scheme: number;
+  readonly signature: Uint8Array;
+  readonly spkiDer: Uint8Array;
+  readonly clientRandom: Uint8Array;
+  readonly serverRandom: Uint8Array;
+  readonly serverParams: Uint8Array;
+};
+
+/** RFC 8422 §5.4: named_curve x25519, a 32-octet point. */
+const serverParamsFixture = (): Uint8Array =>
+  concat(Uint8Array.of(3, 0x00, 0x1d, 32), crypto.getRandomValues(new Uint8Array(32)));
+
+const signServerKeyExchange = async (
+  signer: Signer,
+  scheme: number,
+): Promise<SignedServerKeyExchange> => {
+  const clientRandom = crypto.getRandomValues(new Uint8Array(32));
+  const serverRandom = crypto.getRandomValues(new Uint8Array(32));
+  const serverParams = serverParamsFixture();
+  const pair = await crypto.subtle.generateKey(signer.generate, true, ['sign', 'verify']);
+  if (!('privateKey' in pair)) throw new Error('no key pair');
+  const raw = new Uint8Array(
+    await crypto.subtle.sign(
+      signer.sign,
+      pair.privateKey,
+      concat(clientRandom, serverRandom, serverParams),
+    ),
+  );
+  return {
+    scheme,
+    // ECDSA signs to fixed-width r||s; a ServerKeyExchange carries DER.
+    signature: signer.generate.name === 'ECDSA' ? derFromP1363(raw) : raw,
+    spkiDer: new Uint8Array(await crypto.subtle.exportKey('spki', pair.publicKey)),
+    clientRandom,
+    serverRandom,
+    serverParams,
+  };
+};
+
+const flipFirstBit = (bytes: Uint8Array): Uint8Array => {
+  const copy = new Uint8Array(bytes);
+  copy[0]! ^= 0x01;
+  return copy;
+};
+
+describe('verifyServerKeyExchange (TLS 1.2, RFC 5246 §7.4.3)', () => {
+  it('verifies a real signature under every TLS 1.2 scheme the client offers', async () => {
+    for (const name of SUPPORTED_TLS_1_2_SIGNATURE_SCHEMES) {
+      const signed = await signServerKeyExchange(
+        TLS_1_2_SIGNERS[name],
+        TLS_1_2_SIGNATURE_SCHEMES[name],
+      );
+      expect(await verifyServerKeyExchange(signed), name).toEqual({ ok: true });
+    }
+  });
+
+  /** RFC 5246 §7.4.1.4.1: in TLS 1.2, 0x0403 is (SHA-256, ECDSA) on whatever curve the key is on. */
+  it('verifies ECDSA with the scheme hash and the key curve, in both cross pairings', async () => {
+    for (const [curve, hash, scheme] of [
+      ['P-384', 'SHA-256', 0x0403],
+      ['P-256', 'SHA-384', 0x0503],
+    ] as const) {
+      const signed = await signServerKeyExchange(ecdsaSigner(curve, hash), scheme);
+      expect(await verifyServerKeyExchange(signed), `${curve} ${hash}`).toEqual({ ok: true });
+      // The scheme's hash binds: the same signature under the other ECDSA code fails.
+      expect(
+        await verifyServerKeyExchange({ ...signed, scheme: scheme === 0x0403 ? 0x0503 : 0x0403 }),
+      ).toEqual({ ok: false, description: 'decrypt_error' });
+    }
+  });
+
+  it('refuses a P-521 key, which this client offers for no ECDHE signature', async () => {
+    const signed = await signServerKeyExchange(ecdsaSigner('P-521', 'SHA-256'), 0x0403);
+    expect(await verifyServerKeyExchange(signed)).toEqual({
+      ok: false,
+      description: 'illegal_parameter',
+    });
+  });
+
+  it('refuses a scheme it never offers with illegal_parameter', async () => {
+    const signed = await signServerKeyExchange(TLS_1_2_SIGNERS.rsa_pkcs1_sha256, 0x0401);
+    // SHA-1 RSA, SHA-1 ECDSA, P-521 ECDSA, rsa_pss_pss_sha256, and nonsense.
+    for (const scheme of [0x0201, 0x0203, 0x0603, 0x0809, 0xffff]) {
+      expect(await verifyServerKeyExchange({ ...signed, scheme }), `0x${scheme}`).toEqual({
+        ok: false,
+        description: 'illegal_parameter',
+      });
+    }
+  });
+
+  it('refuses a key of the wrong type for the scheme with illegal_parameter', async () => {
+    const rsa = await signServerKeyExchange(TLS_1_2_SIGNERS.rsa_pkcs1_sha256, 0x0401);
+    const ecdsa = await signServerKeyExchange(TLS_1_2_SIGNERS.ecdsa_secp256r1_sha256, 0x0403);
+    const ed25519 = await signServerKeyExchange(TLS_1_2_SIGNERS.ed25519, 0x0807);
+    for (const [signed, scheme] of [
+      [rsa, 0x0403],
+      [rsa, 0x0807],
+      [ecdsa, 0x0401],
+      [ecdsa, 0x0804],
+      [ecdsa, 0x0807],
+      [ed25519, 0x0401],
+      [ed25519, 0x0503],
+    ] as const) {
+      expect(await verifyServerKeyExchange({ ...signed, scheme })).toEqual({
+        ok: false,
+        description: 'illegal_parameter',
+      });
+    }
+  });
+
+  it('refuses a tampered random, server params or signature with decrypt_error', async () => {
+    for (const name of [
+      'rsa_pkcs1_sha256',
+      'rsa_pss_rsae_sha256',
+      'ecdsa_secp384r1_sha384',
+      'ed25519',
+    ] as const) {
+      const signed = await signServerKeyExchange(
+        TLS_1_2_SIGNERS[name],
+        TLS_1_2_SIGNATURE_SCHEMES[name],
+      );
+      for (const tampered of [
+        { ...signed, clientRandom: flipFirstBit(signed.clientRandom) },
+        { ...signed, serverRandom: flipFirstBit(signed.serverRandom) },
+        { ...signed, serverParams: flipFirstBit(signed.serverParams) },
+        // The two randoms swapped: the order is part of what is signed.
+        { ...signed, clientRandom: signed.serverRandom, serverRandom: signed.clientRandom },
+        { ...signed, signature: flipFirstBit(signed.signature.slice().reverse()).reverse() },
+      ]) {
+        expect(await verifyServerKeyExchange(tampered), name).toEqual({
+          ok: false,
+          description: 'decrypt_error',
+        });
+      }
+    }
+  });
+
+  it('refuses a malformed ECDSA DER signature with decrypt_error', async () => {
+    const signed = await signServerKeyExchange(TLS_1_2_SIGNERS.ecdsa_secp256r1_sha256, 0x0403);
+    // Negative, zero, and oversized (> 32-byte) scalars must be rejected rather than truncated.
+    const zeroScalar = Uint8Array.of(0x30, 0x06, 0x02, 0x01, 0x00, 0x02, 0x01, 0x01);
+    const negativeScalar = Uint8Array.of(0x30, 0x06, 0x02, 0x01, 0xff, 0x02, 0x01, 0x01);
+    const oversizedScalar = concat(
+      Uint8Array.of(0x30, 38, 0x02, 33, 0x01),
+      new Uint8Array(32).fill(0x22),
+      Uint8Array.of(0x02, 0x01, 0x01),
+    );
+    for (const signature of [
+      new Uint8Array(0),
+      Uint8Array.of(0x30, 0x00),
+      signed.signature.subarray(1),
+      zeroScalar,
+      negativeScalar,
+      oversizedScalar,
+    ]) {
+      expect(await verifyServerKeyExchange({ ...signed, signature })).toEqual({
+        ok: false,
+        description: 'decrypt_error',
+      });
+    }
+  });
+
+  it('refuses an SPKI it cannot parse with bad_certificate', async () => {
+    const signed = await signServerKeyExchange(TLS_1_2_SIGNERS.ed25519, 0x0807);
+    expect(await verifyServerKeyExchange({ ...signed, spkiDer: Uint8Array.of(1, 2, 3) })).toEqual({
+      ok: false,
+      description: 'bad_certificate',
+    });
+  });
+});
+
+/** The TLS 1.2 relaxations must not reach TLS 1.3 (RFC 9846 §4.5.2). */
+describe('verifyCertificateVerify stays TLS 1.3-strict', () => {
+  const tls13SignedData = (transcriptHash: Uint8Array): Uint8Array<ArrayBuffer> =>
+    concat(
+      new Uint8Array(64).fill(0x20),
+      new TextEncoder().encode('TLS 1.3, server CertificateVerify'),
+      Uint8Array.of(0x00),
+      transcriptHash,
+    );
+
+  it('refuses rsa_pkcs1_sha256/384/512 even over a valid signature', async () => {
+    const transcriptHash = crypto.getRandomValues(new Uint8Array(32));
+    for (const name of ['rsa_pkcs1_sha256', 'rsa_pkcs1_sha384', 'rsa_pkcs1_sha512'] as const) {
+      const signer = TLS_1_2_SIGNERS[name];
+      const pair = await crypto.subtle.generateKey(signer.generate, true, ['sign', 'verify']);
+      if (!('privateKey' in pair)) throw new Error('no key pair');
+      const signature = new Uint8Array(
+        await crypto.subtle.sign(signer.sign, pair.privateKey, tls13SignedData(transcriptHash)),
+      );
+      const spkiDer = new Uint8Array(await crypto.subtle.exportKey('spki', pair.publicKey));
+      const scheme = TLS_1_2_SIGNATURE_SCHEMES[name];
+
+      expect(
+        await verifyCertificateVerify({ scheme, signature, spkiDer, transcriptHash }),
+        name,
+      ).toEqual({
+        ok: false,
+        description: 'illegal_parameter',
+      });
+      expect(await importLeafKey(spkiDer, scheme), name).toEqual({
+        ok: false,
+        description: 'illegal_parameter',
+      });
+    }
+  });
+
+  it('still refuses a P-384 key under ecdsa_secp256r1_sha256', async () => {
+    const transcriptHash = crypto.getRandomValues(new Uint8Array(32));
+    const signer = ecdsaSigner('P-384', 'SHA-256');
+    const pair = await crypto.subtle.generateKey(signer.generate, true, ['sign', 'verify']);
+    if (!('privateKey' in pair)) throw new Error('no key pair');
+    const raw = new Uint8Array(
+      await crypto.subtle.sign(signer.sign, pair.privateKey, tls13SignedData(transcriptHash)),
+    );
+    expect(
+      await verifyCertificateVerify({
+        scheme: 0x0403,
+        signature: derFromP1363(raw),
+        spkiDer: new Uint8Array(await crypto.subtle.exportKey('spki', pair.publicKey)),
+        transcriptHash,
+      }),
+    ).toEqual({ ok: false, description: 'illegal_parameter' });
   });
 });

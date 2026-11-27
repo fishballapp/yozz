@@ -17,9 +17,14 @@ export type InventoryRow = {
   readonly argv: readonly string[];
   /**
    * Measured in the inventory run, in two forms: the runner's own error when the test fails, and
-   * the client's `alert-received protocol_version` when a TLS 1.2 test passes by accident.
+   * the client's `alert-received protocol_version` when an older-TLS test passes by accident.
    */
   readonly peerRefusedVersion: boolean;
+  /**
+   * Measured in the inventory run: connection 0 negotiated TLS 1.2 and the runner asked for
+   * `-resume-count > 0`, which expects TLS 1.2 session resumption (not implemented in v1).
+   */
+  readonly isTls12Resumption: boolean;
 };
 
 export type ScopeRule = {
@@ -43,7 +48,7 @@ const offersGroup = (row: InventoryRow, ids: Readonly<Record<number, string>>): 
 const offersScheme = (row: InventoryRow, ids: Readonly<Record<number, string>>): boolean =>
   valuesOf(row.argv, '-verify-prefs').some(value => ids[Number(value)] !== undefined);
 
-const VERSION_TOKEN = /(^|-)(SSL3|TLS1|TLS11|TLS12)(-|$)/;
+const VERSION_TOKEN = /(^|-)(SSL3|TLS1|TLS11)(-|$)/;
 
 /** Post-quantum key exchange and signatures, out of v1 together. */
 const POST_QUANTUM_GROUPS: Readonly<Record<number, string>> = {
@@ -62,17 +67,14 @@ const P521_GROUP: Readonly<Record<number, string>> = { 25: 'P-521' };
 const P521_SCHEME: Readonly<Record<number, string>> = { 1539: 'ECDSA_P521_SHA512' };
 
 /**
- * Not CertificateVerify schemes: RFC 9846 §4.3.3 (RSA-PKCS1 "not defined for use in signed TLS
- * handshake messages") and §4.5.2 ("SHA-1 ... MUST NOT be used in any signatures of
- * CertificateVerify messages").
+ * Schemes never supported at either version: SHA-1 (deprecated, RFC 9846 §4.5.2) and BoringSSL's
+ * non-standard `RSA_PKCS1_SHA256_LEGACY`. Dropped in `-verify-prefs` rather than declined so
+ * refusal tests still run.
  */
 export const LEGACY_SCHEMES: Readonly<Record<number, string>> = {
   513: 'RSA_PKCS1_SHA1',
   515: 'ECDSA_SHA1',
-  1025: 'RSA_PKCS1_SHA256',
   1056: 'RSA_PKCS1_SHA256_LEGACY',
-  1281: 'RSA_PKCS1_SHA384',
-  1537: 'RSA_PKCS1_SHA512',
 };
 
 /**
@@ -108,10 +110,10 @@ export const RFC_DIVERGENCES: readonly { readonly test: string; readonly rfc: st
     test: 'KeyUpdate-InvalidRequestMode',
     rfc: '§4.7.3 on request_update: "If an implementation receives any other value, it MUST terminate the connection with an illegal_parameter alert." BoringSSL raises :DECODE_ERROR:.',
   },
-  {
-    test: 'GarbageCertificate-Client-TLS13',
-    rfc: '§6.2: "bad_certificate: A certificate was corrupt, contained signatures that did not verify correctly, etc." A certificate that will not parse is corrupt. BoringSSL sends decode_error.',
-  },
+  ...['TLS12', 'TLS13'].map(ver => ({
+    test: `GarbageCertificate-Client-${ver}`,
+    rfc: 'RFC 9846 §6.2 / RFC 5246 §7.2.2: "bad_certificate: A certificate was corrupt, contained signatures that did not verify correctly, etc." A certificate that will not parse is corrupt. BoringSSL sends decode_error.',
+  })),
   {
     test: 'SendWarningAlerts-TLS13',
     rfc: '§6: "All the alerts listed in Section 6.2 MUST be sent with AlertLevel=fatal and MUST be treated as error alerts when received regardless of the AlertLevel in the message." A warning-level unexpected_message is therefore the peer\'s error alert, and the connection ends without a reply. BoringSSL answers with decode_error.',
@@ -119,10 +121,6 @@ export const RFC_DIVERGENCES: readonly { readonly test: string; readonly rfc: st
   {
     test: 'EncryptedExtensionsWithKeyShare-TLS13',
     rfc: '§4.3: "If an implementation receives an extension which it recognizes and which is not specified for the message in which it appears, it MUST abort the handshake with an illegal_parameter alert." A key_share in EncryptedExtensions is exactly that. BoringSSL sends unsupported_extension and checks it, so no mapping can bridge this one.',
-  },
-  {
-    test: 'PointFormat-EncryptedExtensions-TLS13',
-    rfc: '§4.3: an extension response to a request we never made "MUST abort the handshake with an unsupported_extension alert". We do not offer ec_point_formats. BoringSSL parses the body and raises :ERROR_PARSING_EXTENSION: instead.',
   },
   {
     test: 'HelloRetryRequestVersionMismatch-TLS13',
@@ -140,25 +138,31 @@ export const RFC_DIVERGENCES: readonly { readonly test: string; readonly rfc: st
     test: 'RejectEmptyCertificateAuthorities-Client-TLS-TLS13',
     rfc: '§4.3 again, and the same carve-out: an extension we do not implement is one we may ignore, and an empty certificate_authorities list is only malformed to a client that reads it.',
   },
-  ...['', '-ImplicitHandshake', '-PackHandshake', '-SplitHandshakeRecords'].map(variant => ({
-    test: `CertificateVerificationFail-Client-TLS13-TLS-Sync${variant}`,
-    rfc: '§4.5.1: a receiver that "cannot construct an acceptable chain using the provided certificates and decides to abort the handshake... MUST abort the handshake with an appropriate certificate-related alert". We send `certificate_unknown`, which §6.2 defines as "some other (unspecified) issue arose in processing the certificate, rendering it unacceptable" — an application refusing on its own policy is exactly that. BoringSSL sends `handshake_failure`, which is not certificate-related at all, and checks for it. Note this is the LEGACY callback only: with `-use-custom-verify-callback` BoringSSL wants `certificate_unknown` too (`verifyFailLocalError` in `state_machine_tests.go`), and those tests pass. Its four Async siblings do not check the alert and pass.',
-  })),
+  ...['TLS12', 'TLS13'].flatMap(ver =>
+    ['', '-ImplicitHandshake', '-PackHandshake', '-SplitHandshakeRecords'].map(variant => ({
+      test: `CertificateVerificationFail-Client-${ver}-TLS-Sync${variant}`,
+      rfc: 'RFC 9846 §4.5.1 / RFC 5246 §7.2.2: a receiver that "cannot construct an acceptable chain using the provided certificates and decides to abort the handshake... MUST abort the handshake with an appropriate certificate-related alert". We send `certificate_unknown`, which §6.2 defines as "some other (unspecified) issue arose in processing the certificate, rendering it unacceptable" — an application refusing on its own policy is exactly that. BoringSSL sends `handshake_failure`, which is not certificate-related at all, and checks for it. Note this is the LEGACY callback only: with `-use-custom-verify-callback` BoringSSL wants `certificate_unknown` too (`verifyFailLocalError` in `state_machine_tests.go`), and those tests pass. Its four Async siblings do not check the alert and pass.',
+    })),
+  ),
   ...['NoContext', 'EmptyContext'].map(variant => ({
     test: `ExportKeyingMaterial-${variant}-TLS-TLS13`,
     rfc: '§7.1 declares the exporter label\'s home field `opaque label<7..255> = "tls13 " + Label`, and the prefix alone is SIX octets — so an empty `Label` cannot be encoded, and `hkdfLabel` refuses to derive a key from a struct that could not go on a wire. These two tests pass `-export-label ""`, and BoringSSL computes the exporter over the 6-octet label anyway. Their two labelled siblings, `ExportKeyingMaterial-TLS-TLS13` and `-Small-`, PASS — including 1024 octets, which is the only thing in the suite that reaches `hkdfExpand`\'s multi-block loop, so the exporter itself is proven against the runner\'s own computation byte for byte.',
   })),
+  ...['TLS12', 'TLS13'].map(ver => ({
+    test: `DuplicateExtensionClient-TLS-${ver}`,
+    rfc: 'RFC 9846 §4.3 / RFC 5246 §7.4.1.4 forbid a repeated extension and name no alert for it. We say illegal_parameter everywhere; BoGo wants decode_error here and illegal_parameter for the same fault in a NewSessionTicket, so there is no single answer to match.',
+  })),
   {
-    test: 'DuplicateExtensionClient-TLS-TLS13',
-    rfc: '§4.3 forbids a repeated extension and names no alert for it. We say illegal_parameter everywhere; BoGo wants decode_error here and illegal_parameter for the same fault in a NewSessionTicket, so there is no single answer to match.',
+    test: 'SupportedVersionSelection-TLS12',
+    rfc: "RFC 8446 §4.2.1 / RFC 9846 §4.2.1: \"If the 'supported_versions' extension in the ServerHello contains a version not offered by the client or contains a version prior to TLS 1.3, the client MUST abort the handshake with an 'illegal_parameter' alert.\" We send illegal_parameter. BoringSSL's `parse_server_version` (`handshake_client.cc`, carrying its own TODO that it \"doesn't quite match the RFC8446 formulation\") accepts 0x0303 there and fails later in TLS 1.2 extension parsing with `:UNEXPECTED_EXTENSION:` (`unsupported_extension`).",
   },
 ];
 
 export const SCOPE_RULES: readonly ScopeRule[] = [
   {
     id: 'not-tls',
-    why: 'DTLS and QUIC are different record layers. YOZZ speaks TLS over a stream socket and will not grow either.',
-    excludes: row => row.protocol !== 'tls',
+    why: 'DTLS and QUIC are different record layers. YOZZ speaks TLS over a stream socket and will not grow either, nor any QUIC transport-parameters configuration.',
+    excludes: row => row.protocol !== 'tls' || row.flags.includes('-quic-transport-params'),
   },
   {
     id: 'server',
@@ -166,13 +170,13 @@ export const SCOPE_RULES: readonly ScopeRule[] = [
     excludes: row => row.side !== 'client',
   },
   {
-    id: 'pre-tls13-by-name',
-    why: 'The test names its version, and the runner panics if a versioned name disagrees with its config. TLS 1.3 is the whole of what this client speaks.',
+    id: 'pre-tls12-by-name',
+    why: 'The test names SSL 3.0, TLS 1.0 or TLS 1.1, and the runner panics if a versioned name disagrees with its config. This client speaks TLS 1.3 and modern TLS 1.2 only.',
     excludes: row => VERSION_TOKEN.test(row.name),
   },
   {
-    id: 'pre-tls13-by-peer',
-    why: 'The name says nothing about versions, but the runner refused the handshake because our ClientHello offered only TLS 1.3. Its server is older, so the test is not ours.',
+    id: 'pre-tls12-by-peer',
+    why: 'The name says nothing about versions, but the runner refused the handshake because our ClientHello offers only TLS 1.3 and TLS 1.2. Its server is older, so the test is not ours.',
     excludes: row => row.peerRefusedVersion,
   },
   {
@@ -202,7 +206,7 @@ export const SCOPE_RULES: readonly ScopeRule[] = [
   },
   {
     id: 'renegotiation',
-    why: 'Renegotiation does not exist in TLS 1.3, and the flags that surround it are all TLS 1.2 machinery.',
+    why: 'TLS 1.3 has no renegotiation and our TLS 1.2 client deliberately refuses it (sending `no_renegotiation` on post-handshake `HelloRequest` and `unexpected_message` on stray handshake `HelloRequest` — those refusal tests stay in scope and pass). Flags that ask the client to perform renegotiation, ignore HelloRequest, or enforce `-no-legacy-server-connect` / `-expect-secure-renegotiation` are excluded.',
     excludes: row =>
       row.flags.some(flag => flag.includes('renegotiat')) ||
       hasAny(row.flags, ['-no-legacy-server-connect', '-expect-secure-renegotiation']),
@@ -226,22 +230,20 @@ export const SCOPE_RULES: readonly ScopeRule[] = [
   },
   {
     id: 'not-our-clienthello',
-    why: 'The test asks for a verdict only a client whose ClientHello differs from ours can give — either because the thing it tests never reaches us, or because it reaches us and we are entitled to answer differently. Each was measured, not guessed: the runner echoes extended_master_secret and renegotiation_info only to a client that offered them (`handshake_server.go` processClientExtensions) and this client offers neither; a server_name acknowledgement is unsolicited only for a client that sent no SNI, and ours always does; BoringSSL disables Ed25519 by default where we advertise it and verify it, which is what the three Ed25519 entries share, though not by the same mechanism: `Ed25519DefaultDisable-NoAccept` and `Client-VerifyDefault-Ed25519-TLS13` sign Ed25519 with `IgnorePeerSignatureAlgorithmPreferences` and expect the refusal a client owes a scheme it withheld, while `Ed25519DefaultDisable-NoAdvertise` sets no bug at all and expects the runner to find no common algorithm — nothing signs. All three turn on a default we do not share, and this client withheld nothing (`Client-Verify-Ed25519-TLS13`, which offers it explicitly, passes); and BoringSSL offers a post-quantum group by default where we offer X25519, P-256 and P-384.',
+    why: 'The test asks for a verdict only a client whose ClientHello differs from ours can give — either because the thing it tests never reaches us, or because it reaches us and we are entitled to answer differently. Each was measured, not guessed: a server_name acknowledgement is unsolicited only for a client that sent no SNI, and ours always does (both TLS 1.2 and TLS 1.3); BoringSSL disables Ed25519 by default where we advertise it and verify it, which is what the four Ed25519 entries share (`Ed25519DefaultDisable-NoAccept`, `Client-VerifyDefault-Ed25519-TLS12`, `Client-VerifyDefault-Ed25519-TLS13` sign Ed25519 and expect refusal, while `Ed25519DefaultDisable-NoAdvertise` expects no common algorithm — `Client-Verify-Ed25519-TLS13` passes explicitly); and BoringSSL offers a post-quantum group by default where we offer X25519, P-256 and P-384.',
     excludes: row =>
       [
-        'EMS-Forbidden-TLS13',
-        'RenegotiationInfo-Forbidden-TLS13',
+        'UnsolicitedServerNameAck-TLS-TLS12',
         'UnsolicitedServerNameAck-TLS-TLS13',
         'Ed25519DefaultDisable-NoAccept',
         'Ed25519DefaultDisable-NoAdvertise',
+        'Client-VerifyDefault-Ed25519-TLS12',
         'Client-VerifyDefault-Ed25519-TLS13',
         'PostQuantumEnabledByDefaultInClients',
         // An SSL 3.0 server that refuses our ClientHello for want of a shared suite; the
         // unsolicited ServerHello the test is named for never arrives.
         'NoSSL3-Client-Unsolicited',
-        // `MaxVersion: VersionTLS12` (`cipher_suite_tests.go`), and the only test using `-cipher`,
-        // which takes an OpenSSL cipher string; the shim exits 89 on it before `pre-tls13-by-peer`
-        // could measure the refusal.
+        // The only test using `-cipher`, which takes an OpenSSL cipher string.
         'UnsupportedCipherSuite',
       ].includes(row.name),
   },
@@ -250,7 +252,9 @@ export const SCOPE_RULES: readonly ScopeRule[] = [
     why: "The check is real and ours, but it lives in `YOZZ_VALIDATOR` — which cannot run against BoGo's certificates at all (see README). x509-limbo is where keyUsage is gated.",
     excludes: row =>
       [
+        'ECDSAKeyUsage-Client-TLS12',
         'ECDSAKeyUsage-Client-TLS13',
+        'RSAKeyUsage-Client-WantSignature-GotEncipherment-TLS12',
         'RSAKeyUsage-Client-WantSignature-GotEncipherment-TLS13',
       ].includes(row.name),
   },
@@ -261,21 +265,17 @@ export const SCOPE_RULES: readonly ScopeRule[] = [
   },
   {
     id: 'older-tls-shape',
-    why: 'The flag asks the client to speak a version other than 1.3, or for machinery that only exists below it: extended master secret, False Start, the `tls-unique` channel binding, which TLS 1.3 replaces with the exporter, and CBC record splitting — the TLS 1.0 BEAST mitigation, over a cipher mode TLS 1.3 does not have. BoGo runs the six splitting tests at `MaxVersion: VersionTLS10` (`cbc_tests.go`), and they sat in the manifest only because the shim exited 89 on `-write-different-record-sizes` before reaching this flag.',
+    why: 'The flag asks for pre-TLS 1.2 versions, disables every version we support, or asks for legacy TLS 1.2 machinery we do not implement: Fallback SCSV (RFC 7507, for downgrades to TLS 1.0/1.1), False Start, the `tls-unique` channel binding (replaced by the RFC 5705/9266 exporter), and CBC record splitting (the TLS 1.0 BEAST mitigation).',
     excludes: row =>
       hasAny(row.flags, [
-        '-max-version',
-        '-min-version',
-        '-no-tls13',
-        '-no-tls1',
-        '-no-tls11',
-        '-no-tls12',
         '-fallback-scsv',
         '-false-start',
         '-tls-unique',
-        '-expect-extended-master-secret',
         '-cbc-record-splitting',
-      ]),
+      ]) ||
+      valuesOf(row.argv, '-min-version').some(v => Number(v) < 771) ||
+      valuesOf(row.argv, '-max-version').some(v => Number(v) < 771) ||
+      (row.flags.includes('-no-tls12') && row.flags.includes('-no-tls13')),
   },
   {
     id: 'revocation-out-of-v1',
@@ -284,7 +284,7 @@ export const SCOPE_RULES: readonly ScopeRule[] = [
   },
   {
     id: 'not-in-this-client',
-    why: "Extensions and credential types YOZZ will not grow. A TLS-level PSK or PAKE is a different trust model from a password sent to the mail server over an authenticated channel; Channel ID is a Google extension; SRTP is for media; certificate compression is an optimisation for a client that opens one connection per device; trust-anchor negotiation is a draft; server padding is BoringSSL's own. Certificate Transparency is the one with teeth, and ROADMAP already names it as knowingly absent — TOFU pinning is what stands in for it.",
+    why: "Extensions, credential types, and vendor-private workarounds YOZZ will not grow. A TLS-level PSK or PAKE is a different trust model from a password sent to the mail server over an authenticated channel; Channel ID is a Google extension; SRTP is for media; certificate compression is an optimisation for a client that opens one connection per device; trust-anchor negotiation is a draft; server padding is BoringSSL's own; and `kJDK11DowngradeRandom` (`tls13_both.cc`: 'This is a non-standard randomly-generated value') is a BoringSSL-private 2018 workaround not in RFC 8446 or RFC 9846. Certificate Transparency is the one with teeth, and ROADMAP already names it as knowingly absent — TOFU pinning is what stands in for it.",
     excludes: row =>
       hasAny(row.flags, [
         '-psk',
@@ -301,7 +301,8 @@ export const SCOPE_RULES: readonly ScopeRule[] = [
         '-enable-signed-cert-timestamps',
         '-expect-signed-cert-timestamps',
         '-signed-cert-timestamps',
-      ]),
+      ]) ||
+      ['Client-RejectJDK11DowngradeRandom', 'Client-AcceptJDK11DowngradeRandom'].includes(row.name),
   },
   {
     id: 'not-our-connection-api',
@@ -335,10 +336,57 @@ export const SCOPE_RULES: readonly ScopeRule[] = [
   },
   {
     id: 'chacha20',
-    why: 'ROADMAP names ChaCha20-Poly1305 as deliberately never implemented. The two AES-GCM suites are what every mail host offers. Two tests are named by hand because their NAMES say nothing. `Resume-Client-CipherMismatch-TLS13` resumes at a config whose only suite is TLS_CHACHA20_POLY1305_SHA256 (`resumption_tests.go`), so the second handshake dies on `handshake_failure` before it can test what it exists to test — that TLS 1.3 may resume at a different suite with the same hash. `TLS13-CipherPreference-Client` is UNREACHABLE rather than unbuilt: it exists to check that a client orders ChaCha20-Poly1305 against AES-GCM by whether it has AES hardware, and pins the answer with `-expect-cipher-aes` or `-expect-cipher-no-aes` (`tls13_tests.go`). A client offering only the two AES-GCM suites has no ordering to get wrong and can only ever answer AES, so passing it would prove nothing. It returns with ChaCha20 or not at all.',
+    why: 'ROADMAP names ChaCha20-Poly1305 as deliberately never implemented (WebCrypto has none; AES-GCM is what mail hosts offer). Three tests are named by hand because their NAMES say nothing: `Resume-Client-CipherMismatch-TLS13` (`resumption_tests.go`) and `PointFormat-Client-Missing` (`curve_tests.go`, pins `TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256`) die on `handshake_failure` for want of a shared suite; `TLS13-CipherPreference-Client` (`tls13_tests.go`) checks ChaCha20 vs AES-GCM hardware ordering, which is unreachable when only AES-GCM is offered.',
     excludes: row =>
       row.name.includes('CHACHA20') ||
-      ['Resume-Client-CipherMismatch-TLS13', 'TLS13-CipherPreference-Client'].includes(row.name),
+      [
+        'Resume-Client-CipherMismatch-TLS13',
+        'TLS13-CipherPreference-Client',
+        'PointFormat-Client-Missing',
+      ].includes(row.name),
+  },
+  {
+    id: 'tls12-legacy-suites',
+    why: 'Modern TLS 1.2 only: ephemeral ECDHE with AES-GCM (`TLS_ECDHE_{ECDSA,RSA}_WITH_AES_{128,256}_GCM_SHA{256,384}`). CBC, 3DES, RC4, DHE, and static RSA key exchange (no forward secrecy, Bleichenbacher/Lucky13 oracle surfaces) are deliberately omitted. Named entries pin a CBC or static-RSA suite inside Go `Config.CipherSuites` (`basic_tests.go`, `cipher_suite_tests.go`, `key_usage_tests.go`, `resumption_tests.go`).',
+    excludes: row =>
+      row.name.includes('_CBC_') ||
+      row.name.includes('3DES') ||
+      row.name.includes('-RSA_WITH_') ||
+      [
+        'BadCBCPadding',
+        'BadCBCPadding255',
+        'MaxCBCPadding',
+        'CertificateCipherMismatch-PSS',
+        'RSAEphemeralKey',
+        'RSAKeyUsage-Client-WantEncipherment-GotEnciphermentTLS12',
+        'RSAKeyUsage-Client-WantEncipherment-GotSignature-TLS12',
+        'Resume-Client-CipherMismatch',
+      ].includes(row.name),
+  },
+  {
+    id: 'tls12-sha1-signatures',
+    why: 'SHA-1 handshake signatures are deliberately refused at both TLS 1.2 and TLS 1.3 (chosen-prefix collision breaks). At TLS 1.3 BoringSSL refuses them too so those tests pass; at TLS 1.2 BoringSSL still accepts SHA-1 and expects negotiation to succeed (or reach signature verification). `Client-VerifyDefault-ECDSA_SHA1-TLS12` expects refusal by default and stays in scope.',
+    excludes: row =>
+      [
+        'Client-InvalidSignature-ECDSA_SHA1-TLS12',
+        'Client-InvalidSignature-RSA_PKCS1_SHA1-TLS12',
+        'Client-Verify-ECDSA_SHA1-TLS12',
+        'Client-Verify-RSA_PKCS1_SHA1-TLS12',
+        'Client-VerifyDefault-RSA_PKCS1_SHA1-TLS12',
+      ].includes(row.name),
+  },
+  {
+    id: 'tls12-resumption',
+    why: 'TLS 1.2 session resumption (session IDs and RFC 5077 `session_ticket` / `NewSessionTicket`) is deliberately not implemented: TLS 1.2 is a compatibility fallback for rare legacy mail hosts, and cross-version rejection (`Resume-Client-Mismatch-TLS13-TLS12-TLS`, `Resume-Client-NoResume-TLS13-TLS12-TLS`, `EchoTLS13CompatibilitySessionID`) stays in scope. Because we never offer `session_ticket`, the four RFC 5077 `NewSessionTicket` tests never receive one and leave with it. Note that BoGo also sets `resumeSession: true` on several positive TLS 1.2 tests (`Client-Verify-*-TLS12`, `ExportKeyingMaterial-TLS-TLS12`, per-suite `TLS-TLS12-ECDHE_*-client`), so positive TLS 1.2 suite, signature-scheme (including RSA-PKCS1), and exporter coverage is gated against OpenSSL in `src/interop.test.ts` and `src/tls12-key-schedule.test.ts`.',
+    excludes: row =>
+      row.isTls12Resumption ||
+      row.flags.some(flag => flag.endsWith('-no-ticket')) ||
+      [
+        'SkipNewSessionTicket',
+        'TrailingMessageData-NewSessionTicket-TLS',
+        'WrongMessageType-NewSessionTicket-TLS',
+        'SendEmptySessionTicket-TLS12',
+      ].includes(row.name),
   },
   {
     id: 'post-quantum',

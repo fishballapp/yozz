@@ -143,6 +143,9 @@ try {
     let succeeded = 0;
     try {
       await page.goto(`http://localhost:${PAGE_PORT}/`);
+      // `main.ts` imports `page.ts` via top-level await (so the Temporal polyfill runs first in WebKit);
+      // wait until that module attaches `window.yozzHandshake`.
+      await page.waitForFunction(() => typeof window.yozzHandshake === 'function');
       const results = await page.evaluate(
         ([endpoint, hosts, relayMode]) =>
           window.yozzHandshake(endpoint as string, hosts as string[], relayMode as boolean),

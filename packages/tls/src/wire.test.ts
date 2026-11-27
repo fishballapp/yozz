@@ -5,7 +5,10 @@ import { decodeHandshakeMessage, encodeProductionClientHello } from './handshake
 import { CIPHER_SUITES } from './key-schedule.ts';
 import { generateKeyShare } from './key-share.ts';
 import {
+  ALERT_DESCRIPTIONS,
   CERTIFICATE_SIGNATURE_SCHEMES,
+  EXTENSION_TYPES,
+  HANDSHAKE_TYPES,
   HRR_MAGIC_RANDOM,
   NAMED_GROUPS,
   namedGroupFromCode,
@@ -13,7 +16,13 @@ import {
   SIGNATURE_SCHEMES,
   SUPPORTED_GROUPS,
   SUPPORTED_SIGNATURE_SCHEMES,
+  SUPPORTED_TLS_1_2_CIPHER_SUITES,
+  SUPPORTED_TLS_1_2_SIGNATURE_SCHEMES,
   signatureSchemeFromCode,
+  TLS_1_2_CIPHER_SUITES,
+  TLS_1_2_SIGNATURE_SCHEMES,
+  tls12SignatureSchemeFromCode,
+  tls12SuiteFromCode,
 } from './wire.ts';
 
 describe('Stage 1 — Wire tables', () => {
@@ -172,5 +181,128 @@ describe('signature_algorithms_cert agrees with what @yozz.app/x509 verifies', (
     expect(OFFERED_CERTIFICATE_SIGNATURE_SCHEMES).toContain('rsa_pkcs1_sha256');
     expect(Object.keys(CERTIFICATE_SIGNATURE_SCHEMES)).not.toContain('rsa_pss_rsae_sha256');
     expect(Object.keys(CERTIFICATE_SIGNATURE_SCHEMES)).not.toContain('ed25519');
+  });
+});
+
+describe('TLS 1.2 wire tables', () => {
+  /** Literals, IANA's TLS Cipher Suites registry (RFC 5289 §3). */
+  it('carries the IANA code point and parameters for every TLS 1.2 suite', () => {
+    expect(TLS_1_2_CIPHER_SUITES).toEqual({
+      TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256: {
+        code: 0xc02b,
+        hash: 'SHA-256',
+        hashLength: 32,
+        keyLength: 16,
+        implicitIvLength: 4,
+        explicitNonceLength: 8,
+        auth: 'ecdsa',
+      },
+      TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256: {
+        code: 0xc02f,
+        hash: 'SHA-256',
+        hashLength: 32,
+        keyLength: 16,
+        implicitIvLength: 4,
+        explicitNonceLength: 8,
+        auth: 'rsa',
+      },
+      TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384: {
+        code: 0xc02c,
+        hash: 'SHA-384',
+        hashLength: 48,
+        keyLength: 32,
+        implicitIvLength: 4,
+        explicitNonceLength: 8,
+        auth: 'ecdsa',
+      },
+      TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384: {
+        code: 0xc030,
+        hash: 'SHA-384',
+        hashLength: 48,
+        keyLength: 32,
+        implicitIvLength: 4,
+        explicitNonceLength: 8,
+        auth: 'rsa',
+      },
+    });
+  });
+
+  it('offers every TLS 1.2 suite, AES-128 first', () => {
+    expect(SUPPORTED_TLS_1_2_CIPHER_SUITES.map(name => TLS_1_2_CIPHER_SUITES[name].code)).toEqual([
+      0xc02b, 0xc02f, 0xc02c, 0xc030,
+    ]);
+  });
+
+  it('maps every TLS 1.2 suite code back to its name, and nothing else', () => {
+    for (const name of SUPPORTED_TLS_1_2_CIPHER_SUITES) {
+      expect(tls12SuiteFromCode(TLS_1_2_CIPHER_SUITES[name].code)).toBe(name);
+    }
+    // TLS 1.3 suites, CBC (0xc023) and RSA key exchange GCM (0x009c) are not TLS 1.2 suites we run.
+    for (const code of [0x1301, 0x1302, 0xc023, 0x009c, 0xcca8]) {
+      expect(tls12SuiteFromCode(code)).toBeUndefined();
+    }
+  });
+
+  it('carries the IANA code point for every TLS 1.2 signature scheme', () => {
+    expect(TLS_1_2_SIGNATURE_SCHEMES).toEqual({
+      ecdsa_secp256r1_sha256: 0x0403,
+      ecdsa_secp384r1_sha384: 0x0503,
+      rsa_pss_rsae_sha256: 0x0804,
+      rsa_pss_rsae_sha384: 0x0805,
+      rsa_pss_rsae_sha512: 0x0806,
+      ed25519: 0x0807,
+      rsa_pkcs1_sha256: 0x0401,
+      rsa_pkcs1_sha384: 0x0501,
+      rsa_pkcs1_sha512: 0x0601,
+    });
+  });
+
+  it('offers the TLS 1.3 schemes first and RSA-PKCS1 last', () => {
+    expect(SUPPORTED_TLS_1_2_SIGNATURE_SCHEMES).toEqual([
+      ...SUPPORTED_SIGNATURE_SCHEMES,
+      'rsa_pkcs1_sha256',
+      'rsa_pkcs1_sha384',
+      'rsa_pkcs1_sha512',
+    ]);
+  });
+
+  it('maps every TLS 1.2 scheme code back to its name, and nothing else', () => {
+    for (const name of SUPPORTED_TLS_1_2_SIGNATURE_SCHEMES) {
+      expect(tls12SignatureSchemeFromCode(TLS_1_2_SIGNATURE_SCHEMES[name])).toBe(name);
+    }
+    // SHA-1 (0x0201, 0x0203) and P-521 (0x0603) are refused.
+    for (const code of [0x0201, 0x0203, 0x0603]) {
+      expect(tls12SignatureSchemeFromCode(code)).toBeUndefined();
+    }
+  });
+
+  /** The separation the TLS 1.2 table must not erode (RFC 9846 §4.5.2). */
+  it('leaves RSA-PKCS1 out of the TLS 1.3 table', () => {
+    expect(tls12SignatureSchemeFromCode(0x0401)).toBe('rsa_pkcs1_sha256');
+    expect(signatureSchemeFromCode(0x0401)).toBeUndefined();
+    expect(Object.keys(SIGNATURE_SCHEMES)).not.toContain('rsa_pkcs1_sha256');
+    expect(SUPPORTED_SIGNATURE_SCHEMES).not.toContain('rsa_pkcs1_sha256');
+  });
+
+  it('carries the TLS 1.2 handshake, extension and alert code points', () => {
+    expect(HANDSHAKE_TYPES).toMatchObject({
+      hello_request: 0,
+      server_key_exchange: 12,
+      server_hello_done: 14,
+      client_key_exchange: 16,
+    });
+    expect(EXTENSION_TYPES).toMatchObject({
+      ec_point_formats: 11,
+      extended_master_secret: 23,
+      renegotiation_info: 0xff01,
+    });
+    expect(ALERT_DESCRIPTIONS.no_renegotiation).toBe(100);
+  });
+
+  it('gives no two handshake types, extensions or alerts the same code', () => {
+    for (const table of [HANDSHAKE_TYPES, EXTENSION_TYPES, ALERT_DESCRIPTIONS]) {
+      const codes = Object.values(table);
+      expect(new Set(codes).size).toBe(codes.length);
+    }
   });
 });

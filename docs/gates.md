@@ -26,14 +26,14 @@ pnpm -F @yozz.app/mail test             # 745. Threading, sync over a fake IMAP 
                                     #   on against a fake server),
                                     #   DKIM verification (RFC 8463's vectors, a mailauth-signed message),
                                     #   the sanitizer policy and the served page (under jsdom)
-pnpm -F @yozz.app/web test              # 773. Vault client + unlock (WebAuthn mocked), the IndexedDB
+pnpm -F @yozz.app/web test              # 977. Vault client + unlock (WebAuthn mocked), the IndexedDB
                                     #   cache, the live connection, the WebMCP tools over a fake
                                     #   port + their mount, ceilings, the frame script's pin in
                                     #   public/_headers, image consent, the screens, and architecture.test.ts
 pnpm -F @yozz.app/x509 test             # 426, incl. end-to-end chains signed at test time and the
                                     #   two authentication bypasses as regressions
-pnpm -F @yozz.app/tls test              # 455. RFC 8448 byte-exact on all five traces; the interop
-                                    #   rows open loopback sockets
+pnpm -F @yozz.app/tls test              # 646. RFC 8448 byte-exact on all five traces; TLS 1.3 and
+                                    #   modern TLS 1.2 OpenSSL interop rows open loopback sockets
 pnpm -F @yozz.app/worker-api db:check-auth   # fails if the generated Better Auth migration has
                                     #   drifted from the plugin set. Run after any auth.ts change
 ```
@@ -59,7 +59,7 @@ node packages/x509/harness/limbo.ts --validator=yozz --anchors=unindexed   # the
                                     #   plain anchor source must score identically to the compiled one
 
 pnpm -F @yozz.app/tls bogo:fetch        # the pinned boringssl checkout, 337MB, into gitignored .bogo/
-pnpm -F @yozz.app/tls bogo              # 296 in-scope tests, ~15s. Needs Go
+pnpm -F @yozz.app/tls bogo              # 497 in-scope tests (TLS 1.3 + modern TLS 1.2), ~25s. Needs Go
 pnpm -F @yozz.app/tls bogo:record       # re-record expected.txt after a fix or a pin bump
 pnpm -F @yozz.app/tls bogo:inventory    # ~3.5min. REBUILD manifest.txt after a pin bump or after the
                                     #   shim learns a flag. Run it alone, never through `head`:
@@ -70,7 +70,7 @@ pnpm -F @yozz.app/tls bogo:inventory    # ~3.5min. REBUILD manifest.txt after a 
 | --- | --- | --- | --- |
 | `@yozz.app/x509` | **902/902** | **8827/8837** | **10** — each attributed in `expected-disagreements.txt` |
 | OpenSSL 3.6.3 (control) | 784/902 | 8765/8837 | 190 |
-| `@yozz.app/tls` BoGo | 296 pass | 0 fail | 0 skip — every exclusion is a rule in `harness/bogo/scope.ts` |
+| `@yozz.app/tls` BoGo | 497 pass | 0 fail | 0 skip — every exclusion is a rule in `harness/bogo/scope.ts` |
 
 All ten x509 disagreements are over-ACCEPTS, the dangerous direction for a verifier. Treat the
 count as debt, not a score.
@@ -155,9 +155,9 @@ runs it in Playwright's image of the catalog's version, which already holds all 
 ```bash
 pnpm -F @yozz.app/smtp live             # nine submission hosts over 465: banner + EHLO. 9/9 ok. With
                                     #   YOZZ_SMTP_HOST/USER/PASSWORD(/TO): auth, then one real send
-pnpm -F @yozz.app/tls live              # nine mail servers over node:net; prints each host's SPKI pin.
-                                    #   Takes host names to run fewer. A red line is usually THEIR outage
-pnpm -F @yozz.app/tls browser           # the same nine in Chromium, Gecko and WebKit over a WebSocket
+pnpm -F @yozz.app/tls live              # ten mail servers over node:net (9 TLS 1.3 + imap.larksuite.com TLS 1.2);
+                                    #   prints each host's SPKI pin. Takes host names to run fewer. A red line is usually THEIR outage
+pnpm -F @yozz.app/tls browser           # the same ten in Chromium, Gecko and WebKit over a WebSocket
                                     #   to the spike Worker under local workerd. Needs
                                     #   `playwright install`, no Cloudflare credential.
                                     #   --engine webkit for one; --bridge wss://… for a deployed relay.
@@ -173,8 +173,9 @@ pnpm -F @yozz.app/x509 corpus:harvest   # only to REBUILD the corpus — network
 pnpm -F @yozz.app/worker-api db:migrate:local   # apply migrations to wrangler dev's local D1
 ```
 
-Expect 63 handshakes, 63 IMAP greetings from `live` + `browser` together. `posteo.de` takes a
-HelloRetryRequest to secp384r1; the other eight take X25519; none offers P-521.
+Expect 40 handshakes, 40 IMAP greetings from `live` (10) + `browser` (30 across Chromium, Firefox
+and WebKit) together, with one pin per host across engines. `imap.larksuite.com` negotiates TLS 1.2;
+the other nine negotiate TLS 1.3; none offers P-521.
 
 ## Mutation discipline
 

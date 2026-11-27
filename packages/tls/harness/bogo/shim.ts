@@ -20,14 +20,14 @@ import {
   NAMED_GROUPS,
   type NamedGroup,
   namedGroupFromCode,
-  SIGNATURE_SCHEMES,
-  type SignatureScheme,
   SUPPORTED_GROUPS,
-  SUPPORTED_SIGNATURE_SCHEMES,
-  signatureSchemeFromCode,
   startTls,
+  TLS_1_2_SIGNATURE_SCHEMES,
+  type Tls12SignatureScheme,
   type TlsFailure,
+  type TlsProtocolVersion,
   type TlsSession,
+  tls12SignatureSchemeFromCode,
 } from '../../src/index.ts';
 import { endGracefully, socketTransport } from '../socket-transport.ts';
 import { LEGACY_SCHEMES, UNIMPLEMENTED_CURVES, UNIMPLEMENTED_SCHEMES } from './scope.ts';
@@ -55,6 +55,15 @@ type Options = {
   readonly exportKeyingMaterialLength: number;
   readonly exportLabel: string;
   readonly exportContext: string;
+  /** `-use-export-context`: on TLS 1.2 (RFC 5705 §4), empty context and absent context differ. */
+  readonly useExportContext: boolean;
+  /** `-min-version` / `-max-version` / `-no-tls12` / `-no-tls13`. */
+  readonly minVersion: TlsProtocolVersion;
+  readonly maxVersion: TlsProtocolVersion;
+  /** `-expect-version <wireCode>`: 771 (TLS 1.2) or 772 (TLS 1.3), or null when unchecked. */
+  readonly expectVersion: number | null;
+  /** `-expect-extended-master-secret`: true on TLS 1.3 or on TLS 1.2 with EMS negotiated. */
+  readonly expectExtendedMasterSecret: boolean;
   /** `-shim-writes-first`: speak before being spoken to. */
   readonly writesFirst: boolean;
   /** `-shim-shuts-down`: hang up after the handshake without reading. */
@@ -75,8 +84,8 @@ type Options = {
   readonly expectsNoSession: boolean;
   /** `-expect-hrr` / `-expect-no-hrr`, or null when the test does not say. */
   readonly expectHelloRetryRequest: boolean | null;
-  /** `-verify-prefs`: what `signature_algorithms` offers, in the runner's order. */
-  readonly signatureSchemes: readonly SignatureScheme[];
+  /** `-verify-prefs`: what `signature_algorithms` offers, or undefined for `startTls`'s version default. */
+  readonly signatureSchemes: readonly Tls12SignatureScheme[] | undefined;
   /** `-expect-peer-signature-algorithm`: asserted on every connection, resumed ones included, out of the session. */
   readonly expectPeerSignatureScheme: number | null;
 };
@@ -212,6 +221,13 @@ const parseArgs = (wholeArgv: readonly string[], role: ConnectionRole): Options 
   let exportKeyingMaterialLength = 0;
   let exportLabel = '';
   let exportContext = '';
+  let useExportContext = false;
+  let minVersionNum = 771;
+  let maxVersionNum = 772;
+  let noTls12 = false;
+  let noTls13 = false;
+  let expectVersion: number | null = null;
+  let expectExtendedMasterSecret = false;
   let writesFirst = false;
   let shutsDown = false;
   let checkCloseNotify = false;
@@ -222,7 +238,7 @@ const parseArgs = (wholeArgv: readonly string[], role: ConnectionRole): Options 
   let expectsSessionMiss = false;
   let expectsNoSession = false;
   let expectHelloRetryRequest: boolean | null = null;
-  const verifyPrefs: SignatureScheme[] = [];
+  const verifyPrefs: Tls12SignatureScheme[] = [];
   let expectPeerSignatureScheme: number | null = null;
 
   const value = (index: number, flag: string): string => {
@@ -274,8 +290,39 @@ const parseArgs = (wholeArgv: readonly string[], role: ConnectionRole): Options 
       case '-export-context':
         exportContext = value(++i, flag);
         break;
-      /** RFC 9846 §7.5 hashes the context, so absent and empty are the same; the runner's `exportKeyingMaterialTLS13` never reads `useContext`. */
       case '-use-export-context':
+        useExportContext = true;
+        break;
+      case '-min-version': {
+        const versionCode = Number(value(++i, flag));
+        if (versionCode !== 771 && versionCode !== 772) {
+          decline(`min-version ${versionCode}`);
+        }
+        minVersionNum = versionCode;
+        break;
+      }
+      case '-max-version': {
+        const versionCode = Number(value(++i, flag));
+        if (versionCode !== 771 && versionCode !== 772) {
+          decline(`max-version ${versionCode}`);
+        }
+        maxVersionNum = versionCode;
+        break;
+      }
+      case '-no-tls1':
+      case '-no-tls11':
+        break;
+      case '-no-tls12':
+        noTls12 = true;
+        break;
+      case '-no-tls13':
+        noTls13 = true;
+        break;
+      case '-expect-version':
+        expectVersion = Number(value(++i, flag));
+        break;
+      case '-expect-extended-master-secret':
+        expectExtendedMasterSecret = true;
         break;
       case '-shim-writes-first':
         writesFirst = true;
@@ -300,12 +347,15 @@ const parseArgs = (wholeArgv: readonly string[], role: ConnectionRole): Options 
       /** Repeated once per scheme; declines by algorithm, like `-curves`. */
       case '-verify-prefs': {
         const id = Number(value(++i, flag));
-        // RFC 9846 §4.3.3 / §4.5.2: RSA-PKCS1 and SHA-1 are not CertificateVerify schemes, so they are
-        // dropped rather than declined. See DECISIONS.md, "An undefined `-verify-prefs` scheme is dropped".
+        const scheme = tls12SignatureSchemeFromCode(id);
+        if (scheme !== undefined) {
+          verifyPrefs.push(scheme);
+          break;
+        }
+        // SHA-1 and RSA_PKCS1_SHA256_LEGACY are never supported; dropped rather than declined so
+        // TLS 1.2/1.3 refusal tests measure the enforcement check.
         if (LEGACY_SCHEMES[id] !== undefined) break;
-        const scheme = signatureSchemeFromCode(id);
-        if (scheme === undefined) decline(`signature scheme ${UNIMPLEMENTED_SCHEMES[id] ?? id}`);
-        verifyPrefs.push(scheme);
+        decline(`signature scheme ${UNIMPLEMENTED_SCHEMES[id] ?? id}`);
         break;
       }
       case '-expect-peer-signature-algorithm':
@@ -352,6 +402,13 @@ const parseArgs = (wholeArgv: readonly string[], role: ConnectionRole): Options 
   }
 
   if (port === null) throw new Error('-port is required');
+  const allowTls12 = !noTls12 && minVersionNum <= 771 && maxVersionNum >= 771;
+  const allowTls13 = !noTls13 && minVersionNum <= 772 && maxVersionNum >= 772;
+  if (!allowTls12 && !allowTls13) {
+    decline('no supported versions enabled');
+  }
+  const minVersion: TlsProtocolVersion = allowTls12 ? 'TLS 1.2' : 'TLS 1.3';
+  const maxVersion: TlsProtocolVersion = allowTls13 ? 'TLS 1.3' : 'TLS 1.2';
   return {
     port,
     shimId,
@@ -361,6 +418,11 @@ const parseArgs = (wholeArgv: readonly string[], role: ConnectionRole): Options 
     exportKeyingMaterialLength,
     exportLabel,
     exportContext,
+    useExportContext,
+    minVersion,
+    maxVersion,
+    expectVersion,
+    expectExtendedMasterSecret,
     verifiesPeer,
     verifyFails,
     reverifiesOnResume,
@@ -369,7 +431,7 @@ const parseArgs = (wholeArgv: readonly string[], role: ConnectionRole): Options 
     shutsDown,
     checkCloseNotify,
     supportedGroups: curves.length > 0 ? curves : SUPPORTED_GROUPS,
-    signatureSchemes: verifyPrefs.length > 0 ? verifyPrefs : SUPPORTED_SIGNATURE_SCHEMES,
+    signatureSchemes: verifyPrefs.length > 0 ? verifyPrefs : undefined,
     expectCurveId,
     expectPeerSignatureScheme,
     resumeCount,
@@ -431,7 +493,7 @@ const runConnection = async (
     readonly inheritedRefusal: boolean;
     readonly onVerification: (refused: boolean) => void;
   },
-): Promise<number> => {
+): Promise<{ readonly code: number; readonly protocolVersion: TlsProtocolVersion | null }> => {
   const socket = await openSocket(options);
   const verification = verificationFor(options);
   let hasNewSession = false;
@@ -444,6 +506,8 @@ const runConnection = async (
       /** Frozen for the connection: BoGo compares the reported ticket age to `-resumption-delay` exactly. */
       now: () => now,
       validator: verification.validator,
+      minVersion: options.minVersion,
+      maxVersion: options.maxVersion,
       supportedGroups: options.supportedGroups,
       signatureSchemes: options.signatureSchemes,
       session,
@@ -453,10 +517,35 @@ const runConnection = async (
         onSession(next);
       },
     });
-    if (!handshake.ok) return fail(describe(handshake.reason));
+    if (!handshake.ok) return { code: fail(describe(handshake.reason)), protocolVersion: null };
 
-    const { connection, negotiatedGroup, isResumed, isHelloRetryRequested, peerSignatureScheme } =
-      handshake;
+    const {
+      connection,
+      protocolVersion,
+      negotiatedGroup,
+      isResumed,
+      isHelloRetryRequested,
+      peerSignatureScheme,
+    } = handshake;
+    const negotiatedVersionCode = protocolVersion === 'TLS 1.3' ? 0x0304 : 0x0303;
+    if (options.expectVersion !== null && negotiatedVersionCode !== options.expectVersion) {
+      return {
+        code: fail(
+          `yozz: negotiated version ${negotiatedVersionCode}, wanted ${options.expectVersion}`,
+        ),
+        protocolVersion,
+      };
+    }
+    if (
+      options.expectExtendedMasterSecret &&
+      handshake.protocolVersion === 'TLS 1.2' &&
+      !handshake.hasExtendedMasterSecret
+    ) {
+      return {
+        code: fail('yozz: extended_master_secret was not negotiated'),
+        protocolVersion,
+      };
+    }
     // With `-reverify-on-resume` the validator ran on this connection, and reaching here means it said yes.
     const refused =
       isResumed && !options.reverifiesOnResume ? inheritedRefusal : verification.refused();
@@ -467,49 +556,69 @@ const runConnection = async (
      */
     if (options.expectVerifyResult) {
       if (!isResumed && !verification.ran()) {
-        return fail('yozz: handshake completed without verifying the peer certificate');
+        return {
+          code: fail('yozz: handshake completed without verifying the peer certificate'),
+          protocolVersion,
+        };
       }
       if (refused !== options.verifyFails) {
-        return fail(`yozz: verification refused=${refused}, wanted refused=${options.verifyFails}`);
+        return {
+          code: fail(
+            `yozz: verification refused=${refused}, wanted refused=${options.verifyFails}`,
+          ),
+          protocolVersion,
+        };
       }
     }
     if (options.expectCurveId !== null && NAMED_GROUPS[negotiatedGroup] !== options.expectCurveId) {
-      return fail(
-        `yozz: negotiated curve ${NAMED_GROUPS[negotiatedGroup]}, wanted ${options.expectCurveId}`,
-      );
+      return {
+        code: fail(
+          `yozz: negotiated curve ${NAMED_GROUPS[negotiatedGroup]}, wanted ${options.expectCurveId}`,
+        ),
+        protocolVersion,
+      };
     }
-    const peerSignatureCode = SIGNATURE_SCHEMES[peerSignatureScheme];
+    const peerSignatureCode = TLS_1_2_SIGNATURE_SCHEMES[peerSignatureScheme];
     if (
       options.expectPeerSignatureScheme !== null &&
       peerSignatureCode !== options.expectPeerSignatureScheme
     ) {
-      return fail(
-        `yozz: peer signature algorithm ${peerSignatureCode}, wanted ${options.expectPeerSignatureScheme}`,
-      );
+      return {
+        code: fail(
+          `yozz: peer signature algorithm ${peerSignatureCode}, wanted ${options.expectPeerSignatureScheme}`,
+        ),
+        protocolVersion,
+      };
     }
     /** BoringSSL's `expect_resume = is_resume && !expect_session_miss`. */
     if (isResumed !== (isResume && !options.expectsSessionMiss)) {
-      return fail(`yozz: session was${isResumed ? '' : ' not'} resumed`);
+      return {
+        code: fail(`yozz: session was${isResumed ? '' : ' not'} resumed`),
+        protocolVersion,
+      };
     }
     if (
       options.expectHelloRetryRequest !== null &&
       isHelloRetryRequested !== options.expectHelloRetryRequest
     ) {
-      return fail(`yozz: HelloRetryRequest was${isHelloRetryRequested ? '' : ' not'} sent`);
+      return {
+        code: fail(`yozz: HelloRetryRequest was${isHelloRetryRequested ? '' : ' not'} sent`),
+        protocolVersion,
+      };
     }
     /** The peer derived the same octets and compares. */
     if (options.exportKeyingMaterialLength > 0) {
       const exported = await connection.exportKeyingMaterial(
         options.exportLabel,
-        new TextEncoder().encode(options.exportContext),
+        options.useExportContext ? new TextEncoder().encode(options.exportContext) : null,
         options.exportKeyingMaterialLength,
       );
       const sent = await connection.write(exported);
-      if (!sent.ok) return fail(describe(sent.reason));
+      if (!sent.ok) return { code: fail(describe(sent.reason)), protocolVersion };
     }
     if (options.writesFirst) {
       const opening = await connection.write(new TextEncoder().encode(SHIM_INITIAL_WRITE));
-      if (!opening.ok) return fail(describe(opening.reason));
+      if (!opening.ok) return { code: fail(describe(opening.reason)), protocolVersion };
     }
 
     while (!options.shutsDown) {
@@ -517,30 +626,39 @@ const runConnection = async (
       if (!read.ok) {
         // A peer that simply goes away ends the conversation; only `-check-close-notify` makes that a complaint.
         if (read.reason.kind === 'truncated' && !options.checkCloseNotify) break;
-        return fail(describe(read.reason));
+        return { code: fail(describe(read.reason)), protocolVersion };
       }
       if (read.kind === 'closed') break;
 
       const written = await connection.write(invert(read.bytes));
-      if (!written.ok) return fail(describe(written.reason));
+      if (!written.ok) return { code: fail(describe(written.reason)), protocolVersion };
     }
 
     // Our close_notify goes out either way; `-check-close-notify` decides whether the peer owes one back.
     const closed = await connection.close();
-    if (!closed.ok && options.checkCloseNotify) return fail(describe(closed.reason));
+    if (!closed.ok && options.checkCloseNotify) {
+      return { code: fail(describe(closed.reason)), protocolVersion };
+    }
 
     if (options.checkCloseNotify) {
       const shutdown = await connection.read();
-      if (!shutdown.ok) return fail(describe(shutdown.reason));
-      if (shutdown.kind !== 'closed') return fail('yozz: data after our close_notify');
+      if (!shutdown.ok) return { code: fail(describe(shutdown.reason)), protocolVersion };
+      if (shutdown.kind !== 'closed') {
+        return { code: fail('yozz: data after our close_notify'), protocolVersion };
+      }
     }
 
-    /** BoringSSL's shim asserts the same: a ticket must arrive unless the test says otherwise. `-shim-shuts-down` never reads. */
-    if (!options.shutsDown && hasNewSession === options.expectsNoSession) {
-      return fail(`yozz: a session was${hasNewSession ? '' : ' not'} established`);
+    /** BoringSSL's shim asserts the same on TLS 1.3: a ticket must arrive unless the test says otherwise. `-shim-shuts-down` never reads; TLS 1.2 never mints sessions. */
+    if (!options.shutsDown && protocolVersion === 'TLS 1.3') {
+      if (hasNewSession === options.expectsNoSession) {
+        return {
+          code: fail(`yozz: a session was${hasNewSession ? '' : ' not'} established`),
+          protocolVersion,
+        };
+      }
     }
 
-    return 0;
+    return { code: 0, protocolVersion };
   } finally {
     await endGracefully(socket);
   }
@@ -564,7 +682,7 @@ const main = async (): Promise<number> => {
 
   for (let exchange = 0; exchange <= initial.resumeCount; exchange += 1) {
     const isResume = exchange > 0;
-    const code = await runConnection(isResume ? onResume : initial, {
+    const { code, protocolVersion } = await runConnection(isResume ? onResume : initial, {
       isResume,
       now,
       session,
@@ -577,6 +695,9 @@ const main = async (): Promise<number> => {
       },
     });
     if (code !== 0) return code;
+    if (exchange === 0 && initial.resumeCount > 0 && protocolVersion === 'TLS 1.2') {
+      decline('TLS 1.2 session resumption');
+    }
     now = now.add({ seconds: initial.resumptionDelaySeconds });
   }
 

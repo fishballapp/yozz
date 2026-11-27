@@ -16,11 +16,15 @@ import {
   type NamedGroup,
   OFFERED_CERTIFICATE_SIGNATURE_SCHEMES,
   PSK_KEY_EXCHANGE_MODES,
-  SIGNATURE_SCHEMES,
-  type SignatureScheme,
   SUPPORTED_GROUPS,
   SUPPORTED_SIGNATURE_SCHEMES,
+  SUPPORTED_TLS_1_2_CIPHER_SUITES,
+  SUPPORTED_TLS_1_2_SIGNATURE_SCHEMES,
+  TLS_1_2_CIPHER_SUITES,
+  TLS_1_2_SIGNATURE_SCHEMES,
   TLS_VERSION,
+  type Tls12SignatureScheme,
+  type TlsProtocolVersion,
 } from './wire.ts';
 
 export type KeyShareEntry = {
@@ -62,6 +66,12 @@ export type Extension =
     }
   | { readonly kind: 'psk_key_exchange_modes'; readonly modes: readonly number[] }
   | { readonly kind: 'early_data'; readonly maxEarlyDataSize?: number }
+  /** RFC 8422 §5.1.2. TLS 1.2 hellos only. */
+  | { readonly kind: 'ec_point_formats'; readonly formats: readonly number[] }
+  /** RFC 7627 §5.1: an empty body. TLS 1.2 hellos only. */
+  | { readonly kind: 'extended_master_secret' }
+  /** RFC 5746 §3.2: empty on an initial handshake. TLS 1.2 hellos only. */
+  | { readonly kind: 'renegotiation_info'; readonly renegotiatedConnection: Uint8Array }
   | { readonly kind: 'unknown'; readonly typeCode: number; readonly data: Uint8Array };
 
 export type CertificateEntry = {
@@ -272,6 +282,18 @@ const encodeExtensions = (extensions: readonly Extension[]): Uint8Array<ArrayBuf
         } else {
           body = new Uint8Array(0);
         }
+        break;
+      }
+      case 'ec_point_formats': {
+        body = concat(writeUint8(ext.formats.length), ...ext.formats.map(f => writeUint8(f)));
+        break;
+      }
+      case 'extended_master_secret': {
+        body = new Uint8Array(0);
+        break;
+      }
+      case 'renegotiation_info': {
+        body = concat(writeUint8(ext.renegotiatedConnection.length), ext.renegotiatedConnection);
         break;
       }
       case 'unknown': {
@@ -526,6 +548,23 @@ const decodeExtensions = (
         return { ok: false, description: 'decode_error' };
       }
       extensions.push({ kind: 'psk_key_exchange_modes', modes: [...extData.subarray(1)] });
+    } else if (isHello && typeCode === EXTENSION_TYPES.ec_point_formats) {
+      // RFC 8422 §5.1.2: `ec_point_format_list<1..2^8-1>`.
+      if (extData.length < 1) return { ok: false, description: 'decode_error' };
+      const formatsLen = readUint8(extData, 0);
+      if (formatsLen === 0 || extData.length !== 1 + formatsLen) {
+        return { ok: false, description: 'decode_error' };
+      }
+      extensions.push({ kind: 'ec_point_formats', formats: [...extData.subarray(1)] });
+    } else if (isHello && typeCode === EXTENSION_TYPES.extended_master_secret) {
+      if (extData.length !== 0) return { ok: false, description: 'decode_error' };
+      extensions.push({ kind: 'extended_master_secret' });
+    } else if (isHello && typeCode === EXTENSION_TYPES.renegotiation_info) {
+      // RFC 5746 §3.2: `opaque renegotiated_connection<0..255>`.
+      if (extData.length < 1) return { ok: false, description: 'decode_error' };
+      const connectionLen = readUint8(extData, 0);
+      if (extData.length !== 1 + connectionLen) return { ok: false, description: 'decode_error' };
+      extensions.push({ kind: 'renegotiation_info', renegotiatedConnection: extData.subarray(1) });
     } else if (typeCode === EXTENSION_TYPES.early_data) {
       if (extData.length === 4) {
         const maxEarlyDataSize =
@@ -946,24 +985,243 @@ export const decodeHandshakeMessages = (
   return { ok: true, value: messages };
 };
 
+/**
+ * TLS 1.2's own messages (RFC 5246 §7.4). Certificate and CertificateRequest share their type
+ * codes with TLS 1.3 but not their layout, so they are decoded only once the version is known.
+ */
+export type Tls12HandshakeMessage =
+  | { readonly kind: 'hello_request' }
+  | { readonly kind: 'certificate'; readonly certificateList: readonly Uint8Array[] }
+  | {
+      readonly kind: 'server_key_exchange';
+      /** RFC 8422 §5.4: `named_curve`, the only curve type left. */
+      readonly curveType: 3;
+      readonly namedCurve: number;
+      readonly publicKey: Uint8Array;
+      /** The `ServerECDHParams` bytes exactly as received, which the signature covers. */
+      readonly serverParams: Uint8Array;
+      readonly scheme: number;
+      readonly signature: Uint8Array;
+    }
+  | {
+      readonly kind: 'certificate_request';
+      readonly certificateTypes: readonly number[];
+      readonly signatureSchemes: readonly number[];
+      /** `DistinguishedName certificate_authorities<0..2^16-1>`, unparsed: we never pick by CA. */
+      readonly rawAuthorities: Uint8Array;
+    }
+  | { readonly kind: 'server_hello_done' }
+  | { readonly kind: 'client_key_exchange'; readonly publicKey: Uint8Array }
+  | { readonly kind: 'finished'; readonly verifyData: Uint8Array };
+
+const NAMED_CURVE_TYPE = 3;
+
+export const encodeTls12HandshakeMessage = (
+  msg: Tls12HandshakeMessage,
+): Uint8Array<ArrayBuffer> => {
+  const [typeCode, body] = ((): readonly [number, Uint8Array] => {
+    switch (msg.kind) {
+      case 'hello_request':
+        return [HANDSHAKE_TYPES.hello_request, new Uint8Array(0)];
+      case 'certificate': {
+        const list = concat(
+          ...msg.certificateList.flatMap(cert => [writeUint24(cert.length), cert]),
+        );
+        return [HANDSHAKE_TYPES.certificate, concat(writeUint24(list.length), list)];
+      }
+      case 'server_key_exchange':
+        return [
+          HANDSHAKE_TYPES.server_key_exchange,
+          concat(
+            writeUint8(msg.curveType),
+            writeUint16(msg.namedCurve),
+            writeUint8(msg.publicKey.length),
+            msg.publicKey,
+            writeUint16(msg.scheme),
+            writeUint16(msg.signature.length),
+            msg.signature,
+          ),
+        ];
+      case 'certificate_request': {
+        const schemes = concat(...msg.signatureSchemes.map(scheme => writeUint16(scheme)));
+        return [
+          HANDSHAKE_TYPES.certificate_request,
+          concat(
+            writeUint8(msg.certificateTypes.length),
+            ...msg.certificateTypes.map(type => writeUint8(type)),
+            writeUint16(schemes.length),
+            schemes,
+            writeUint16(msg.rawAuthorities.length),
+            msg.rawAuthorities,
+          ),
+        ];
+      }
+      case 'server_hello_done':
+        return [HANDSHAKE_TYPES.server_hello_done, new Uint8Array(0)];
+      case 'client_key_exchange':
+        return [
+          HANDSHAKE_TYPES.client_key_exchange,
+          concat(writeUint8(msg.publicKey.length), msg.publicKey),
+        ];
+      case 'finished':
+        return [HANDSHAKE_TYPES.finished, msg.verifyData];
+    }
+  })();
+  return concat(writeUint8(typeCode), writeUint24(body.length), body);
+};
+
+const decodeTls12Certificate = (body: Uint8Array): DecodeResult<Tls12HandshakeMessage> => {
+  if (body.length < 3) return { ok: false, description: 'decode_error' };
+  if (body.length !== 3 + readUint24(body, 0)) return { ok: false, description: 'decode_error' };
+  const certificateList: Uint8Array[] = [];
+  let offset = 3;
+  while (offset < body.length) {
+    if (offset + 3 > body.length) return { ok: false, description: 'decode_error' };
+    const certLen = readUint24(body, offset);
+    offset += 3;
+    // RFC 5246 §7.4.2: `opaque ASN.1Cert<1..2^24-1>`.
+    if (certLen === 0 || offset + certLen > body.length) {
+      return { ok: false, description: 'decode_error' };
+    }
+    certificateList.push(body.subarray(offset, offset + certLen));
+    offset += certLen;
+  }
+  return { ok: true, value: { kind: 'certificate', certificateList } };
+};
+
+const decodeServerKeyExchange = (body: Uint8Array): DecodeResult<Tls12HandshakeMessage> => {
+  if (body.length < 4) return { ok: false, description: 'decode_error' };
+  // RFC 8422 §5.4: explicit curves are deprecated, so anything but `named_curve` is refused.
+  if (readUint8(body, 0) !== NAMED_CURVE_TYPE) {
+    return { ok: false, description: 'illegal_parameter' };
+  }
+  const namedCurve = readUint16(body, 1);
+  const publicKeyLen = readUint8(body, 3);
+  const paramsEnd = 4 + publicKeyLen;
+  // `opaque point <1..2^8-1>`; then a scheme and a length.
+  if (publicKeyLen === 0 || paramsEnd + 4 > body.length) {
+    return { ok: false, description: 'decode_error' };
+  }
+  const signatureLen = readUint16(body, paramsEnd + 2);
+  if (body.length !== paramsEnd + 4 + signatureLen) {
+    return { ok: false, description: 'decode_error' };
+  }
+  return {
+    ok: true,
+    value: {
+      kind: 'server_key_exchange',
+      curveType: NAMED_CURVE_TYPE,
+      namedCurve,
+      publicKey: body.subarray(4, paramsEnd),
+      serverParams: body.subarray(0, paramsEnd),
+      scheme: readUint16(body, paramsEnd),
+      signature: body.subarray(paramsEnd + 4),
+    },
+  };
+};
+
+const decodeTls12CertificateRequest = (body: Uint8Array): DecodeResult<Tls12HandshakeMessage> => {
+  if (body.length < 1) return { ok: false, description: 'decode_error' };
+  // `ClientCertificateType certificate_types<1..2^8-1>`.
+  const typesLen = readUint8(body, 0);
+  const schemesAt = 1 + typesLen;
+  if (typesLen === 0 || schemesAt + 2 > body.length) {
+    return { ok: false, description: 'decode_error' };
+  }
+  // `SignatureAndHashAlgorithm supported_signature_algorithms<2..2^16-2>`.
+  const schemesLen = readUint16(body, schemesAt);
+  const authoritiesAt = schemesAt + 2 + schemesLen;
+  if (schemesLen === 0 || schemesLen % 2 !== 0 || authoritiesAt + 2 > body.length) {
+    return { ok: false, description: 'decode_error' };
+  }
+  const authoritiesLen = readUint16(body, authoritiesAt);
+  if (body.length !== authoritiesAt + 2 + authoritiesLen) {
+    return { ok: false, description: 'decode_error' };
+  }
+  return {
+    ok: true,
+    value: {
+      kind: 'certificate_request',
+      certificateTypes: [...body.subarray(1, schemesAt)],
+      signatureSchemes: Array.from({ length: schemesLen / 2 }, (_, index) =>
+        readUint16(body, schemesAt + 2 + index * 2),
+      ),
+      rawAuthorities: body.subarray(authoritiesAt + 2),
+    },
+  };
+};
+
+export const decodeTls12HandshakeMessage = (
+  bytes: Uint8Array,
+): DecodeResult<Tls12HandshakeMessage> => {
+  if (bytes.length < 4) return { ok: false, description: 'decode_error' };
+  const typeCode = readUint8(bytes, 0);
+  if (bytes.length !== 4 + readUint24(bytes, 1)) return { ok: false, description: 'decode_error' };
+  const body = bytes.subarray(4);
+
+  switch (typeCode) {
+    case HANDSHAKE_TYPES.hello_request:
+      if (body.length !== 0) return { ok: false, description: 'decode_error' };
+      return { ok: true, value: { kind: 'hello_request' } };
+    case HANDSHAKE_TYPES.certificate:
+      return decodeTls12Certificate(body);
+    case HANDSHAKE_TYPES.server_key_exchange:
+      return decodeServerKeyExchange(body);
+    case HANDSHAKE_TYPES.certificate_request:
+      return decodeTls12CertificateRequest(body);
+    case HANDSHAKE_TYPES.server_hello_done:
+      if (body.length !== 0) return { ok: false, description: 'decode_error' };
+      return { ok: true, value: { kind: 'server_hello_done' } };
+    case HANDSHAKE_TYPES.client_key_exchange: {
+      // RFC 8422 §5.7: `opaque point <1..2^8-1>`.
+      if (body.length < 1) return { ok: false, description: 'decode_error' };
+      const publicKeyLen = readUint8(body, 0);
+      if (publicKeyLen === 0 || body.length !== 1 + publicKeyLen) {
+        return { ok: false, description: 'decode_error' };
+      }
+      return { ok: true, value: { kind: 'client_key_exchange', publicKey: body.subarray(1) } };
+    }
+    case HANDSHAKE_TYPES.finished:
+      return { ok: true, value: { kind: 'finished', verifyData: body } };
+    default:
+      return { ok: false, description: 'unexpected_message' };
+  }
+};
+
 export type ProductionClientHelloOptions = {
   readonly serverName: string;
-  readonly keySharePublicKey: Uint8Array;
+  /** Defaults to `'TLS 1.2'`. */
+  readonly minVersion?: TlsProtocolVersion;
   readonly group?: NamedGroup;
   /** What `supported_groups` offers. The share sits on `group`, not on the first of these. */
   readonly supportedGroups?: readonly NamedGroup[];
-  /** What `signature_algorithms` offers, in preference order. */
-  readonly signatureSchemes?: readonly SignatureScheme[];
+  /**
+   * What `signature_algorithms` offers, in preference order. RSA-PKCS1 here signs a TLS 1.2
+   * ServerKeyExchange only; a TLS 1.3 CertificateVerify can never be verified with it.
+   */
+  readonly signatureSchemes?: readonly Tls12SignatureScheme[];
   readonly random?: Uint8Array;
   readonly legacySessionId?: Uint8Array;
+  /** TLS 1.3 only; left out of a TLS 1.2-only hello. */
   readonly cookie?: Uint8Array;
-  /** The binder is left as zeroes; `bindClientHello` fills it in. */
+  /** TLS 1.3 only; left out of a TLS 1.2-only hello. The binder is left as zeroes; `bindClientHello` fills it in. */
   readonly psk?: {
     readonly identity: Uint8Array;
     readonly obfuscatedTicketAge: number;
     readonly binderLength: number;
   };
-};
+} & (
+  | {
+      /** Defaults to `'TLS 1.3'`. */
+      readonly maxVersion?: 'TLS 1.3';
+      readonly keySharePublicKey: Uint8Array;
+    }
+  | {
+      readonly maxVersion: 'TLS 1.2';
+      /** Unused: a TLS 1.2-only hello carries no key share. */
+      readonly keySharePublicKey?: Uint8Array;
+    }
+);
 
 /** The tail of the message, since `pre_shared_key` must be last (RFC 9846 §4.3.11): list length, entry length, binder. */
 export const binderListLength = (binderLength: number): number => 3 + binderLength;
@@ -981,12 +1239,35 @@ export const paddingFor = (messageLength: number): number | null => {
   return Math.max(0, PADDING_TARGET - messageLength - PADDING_EXTENSION_HEADER_BYTES);
 };
 
+const TLS_1_3_CIPHER_SUITE_CODES: readonly number[] = [0x1301, 0x1302];
+
 export const encodeProductionClientHello = (
   options: ProductionClientHelloOptions,
 ): Uint8Array<ArrayBuffer> => {
+  const minVersion = options.minVersion ?? 'TLS 1.2';
+  const maxVersion = options.maxVersion ?? 'TLS 1.3';
+  if (minVersion === 'TLS 1.3' && maxVersion === 'TLS 1.2') {
+    throw new Error('minVersion TLS 1.3 is above maxVersion TLS 1.2');
+  }
+  const isTls12Offered = minVersion === 'TLS 1.2';
+  const isTls13Offered = maxVersion === 'TLS 1.3';
+
   const random = options.random ?? crypto.getRandomValues(new Uint8Array(32));
-  const legacySessionId = options.legacySessionId ?? crypto.getRandomValues(new Uint8Array(32));
+  const legacySessionId =
+    options.legacySessionId ??
+    (isTls13Offered ? crypto.getRandomValues(new Uint8Array(32)) : new Uint8Array(0));
   const group = options.group ?? 'x25519';
+  const tls12SuiteCodes = SUPPORTED_TLS_1_2_CIPHER_SUITES.map(
+    name => TLS_1_2_CIPHER_SUITES[name].code,
+  );
+  const cipherSuites = ((): readonly number[] => {
+    if (!isTls12Offered) return TLS_1_3_CIPHER_SUITE_CODES;
+    if (!isTls13Offered) return tls12SuiteCodes;
+    return [...TLS_1_3_CIPHER_SUITE_CODES, ...tls12SuiteCodes];
+  })();
+  const defaultSchemes = isTls12Offered
+    ? SUPPORTED_TLS_1_2_SIGNATURE_SCHEMES
+    : SUPPORTED_SIGNATURE_SCHEMES;
 
   const extensions: Extension[] = [
     { kind: 'server_name', serverNames: [options.serverName] },
@@ -994,10 +1275,12 @@ export const encodeProductionClientHello = (
       kind: 'supported_groups',
       groups: (options.supportedGroups ?? SUPPORTED_GROUPS).map(name => NAMED_GROUPS[name]),
     },
+    // RFC 8422 §5.1.2: uncompressed only.
+    ...(isTls12Offered ? [{ kind: 'ec_point_formats', formats: [0] } as const] : []),
     {
       kind: 'signature_algorithms',
-      schemes: (options.signatureSchemes ?? SUPPORTED_SIGNATURE_SCHEMES).map(
-        name => SIGNATURE_SCHEMES[name],
+      schemes: (options.signatureSchemes ?? defaultSchemes).map(
+        name => TLS_1_2_SIGNATURE_SCHEMES[name],
       ),
     },
     // Not derived from `signatureSchemes`: that is policy about CertificateVerify, this is what
@@ -1008,39 +1291,58 @@ export const encodeProductionClientHello = (
         name => CERTIFICATE_SIGNATURE_SCHEMES[name].code,
       ),
     },
-    { kind: 'supported_versions', versions: [TLS_VERSION.V1_3], isServerHello: false },
-    {
-      kind: 'key_share',
-      clientShares: [{ group: NAMED_GROUPS[group], keyExchange: options.keySharePublicKey }],
-    },
+    // RFC 7627 is what makes a TLS 1.2 master secret safe; RFC 5746's empty body says we never renegotiate.
+    ...(isTls12Offered
+      ? ([
+          { kind: 'extended_master_secret' },
+          { kind: 'renegotiation_info', renegotiatedConnection: new Uint8Array(0) },
+        ] as const)
+      : []),
   ];
 
-  if (options.cookie !== undefined) {
-    extensions.push({ kind: 'cookie', cookie: options.cookie });
-  }
+  if (isTls13Offered) {
+    if (options.keySharePublicKey === undefined) {
+      throw new Error('a ClientHello offering TLS 1.3 needs keySharePublicKey');
+    }
+    extensions.push(
+      {
+        kind: 'supported_versions',
+        versions: isTls12Offered ? [TLS_VERSION.V1_3, TLS_VERSION.V1_2] : [TLS_VERSION.V1_3],
+        isServerHello: false,
+      },
+      {
+        kind: 'key_share',
+        clientShares: [{ group: NAMED_GROUPS[group], keyExchange: options.keySharePublicKey }],
+      },
+    );
 
-  // Offered even without a session: RFC 9846 §4.7.1 lets a server withhold a ticket otherwise, and BoringSSL does.
-  extensions.push({
-    kind: 'psk_key_exchange_modes',
-    modes: [PSK_KEY_EXCHANGE_MODES.psk_dhe_ke],
-  });
+    if (options.cookie !== undefined) {
+      extensions.push({ kind: 'cookie', cookie: options.cookie });
+    }
 
-  // §4.3.11: `pre_shared_key` must be the last extension.
-  if (options.psk !== undefined) {
+    // Offered even without a session: RFC 9846 §4.7.1 lets a server withhold a ticket otherwise, and BoringSSL does.
     extensions.push({
-      kind: 'pre_shared_key',
-      identities: [
-        {
-          identity: options.psk.identity,
-          obfuscatedTicketAge: options.psk.obfuscatedTicketAge,
-        },
-      ],
-      binders: [new Uint8Array(options.psk.binderLength)],
+      kind: 'psk_key_exchange_modes',
+      modes: [PSK_KEY_EXCHANGE_MODES.psk_dhe_ke],
     });
+
+    // §4.3.11: `pre_shared_key` must be the last extension.
+    if (options.psk !== undefined) {
+      extensions.push({
+        kind: 'pre_shared_key',
+        identities: [
+          {
+            identity: options.psk.identity,
+            obfuscatedTicketAge: options.psk.obfuscatedTicketAge,
+          },
+        ],
+        binders: [new Uint8Array(options.psk.binderLength)],
+      });
+    }
   }
 
   // `bindClientHello` cuts a fixed-size tail off the message, so this must really hold.
-  if (options.psk !== undefined && extensions.at(-1)?.kind !== 'pre_shared_key') {
+  if (isTls13Offered && options.psk !== undefined && extensions.at(-1)?.kind !== 'pre_shared_key') {
     throw new Error('pre_shared_key must be the last ClientHello extension');
   }
 
@@ -1050,7 +1352,7 @@ export const encodeProductionClientHello = (
       legacyVersion: TLS_VERSION.V1_2,
       random,
       legacySessionId,
-      cipherSuites: [0x1301, 0x1302],
+      cipherSuites,
       legacyCompressionMethods: Uint8Array.of(0),
       extensions: withExtensions,
     });

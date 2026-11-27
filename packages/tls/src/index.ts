@@ -33,6 +33,7 @@ export { pinnedValidator, publicKeyPin } from './pinning.ts';
 export type { TlsSession } from './session.ts';
 export type { ByteDuplex } from './transport.ts';
 export {
+  type LegacyRsaSignatureScheme,
   NAMED_GROUPS,
   type NamedGroup,
   namedGroupFromCode,
@@ -40,5 +41,14 @@ export {
   type SignatureScheme,
   SUPPORTED_GROUPS,
   SUPPORTED_SIGNATURE_SCHEMES,
+  SUPPORTED_TLS_1_2_CIPHER_SUITES,
+  SUPPORTED_TLS_1_2_SIGNATURE_SCHEMES,
   signatureSchemeFromCode,
+  TLS_1_2_CIPHER_SUITES,
+  TLS_1_2_SIGNATURE_SCHEMES,
+  type Tls12CipherSuite,
+  type Tls12SignatureScheme,
+  type TlsProtocolVersion,
+  tls12SignatureSchemeFromCode,
+  tls12SuiteFromCode,
 } from './wire.ts';

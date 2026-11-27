@@ -1,6 +1,11 @@
 import { decodeDer, decodeInteger } from '@yozz.app/x509';
 import { concat } from './bytes.ts';
-import { type AlertDescription, SIGNATURE_SCHEMES } from './wire.ts';
+import {
+  type AlertDescription,
+  type NamedGroup,
+  SIGNATURE_SCHEMES,
+  TLS_1_2_SIGNATURE_SCHEMES,
+} from './wire.ts';
 
 const nonShared = (bytes: Uint8Array): Uint8Array<ArrayBuffer> => new Uint8Array(bytes);
 
@@ -60,6 +65,9 @@ const getSpkiAlgorithm = (spkiDer: Uint8Array): SpkiAlgorithm | undefined => {
 };
 
 const bigIntToBytes = (value: bigint, byteLength: number): Uint8Array<ArrayBuffer> => {
+  if (value <= 0n || value >= 1n << BigInt(byteLength * 8)) {
+    throw new Error('ECDSA signature scalar out of range');
+  }
   let hex = value.toString(16);
   if (hex.length % 2 !== 0) hex = `0${hex}`;
   const targetHex = hex.padStart(byteLength * 2, '0');
@@ -299,4 +307,183 @@ export const verifyCertificateVerify = async (
   }
 
   return { ok: true };
+};
+
+export type VerifyServerKeyExchangeOptions = {
+  readonly scheme: number;
+  readonly signature: Uint8Array;
+  readonly spkiDer: Uint8Array;
+  readonly algorithmOid?: string;
+  readonly clientRandom: Uint8Array;
+  readonly serverRandom: Uint8Array;
+  /** The `ServerECDHParams` exactly as received: curve type, named curve, public point. */
+  readonly serverParams: Uint8Array;
+};
+
+const RSA_ENCRYPTION_OID = '1.2.840.113549.1.1.1';
+const EC_PUBLIC_KEY_OID = '1.2.840.10045.2.1';
+const ED25519_OID = '1.3.101.112';
+
+/** The curves an ECDSA ServerKeyExchange key may sit on, with each one's scalar length. */
+const TLS_1_2_ECDSA_CURVES: Readonly<
+  Record<
+    string,
+    {
+      readonly group: NamedGroup;
+      readonly namedCurve: 'P-256' | 'P-384';
+      readonly scalarLength: 32 | 48;
+    }
+  >
+> = {
+  '1.2.840.10045.3.1.7': { group: 'secp256r1', namedCurve: 'P-256', scalarLength: 32 },
+  '1.3.132.0.34': { group: 'secp384r1', namedCurve: 'P-384', scalarLength: 48 },
+};
+
+/** RFC 8422 §5.1.1: the TLS `NamedGroup` of an EC SPKI's curve, or `undefined` if unsupported. */
+export const spkiEcNamedGroup = (spkiDer: Uint8Array): NamedGroup | undefined => {
+  const algorithm = getSpkiAlgorithm(spkiDer);
+  if (algorithm?.oid !== EC_PUBLIC_KEY_OID || algorithm.curveOid === undefined) {
+    return undefined;
+  }
+  return TLS_1_2_ECDSA_CURVES[algorithm.curveOid]?.group;
+};
+
+/** How to verify each TLS 1.2 scheme. The ECDSA rows name a hash only (RFC 5246 §7.4.1.4.1). */
+type Tls12Verifier =
+  | {
+      readonly family: 'rsa';
+      readonly importParams: RsaHashedImportParams;
+      readonly verifyParams: AlgorithmIdentifier | RsaPssParams;
+    }
+  | { readonly family: 'ecdsa'; readonly hash: 'SHA-256' | 'SHA-384' }
+  | { readonly family: 'ed25519' };
+
+const TLS_1_2_VERIFIERS: Readonly<Record<number, Tls12Verifier>> = {
+  [TLS_1_2_SIGNATURE_SCHEMES.rsa_pss_rsae_sha256]: {
+    family: 'rsa',
+    importParams: { name: 'RSA-PSS', hash: 'SHA-256' },
+    verifyParams: { name: 'RSA-PSS', saltLength: 32 },
+  },
+  [TLS_1_2_SIGNATURE_SCHEMES.rsa_pss_rsae_sha384]: {
+    family: 'rsa',
+    importParams: { name: 'RSA-PSS', hash: 'SHA-384' },
+    verifyParams: { name: 'RSA-PSS', saltLength: 48 },
+  },
+  [TLS_1_2_SIGNATURE_SCHEMES.rsa_pss_rsae_sha512]: {
+    family: 'rsa',
+    importParams: { name: 'RSA-PSS', hash: 'SHA-512' },
+    verifyParams: { name: 'RSA-PSS', saltLength: 64 },
+  },
+  [TLS_1_2_SIGNATURE_SCHEMES.rsa_pkcs1_sha256]: {
+    family: 'rsa',
+    importParams: { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' },
+    verifyParams: { name: 'RSASSA-PKCS1-v1_5' },
+  },
+  [TLS_1_2_SIGNATURE_SCHEMES.rsa_pkcs1_sha384]: {
+    family: 'rsa',
+    importParams: { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-384' },
+    verifyParams: { name: 'RSASSA-PKCS1-v1_5' },
+  },
+  [TLS_1_2_SIGNATURE_SCHEMES.rsa_pkcs1_sha512]: {
+    family: 'rsa',
+    importParams: { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-512' },
+    verifyParams: { name: 'RSASSA-PKCS1-v1_5' },
+  },
+  [TLS_1_2_SIGNATURE_SCHEMES.ecdsa_secp256r1_sha256]: { family: 'ecdsa', hash: 'SHA-256' },
+  [TLS_1_2_SIGNATURE_SCHEMES.ecdsa_secp384r1_sha384]: { family: 'ecdsa', hash: 'SHA-384' },
+  [TLS_1_2_SIGNATURE_SCHEMES.ed25519]: { family: 'ed25519' },
+};
+
+type PreparedVerification = {
+  readonly key: CryptoKey;
+  readonly params: AlgorithmIdentifier | RsaPssParams | EcdsaParams;
+  readonly ecdsaScalarLength: number | null;
+};
+
+const prepareTls12Verification = async (
+  verifier: Tls12Verifier,
+  spkiDer: Uint8Array,
+  algorithm: SpkiAlgorithm,
+): Promise<PreparedVerification | null> => {
+  const importVerifyKey = (
+    params: AlgorithmIdentifier | RsaHashedImportParams | EcKeyImportParams,
+  ) => crypto.subtle.importKey('spki', nonShared(spkiDer), params, false, ['verify']);
+
+  if (verifier.family === 'rsa') {
+    if (algorithm.oid !== RSA_ENCRYPTION_OID) return null;
+    return {
+      key: await importVerifyKey(verifier.importParams),
+      params: verifier.verifyParams,
+      ecdsaScalarLength: null,
+    };
+  }
+  if (verifier.family === 'ed25519') {
+    if (algorithm.oid !== ED25519_OID) return null;
+    return {
+      key: await importVerifyKey({ name: 'Ed25519' }),
+      params: { name: 'Ed25519' },
+      ecdsaScalarLength: null,
+    };
+  }
+  const curve =
+    algorithm.curveOid === undefined ? undefined : TLS_1_2_ECDSA_CURVES[algorithm.curveOid];
+  if (algorithm.oid !== EC_PUBLIC_KEY_OID || curve === undefined) return null;
+  return {
+    key: await importVerifyKey({ name: 'ECDSA', namedCurve: curve.namedCurve }),
+    params: { name: 'ECDSA', hash: verifier.hash },
+    ecdsaScalarLength: curve.scalarLength,
+  };
+};
+
+/**
+ * RFC 5246 §7.4.3 / RFC 8422 §5.4: the signature over `client_random || server_random ||
+ * ServerECDHParams`. Unlike `verifyCertificateVerify`, RSA-PKCS1 is allowed and an ECDSA scheme
+ * does not fix the key's curve; neither relaxation may reach TLS 1.3.
+ */
+export const verifyServerKeyExchange = async (
+  options: VerifyServerKeyExchangeOptions,
+): Promise<VerifyCertificateVerifyResult> => {
+  const verifier = TLS_1_2_VERIFIERS[options.scheme];
+  if (verifier === undefined) {
+    return { ok: false, description: 'illegal_parameter' };
+  }
+  const parsed = getSpkiAlgorithm(options.spkiDer);
+  if (parsed === undefined) {
+    return { ok: false, description: 'bad_certificate' };
+  }
+  const algorithm = { oid: options.algorithmOid ?? parsed.oid, curveOid: parsed.curveOid };
+
+  const prepared = await (async () => {
+    try {
+      return await prepareTls12Verification(verifier, options.spkiDer, algorithm);
+    } catch {
+      return 'unimportable' as const;
+    }
+  })();
+  if (prepared === 'unimportable') {
+    return { ok: false, description: 'bad_certificate' };
+  }
+  if (prepared === null) {
+    return { ok: false, description: 'illegal_parameter' };
+  }
+
+  const signedData = concat(options.clientRandom, options.serverRandom, options.serverParams);
+  const isValid = await (async () => {
+    try {
+      const signature =
+        prepared.ecdsaScalarLength === null
+          ? options.signature
+          : derToP1363(options.signature, prepared.ecdsaScalarLength);
+      return await crypto.subtle.verify(
+        prepared.params,
+        prepared.key,
+        nonShared(signature),
+        nonShared(signedData),
+      );
+    } catch {
+      return false;
+    }
+  })();
+
+  return isValid ? { ok: true } : { ok: false, description: 'decrypt_error' };
 };

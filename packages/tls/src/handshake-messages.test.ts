@@ -3,15 +3,21 @@ import { RFC_8448_TRACES, type Rfc8448Trace } from '../vectors/rfc8448.ts';
 import { concat, writeUint16, writeUint24 } from './bytes.ts';
 import {
   decodeHandshakeMessage,
+  decodeTls12HandshakeMessage,
+  type Extension,
   encodeHandshakeMessage,
   encodeProductionClientHello,
+  encodeTls12HandshakeMessage,
   type HandshakeMessage,
   paddingFor,
+  type Tls12HandshakeMessage,
 } from './handshake-messages.ts';
 import {
   NAMED_GROUPS,
   SIGNATURE_SCHEMES,
   SUPPORTED_SIGNATURE_SCHEMES,
+  SUPPORTED_TLS_1_2_SIGNATURE_SCHEMES,
+  TLS_1_2_SIGNATURE_SCHEMES,
   TLS_VERSION,
 } from './wire.ts';
 
@@ -64,7 +70,7 @@ describe('Stage 3: Handshake message codec', () => {
   }
 
   describe('production ClientHello structural properties', () => {
-    it('produces a compliant TLS 1.3 ClientHello', () => {
+    it('produces a compliant TLS 1.2..1.3 ClientHello by default', () => {
       const keyShare = new Uint8Array(32);
       keyShare.fill(0x55);
 
@@ -83,7 +89,7 @@ describe('Stage 3: Handshake message codec', () => {
       expect(decoded.value.legacyVersion).toBe(TLS_VERSION.V1_2);
       expect(decoded.value.random.length).toBe(32);
       expect(decoded.value.legacySessionId.length).toBe(32);
-      expect(decoded.value.cipherSuites).toEqual([0x1301, 0x1302]);
+      expect(decoded.value.cipherSuites).toEqual([0x1301, 0x1302, 0xc02b, 0xc02f, 0xc02c, 0xc030]);
       expect(decoded.value.legacyCompressionMethods).toEqual(Uint8Array.of(0));
 
       const sni = decoded.value.extensions.find(e => e.kind === 'server_name');
@@ -98,7 +104,7 @@ describe('Stage 3: Handshake message codec', () => {
       const versions = decoded.value.extensions.find(e => e.kind === 'supported_versions');
       expect(versions).toEqual({
         kind: 'supported_versions',
-        versions: [TLS_VERSION.V1_3],
+        versions: [TLS_VERSION.V1_3, TLS_VERSION.V1_2],
         isServerHello: false,
       });
 
@@ -107,6 +113,40 @@ describe('Stage 3: Handshake message codec', () => {
         kind: 'key_share',
         clientShares: [{ group: NAMED_GROUPS.x25519, keyExchange: keyShare }],
       });
+
+      expect(decoded.value.extensions).toContainEqual({ kind: 'ec_point_formats', formats: [0] });
+      expect(decoded.value.extensions).toContainEqual({ kind: 'extended_master_secret' });
+      expect(decoded.value.extensions).toContainEqual({
+        kind: 'renegotiation_info',
+        renegotiatedConnection: new Uint8Array(0),
+      });
+    });
+
+    it('produces a TLS 1.3-only ClientHello when minVersion is TLS 1.3', () => {
+      const keyShare = new Uint8Array(32);
+      keyShare.fill(0x55);
+
+      const encoded = encodeProductionClientHello({
+        serverName: 'imap.example.com',
+        minVersion: 'TLS 1.3',
+        keySharePublicKey: keyShare,
+      });
+
+      const decoded = decodeHandshakeMessage(encoded);
+      expect(decoded.ok).toBe(true);
+      if (!decoded.ok || decoded.value.kind !== 'client_hello') return;
+
+      expect(decoded.value.legacyVersion).toBe(TLS_VERSION.V1_2);
+      expect(decoded.value.legacySessionId.length).toBe(32);
+      expect(decoded.value.cipherSuites).toEqual([0x1301, 0x1302]);
+      expect(decoded.value.extensions.find(e => e.kind === 'supported_versions')).toEqual({
+        kind: 'supported_versions',
+        versions: [TLS_VERSION.V1_3],
+        isServerHello: false,
+      });
+      expect(decoded.value.extensions.some(e => e.kind === 'ec_point_formats')).toBe(false);
+      expect(decoded.value.extensions.some(e => e.kind === 'extended_master_secret')).toBe(false);
+      expect(decoded.value.extensions.some(e => e.kind === 'renegotiation_info')).toBe(false);
     });
 
     it('offers exactly the groups it was given, in the order it was given them', () => {
@@ -145,17 +185,33 @@ describe('Stage 3: Handshake message codec', () => {
       });
     });
 
-    it('offers every implemented scheme when it was given none', () => {
+    it('offers every implemented scheme for the selected version floor when given none', () => {
       // The default is a security boundary too: a scheme dropped from it is one no server may sign with.
-      const encoded = encodeProductionClientHello({
+      const defaultEncoded = encodeProductionClientHello({
         serverName: 'imap.example.com',
         keySharePublicKey: new Uint8Array(32),
       });
+      const defaultDecoded = decodeHandshakeMessage(defaultEncoded);
+      if (!defaultDecoded.ok || defaultDecoded.value.kind !== 'client_hello') {
+        throw new Error('no ClientHello');
+      }
+      expect(defaultDecoded.value.extensions.find(e => e.kind === 'signature_algorithms')).toEqual({
+        kind: 'signature_algorithms',
+        schemes: SUPPORTED_TLS_1_2_SIGNATURE_SCHEMES.map(name => TLS_1_2_SIGNATURE_SCHEMES[name]),
+      });
 
-      const decoded = decodeHandshakeMessage(encoded);
-      if (!decoded.ok || decoded.value.kind !== 'client_hello') throw new Error('no ClientHello');
-
-      expect(decoded.value.extensions.find(e => e.kind === 'signature_algorithms')).toEqual({
+      const tls13OnlyEncoded = encodeProductionClientHello({
+        serverName: 'imap.example.com',
+        minVersion: 'TLS 1.3',
+        keySharePublicKey: new Uint8Array(32),
+      });
+      const tls13OnlyDecoded = decodeHandshakeMessage(tls13OnlyEncoded);
+      if (!tls13OnlyDecoded.ok || tls13OnlyDecoded.value.kind !== 'client_hello') {
+        throw new Error('no ClientHello');
+      }
+      expect(
+        tls13OnlyDecoded.value.extensions.find(e => e.kind === 'signature_algorithms'),
+      ).toEqual({
         kind: 'signature_algorithms',
         schemes: SUPPORTED_SIGNATURE_SCHEMES.map(name => SIGNATURE_SCHEMES[name]),
       });
@@ -336,6 +392,453 @@ describe('RFC 7685 padding boundaries', () => {
       const body = paddingFor(length);
       const final = body === null ? length : length + 4 + body;
       expect(final < 256 || final > 511).toBe(true);
+    }
+  });
+});
+
+const message = (type: number, body: Uint8Array): Uint8Array =>
+  concat(Uint8Array.of(type), writeUint24(body.length), body);
+
+describe('TLS 1.2 handshake messages', () => {
+  const ROUND_TRIPS: readonly Tls12HandshakeMessage[] = [
+    { kind: 'hello_request' },
+    { kind: 'certificate', certificateList: [] },
+    {
+      kind: 'certificate',
+      certificateList: [Uint8Array.of(0x30, 1, 2), new Uint8Array(70_000).fill(7)],
+    },
+    {
+      kind: 'certificate_request',
+      certificateTypes: [1, 64],
+      signatureSchemes: [0x0403, 0x0401],
+      rawAuthorities: Uint8Array.of(0, 3, 0x30, 1, 0),
+    },
+    {
+      kind: 'certificate_request',
+      certificateTypes: [1],
+      signatureSchemes: [0x0804],
+      rawAuthorities: new Uint8Array(0),
+    },
+    { kind: 'server_hello_done' },
+    { kind: 'client_key_exchange', publicKey: new Uint8Array(65).fill(4) },
+    { kind: 'finished', verifyData: new Uint8Array(12).fill(9) },
+  ];
+
+  for (const msg of ROUND_TRIPS) {
+    it(`round-trips ${msg.kind}`, () => {
+      expect(decodeTls12HandshakeMessage(encodeTls12HandshakeMessage(msg))).toEqual({
+        ok: true,
+        value: msg,
+      });
+    });
+  }
+
+  it('lays out Certificate with no request context and no per-entry extensions', () => {
+    expect([
+      ...encodeTls12HandshakeMessage({
+        kind: 'certificate',
+        certificateList: [Uint8Array.of(0xaa), Uint8Array.of(0xbb, 0xcc)],
+      }),
+    ]).toEqual([11, 0, 0, 12, 0, 0, 9, 0, 0, 1, 0xaa, 0, 0, 2, 0xbb, 0xcc]);
+  });
+
+  describe('ServerKeyExchange (RFC 8422 §5.4)', () => {
+    const publicKey = new Uint8Array(32).fill(0x11);
+    const signature = new Uint8Array(71).fill(0x22);
+    const body = concat(
+      Uint8Array.of(3),
+      writeUint16(NAMED_GROUPS.x25519),
+      Uint8Array.of(32),
+      publicKey,
+      writeUint16(0x0403),
+      writeUint16(signature.length),
+      signature,
+    );
+
+    it('decodes, exposing the exact ServerECDHParams bytes the signature covers', () => {
+      const bytes = message(12, body);
+      const decoded = decodeTls12HandshakeMessage(bytes);
+      expect(decoded).toEqual({
+        ok: true,
+        value: {
+          kind: 'server_key_exchange',
+          curveType: 3,
+          namedCurve: NAMED_GROUPS.x25519,
+          publicKey,
+          serverParams: body.subarray(0, 36),
+          scheme: 0x0403,
+          signature,
+        },
+      });
+      if (!decoded.ok) return;
+      expect(encodeTls12HandshakeMessage(decoded.value)).toEqual(bytes);
+    });
+
+    it('refuses an explicit curve with illegal_parameter', () => {
+      for (const curveType of [1, 2]) {
+        const explicit = new Uint8Array(body);
+        explicit[0] = curveType;
+        expect(decodeTls12HandshakeMessage(message(12, explicit))).toEqual({
+          ok: false,
+          description: 'illegal_parameter',
+        });
+      }
+    });
+
+    it('refuses an empty point or a length that does not add up with decode_error', () => {
+      const emptyPoint = concat(
+        Uint8Array.of(3, 0, 0x1d, 0),
+        writeUint16(0x0403),
+        writeUint16(1),
+        Uint8Array.of(0),
+      );
+      const overlongPoint = new Uint8Array(body);
+      overlongPoint[3] = 200;
+      for (const malformed of [
+        new Uint8Array(0),
+        body.subarray(0, 3),
+        emptyPoint,
+        overlongPoint,
+        body.subarray(0, 36),
+        body.subarray(0, 39),
+        body.subarray(0, -1),
+        concat(body, Uint8Array.of(0)),
+      ]) {
+        expect(decodeTls12HandshakeMessage(message(12, malformed))).toEqual({
+          ok: false,
+          description: 'decode_error',
+        });
+      }
+    });
+  });
+
+  it('refuses a malformed Certificate with decode_error', () => {
+    const entry = concat(writeUint24(2), Uint8Array.of(1, 2));
+    for (const body of [
+      new Uint8Array(0),
+      Uint8Array.of(0, 0),
+      // A zero-length certificate.
+      concat(writeUint24(3), writeUint24(0)),
+      // Trailing bytes after the list.
+      concat(writeUint24(entry.length), entry, Uint8Array.of(0)),
+      // The list claims more than it carries.
+      concat(writeUint24(entry.length + 1), entry),
+      // An entry overrunning the list.
+      concat(writeUint24(4), writeUint24(9), Uint8Array.of(1)),
+      // A truncated entry length.
+      concat(writeUint24(2), Uint8Array.of(0, 0)),
+    ]) {
+      expect(decodeTls12HandshakeMessage(message(11, body))).toEqual({
+        ok: false,
+        description: 'decode_error',
+      });
+    }
+  });
+
+  it('refuses a malformed CertificateRequest with decode_error', () => {
+    const valid = concat(Uint8Array.of(1, 64), writeUint16(2), writeUint16(0x0403), writeUint16(0));
+    expect(decodeTls12HandshakeMessage(message(13, valid)).ok).toBe(true);
+    for (const body of [
+      new Uint8Array(0),
+      // No certificate types.
+      concat(Uint8Array.of(0), writeUint16(2), writeUint16(0x0403), writeUint16(0)),
+      // No signature schemes.
+      concat(Uint8Array.of(1, 64), writeUint16(0), writeUint16(0)),
+      // An odd scheme list.
+      concat(Uint8Array.of(1, 64), writeUint16(3), Uint8Array.of(4, 3, 5), writeUint16(0)),
+      // Authorities longer than the body.
+      concat(Uint8Array.of(1, 64), writeUint16(2), writeUint16(0x0403), writeUint16(5)),
+      // Trailing bytes.
+      concat(valid, Uint8Array.of(0)),
+      // Types overrunning the body.
+      Uint8Array.of(9, 1),
+      valid.subarray(0, -1),
+    ]) {
+      expect(decodeTls12HandshakeMessage(message(13, body))).toEqual({
+        ok: false,
+        description: 'decode_error',
+      });
+    }
+  });
+
+  it('refuses a body on HelloRequest or ServerHelloDone with decode_error', () => {
+    for (const type of [0, 14]) {
+      expect(decodeTls12HandshakeMessage(message(type, Uint8Array.of(0)))).toEqual({
+        ok: false,
+        description: 'decode_error',
+      });
+    }
+  });
+
+  it('refuses a malformed ClientKeyExchange with decode_error', () => {
+    for (const body of [
+      new Uint8Array(0),
+      Uint8Array.of(0),
+      Uint8Array.of(2, 1),
+      Uint8Array.of(1, 1, 1),
+    ]) {
+      expect(decodeTls12HandshakeMessage(message(16, body))).toEqual({
+        ok: false,
+        description: 'decode_error',
+      });
+    }
+  });
+
+  it('refuses a framing whose length disagrees with the bytes with decode_error', () => {
+    for (const bytes of [
+      Uint8Array.of(14, 0, 0),
+      Uint8Array.of(14, 0, 0, 1),
+      Uint8Array.of(14, 0, 0, 0, 0),
+    ]) {
+      expect(decodeTls12HandshakeMessage(bytes)).toEqual({
+        ok: false,
+        description: 'decode_error',
+      });
+    }
+  });
+
+  it('reads a message TLS 1.2 does not define here as unexpected_message', () => {
+    // ClientHello, ServerHello, NewSessionTicket, EncryptedExtensions, CertificateVerify, KeyUpdate.
+    for (const type of [1, 2, 4, 8, 15, 24]) {
+      expect(decodeTls12HandshakeMessage(message(type, new Uint8Array(0)))).toEqual({
+        ok: false,
+        description: 'unexpected_message',
+      });
+    }
+  });
+});
+
+const serverHelloWith = (extensionBytes: Uint8Array): Uint8Array =>
+  message(
+    2,
+    concat(
+      writeUint16(0x0303),
+      new Uint8Array(32).fill(5),
+      Uint8Array.of(0),
+      writeUint16(0xc02f),
+      Uint8Array.of(0),
+      writeUint16(extensionBytes.length),
+      extensionBytes,
+    ),
+  );
+
+const extension = (type: number, body: Uint8Array): Uint8Array =>
+  concat(writeUint16(type), writeUint16(body.length), body);
+
+describe('TLS 1.2 hello extensions', () => {
+  it('decodes ec_point_formats, extended_master_secret and renegotiation_info in a ServerHello', () => {
+    const bytes = serverHelloWith(
+      concat(
+        extension(0xff01, Uint8Array.of(0)),
+        extension(11, Uint8Array.of(2, 0, 1)),
+        extension(23, new Uint8Array(0)),
+      ),
+    );
+    const decoded = decodeHandshakeMessage(bytes);
+    if (!decoded.ok || decoded.value.kind !== 'server_hello') throw new Error('no ServerHello');
+    expect(decoded.value.extensions).toEqual([
+      { kind: 'renegotiation_info', renegotiatedConnection: new Uint8Array(0) },
+      { kind: 'ec_point_formats', formats: [0, 1] },
+      { kind: 'extended_master_secret' },
+    ]);
+    expect(encodeHandshakeMessage(decoded.value)).toEqual(bytes);
+  });
+
+  it('refuses a malformed TLS 1.2 extension body in a hello with decode_error', () => {
+    for (const ext of [
+      extension(11, new Uint8Array(0)),
+      extension(11, Uint8Array.of(0)),
+      extension(11, Uint8Array.of(2, 0)),
+      extension(11, Uint8Array.of(1, 0, 0)),
+      extension(23, Uint8Array.of(0)),
+      extension(0xff01, new Uint8Array(0)),
+      extension(0xff01, Uint8Array.of(2, 0)),
+      extension(0xff01, Uint8Array.of(0, 0)),
+    ]) {
+      expect(decodeHandshakeMessage(serverHelloWith(ext))).toEqual({
+        ok: false,
+        description: 'decode_error',
+      });
+    }
+  });
+
+  /** RFC 9846 §4.3: a known extension in the wrong message is `illegal_parameter`, decided by the caller. */
+  it('leaves them unknown in an EncryptedExtensions, however malformed', () => {
+    const body = concat(
+      extension(11, new Uint8Array(0)),
+      extension(23, Uint8Array.of(1)),
+      extension(0xff01, new Uint8Array(0)),
+    );
+    const decoded = decodeHandshakeMessage(message(8, concat(writeUint16(body.length), body)));
+    expect(decoded).toEqual({
+      ok: true,
+      value: {
+        kind: 'encrypted_extensions',
+        extensions: [
+          { kind: 'unknown', typeCode: 11, data: new Uint8Array(0) },
+          { kind: 'unknown', typeCode: 23, data: Uint8Array.of(1) },
+          { kind: 'unknown', typeCode: 0xff01, data: new Uint8Array(0) },
+        ],
+      },
+    });
+  });
+});
+
+describe('production ClientHello version range', () => {
+  const keySharePublicKey = new Uint8Array(32).fill(0x55);
+  const random = new Uint8Array(32).fill(1);
+  const legacySessionId = new Uint8Array(32).fill(2);
+
+  const decodeHello = (bytes: Uint8Array) => {
+    const decoded = decodeHandshakeMessage(bytes);
+    if (!decoded.ok || decoded.value.kind !== 'client_hello') {
+      throw new Error('our own ClientHello does not decode');
+    }
+    return decoded.value;
+  };
+  const kinds = (extensions: readonly Extension[]) => extensions.map(e => e.kind);
+
+  it('emits the same bytes for TLS 1.2..1.3 spelled out as for the default', () => {
+    const base = { serverName: 'imap.example.com', keySharePublicKey, random, legacySessionId };
+    expect(
+      encodeProductionClientHello({ ...base, minVersion: 'TLS 1.2', maxVersion: 'TLS 1.3' }),
+    ).toEqual(encodeProductionClientHello(base));
+  });
+
+  it('offers both versions for TLS 1.2..1.3, with every TLS 1.2 addition before the PSK tail', () => {
+    const hello = decodeHello(
+      encodeProductionClientHello({
+        serverName: 'imap.example.com',
+        keySharePublicKey,
+        minVersion: 'TLS 1.2',
+        cookie: Uint8Array.of(1, 2, 3),
+        psk: { identity: new Uint8Array(16), obfuscatedTicketAge: 1, binderLength: 32 },
+      }),
+    );
+    expect(hello.legacyVersion).toBe(TLS_VERSION.V1_2);
+    expect(hello.cipherSuites).toEqual([0x1301, 0x1302, 0xc02b, 0xc02f, 0xc02c, 0xc030]);
+    expect(hello.extensions.find(e => e.kind === 'supported_versions')).toEqual({
+      kind: 'supported_versions',
+      versions: [TLS_VERSION.V1_3, TLS_VERSION.V1_2],
+      isServerHello: false,
+    });
+    expect(hello.extensions.find(e => e.kind === 'signature_algorithms')).toEqual({
+      kind: 'signature_algorithms',
+      schemes: SUPPORTED_TLS_1_2_SIGNATURE_SCHEMES.map(name => TLS_1_2_SIGNATURE_SCHEMES[name]),
+    });
+    expect(hello.extensions).toContainEqual({ kind: 'ec_point_formats', formats: [0] });
+    expect(hello.extensions).toContainEqual({ kind: 'extended_master_secret' });
+    expect(hello.extensions).toContainEqual({
+      kind: 'renegotiation_info',
+      renegotiatedConnection: new Uint8Array(0),
+    });
+    const order = kinds(hello.extensions);
+    const modes = order.indexOf('psk_key_exchange_modes');
+    for (const kind of [
+      'ec_point_formats',
+      'extended_master_secret',
+      'renegotiation_info',
+    ] as const) {
+      expect(order.indexOf(kind)).toBeLessThan(modes);
+    }
+    expect(order).toContain('key_share');
+    expect(order).toContain('cookie');
+    expect(order.at(-1)).toBe('pre_shared_key');
+  });
+
+  it('pads a TLS 1.2..1.3 hello right before pre_shared_key, which stays last', () => {
+    const paddedLengths = Array.from({ length: 200 }, (_, index) => index + 1).flatMap(length => {
+      const bytes = encodeProductionClientHello({
+        serverName: 'a'.repeat(length),
+        keySharePublicKey,
+        minVersion: 'TLS 1.2',
+        psk: { identity: new Uint8Array(16), obfuscatedTicketAge: 1, binderLength: 32 },
+      });
+      const order = kinds(decodeHello(bytes).extensions);
+      expect(order.at(-1)).toBe('pre_shared_key');
+      if (!order.includes('padding')) return [];
+      expect(order.at(-2)).toBe('padding');
+      return [bytes.length];
+    });
+    expect(paddedLengths.length).toBeGreaterThan(0);
+    for (const length of paddedLengths) expect([512, 513]).toContain(length);
+  });
+
+  it('offers TLS 1.2 alone without any TLS 1.3 machinery', () => {
+    const hello = decodeHello(
+      encodeProductionClientHello({
+        serverName: 'imap.example.com',
+        minVersion: 'TLS 1.2',
+        maxVersion: 'TLS 1.2',
+        // Ignored: they belong to TLS 1.3.
+        cookie: Uint8Array.of(1),
+        psk: { identity: new Uint8Array(16), obfuscatedTicketAge: 1, binderLength: 32 },
+      }),
+    );
+    expect(hello.legacyVersion).toBe(TLS_VERSION.V1_2);
+    expect(hello.legacySessionId).toEqual(new Uint8Array(0));
+    expect(hello.cipherSuites).toEqual([0xc02b, 0xc02f, 0xc02c, 0xc030]);
+    expect(kinds(hello.extensions)).toEqual([
+      'server_name',
+      'supported_groups',
+      'ec_point_formats',
+      'signature_algorithms',
+      'signature_algorithms_cert',
+      'extended_master_secret',
+      'renegotiation_info',
+    ]);
+    expect(hello.extensions.find(e => e.kind === 'signature_algorithms')).toEqual({
+      kind: 'signature_algorithms',
+      schemes: [0x0403, 0x0503, 0x0804, 0x0805, 0x0806, 0x0807, 0x0401, 0x0501, 0x0601],
+    });
+  });
+
+  it('offers exactly the TLS 1.2 schemes it was given', () => {
+    const hello = decodeHello(
+      encodeProductionClientHello({
+        serverName: 'imap.example.com',
+        minVersion: 'TLS 1.2',
+        maxVersion: 'TLS 1.2',
+        signatureSchemes: ['rsa_pkcs1_sha256', 'ecdsa_secp256r1_sha256'],
+      }),
+    );
+    expect(hello.extensions.find(e => e.kind === 'signature_algorithms')).toEqual({
+      kind: 'signature_algorithms',
+      schemes: [0x0401, 0x0403],
+    });
+  });
+
+  it('pads a TLS 1.2-only hello in the RFC 7685 range', () => {
+    const padded = Array.from({ length: 250 }, (_, index) => index + 1).flatMap(length => {
+      const bytes = encodeProductionClientHello({
+        serverName: 'a'.repeat(length),
+        minVersion: 'TLS 1.2',
+        maxVersion: 'TLS 1.2',
+      });
+      expect(bytes.length < 256 || bytes.length >= 512).toBe(true);
+      const order = kinds(decodeHello(bytes).extensions);
+      return order.includes('padding') ? [order.at(-1)] : [];
+    });
+    expect(padded.length).toBeGreaterThan(0);
+    expect(new Set(padded)).toEqual(new Set(['padding']));
+  });
+
+  it('throws on a range whose minimum is above its maximum', () => {
+    expect(() =>
+      encodeProductionClientHello({
+        serverName: 'imap.example.com',
+        minVersion: 'TLS 1.3',
+        maxVersion: 'TLS 1.2',
+      }),
+    ).toThrow();
+  });
+
+  it('requires a key share whenever TLS 1.3 is offered', () => {
+    for (const minVersion of ['TLS 1.2', 'TLS 1.3'] as const) {
+      expect(() =>
+        // @ts-expect-error A TLS 1.3 offer without a key share is a compile error too.
+        encodeProductionClientHello({ serverName: 'imap.example.com', minVersion }),
+      ).toThrow('keySharePublicKey');
     }
   });
 });

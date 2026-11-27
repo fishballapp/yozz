@@ -1709,7 +1709,7 @@ describe('Stage 7: Handshake state machine & scripted peer', () => {
       if (!decoded.ok || decoded.value.kind !== 'client_hello') return;
 
       const ch = decoded.value;
-      expect(ch.cipherSuites).toEqual([0x1301, 0x1302]);
+      expect(ch.cipherSuites).toEqual([0x1301, 0x1302, 0xc02b, 0xc02f, 0xc02c, 0xc030]);
       expect(ch.legacySessionId.length).toBe(32);
 
       const sni = ch.extensions.find(e => e.kind === 'server_name');
@@ -1724,8 +1724,15 @@ describe('Stage 7: Handshake state machine & scripted peer', () => {
       const versions = ch.extensions.find(e => e.kind === 'supported_versions');
       expect(versions).toEqual({
         kind: 'supported_versions',
-        versions: [TLS_VERSION.V1_3],
+        versions: [TLS_VERSION.V1_3, TLS_VERSION.V1_2],
         isServerHello: false,
+      });
+
+      expect(ch.extensions).toContainEqual({ kind: 'ec_point_formats', formats: [0] });
+      expect(ch.extensions).toContainEqual({ kind: 'extended_master_secret' });
+      expect(ch.extensions).toContainEqual({
+        kind: 'renegotiation_info',
+        renegotiatedConnection: new Uint8Array(0),
       });
 
       const ks = ch.extensions.find(e => e.kind === 'key_share');
@@ -1735,6 +1742,70 @@ describe('Stage 7: Handshake state machine & scripted peer', () => {
         expect(ks.clientShares?.[0]?.group).toBe(NAMED_GROUPS.x25519);
         expect(ks.clientShares?.[0]?.keyExchange.length).toBe(32);
       }
+
+      duplex.close();
+      await startPromise;
+    });
+
+    it('generates a TLS 1.3-only ClientHello when minVersion is TLS 1.3', async () => {
+      const duplex = createMemoryDuplex();
+      const startPromise = startTls({
+        transport: duplex.client,
+        serverName: 'mail.example.com',
+        trustAnchors: dummyTrustAnchors,
+        validationTime: Temporal.Now.instant(),
+        validator: {
+          name: 'dummy',
+          validatePath: async () => ({ ok: false, reason: { code: 'no-path-to-trust-anchor' } }),
+        },
+        minVersion: 'TLS 1.3',
+      });
+
+      const plainRes = openPlain((await duplex.server.read())!);
+      if (!plainRes.ok) throw new Error('expected plaintext ClientHello');
+      const decoded = decodeHandshakeMessage(plainRes.payload);
+      if (!decoded.ok || decoded.value.kind !== 'client_hello') {
+        throw new Error('expected ClientHello');
+      }
+
+      expect(decoded.value.cipherSuites).toEqual([0x1301, 0x1302]);
+      expect(decoded.value.extensions.find(e => e.kind === 'supported_versions')).toEqual({
+        kind: 'supported_versions',
+        versions: [TLS_VERSION.V1_3],
+        isServerHello: false,
+      });
+      expect(decoded.value.extensions.some(e => e.kind === 'extended_master_secret')).toBe(false);
+
+      duplex.close();
+      await startPromise;
+    });
+
+    it('generates a TLS 1.2-only ClientHello with empty session ID and no key share', async () => {
+      const duplex = createMemoryDuplex();
+      const startPromise = startTls({
+        transport: duplex.client,
+        serverName: 'mail.example.com',
+        trustAnchors: dummyTrustAnchors,
+        validationTime: Temporal.Now.instant(),
+        validator: {
+          name: 'dummy',
+          validatePath: async () => ({ ok: false, reason: { code: 'no-path-to-trust-anchor' } }),
+        },
+        maxVersion: 'TLS 1.2',
+      });
+
+      const plainRes = openPlain((await duplex.server.read())!);
+      if (!plainRes.ok) throw new Error('expected plaintext ClientHello');
+      const decoded = decodeHandshakeMessage(plainRes.payload);
+      if (!decoded.ok || decoded.value.kind !== 'client_hello') {
+        throw new Error('expected ClientHello');
+      }
+
+      expect(decoded.value.cipherSuites).toEqual([0xc02b, 0xc02f, 0xc02c, 0xc030]);
+      expect(decoded.value.legacySessionId).toEqual(new Uint8Array(0));
+      expect(decoded.value.extensions.some(e => e.kind === 'supported_versions')).toBe(false);
+      expect(decoded.value.extensions.some(e => e.kind === 'key_share')).toBe(false);
+      expect(decoded.value.extensions.some(e => e.kind === 'psk_key_exchange_modes')).toBe(false);
 
       duplex.close();
       await startPromise;

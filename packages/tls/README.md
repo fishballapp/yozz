@@ -1,15 +1,17 @@
 # @yozz.app/tls
 
-A TLS 1.3 client (RFC 9846) in TypeScript, over any byte duplex. It is what the YOZZ mail
-client uses to reach IMAP and SMTP servers from inside a browser, where there is no socket API
-and no platform TLS to call.
+A TLS 1.3 (RFC 9846) and modern TLS 1.2 (RFC 5246, ephemeral ECDHE + AES-GCM only) client in
+TypeScript, over any byte duplex. It is what the YOZZ mail client uses to reach IMAP and SMTP
+servers from inside a browser, where there is no socket API and no platform TLS to call.
 
-- Record layer, handshake state machine, key schedule, `KeyUpdate`, `close_notify`.
-- 1-RTT PSK resumption; never 0-RTT.
+- Record layer, handshake state machine, TLS 1.3 + TLS 1.2 key schedules, Extended Master Secret
+  (RFC 7627), `KeyUpdate`, `close_notify`, RFC 9846 / RFC 5705 keying-material exporter.
+- 1-RTT PSK resumption on TLS 1.3; never 0-RTT, never renegotiation, no CBC / DHE / static RSA.
 - Certificate validation through [`@yozz.app/x509`](https://www.npmjs.com/package/@yozz.app/x509),
   plus trust-on-first-use public-key pinning as a `Validator` wrapper.
 - WebCrypto only: runs in Node and in Chromium, Firefox and WebKit with no native code.
-- Gates: RFC 8448 byte-exact on all five traces; BoringSSL's BoGo runner, 296/296 in scope.
+- Gates: RFC 8448 byte-exact on all five traces; BoringSSL's BoGo runner, 497/497 in scope; live
+  interop against 10 real mail hosts across Node and all three browser engines.
 
 ```bash
 pnpm add @yozz.app/tls

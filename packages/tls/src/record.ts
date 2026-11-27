@@ -1,4 +1,4 @@
-import { concat, writeUint8, writeUint16 } from './bytes.ts';
+import { concat, readUint8, readUint16, writeUint8, writeUint16 } from './bytes.ts';
 import {
   type AlertDescription,
   CONTENT_TYPES,
@@ -269,6 +269,171 @@ export const openAead = async (
   // §5.1: a record type we do not recognise is an unexpected record.
   if (type === undefined) {
     return { ok: false, description: 'unexpected_message' };
+  }
+
+  if (aeadObserver !== null) {
+    const rawKey = key instanceof CryptoKey ? new Uint8Array(0) : key;
+    aeadObserver({ direction: 'open', key: rawKey, nonce, seq: BigInt(seq), type });
+  }
+
+  return { ok: true, type, payload };
+};
+
+/** RFC 5288 §3: the explicit nonce and the tag, around every TLS 1.2 AES-GCM record. */
+const TLS_1_2_EXPLICIT_NONCE_LENGTH = 8;
+const TLS_1_2_TAG_LENGTH = 16;
+const TLS_1_2_AEAD_OVERHEAD = TLS_1_2_EXPLICIT_NONCE_LENGTH + TLS_1_2_TAG_LENGTH;
+
+const uint64 = (value: bigint | number): Uint8Array<ArrayBuffer> => {
+  const bytes = new Uint8Array(8);
+  new DataView(bytes.buffer).setBigUint64(0, BigInt(value), false);
+  return bytes;
+};
+
+/** RFC 5246 §6.2.3.3: `seq_num || type || version || length`, the length being the plaintext's. */
+const tls12AdditionalData = (
+  seq: bigint | number,
+  typeCode: number,
+  plaintextLength: number,
+): Uint8Array<ArrayBuffer> =>
+  concat(
+    uint64(seq),
+    writeUint8(typeCode),
+    writeUint16(LEGACY_RECORD_VERSION.STANDARD),
+    writeUint16(plaintextLength),
+  );
+
+const assertImplicitIv = (implicitIv: Uint8Array): void => {
+  if (implicitIv.length !== 4) {
+    throw new Error(`TLS 1.2 AES-GCM implicit IV must be 4 octets, got ${implicitIv.length}`);
+  }
+};
+
+/**
+ * A TLS 1.2 AES-GCM record (RFC 5288 §3). The explicit nonce is the sequence number, which RFC
+ * 5288 permits and which makes a nonce reuse impossible without a sequence reuse.
+ */
+export const sealTls12Aead = async (
+  key: Uint8Array | CryptoKey,
+  implicitIv: Uint8Array,
+  seq: bigint | number,
+  type: ContentType,
+  payload: Uint8Array,
+): Promise<Uint8Array<ArrayBuffer>> => {
+  assertImplicitIv(implicitIv);
+  if (payload.length > MAX_RECORD_PLAINTEXT) {
+    throw new Error('record_overflow');
+  }
+  const typeCode = CONTENT_TYPES[type];
+  if (typeCode === undefined) {
+    throw new Error(`Unknown content type: ${type}`);
+  }
+
+  const explicitNonce = uint64(seq);
+  const nonce = concat(implicitIv, explicitNonce);
+
+  if (aeadObserver !== null) {
+    const rawKey = key instanceof CryptoKey ? new Uint8Array(0) : key;
+    aeadObserver({ direction: 'seal', key: rawKey, nonce, seq: BigInt(seq), type });
+  }
+
+  const cryptoKey =
+    key instanceof CryptoKey
+      ? key
+      : await crypto.subtle.importKey('raw', nonShared(key), { name: 'AES-GCM' }, false, [
+          'encrypt',
+        ]);
+
+  const ciphertextWithTag = new Uint8Array(
+    await crypto.subtle.encrypt(
+      {
+        name: 'AES-GCM',
+        iv: nonce,
+        additionalData: tls12AdditionalData(seq, typeCode, payload.length),
+        tagLength: 128,
+      },
+      cryptoKey,
+      nonShared(payload),
+    ),
+  );
+
+  return concat(
+    writeUint8(typeCode),
+    writeUint16(LEGACY_RECORD_VERSION.STANDARD),
+    writeUint16(TLS_1_2_EXPLICIT_NONCE_LENGTH + ciphertextWithTag.length),
+    explicitNonce,
+    ciphertextWithTag,
+  );
+};
+
+export const openTls12Aead = async (
+  key: Uint8Array | CryptoKey,
+  implicitIv: Uint8Array,
+  seq: bigint | number,
+  record: Uint8Array,
+): Promise<OpenRecordResult> => {
+  assertImplicitIv(implicitIv);
+  if (record.length < 5) {
+    return { ok: false, description: 'decode_error' };
+  }
+  const outerType = readUint8(record, 0);
+  const type = (Object.entries(CONTENT_TYPES) as readonly [ContentType, number][]).find(
+    ([, code]) => code === outerType,
+  )?.[0];
+  if (type === undefined) {
+    return { ok: false, description: 'decode_error' };
+  }
+  if (readUint16(record, 1) !== LEGACY_RECORD_VERSION.STANDARD) {
+    return { ok: false, description: 'decode_error' };
+  }
+  const length = readUint16(record, 3);
+  if (record.length !== 5 + length) {
+    return { ok: false, description: 'decode_error' };
+  }
+  // RFC 5246 §6.2.3: TLSCiphertext may exceed 2^14 by the cipher's expansion, which here is fixed.
+  if (length > MAX_RECORD_PLAINTEXT + TLS_1_2_AEAD_OVERHEAD) {
+    return { ok: false, description: 'record_overflow' };
+  }
+  // Too short for a nonce and a tag; a decryption that cannot succeed is bad_record_mac.
+  if (length < TLS_1_2_AEAD_OVERHEAD) {
+    return { ok: false, description: 'bad_record_mac' };
+  }
+
+  const explicitNonce = record.subarray(5, 5 + TLS_1_2_EXPLICIT_NONCE_LENGTH);
+  const ciphertextWithTag = record.subarray(5 + TLS_1_2_EXPLICIT_NONCE_LENGTH);
+  const nonce = concat(implicitIv, explicitNonce);
+
+  const cryptoKey =
+    key instanceof CryptoKey
+      ? key
+      : await crypto.subtle.importKey('raw', nonShared(key), { name: 'AES-GCM' }, false, [
+          'decrypt',
+        ]);
+
+  const payload = await (async (): Promise<Uint8Array | null> => {
+    try {
+      return new Uint8Array(
+        await crypto.subtle.decrypt(
+          {
+            name: 'AES-GCM',
+            iv: nonce,
+            additionalData: tls12AdditionalData(
+              seq,
+              outerType,
+              ciphertextWithTag.length - TLS_1_2_TAG_LENGTH,
+            ),
+            tagLength: 128,
+          },
+          cryptoKey,
+          nonShared(ciphertextWithTag),
+        ),
+      );
+    } catch {
+      return null;
+    }
+  })();
+  if (payload === null) {
+    return { ok: false, description: 'bad_record_mac' };
   }
 
   if (aeadObserver !== null) {

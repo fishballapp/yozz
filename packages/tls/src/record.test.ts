@@ -1,15 +1,21 @@
+import { createCipheriv, createDecipheriv } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { RFC_8448_TRACES, type Rfc8448Step, type Rfc8448Trace } from '../vectors/rfc8448.ts';
 import { concat } from './bytes.ts';
 import { trafficKeys } from './key-schedule.ts';
 import {
+  type AeadRecordEvent,
   buildNonce,
+  MAX_RECORD_PLAINTEXT,
   type OpenRecordResult,
   openAead,
   openPlain,
+  openTls12Aead,
   RecordReader,
   sealAead,
   sealPlain,
+  sealTls12Aead,
+  setAeadObserver,
 } from './record.ts';
 import type { ContentType } from './wire.ts';
 
@@ -435,5 +441,216 @@ describe('Stage 2: Record layer against RFC 8448', () => {
         kind: 'eof',
       });
     });
+  });
+});
+
+/** RFC 5246 §6.2.3.3 and RFC 5288 §3, restated over `node:crypto` so the reference shares no code with the subject. */
+const referenceTls12Record = (
+  key: Uint8Array,
+  implicitIv: Uint8Array,
+  seq: bigint,
+  typeCode: number,
+  payload: Uint8Array,
+): Uint8Array => {
+  const explicitNonce = Buffer.alloc(8);
+  explicitNonce.writeBigUInt64BE(seq);
+  const aad = Buffer.alloc(13);
+  aad.writeBigUInt64BE(seq, 0);
+  aad.writeUInt8(typeCode, 8);
+  aad.writeUInt16BE(0x0303, 9);
+  aad.writeUInt16BE(payload.length, 11);
+  const cipher = createCipheriv(
+    key.length === 16 ? 'aes-128-gcm' : 'aes-256-gcm',
+    key,
+    Buffer.concat([implicitIv, explicitNonce]),
+  );
+  cipher.setAAD(aad);
+  const ciphertext = Buffer.concat([cipher.update(payload), cipher.final(), cipher.getAuthTag()]);
+  const header = Buffer.alloc(5);
+  header.writeUInt8(typeCode, 0);
+  header.writeUInt16BE(0x0303, 1);
+  header.writeUInt16BE(8 + ciphertext.length, 3);
+  return Uint8Array.from(Buffer.concat([header, explicitNonce, ciphertext]));
+};
+
+describe('TLS 1.2 AES-GCM records', () => {
+  for (const keyLength of [16, 32] as const) {
+    const cipherName = keyLength === 16 ? 'aes-128-gcm' : 'aes-256-gcm';
+    const key = crypto.getRandomValues(new Uint8Array(keyLength));
+    const implicitIv = crypto.getRandomValues(new Uint8Array(4));
+
+    describe(cipherName, () => {
+      for (const length of [0, 1, 1000, MAX_RECORD_PLAINTEXT]) {
+        it(`seals ${length} octets byte-for-byte as node:crypto does, and opens them`, async () => {
+          const payload = crypto.getRandomValues(new Uint8Array(length));
+          const seq = 0x0102030405060708n;
+          const sealed = await sealTls12Aead(key, implicitIv, seq, 'application_data', payload);
+          expect(sealed).toEqual(referenceTls12Record(key, implicitIv, seq, 0x17, payload));
+          expect(sealed.length).toBe(5 + 8 + length + 16);
+          expect(await openTls12Aead(key, implicitIv, seq, sealed)).toEqual({
+            ok: true,
+            type: 'application_data',
+            payload,
+          });
+        });
+      }
+
+      it('opens a record sealed by node:crypto, for every content type', async () => {
+        for (const [type, code] of [
+          ['change_cipher_spec', 0x14],
+          ['alert', 0x15],
+          ['handshake', 0x16],
+          ['application_data', 0x17],
+        ] as const) {
+          const payload = crypto.getRandomValues(new Uint8Array(37));
+          const record = referenceTls12Record(key, implicitIv, 9n, code, payload);
+          expect(await openTls12Aead(key, implicitIv, 9n, record)).toEqual({
+            ok: true,
+            type,
+            payload,
+          });
+        }
+      });
+
+      it('decrypts with node:crypto what it seals', async () => {
+        const payload = new TextEncoder().encode('a1 LOGIN user pass');
+        const record = await sealTls12Aead(key, implicitIv, 3, 'application_data', payload);
+        const decipher = createDecipheriv(
+          cipherName,
+          key,
+          Buffer.concat([implicitIv, record.subarray(5, 13)]),
+        );
+        const aad = Buffer.alloc(13);
+        aad.writeBigUInt64BE(3n, 0);
+        aad.writeUInt8(0x17, 8);
+        aad.writeUInt16BE(0x0303, 9);
+        aad.writeUInt16BE(payload.length, 11);
+        decipher.setAAD(aad);
+        decipher.setAuthTag(record.subarray(-16));
+        expect(
+          Uint8Array.from(
+            Buffer.concat([decipher.update(record.subarray(13, -16)), decipher.final()]),
+          ),
+        ).toEqual(payload);
+      });
+    });
+  }
+
+  const key = crypto.getRandomValues(new Uint8Array(16));
+  const implicitIv = crypto.getRandomValues(new Uint8Array(4));
+  const seal = (seq: bigint | number, payload: Uint8Array) =>
+    sealTls12Aead(key, implicitIv, seq, 'handshake', payload);
+
+  it('frames the record as type, 0x0303, length, then the sequence number as explicit nonce', async () => {
+    const sealed = await seal(258, new Uint8Array(10));
+    expect([...sealed.subarray(0, 5)]).toEqual([0x16, 0x03, 0x03, 0x00, 8 + 10 + 16]);
+    expect([...sealed.subarray(5, 13)]).toEqual([0, 0, 0, 0, 0, 0, 1, 2]);
+  });
+
+  it('accepts a CryptoKey as well as raw bytes', async () => {
+    const cryptoKey = await crypto.subtle.importKey('raw', key, 'AES-GCM', false, [
+      'encrypt',
+      'decrypt',
+    ]);
+    const payload = Uint8Array.of(1, 2, 3);
+    const sealed = await sealTls12Aead(cryptoKey, implicitIv, 1n, 'alert', payload);
+    expect(sealed).toEqual(await sealTls12Aead(key, implicitIv, 1n, 'alert', payload));
+    expect(await openTls12Aead(cryptoKey, implicitIv, 1n, sealed)).toEqual({
+      ok: true,
+      type: 'alert',
+      payload,
+    });
+  });
+
+  it('refuses to seal more than 2^14 octets', async () => {
+    await expect(seal(0, new Uint8Array(MAX_RECORD_PLAINTEXT + 1))).rejects.toThrow(
+      'record_overflow',
+    );
+  });
+
+  it('throws on an implicit IV that is not 4 octets, a caller bug', async () => {
+    for (const iv of [new Uint8Array(0), new Uint8Array(12)]) {
+      await expect(sealTls12Aead(key, iv, 0, 'handshake', new Uint8Array(1))).rejects.toThrow();
+      await expect(openTls12Aead(key, iv, 0, await seal(0, new Uint8Array(1)))).rejects.toThrow();
+    }
+  });
+
+  const open = (record: Uint8Array, seq: bigint | number = 0): Promise<OpenRecordResult> =>
+    openTls12Aead(key, implicitIv, seq, record);
+
+  const header = (type: number, version: number, length: number): Uint8Array =>
+    Uint8Array.of(type, version >> 8, version & 0xff, length >> 8, length & 0xff);
+
+  it('refuses a ciphertext longer than 2^14 plus the 24-octet AES-GCM expansion', async () => {
+    const length = MAX_RECORD_PLAINTEXT + 24 + 1;
+    expect(await open(concat(header(0x17, 0x0303, length), new Uint8Array(length)))).toEqual({
+      ok: false,
+      description: 'record_overflow',
+    });
+  });
+
+  it('reads a ciphertext shorter than a nonce and a tag as bad_record_mac', async () => {
+    for (const length of [0, 8, 23]) {
+      expect(await open(concat(header(0x17, 0x0303, length), new Uint8Array(length)))).toEqual({
+        ok: false,
+        description: 'bad_record_mac',
+      });
+    }
+  });
+
+  it('refuses a malformed header with decode_error', async () => {
+    const sealed = await seal(0, new Uint8Array(5));
+    const withVersion = (version: number) => {
+      const copy = new Uint8Array(sealed);
+      copy[1] = version >> 8;
+      copy[2] = version & 0xff;
+      return copy;
+    };
+    const withType = new Uint8Array(sealed);
+    withType[0] = 0x18;
+
+    for (const record of [
+      sealed.subarray(0, 4),
+      withVersion(0x0301),
+      withVersion(0x0304),
+      withType,
+      sealed.subarray(0, -1),
+      concat(sealed, Uint8Array.of(0)),
+    ]) {
+      expect(await open(record)).toEqual({ ok: false, description: 'decode_error' });
+    }
+  });
+
+  it('refuses a tampered explicit nonce, ciphertext, tag or content type with bad_record_mac', async () => {
+    const sealed = await seal(7, crypto.getRandomValues(new Uint8Array(32)));
+    // The type byte (handshake to alert, still a known type), the nonce, the ciphertext, the tag.
+    for (const index of [0, 5, 12, 13, 30, sealed.length - 16, sealed.length - 1]) {
+      const tampered = new Uint8Array(sealed);
+      tampered[index]! ^= index === 0 ? 0x03 : 0x01;
+      expect(await open(tampered, 7)).toEqual({ ok: false, description: 'bad_record_mac' });
+    }
+  });
+
+  it('binds the sequence number through the additional data, not only the explicit nonce', async () => {
+    const sealed = await seal(7, new Uint8Array(16));
+    expect(await open(sealed, 6)).toEqual({ ok: false, description: 'bad_record_mac' });
+    expect(await open(sealed, 8)).toEqual({ ok: false, description: 'bad_record_mac' });
+    expect((await open(sealed, 7)).ok).toBe(true);
+  });
+
+  it('reports each seal and open to the AEAD observer with the 12-octet nonce', async () => {
+    const events: AeadRecordEvent[] = [];
+    setAeadObserver(event => events.push(event));
+    try {
+      const sealed = await seal(5n, Uint8Array.of(1));
+      await open(sealed, 5n);
+    } finally {
+      setAeadObserver(null);
+    }
+    const nonce = concat(implicitIv, Uint8Array.of(0, 0, 0, 0, 0, 0, 0, 5));
+    expect(events).toEqual([
+      { direction: 'seal', key, nonce, seq: 5n, type: 'handshake' },
+      { direction: 'open', key, nonce, seq: 5n, type: 'handshake' },
+    ]);
   });
 });

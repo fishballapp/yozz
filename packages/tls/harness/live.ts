@@ -1,8 +1,8 @@
 /**
- * The nine stage-3 mail servers through this client, validated against `ROOT_BUNDLE` alone.
+ * The ten live mail servers through this client, validated against `ROOT_BUNDLE` alone.
  * Network, so by hand only:
  *
- *     pnpm -F @yozz.app/tls live            # all nine
+ *     pnpm -F @yozz.app/tls live            # all ten
  *     pnpm -F @yozz.app/tls live posteo.de  # just the hosts named
  */
 import { connect, type Socket } from 'node:net';
@@ -24,7 +24,7 @@ const openSocket = (host: string): Promise<Socket> =>
     });
   });
 
-/** The IMAP greeting precedes authentication, so nine servers need no accounts. `line` only when the server greeted; see `isReadyGreeting`. */
+/** The IMAP greeting precedes authentication, so ten servers need no accounts. `line` only when the server greeted; see `isReadyGreeting`. */
 type Greeting =
   | { readonly ok: true; readonly line: string }
   | { readonly ok: false; readonly why: string };
@@ -86,7 +86,7 @@ for (const host of targets) {
     const hello = clientHello === undefined ? '?' : `${clientHello.length - 5}B`;
     const retry = result.isHelloRetryRequested ? ' (HelloRetryRequest)' : '';
     console.log(
-      `ok    ${host.padEnd(22)} hello=${hello.padEnd(5)} ${result.negotiatedGroup} / ${result.peerSignatureScheme}${retry}`,
+      `ok    ${host.padEnd(22)} hello=${hello.padEnd(5)} ${result.protocolVersion} / ${result.negotiatedGroup} / ${result.peerSignatureScheme}${retry}`,
     );
     console.log(`      ${greeting.line.slice(0, 74)}`);
     // Nothing stores it; re-running prints the same pin until the host rotates its key.
