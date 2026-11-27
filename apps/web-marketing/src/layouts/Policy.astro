@@ -1,4 +1,5 @@
 ---
+import Prose from '../components/Prose.astro';
 import SiteFooter from '../components/SiteFooter.astro';
 import SiteHeader from '../components/SiteHeader.astro';
 import Sprite from '../components/Sprite.astro';
@@ -26,9 +27,9 @@ const { title, description, updated } = Astro.props.frontmatter;
       <p class="label">Legal</p>
       <h1 class="section-title">{title}</h1>
       <p class="updated">Last updated {updated}</p>
-      <div class="prose">
+      <Prose class="body">
         <slot />
-      </div>
+      </Prose>
     </article>
   </main>
   <SiteFooter />
@@ -51,66 +52,7 @@ const { title, description, updated } = Astro.props.frontmatter;
     color: var(--text-faint);
   }
 
-  .prose {
+  .body {
     margin-top: clamp(36px, 5vw, 56px);
-    color: var(--text-dim);
-  }
-
-  .prose :global(h2) {
-    margin-top: 56px;
-    padding-bottom: 12px;
-    border-bottom: 1px solid var(--line);
-    font-size: 1.5rem;
-    line-height: 1.2;
-    font-weight: 600;
-    letter-spacing: -0.02em;
-    color: var(--ink);
-  }
-
-  .prose :global(h3) {
-    margin-top: 32px;
-    font-size: 1.125rem;
-    line-height: 1.4;
-    font-weight: 600;
-    color: var(--ink);
-  }
-
-  .prose :global(p),
-  .prose :global(ul),
-  .prose :global(ol) {
-    margin-top: 16px;
-  }
-
-  .prose :global(ul) {
-    padding-left: 1.2em;
-    list-style: '– ' outside;
-  }
-
-  .prose :global(ol) {
-    padding-left: 1.4em;
-    list-style: decimal outside;
-  }
-
-  .prose :global(li + li) {
-    margin-top: 8px;
-  }
-
-  .prose :global(strong) {
-    color: var(--ink);
-    font-weight: 600;
-  }
-
-  .prose :global(a) {
-    color: var(--ink);
-    text-decoration: underline;
-    text-underline-offset: 4px;
-    overflow-wrap: anywhere;
-  }
-
-  .prose :global(code) {
-    font-family: var(--font-mono);
-    font-size: 0.88em;
-    color: var(--ink);
-    overflow-wrap: anywhere;
   }
 </style>

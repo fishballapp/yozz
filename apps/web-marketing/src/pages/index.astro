@@ -8,7 +8,7 @@ import SendAs from '../components/SendAs.astro';
 import SiteFooter from '../components/SiteFooter.astro';
 import SiteHeader from '../components/SiteHeader.astro';
 import Sprite from '../components/Sprite.astro';
-import Landing from '../layouts/Landing.astro';
+import Counted from '../layouts/Counted.astro';
 
 const softwareApplication = {
   '@context': 'https://schema.org',
@@ -23,11 +23,12 @@ const softwareApplication = {
 };
 ---
 
-<Landing
+<Counted
   title="YOZZ: every address you own, in one inbox"
   description="YOZZ is a zero-knowledge webmail client over the mail accounts you already have. Read them as one stream and send from any address over its own SMTP server."
   structuredData={softwareApplication}
 >
+  <link slot="head" rel="alternate" type="application/rss+xml" title="YOZZ Blog" href="/blog/rss.xml" />
   <Sprite />
   <SiteHeader />
   <main id="main" tabindex="-1">
@@ -39,7 +40,7 @@ const softwareApplication = {
     <Close />
   </main>
   <SiteFooter hasCookieSettings />
-</Landing>
+</Counted>
 
 <script>
   import { getConsent, onConsentChange } from '@internal/cookie-consent';

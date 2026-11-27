@@ -4,14 +4,15 @@ import Icon from './Icon.astro';
 
 // The page's one action, an ink block in the logo's two colours. Sign-up is /welcome, which
 // links on to /login for someone who already has an account. The rest of the props carry the
-// parent's style scope, for the class it passes.
-type Props = Omit<HTMLAttributes<'a'>, 'href'> & { size?: 'small' | 'large' };
+// parent's style scope, for the class it passes. `label` is for a guide whose answer has a narrower
+// verb than starting.
+type Props = Omit<HTMLAttributes<'a'>, 'href'> & { size?: 'small' | 'large'; label?: string };
 
-const { size = 'large', class: className, ...rest } = Astro.props;
+const { size = 'large', label = 'Start using YOZZ', class: className, ...rest } = Astro.props;
 ---
 
 <a class:list={['start', size, className]} href="/welcome" {...rest}>
-  Start using YOZZ <Icon name="arrow" class="arrow" />
+  {label} <Icon name="arrow" class="arrow" />
 </a>
 
 <style>

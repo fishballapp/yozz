@@ -1,0 +1,141 @@
+---
+import type { HTMLAttributes } from 'astro/types';
+
+// Text written in markdown (the policies, a blog article), set for reading in one column: ruled
+// headings, dashed lists, ink links, and a fenced block as the landing page's terminal. The rest of
+// the props carry the parent's style scope, for the class it passes.
+type Props = HTMLAttributes<'div'>;
+
+const { class: className, ...rest } = Astro.props;
+---
+
+<div class:list={['prose', className]} {...rest}>
+  <slot />
+</div>
+
+<style>
+  .prose {
+    color: var(--text-dim);
+  }
+
+  .prose :global(h2) {
+    margin-top: 56px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid var(--line);
+    font-size: 1.5rem;
+    line-height: 1.2;
+    font-weight: 600;
+    letter-spacing: -0.02em;
+    color: var(--ink);
+  }
+
+  .prose :global(h3) {
+    margin-top: 32px;
+    font-size: 1.125rem;
+    line-height: 1.4;
+    font-weight: 600;
+    color: var(--ink);
+  }
+
+  .prose :global(p),
+  .prose :global(ul),
+  .prose :global(ol),
+  .prose :global(pre),
+  .prose :global(blockquote),
+  .prose :global(table) {
+    margin-top: 16px;
+  }
+
+  .prose :global(ul) {
+    padding-left: 1.2em;
+    list-style: '– ' outside;
+  }
+
+  .prose :global(ol) {
+    padding-left: 1.4em;
+    list-style: decimal outside;
+  }
+
+  .prose :global(li + li) {
+    margin-top: 8px;
+  }
+
+  .prose :global(strong) {
+    color: var(--ink);
+    font-weight: 600;
+  }
+
+  .prose :global(a) {
+    color: var(--ink);
+    text-decoration: underline;
+    text-underline-offset: 4px;
+    overflow-wrap: anywhere;
+  }
+
+  .prose :global(code) {
+    font-family: var(--font-mono);
+    font-size: 0.88em;
+    color: var(--ink);
+    overflow-wrap: anywhere;
+  }
+
+  /* A fenced block is the landing page's terminal (Cli.astro): paper on sunken ink. */
+  .prose :global(pre) {
+    padding: 18px 20px;
+    border: 1px solid var(--rule);
+    background: var(--ink-sunken);
+    color: var(--paper);
+    font-family: var(--font-mono);
+    font-size: 0.8125rem;
+    line-height: 1.5rem;
+    overflow-x: auto;
+  }
+
+  .prose :global(pre code) {
+    font-size: inherit;
+    color: inherit;
+    overflow-wrap: normal;
+  }
+
+  .prose :global(blockquote) {
+    padding-left: 20px;
+    border-left: 2px solid var(--ink);
+  }
+
+  .prose :global(blockquote > :first-child) {
+    margin-top: 0;
+  }
+
+  .prose :global(hr) {
+    margin-block: 40px;
+    border: 0;
+    border-top: 1px solid var(--line);
+  }
+
+  .prose :global(table) {
+    display: block;
+    width: 100%;
+    overflow-x: auto;
+    border-collapse: collapse;
+    font-size: 0.9375rem;
+    line-height: 1.45;
+  }
+
+  .prose :global(th),
+  .prose :global(td) {
+    padding: 10px 16px 10px 0;
+    border-bottom: 1px solid var(--line);
+    text-align: left;
+    vertical-align: top;
+  }
+
+  .prose :global(th) {
+    border-bottom-color: var(--ink);
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    font-weight: 400;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--text-faint);
+  }
+</style>

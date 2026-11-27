@@ -11,17 +11,18 @@
   // Served on its own domain only: not on workers.dev, and with no preview URLs.
   "workers_dev": false,
   "preview_urls": false,
-  // dist/ is the app (@yozz.app/web) with the landing page (@yozz.app/web-marketing) beside it as
-  // _landing.html, put together by scripts/assemble-assets.ts. Only `/` runs the Worker, which
-  // picks between the two by the signed-in cookie; every other path is the assets layer's, with
-  // index.html for the app's client-side routes, so static hits stay unbilled.
+  // dist/ is the app (@yozz.app/web) with the landing build (@yozz.app/web-marketing) beside it,
+  // its index.html as _landing.html, put together by scripts/assemble-assets.ts. `/` runs the
+  // Worker, which picks between the two by the signed-in cookie, and so does the blog, so an
+  // unknown /blog/* address is a 404 rather than the app's shell; every other path is the assets
+  // layer's, with index.html for the app's client-side routes, so static hits stay unbilled.
   // The deploy builds the app with VITE_API_URL=https://api.yozz.app: apps/web/src/vault/api-base-url.ts
   // reads it, and the vault screens refuse to work without it (isApiConfigured).
   "assets": {
     "directory": "./dist",
     "binding": "ASSETS",
     "not_found_handling": "single-page-application",
-    "run_worker_first": ["/"]
+    "run_worker_first": ["/", "/blog", "/blog/*"]
   },
   "observability": {
     "enabled": true

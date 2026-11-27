@@ -1,0 +1,107 @@
+---
+import { articleHref, getArticles } from '../blog';
+import PublishedDate from '../components/PublishedDate.astro';
+import Blog from '../layouts/Blog.astro';
+
+const articles = await getArticles();
+---
+
+<Blog
+  title="Blog · YOZZ"
+  description="Updates and guides from YOZZ, a zero-knowledge webmail client over the mail accounts you already own."
+>
+  <div class="column">
+    <div class="head">
+      <h1 class="section-title">Blog</h1>
+      <a class="feed" href="/blog/rss.xml">RSS feed</a>
+    </div>
+
+    {/* Newest first, ruled like the landing page's ledger: no cards, no badges. */}
+    {
+      articles.length === 0 ? (
+        <p class="empty">No posts yet.</p>
+      ) : (
+        <ul class="list">
+          {articles.map(article => (
+            <li>
+              <a href={articleHref(article)}>{article.data.heading} →</a>
+              <p>{article.data.summary}</p>
+              <PublishedDate date={article.data.publishedOn} class="date" />
+            </li>
+          ))}
+        </ul>
+      )
+    }
+  </div>
+</Blog>
+
+<style>
+  .column {
+    max-width: 42rem;
+  }
+
+  .head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 8px 24px;
+  }
+
+  .section-title {
+    margin-top: 0;
+  }
+
+  .feed {
+    padding-block: 12px;
+    font-family: var(--font-mono);
+    font-size: 0.8125rem;
+    line-height: 1.25rem;
+    color: var(--text-dim);
+    text-decoration: underline;
+    text-underline-offset: 4px;
+  }
+
+  .feed:hover {
+    color: var(--ink);
+  }
+
+  .list {
+    margin-top: clamp(36px, 5vw, 56px);
+    border-top: 1px solid var(--ink);
+  }
+
+  .list li {
+    padding-block: 24px;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .list a {
+    font-size: 1.375rem;
+    line-height: 1.25;
+    font-weight: 600;
+    letter-spacing: -0.02em;
+    color: var(--ink);
+    text-decoration: none;
+  }
+
+  .list a:hover {
+    text-decoration: underline;
+    text-underline-offset: 4px;
+  }
+
+  .list p {
+    margin-top: 8px;
+    color: var(--text-dim);
+  }
+
+  .list :global(.date) {
+    display: block;
+    margin-top: 10px;
+  }
+
+  .empty {
+    margin-top: clamp(36px, 5vw, 56px);
+    color: var(--text-dim);
+  }
+</style>

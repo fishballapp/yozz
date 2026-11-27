@@ -1,6 +1,7 @@
-# The origin's policy, for the app and the landing page alike. apps/worker-web/src/index.ts adds
-# PostHog's ingest host to connect-src on the landing page's response, and only there
-# (DECISIONS.md, "Analytics on the landing page only"); every other byte here reaches both.
+# The origin's policy, for the app, the landing page and the blog alike. apps/worker-web/src/csp.ts
+# adds PostHog's ingest host to connect-src on the landing page's and the blog's responses, and
+# only there (DECISIONS.md, "Analytics on the landing page only", "The blog at /blog"); every other
+# byte here reaches every page unchanged.
 /*
   Content-Security-Policy: default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self' 'sha256-jnsQ/4yNPZwpQxe2qiUGfkcdILJ36ll/d0hNonxPDtI='; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; font-src 'self'; connect-src 'self' https://api.yozz.app wss://api.yozz.app https://cloudflare-dns.com; frame-src 'self'; manifest-src 'self'; upgrade-insecure-requests
   Cross-Origin-Opener-Policy: same-origin

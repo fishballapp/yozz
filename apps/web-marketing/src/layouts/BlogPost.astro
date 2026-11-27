@@ -1,0 +1,216 @@
+---
+import type { CollectionEntry } from 'astro:content';
+import { articleHref, blogPosting, getNextArticle } from '../blog';
+import Prose from '../components/Prose.astro';
+import PublishedDate from '../components/PublishedDate.astro';
+import StartButton from '../components/StartButton.astro';
+import Blog from './Blog.astro';
+
+// One article in the policies' reading column: back to the blog, the heading and its date, a
+// guide's short answer with its action, the prose, the closing action and what to read next.
+type Props = { article: CollectionEntry<'blog'> };
+
+const { article } = Astro.props;
+const { title, description, heading, publishedOn, kind, answer, actionLabel } = article.data;
+const next = await getNextArticle(article);
+
+const site = Astro.site ?? Astro.url;
+const structuredData = blogPosting({
+  article,
+  siteUrl: site,
+  publisher: { name: 'YOZZ', url: new URL('/', site).href },
+});
+---
+
+<Blog title={title} description={description} structuredData={structuredData}>
+  <article data-article={article.id}>
+    <a class="back" href="/blog">← Blog</a>
+    <h1 class="section-title">{heading}</h1>
+    <p class="meta">
+      {kind === 'guide' && 'Guide · '}<PublishedDate date={publishedOn} />
+    </p>
+
+    {
+      answer !== undefined && (
+        <div class="answer">
+          {answer.map(paragraph => <p>{paragraph}</p>)}
+          <div class="answer-actions">
+            <StartButton size="small" label={actionLabel} data-cta="start-article-top" />
+            <a href="/">See how YOZZ works</a>
+          </div>
+        </div>
+      )
+    }
+
+    <Prose class="body">
+      <slot />
+    </Prose>
+
+    <section class="close" aria-labelledby="close-title">
+      <h2 id="close-title">Try YOZZ with the mail accounts you already own.</h2>
+      <p>Free while in beta. No card. Open source.</p>
+      <div class="act">
+        <StartButton class="cta" data-cta="start-article-closing" />
+        <small>
+          Make a vault with a passkey or password we cannot reset, then add each address over IMAP
+          (993) and SMTP (465). Gmail needs an app password.
+        </small>
+      </div>
+    </section>
+
+    {
+      next !== null && (
+        <nav class="next" aria-labelledby="next-label">
+          <p class="label" id="next-label">Read next</p>
+          <a href={articleHref(next)}>{next.data.heading} →</a>
+          <p>{next.data.summary}</p>
+        </nav>
+      )
+    }
+  </article>
+</Blog>
+
+<style>
+  article {
+    max-width: 42rem;
+  }
+
+  .back {
+    display: inline-block;
+    padding-block: 12px;
+    font-family: var(--font-mono);
+    font-size: 0.8125rem;
+    line-height: 1.25rem;
+    color: var(--text-dim);
+    text-decoration: none;
+  }
+
+  .back:hover {
+    color: var(--ink);
+    text-decoration: underline;
+    text-underline-offset: 4px;
+  }
+
+  .section-title {
+    margin-top: 12px;
+  }
+
+  .meta {
+    margin-top: 16px;
+    font-family: var(--font-mono);
+    font-size: 0.8125rem;
+    line-height: 1.25rem;
+    color: var(--text-faint);
+  }
+
+  .answer {
+    margin-top: clamp(28px, 4vw, 40px);
+    padding-bottom: clamp(28px, 4vw, 40px);
+    border-bottom: 1px solid var(--line);
+    font-size: 1.1875rem;
+    line-height: 1.5;
+    color: var(--ink);
+  }
+
+  .answer p + p {
+    margin-top: 12px;
+  }
+
+  .answer-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 12px 24px;
+    margin-top: 24px;
+  }
+
+  .answer-actions > a:not([data-cta]) {
+    font-family: var(--font-mono);
+    font-size: 0.8125rem;
+    line-height: 44px;
+    color: var(--text-dim);
+    text-decoration: underline;
+    text-underline-offset: 4px;
+  }
+
+  .answer-actions > a:not([data-cta]):hover {
+    color: var(--ink);
+  }
+
+  .body {
+    margin-top: clamp(36px, 5vw, 56px);
+  }
+
+  /* The landing page's closing block (Close.astro), at the column's scale. */
+  .close {
+    margin-top: clamp(64px, 8vw, 96px);
+    padding-block: clamp(32px, 4vw, 48px);
+    border-block: 1px solid var(--ink);
+  }
+
+  .close h2 {
+    font-size: clamp(1.75rem, 3vw, 2.25rem);
+    line-height: 1.08;
+    font-weight: 600;
+    letter-spacing: -0.03em;
+    text-wrap: balance;
+  }
+
+  .close p {
+    margin-top: 12px;
+    font-size: 1.125rem;
+    line-height: 1.4;
+    font-weight: 500;
+    letter-spacing: -0.01em;
+    color: var(--text-dim);
+  }
+
+  .act {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 14px 24px;
+    margin-top: 28px;
+  }
+
+  .act small {
+    flex: 1 1 16rem;
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    line-height: 1.125rem;
+    color: var(--text-faint);
+  }
+
+  .next {
+    margin-top: 48px;
+    padding-top: 24px;
+    border-top: 1px solid var(--line);
+  }
+
+  .next a {
+    display: inline-block;
+    margin-top: 12px;
+    font-size: 1.25rem;
+    line-height: 1.3;
+    font-weight: 600;
+    letter-spacing: -0.015em;
+    color: var(--ink);
+    text-decoration: none;
+  }
+
+  .next a:hover {
+    text-decoration: underline;
+    text-underline-offset: 4px;
+  }
+
+  .next p:not(.label) {
+    margin-top: 6px;
+    color: var(--text-dim);
+  }
+
+  @media (max-width: 760px) {
+    .cta {
+      width: 100%;
+    }
+  }
+</style>

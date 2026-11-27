@@ -1,0 +1,63 @@
+---
+import SiteFooter from '../components/SiteFooter.astro';
+import SiteHeader from '../components/SiteHeader.astro';
+import Sprite from '../components/Sprite.astro';
+import Page from '../layouts/Page.astro';
+
+// What the Worker answers an unknown /blog/* address with, under status 404. No script and no
+// analytics, like the policies.
+---
+
+<Page
+  title="Page not found · YOZZ"
+  description="This page does not exist on yozz.app."
+  isIndexable={false}
+>
+  <Sprite />
+  <SiteHeader />
+  <main id="main" tabindex="-1" class="wrap">
+    <div class="column">
+      <p class="label">404</p>
+      <h1 class="section-title">Page not found</h1>
+      <p class="say">There is no page at this address.</p>
+      <ul class="ways">
+        <li><a href="/blog">Go to the blog</a></li>
+        <li><a href="/">Go to yozz.app</a></li>
+      </ul>
+    </div>
+  </main>
+  <SiteFooter />
+</Page>
+
+<style>
+  main {
+    padding-block: clamp(48px, 7vw, 104px) clamp(72px, 9vw, 136px);
+  }
+
+  .column {
+    max-width: 42rem;
+  }
+
+  .say {
+    margin-top: 20px;
+    color: var(--text-dim);
+  }
+
+  .ways {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0 28px;
+    margin-top: 16px;
+  }
+
+  .ways a {
+    display: inline-block;
+    padding-block: 10px;
+    font-family: var(--font-mono);
+    font-size: 0.8125rem;
+    line-height: 1.5rem;
+    color: var(--ink);
+    text-decoration: underline;
+    text-underline-offset: 4px;
+  }
+</style>

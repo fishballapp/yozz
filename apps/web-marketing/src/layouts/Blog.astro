@@ -1,0 +1,38 @@
+---
+import SiteFooter from '../components/SiteFooter.astro';
+import SiteHeader from '../components/SiteHeader.astro';
+import Sprite from '../components/Sprite.astro';
+import Counted from './Counted.astro';
+
+// A blog page, /blog or an article: counted like the landing page, but for every browser, signed in
+// or not, since nothing here is the app's (DECISIONS.md, "The blog at /blog").
+type Props = {
+  title: string;
+  description: string;
+  structuredData?: Record<string, unknown>;
+};
+
+const { title, description, structuredData } = Astro.props;
+---
+
+<Counted title={title} description={description} structuredData={structuredData}>
+  <link slot="head" rel="alternate" type="application/rss+xml" title="YOZZ Blog" href="/blog/rss.xml" />
+  <Sprite />
+  <SiteHeader />
+  <main id="main" tabindex="-1" class="wrap">
+    <slot />
+  </main>
+  <SiteFooter hasCookieSettings />
+</Counted>
+
+<script>
+  import { startBundledPostHog } from '@internal/marketing/posthog-bundled';
+
+  startBundledPostHog();
+</script>
+
+<style>
+  main {
+    padding-block: clamp(48px, 7vw, 104px) clamp(72px, 9vw, 136px);
+  }
+</style>

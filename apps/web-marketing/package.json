@@ -4,7 +4,7 @@
   "private": true,
   "license": "AGPL-3.0-only",
   "type": "module",
-  "description": "YOZZ's landing page, the one prerendered page at yozz.app/. Astro 7 + Tailwind v4 on the app's own colour tokens; the yozz-web Worker serves it beside the app to a browser that is not signed in.",
+  "description": "YOZZ's landing page at yozz.app/, its blog at /blog and its policies. Astro 7 + Tailwind v4 on the app's own colour tokens; the yozz-web Worker serves it beside the app.",
   "exports": {
     "./analytics": "./src/analytics.ts"
   },
@@ -12,9 +12,12 @@
     "dev": "astro dev --port 4177",
     "build": "astro build",
     "check": "astro check",
+    "test": "vitest run",
+    "typegen:routes": "astro sync",
     "astro": "astro"
   },
   "dependencies": {
+    "@astrojs/mdx": "catalog:",
     "@astrojs/sitemap": "catalog:",
     "@fontsource-variable/geist": "catalog:",
     "@fontsource-variable/geist-mono": "catalog:",
@@ -27,6 +30,7 @@
   },
   "devDependencies": {
     "@astrojs/check": "catalog:",
-    "typescript": "catalog:ts6"
+    "typescript": "catalog:ts6",
+    "vitest": "catalog:"
   }
 }

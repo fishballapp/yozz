@@ -2,7 +2,7 @@
 layout: ../layouts/Policy.astro
 title: Privacy policy
 description: What YOZZ's servers hold and can read, what they cannot, what your browser keeps, who else handles your data, why, for how long, and how to delete it.
-updated: 13 November 2026
+updated: 27 November 2026
 ---
 
 YOZZ is a zero-knowledge webmail client: a client over mail accounts you already have. Our servers
@@ -66,11 +66,12 @@ port in its address, and a settings lookup names the domain. When a relay connec
 also says which mail server it was. Cloudflare sees your IP address with every request, as any host
 does.
 
-## Analytics, on the home page only
+## Analytics, on the home page and blog only
 
-We count visits to the home page, yozz.app/, with PostHog, in PostHog's EU cloud: page views, time
-on the page, and clicks on its "Start using YOZZ" and "Log in" links. Nothing else is recorded: no
-session recordings, no heatmaps, no automatic click tracking, no scroll depth.
+We count visits to the home page, yozz.app/, and the blog, yozz.app/blog and its posts, with
+PostHog, in PostHog's EU cloud: page views, time on the page, and clicks on their sign-up
+("Start using YOZZ") and "Log in" links. Nothing else is recorded: no session recordings, no
+heatmaps, no automatic click tracking, no scroll depth.
 
 - **Before you choose** in the cookie banner, we count your visit without cookies, and nothing is
   stored in your browser. PostHog tells visitors apart by a hash of your IP address and browser,
@@ -84,7 +85,7 @@ session recordings, no heatmaps, no automatic click tracking, no scroll depth.
   stays in session storage until you close the tab. PostHog keeps a note in your browser that you
   declined.
 - **If you already use YOZZ** in this browser, the home page sends you on to the app without
-  counting you.
+  counting you. Visits to the blog are still counted as above.
 
 Each count carries the full address of the page, including any campaign tags in it (such as
 `utm_source`), with advertising click IDs masked; the page's title; the page you came from; your
@@ -96,11 +97,11 @@ tab, and the page and referrer you arrived with.
 PostHog receives your IP address with each count, as any server does. Our project is set to discard
 it, so PostHog does not store it.
 
-Change your mind any time with "Cookie settings" at the foot of the home page, or at
+Change your mind any time with "Cookie settings" at the foot of the home page or the blog, or at
 [yozz.app/?cookie-settings](/?cookie-settings), which opens the choice even when you are signed in.
 A visit to that page is counted only if you accept.
 
-The app, these policy pages and the command-line tool send nothing to PostHog.
+The app, these policy pages, error pages and the command-line tool send nothing to PostHog.
 
 ## Cookies and what your browser keeps
 
@@ -179,7 +180,7 @@ The **`yozz` command-line tool** keeps, on the computer it runs on: its sign-in 
   servers if it has them, and the mail provider found through the domain's MX record (that
   provider's settings servers, and the Thunderbird database's entry for it). They receive the
   domain, or the provider's domain, from our servers, not your address.
-- **PostHog**, in its EU cloud, counts visits to the home page (above).
+- **PostHog**, in its EU cloud, counts visits to the home page and the blog (above).
   [Privacy policy](https://posthog.com/privacy)
 - **Remote images.** If you load a message's remote images, your browser fetches them from
   wherever the sender put them, and that server sees your IP address.
@@ -198,8 +199,8 @@ We do not sell your data or use it for advertising.
 - **In our legitimate interests:**
   - keeping YOZZ working and secure: the request logs, the IP address and browser recorded with
     each session, and limits on how often the relay and settings lookup can be used;
-  - knowing how many people visit the home page and whether it leads them to try YOZZ: the count
-    without cookies. You can object at any time by writing to us.
+  - knowing how many people visit the home page and the blog and whether they lead them to try
+    YOZZ: the count without cookies. You can object at any time by writing to us.
 - **With your consent:** PostHog's cookie and storage, and what they allow: recognising a returning
   visitor and working out your country and city. Withdraw it at any time with "Cookie settings".
 
@@ -218,7 +219,7 @@ the cache) and the note of your cookie choice are strictly necessary, so they ne
   database, even for an address that never became an account, because we do not yet clear them on
   a schedule. Write to us and we will delete it.
 - **Cloudflare's request logs:** 7 days.
-- **The home page's visit counts at PostHog:** no longer than 2 years.
+- **Visit counts for the home page and blog at PostHog:** no longer than 2 years.
 - **What your browser and the command-line tool keep:** until you log out or delete it, as above.
 
 ## Deleting your data

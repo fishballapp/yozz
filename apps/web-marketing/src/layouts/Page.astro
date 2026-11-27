@@ -4,16 +4,17 @@ import type { IconLink } from '@internal/marketing/icons';
 import MarketingShell from '@internal/marketing/PageShell.astro';
 import '../styles/global.css';
 
-// A page of this site with no analytics: the policies. Landing.astro is this plus PostHog and the
-// cookie banner, and only the landing response's CSP lets PostHog through (DECISIONS.md, "The
-// policies at /privacy and /terms carry no analytics").
+// A page of this site with no analytics: the policies and the 404 page. Counted.astro is this plus
+// PostHog and the cookie banner, and only the landing and blog responses' CSP lets PostHog through
+// (DECISIONS.md, "The policies at /privacy and /terms carry no analytics").
 type Props = {
   title: string;
   description: string;
   structuredData?: Record<string, unknown>;
+  isIndexable?: boolean;
 };
 
-const { title, description, structuredData } = Astro.props;
+const { title, description, structuredData, isIndexable } = Astro.props;
 
 // The app's own files, served beside this page from the same origin (apps/web/public).
 const icons: readonly IconLink[] = [
@@ -38,6 +39,7 @@ const icons: readonly IconLink[] = [
   fontHref={null}
   icons={icons}
   structuredData={structuredData}
+  isIndexable={isIndexable}
 >
   {/* The headline's face, fetched with the page rather than after its stylesheet. */}
   <link slot="head" rel="preload" href={geistLatin} as="font" type="font/woff2" crossorigin />

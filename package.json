@@ -12,7 +12,7 @@
     "build": "pnpm -r build",
     "check": "biome check .",
     "check:fix": "biome check --write .",
-    "typecheck": "tsc -b",
+    "typecheck": "pnpm -r --if-present typegen:routes && tsc -b",
     "test": "pnpm -r test",
     "repojj:check": "repojj check",
     "repojj:check:fix": "repojj check --fix",

@@ -1,0 +1,23 @@
+---
+// The day an article went up, as a reader reads it ("27 November 2026"), in mono beside the prose.
+type Props = { date: string; class?: string };
+
+const { date, class: className } = Astro.props;
+---
+
+<time datetime={date} class:list={['date', className]}>
+  {Temporal.PlainDate.from(date).toLocaleString('en-GB', {
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+  })}
+</time>
+
+<style>
+  .date {
+    font-family: var(--font-mono);
+    font-size: 0.8125rem;
+    line-height: 1.25rem;
+    color: var(--text-faint);
+  }
+</style>

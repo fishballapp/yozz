@@ -1,7 +1,8 @@
 ---
 import Logo from './Logo.astro';
 
-// `hasCookieSettings` only where the cookie banner is: the landing page, the one page with analytics.
+// `hasCookieSettings` only where the cookie banner is: the landing page and the blog, the pages with
+// analytics.
 type Props = { note?: string; hasCookieSettings?: boolean };
 
 const { note, hasCookieSettings = false } = Astro.props;
@@ -10,6 +11,7 @@ const { note, hasCookieSettings = false } = Astro.props;
 <footer class="wrap footer">
   <Logo class="logo" />
   <nav aria-label="Footer">
+    <a href="/blog">Blog</a>
     <a href="https://github.com/fishballapp/yozz">GitHub</a>
     <a href="https://www.npmjs.com/package/@yozz.app/cli">npm</a>
     <a href="https://github.com/fishballapp/yozz/issues">Issues</a>
